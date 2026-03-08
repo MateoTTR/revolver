@@ -6,17 +6,17 @@ Cumulative tracking of session duration and token usage across all Revolver sess
 
 | # | Date | Session | Duration | Tokens | Phase | Summary |
 |---|---|---|---|---|---|---|
-| 1 | 2026-03-08 | session-001 | _in progress_ | _TBD_ | Phase 1 — ConOps | ConOps brainstorm, initial project structure |
+| 1 | 2026-03-08 | session-001 | ~2h30 | N/A | Phase 1 — ConOps | ConOps brainstorm, initial project structure |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
 | **Total sessions** | 1 |
-| **Total duration** | _TBD_ |
-| **Total tokens** | _TBD_ |
-| **Avg duration/session** | _TBD_ |
-| **Avg tokens/session** | _TBD_ |
+| **Total duration** | ~2h30 |
+| **Total tokens** | N/A |
+| **Avg duration/session** | ~2h30 |
+| **Avg tokens/session** | N/A |
 
 ## Notes
 
