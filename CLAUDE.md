@@ -1,0 +1,96 @@
+# Revolver — Claude Instructions
+
+## Project Overview
+
+**Revolver** is a MLOps CLI platform that orchestrates OpenEvolve to let users define optimization problems, manage LLMs (local or API), version problems and datasets, generate solutions via LLM-guided evolution, and benchmark results with full traceability.
+
+## How to Use This File
+
+At the start of each session, read this file entirely, then follow the "Session Checklist" below before starting any work.
+
+---
+
+## Documentation Index
+
+| Document | Path | Purpose |
+|---|---|---|
+| ConOps | [docs/conops/conops.md](docs/conops/conops.md) | Concept of operations, personas, workflows |
+| Specifications | [docs/specs/specifications.md](docs/specs/specifications.md) | Functional & non-functional requirements |
+| Architecture overview | [docs/architecture/architecture.md](docs/architecture/architecture.md) | System design, components, ADR list |
+| ADR template | [docs/architecture/adr/ADR-000-template.md](docs/architecture/adr/ADR-000-template.md) | Template for new ADRs |
+| Task backlog | [docs/tasks/backlog.md](docs/tasks/backlog.md) | Numbered task list with status |
+| Session reports | [docs/sessions/](docs/sessions/) | One file per session, sorted by date |
+| Session cost tracker | [docs/sessions/cost-tracker.md](docs/sessions/cost-tracker.md) | Cumulative session duration and token usage |
+
+### Architecture Decision Records (ADRs)
+
+_None yet — will be created during Phase 2._
+
+---
+
+## Session Checklist
+
+Before starting any work in a session:
+
+1. Read this file (`CLAUDE.md`)
+2. Read [docs/tasks/backlog.md](docs/tasks/backlog.md) — identify the current in-progress or next task
+3. Read the relevant ADRs if the task involves an architectural decision
+4. Read [docs/specs/specifications.md](docs/specs/specifications.md) if the task involves a feature
+5. Check the latest session report in [docs/sessions/](docs/sessions/) for context from previous session
+6. At the end of the session:
+   - Create a session report in `docs/sessions/YYYY-MM-DD-session-NNN.md`
+   - Include **session duration** (start time → end time) and **token count** (if provided by the user) in the report header
+   - Update [docs/sessions/cost-tracker.md](docs/sessions/cost-tracker.md) with the new session row and recalculate totals
+   - Update the backlog
+
+---
+
+## Project Phases
+
+| Phase | Focus | Status |
+|---|---|---|
+| Phase 1 | Cadrage: ConOps + Functional Specifications | **In progress** |
+| Phase 2 | Architecture, tech choices (ADRs), data model | Not started |
+| Phase 3 | POCs for critical aspects | Not started |
+| Phase 4 | Validation strategy, test plan, traceability | Not started |
+| Phase 5 | Implementation | Not started |
+
+---
+
+## General Conventions
+
+### Language
+- All code, comments, variable names, and documentation must be in **English**.
+- Communication with the user is in **French**.
+
+### File Naming
+- ADRs: `ADR-NNN-short-title.md` (zero-padded 3-digit number)
+- Tasks: `TASK-NNN-short-title.md`
+- Sessions: `YYYY-MM-DD-session-NNN.md`
+- ConOps: `conops.md` (single living document)
+
+### Git
+- Commit message format: English, imperative mood (`Add`, `Fix`, `Update`...)
+- Branching strategy: TBD (ADR)
+
+---
+
+## Key Constraints
+
+- **CLI-first**: all functionality exposed as CLI commands, composable in scripts
+- **OpenEvolve-based**: solution generation relies on OpenEvolve's evolutionary loop
+- **LLM-agnostic**: must support local models and multiple API providers (Anthropic, Google, OpenAI)
+- **LLM interface**: all LLMs must expose an OpenAI-compatible API (native or via adapter)
+- **Full traceability**: every solution must trace back to problem version, dataset, LLM, and config
+- **Reproducibility**: runs must be reproducible given the same config and seed
+
+---
+
+## Open Questions / Decisions Pending
+
+- [ ] Primary programming language (Python? Rust? Mixed?)
+- [ ] Project/problem versioning strategy (git-based? internal?)
+- [ ] Dataset storage format and management
+- [ ] Local LLM deployment tool (Ollama? vLLM? both?)
+- [ ] CLI framework choice
+- [ ] Benchmark output format and visualization
