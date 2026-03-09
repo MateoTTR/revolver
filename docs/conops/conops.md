@@ -1,8 +1,8 @@
 # Revolver — Concept of Operations (ConOps)
 
-**Version**: 0.2 — Revised after user feedback (Project concept, test workflow)
-**Date**: 2026-03-08
-**Status**: Draft — Under Review
+**Version**: 0.3 — Consolidated after full user review
+**Date**: 2026-03-09
+**Status**: Accepted
 
 ---
 
@@ -105,10 +105,9 @@ scheduling-optimizer/           # Project root (user's working directory)
 │   │   │   ├── config.yaml
 │   │   │   └── manifest.yaml   # Hash, timestamp, message
 │   │   └── v1.1/
-│   ├── datasets/               # Immutable dataset snapshots
+│   ├── datasets/               # Dataset registrations (reference + hashes)
 │   │   ├── train-small/
-│   │   │   ├── snapshot/       # Copy of instance files
-│   │   │   └── manifest.yaml   # Hash, instance count, split, compatibility
+│   │   │   └── manifest.yaml   # Path, hashes, instance count, split, compat
 │   │   └── eval-benchmark/
 │   ├── solutions/              # Generated solutions
 │   │   ├── <auto-id>/
@@ -139,13 +138,15 @@ This project-local approach means:
 
 A **Problem** is the user's optimization problem definition within a project. It consists of:
 
-- **Initial program**: The starting code that OpenEvolve will evolve. Contains `EVOLVE-BLOCK` markers delimiting what can be modified. Can be any language.
-- **Evaluator**: A Python file with an `evaluate(program_path) -> dict` function. Must be able to work with any dataset (not hardcoded). Reads the active dataset location from an environment variable or config file set by Revolver.
+- **Initial program**: The starting code that OpenEvolve will evolve. Contains `EVOLVE-BLOCK` markers delimiting what can be modified. **Can be any language** (Python, C++, Rust, etc.).
+- **Evaluator**: A Python file with an `evaluate(program_path) -> dict[str, float]` function. Must be able to work with any dataset (not hardcoded). Reads the active dataset location from an environment variable set by Revolver.
 - **Metadata**: Name, description, domain, objectives description (stored in `project.yaml`).
 
 A Problem can have multiple **Versions**. Each version is an **immutable snapshot** of the initial program + evaluator + config, stored in `.revolver/problem/`. Once versioned, the snapshot cannot be modified — the user works on a mutable working copy and creates new versions when ready.
 
-### 4.2 Dataset
+**Language agnosticism**: Revolver does not compile or execute the evolved program directly. The evaluator is responsible for everything: compilation (if needed), execution, measurement, and scoring. For non-Python programs, the evaluator typically uses `subprocess` to compile and run the evolved code. Revolver only stores the source code and passes it through to OpenEvolve.
+
+### 4.3 Dataset
 
 A **Dataset** is a collection of problem instances used for training (solution generation) or evaluation (benchmarking).
 
@@ -160,9 +161,17 @@ A **Dataset** is a collection of problem instances used for training (solution g
 - **Split**: `train` (used during OpenEvolve evolution) or `eval` (used for benchmarking)
 - **Compatibility**: Declared compatible with one or more Problem versions
 - **Instance count**: Automatically computed by Revolver (count of top-level entries)
-- **Versioned**: Immutable snapshot stored in `.revolver/datasets/`
 
-### 4.3 Instance Injection Mechanism
+**Storage strategy**: Datasets are registered by **reference**, not copied into the store. Revolver records:
+- The **original path** to the dataset directory
+- A **SHA-256 hash** of each instance (file content hash or directory tree hash)
+- A **global hash** of the entire dataset
+
+At usage time (`revolver run`, `revolver eval`, `revolver benchmark`), Revolver **verifies integrity** by recomputing hashes and comparing to the registered values. If the data has changed, Revolver warns the user. This avoids duplicating potentially large datasets while still guaranteeing traceability.
+
+For small datasets or critical reproducibility needs, the user can force a full copy with `revolver dataset add --snapshot`, which copies all instance files into `.revolver/datasets/<name>/snapshot/`.
+
+### 4.4 Instance Injection Mechanism
 
 To decouple the evaluator from specific datasets, Revolver uses an **environment-based injection**:
 
@@ -178,9 +187,25 @@ To decouple the evaluator from specific datasets, Revolver uses an **environment
    - Lets the evaluator work with any dataset without code changes
    - Gives Revolver per-instance visibility for detailed metrics
 
-**Note**: Revolver must provide example evaluators and documentation showing this pattern.
+**Dual-mode evaluator**: The evaluator must support two operating modes:
+- **Single-instance mode** (for Revolver eval/benchmark): `REVOLVER_INSTANCE_PATH` is set → evaluate the program on this one instance, return metrics for it
+- **Aggregated mode** (for OpenEvolve training runs): `REVOLVER_DATASET_DIR` is set but `REVOLVER_INSTANCE_PATH` is not → iterate over all instances internally, return an aggregated `combined_score`
 
-### 4.4 Solution
+**Note**: Revolver must provide example evaluators and documentation showing both modes, including examples for non-Python programs (C++, Rust) demonstrating compilation in the evaluator.
+
+### 4.5 Metrics and Objectives
+
+The evaluator returns a `dict[str, float]` where each key is a metric or objective. All values must be numeric (float).
+
+**Key conventions**:
+- `combined_score`: Required by OpenEvolve as the primary fitness metric (always **maximized**). The user computes this from their objectives (e.g., `1.0 / makespan` for minimization).
+- Other keys: Domain-specific raw metrics (e.g., `makespan`, `total_cost`, `quality`). These are stored and reported as-is.
+
+**Direction of objectives**: In V1, Revolver is **agnostic** — it reports raw statistics (mean, min, max, percentiles, std) without knowing which direction is "better". The user interprets their own metrics. A future version may add direction metadata in `project.yaml`.
+
+**Multi-objective**: Multiple keys in the dict naturally support multi-objective problems. Benchmark statistics are computed **per metric key**.
+
+### 4.6 Solution
 
 A **Solution** is the output of an OpenEvolve run. It contains:
 
@@ -198,7 +223,7 @@ A **Solution** is the output of an OpenEvolve run. It contains:
   - Number of iterations
 - **Checkpoint**: Reference to the OpenEvolve checkpoint for potential resume
 
-### 4.5 Benchmark
+### 4.7 Benchmark
 
 A **Benchmark** is the evaluation of one or more Solutions against a single evaluation Dataset.
 
@@ -214,7 +239,7 @@ A **Benchmark** is the evaluation of one or more Solutions against a single eval
 - Compare solutions from different problem version evolutions
 - Identify which solution performs best overall and on which instance types
 
-### 4.6 LLM
+### 4.8 LLM
 
 An **LLM** in Revolver is a registered model available for use in OpenEvolve runs.
 
@@ -434,9 +459,9 @@ revolver benchmark export --latest --format csv --output results.csv
 │  │                                                                  │    │
 │  │  problem/           datasets/           revolver.db              │    │
 │  │  ├── v1.0/          ├── train-small/    (metrics, lineage,      │    │
-│  │  │   ├── prog.py    │   ├── snapshot/    timestamps, costs)     │    │
-│  │  │   ├── eval.py    │   └── manifest     solutions/             │    │
-│  │  │   └── manifest   └── eval-bench/      ├── <auto-id>/         │    │
+│  │  │   ├── prog.py    │   └── manifest     timestamps, costs)     │    │
+│  │  │   ├── eval.py    └── eval-bench/      solutions/             │    │
+│  │  │   └── manifest       └── manifest     ├── <auto-id>/         │    │
 │  │  └── v1.1/              └── ...          │   ├── best.py        │    │
 │  │      └── ...                             │   ├── top-N/         │    │
 │  │                                          │   └── oe-checkpoint/ │    │
@@ -476,20 +501,30 @@ revolver benchmark export --latest --format csv --output results.csv
 
 ## 7. Immutability and Integrity
 
-### 7.1 Versioning Strategy
+### 7.1 Problem Versioning
 
-When the user creates a version (`revolver problem version` or `revolver dataset add`), Revolver:
+When the user creates a problem version (`revolver problem version`), Revolver:
 
-1. **Copies** all relevant files into the project-local `.revolver/` store (snapshot)
+1. **Copies** the initial program, evaluator, and config into `.revolver/problem/<tag>/`
 2. **Computes a SHA-256 hash** of the snapshot contents
-3. **Records** the hash in a `manifest.yaml` alongside the snapshot
+3. **Records** the hash, timestamp, and user message in `manifest.yaml`
 
-This ensures:
-- The user can freely modify their working copy without affecting existing versions
-- Any tampering or corruption of the store is detectable via hash verification
-- Versions are truly immutable — creating a new version is the only way to change the definition
+Problem versions are **full snapshots** (code is small) — the user can freely modify their working copy.
 
-### 7.2 Recommended Workflow: Test Before Version
+### 7.2 Dataset Registration
+
+When the user registers a dataset (`revolver dataset add`), Revolver:
+
+1. **Records the original path** to the dataset directory
+2. **Computes a SHA-256 hash** per instance and a global hash
+3. **Stores** path, hashes, instance count, split, and compatibility in `.revolver/datasets/<name>/manifest.yaml`
+4. Data files are **not copied** by default (reference-only)
+
+Integrity is **verified at usage time** (run, eval, benchmark). If hashes don't match, Revolver warns. The user must re-register the dataset if data has changed.
+
+For full reproducibility, `revolver dataset add --snapshot` copies all files into the store.
+
+### 7.3 Recommended Workflow: Test Before Version
 
 The `revolver problem test` command is designed to be run **before** versioning. The recommended flow is:
 
@@ -502,7 +537,7 @@ The `revolver problem test` command is designed to be run **before** versioning.
 
 Revolver does not enforce this order, but documentation and templates strongly recommend it.
 
-### 7.2 Dataset Compatibility
+### 7.4 Dataset Compatibility
 
 Datasets declare compatibility with Problem versions. Revolver **warns** (but does not block) if a user attempts to use a dataset with an incompatible version. This balances safety with flexibility.
 
@@ -578,7 +613,8 @@ b-001,s-002,gemma-small-v1.1,scheduling-optimizer,v1.1,gemma-local,train-small,e
 - Sequential local LLM runs, parallel remote LLM runs
 - Top-N solution storage (configurable, default 1)
 - SQLite for metrics + YAML for configs
-- Example problems and evaluators demonstrating the instance injection pattern
+- Example problems and evaluators demonstrating the instance injection pattern (Python + non-Python examples)
+- Dataset registration by reference (hash-only) with optional `--snapshot` for full copy
 
 ### Out of Scope (V1)
 - Web dashboard / visualization
@@ -600,6 +636,7 @@ b-001,s-002,gemma-small-v1.1,scheduling-optimizer,v1.1,gemma-local,train-small,e
 - [ ] **OQ-05**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training runs — wrapper approach? (→ POC)
 - [ ] **OQ-06**: Exact mechanism for Revolver to control which dataset the evaluator uses during an OpenEvolve run (→ POC)
 - [ ] **OQ-07**: Should `revolver problem test` block versioning on failure, or just warn? (→ UX decision)
+- [ ] **OQ-08**: WSL2 + CUDA + RTX 5090 compatibility with Ollama/vLLM — VRAM visibility, driver requirements (→ POC)
 
 ---
 
