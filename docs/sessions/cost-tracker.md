@@ -8,16 +8,16 @@ Cumulative tracking of session duration and token usage across all Revolver sess
 |---|---|---|---|---|---|---|
 | 1 | 2026-03-08 | session-001 | ~2h30 | N/A | Phase 1 — ConOps | ConOps brainstorm, initial project structure |
 | 2 | 2026-03-09 | session-002 | ~1h | N/A | Phase 1 — ConOps | ConOps review, v0.3 consolidation, POC planning |
-| 3 | 2026-03-09 | session-003 | ~20min | N/A | Phase 1/3 | Integrate local LLM POC results, resolve OQ-01 & OQ-08, update backlog |
+| 3 | 2026-03-09 | session-003 | ~45min | N/A | Phase 1 | POC integration, POC synthesis, functional specs v0.1 (106 FRs + 20 NFRs) |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
 | **Total sessions** | 3 |
-| **Total duration** | ~3h50 |
+| **Total duration** | ~4h15 |
 | **Total tokens** | N/A |
-| **Avg duration/session** | ~1h17 |
+| **Avg duration/session** | ~1h25 |
 | **Avg tokens/session** | N/A |
 
 ## Notes

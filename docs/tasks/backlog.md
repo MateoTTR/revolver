@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 1 | ConOps — Initial brainstorm and draft | [x] | 001 |
 | 2 | ConOps — User review and refinements | [x] | 002 |
-| 3 | Functional specifications — Draft | [ ] | |
+| 3 | Functional specifications — Draft | [x] | 003 |
 | 4 | Functional specifications — Review | [ ] | |
 
 ## Phase 2 — Architecture
