@@ -13,26 +13,29 @@
 
 | # | Task | Status | Session |
 |---|---|---|---|
-| 5 | ADR-001 — Programming language | [ ] | |
-| 6 | ADR-002 — CLI framework | [ ] | |
-| 7 | ADR-003 — Local LLM management tool | [ ] | |
-| 8 | Architecture overview — Draft | [ ] | |
-| 9 | Data model — Detailed design | [ ] | |
+| 5 | ADR-001 — Ollama as local LLM backend (decision + tradeoffs from POC) | [ ] | |
+| 6 | ADR-002 — Programming language | [ ] | |
+| 7 | ADR-003 — CLI framework | [ ] | |
+| 8 | Design `revolver llm` subcommands based on Ollama API mapping | [ ] | |
+| 9 | Architecture overview — Draft | [ ] | |
+| 10 | Data model — Detailed design | [ ] | |
 
 ## Phase 3 — POCs
 
 | # | Task | Status | Session |
 |---|---|---|---|
-| 10 | POC — Local LLM deployment and inference | [ ] | |
-| 11 | POC — OpenEvolve integration with instance injection | [ ] | |
-| 12 | POC — OpenEvolve + Claude API | [ ] | |
+| 11 | POC — Local LLM deployment and inference | [x] | 003 |
+| 12 | POC — OpenEvolve integration with instance injection | [ ] | |
+| 13 | POC — OpenEvolve + Claude API | [ ] | |
+| 14 | POC — Code generation quality with OpenEvolve + local LLM (quantization impact) | [ ] | |
+| 15 | POC — End-to-end OpenEvolve + Ollama endpoint integration | [ ] | |
 
 ## Phase 4 — Validation
 
 | # | Task | Status | Session |
 |---|---|---|---|
-| 13 | Validation strategy and test plan | [ ] | |
-| 14 | Traceability matrix (specs → design → tests) | [ ] | |
+| 16 | Validation strategy and test plan | [ ] | |
+| 17 | Traceability matrix (specs → design → tests) | [ ] | |
 
 ## Phase 5 — Implementation
 

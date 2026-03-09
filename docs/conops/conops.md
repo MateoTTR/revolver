@@ -629,14 +629,14 @@ b-001,s-002,gemma-small-v1.1,scheduling-optimizer,v1.1,gemma-local,train-small,e
 
 ## 10. Open Questions
 
-- [ ] **OQ-01**: Exact local LLM management tool — Ollama vs vLLM vs both? (→ ADR)
+- [x] **OQ-01**: Exact local LLM management tool — **Resolved: Ollama** (9x faster than vLLM, 4x less VRAM via quantization, native OpenAI-compatible API, clean lifecycle management) (→ ADR-001)
 - [ ] **OQ-02**: Primary programming language for Revolver itself (→ ADR)
 - [ ] **OQ-03**: CLI framework choice (→ ADR)
 - [x] **OQ-04**: Internal store location — **Resolved**: project-local `.revolver/` for project data, global `~/.revolver/` for LLMs
 - [ ] **OQ-05**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training runs — wrapper approach? (→ POC)
 - [ ] **OQ-06**: Exact mechanism for Revolver to control which dataset the evaluator uses during an OpenEvolve run (→ POC)
 - [ ] **OQ-07**: Should `revolver problem test` block versioning on failure, or just warn? (→ UX decision)
-- [ ] **OQ-08**: WSL2 + CUDA + RTX 5090 compatibility with Ollama/vLLM — VRAM visibility, driver requirements (→ POC)
+- [x] **OQ-08**: WSL2 + CUDA + RTX 5090 compatibility — **Resolved: Fully compatible** (RTX 5090 32 GB works out of the box in WSL2, no CUDA toolkit install needed, driver 595.71 forwarded via GPU-PV)
 
 ---
 
