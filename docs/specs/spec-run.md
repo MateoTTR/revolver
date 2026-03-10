@@ -33,7 +33,8 @@ Launch an OpenEvolve evolution run.
 1. **Validate inputs**:
    - Problem version exists
    - LLM is registered and reachable (loaded for local, API key set for remote)
-   - Dataset is registered, split is `train`, and compatible with the problem version (warn if not)
+   - Dataset is registered and compatible with the problem version (warn if not)
+   - If dataset split is not `train`, display a warning (do not block)
 2. **Verify dataset integrity**: recompute hashes, warn on mismatch
 3. **Prepare environment**:
    - Set `REVOLVER_DATASET_DIR` to the dataset path
@@ -117,7 +118,7 @@ Resume an interrupted run from its checkpoint.
 | ID | Priority | Requirement | ConOps Ref |
 |---|---|---|---|
 | FR-RUN-001 | MUST | Validate that problem version, LLM, and dataset exist before starting | — |
-| FR-RUN-002 | MUST | Verify that the dataset's split is `train` | §4.3 |
+| FR-RUN-002 | MUST | Warn (do not block) if the dataset's split is not `train` | §4.3 |
 | FR-RUN-003 | MUST | Warn (do not block) if the dataset is not declared compatible with the problem version | §7.4 |
 | FR-RUN-004 | MUST | Verify dataset integrity (hash check) before starting; warn on mismatch | §7.2 |
 | FR-RUN-005 | MUST | Set `REVOLVER_DATASET_DIR` environment variable for the evaluator | §4.4 |
@@ -126,6 +127,8 @@ Resume an interrupted run from its checkpoint.
 | FR-RUN-008 | MUST | Store the top-N best programs in `.revolver/solutions/<id>/` | §4.6 |
 | FR-RUN-009 | MUST | Record full lineage in `manifest.yaml`: problem version, dataset, LLM, config, timestamp, iterations, generation time | §4.6 |
 | FR-RUN-010 | MUST | Store metrics (best scores per iteration) in SQLite | §4.6 |
+| FR-RUN-019 | MUST | On completion, evaluate the best program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`) | §4.6 |
+| FR-RUN-020 | MUST | Training results are accessible via `revolver eval results --solution <id> --dataset <train-dataset>` | — |
 | FR-RUN-011 | MUST | Store the OpenEvolve checkpoint for resume capability | §4.6, §5.5 |
 | FR-RUN-012 | MUST | Support `--alias` for user-friendly solution naming | §4.6 |
 | FR-RUN-013 | MUST | `resume` restores an interrupted run from checkpoint | §5.5 |
@@ -146,7 +149,7 @@ Resume an interrupted run from its checkpoint.
 | Local LLM not loaded | Error: "LLM '<name>' is not loaded. Run `revolver llm start <name>` first." | 3 |
 | Remote LLM API key not set | Error: "API key not configured. Set <ENV_VAR> environment variable." | 3 |
 | Dataset not found | Error: "Dataset '<name>' not found" | 1 |
-| Dataset split is `eval`, not `train` | Error: "Dataset '<name>' has split 'eval'. Use a training dataset." | 1 |
+| Dataset split is not `train` | Warning: "Dataset '<name>' has split 'eval'. Consider using a training dataset." | 0 (continue) |
 | Dataset hash mismatch | Warning: "Dataset '<name>' has been modified since registration. Results may not be reproducible." | 0 (continue) |
 | Dataset incompatible with problem version | Warning: "Dataset '<name>' is not declared compatible with version '<tag>'." | 0 (continue) |
 | OpenEvolve crashes during run | Error: "OpenEvolve failed: <error>". Preserve partial results if any. | 4 |
@@ -191,5 +194,5 @@ config_snapshot: "config.yaml"
 - Requires an initialized project ([spec-project.md](spec-project.md))
 - Requires a problem version ([spec-problem.md](spec-problem.md))
 - Requires a registered LLM ([spec-llm.md](spec-llm.md))
-- Requires a registered dataset with split `train` ([spec-dataset.md](spec-dataset.md))
+- Requires a registered dataset ([spec-dataset.md](spec-dataset.md))
 - Solutions produced here are consumed by `revolver eval` ([spec-eval.md](spec-eval.md)) and `revolver benchmark` ([spec-benchmark.md](spec-benchmark.md))

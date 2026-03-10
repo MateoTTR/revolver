@@ -33,6 +33,7 @@ Functional requirements are organized by CLI command group in separate files (se
 | FR-EVL | Evaluation | [spec-eval.md](spec-eval.md) |
 | FR-BEN | Benchmarking | [spec-benchmark.md](spec-benchmark.md) |
 | FR-SOL | Solution management | [spec-solution.md](spec-solution.md) |
+| FR-SET | Setup & dependencies | [spec-setup.md](spec-setup.md) |
 | NFR | Non-functional requirements | This file (§3) |
 
 Each requirement has a unique ID (e.g., `FR-LLM-003`) that is stable across versions. Deleted requirements are marked `[DELETED]`, never renumbered.
@@ -119,6 +120,20 @@ Each `spec-*.md` file follows this structure:
 | NFR-051 | MUST | `.revolver/` directory permissions default to user-only (700) |
 | NFR-052 | MUST | No secrets are included in solution lineage or benchmark exports |
 
+### 3.7 Deployment & Dependencies
+
+| ID | Priority | Requirement |
+|---|---|---|
+| NFR-060 | MUST | Revolver is installable as a Python package via `pip install` (or compatible tool: uv, pipx, etc.) |
+| NFR-061 | MUST | All Python dependencies (CLI framework, YAML parser, SQLite driver, OpenEvolve, etc.) are declared in the package metadata and installed automatically |
+| NFR-062 | MUST | System-level dependencies (nvidia-smi, GPU drivers) are NOT managed by the installer — they are detected and reported at runtime. Ollama can be installed via conda-forge by `revolver setup` when conda/mamba is available. |
+| NFR-063 | MUST | A `revolver doctor` command checks the presence, version, and health of all required dependencies (Python and non-Python) |
+| NFR-064 | MUST | A `revolver setup` command installs or upgrades missing dependencies: Python packages via pip, Ollama via conda-forge (when conda/mamba is available), with user confirmation |
+| NFR-065 | MUST | `revolver setup` never attempts to install system-level software (GPU drivers, OS packages) — it only reports what is missing with instructions. It never installs conda itself. |
+| NFR-066 | SHOULD | `revolver doctor` produces a clear pass/warn/fail status per dependency, with actionable messages for failures |
+| NFR-067 | SHOULD | Revolver degrades gracefully when optional dependencies are missing: local LLM features require Ollama, GPU features require nvidia-smi, but remote-only workflows remain functional |
+| NFR-068 | SHOULD | `revolver setup` supports `--dry-run` to preview what would be installed without making changes |
+
 ---
 
 ## 4. Global CLI Conventions
@@ -174,6 +189,7 @@ Configuration is resolved in this order (last wins):
 | [spec-eval.md](spec-eval.md) | `revolver eval {<default>,results}` | §5.6 | Single solution evaluation |
 | [spec-benchmark.md](spec-benchmark.md) | `revolver benchmark {<default>,results,export}` | §4.7, §5.7, §8 | Multi-solution comparison and export |
 | [spec-solution.md](spec-solution.md) | `revolver solution {list,info,alias}` | §4.6 | Solution browsing and metadata |
+| [spec-setup.md](spec-setup.md) | `revolver doctor`, `revolver setup` | NFR-060–068 | Dependency verification and assisted installation |
 
 ---
 

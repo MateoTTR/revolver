@@ -9,6 +9,8 @@
 
 This spec covers project initialization and the project-level data model. A project is the top-level organizational unit in Revolver — all problems, datasets, solutions, and benchmarks live within a project.
 
+**Key constraint**: A project contains exactly **one problem** (with multiple versions). Different optimization problems require separate projects. This simplifies dataset compatibility tracking, solution lineage, and benchmarking.
+
 ---
 
 ## 2. Commands
@@ -29,7 +31,6 @@ Initialize a new Revolver project.
 |---|---|---|---|
 | `--path <dir>` | string | `.` | Directory to initialize. Created if it does not exist. |
 | `--description <text>` | string | `""` | Short project description |
-| `--domain <text>` | string | `""` | Problem domain (e.g., "scheduling", "routing") |
 
 **Output** (human):
 ```
@@ -55,7 +56,7 @@ Created: .revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml
 | ID | Priority | Requirement | ConOps Ref |
 |---|---|---|---|
 | FR-PRJ-001 | MUST | Create a `.revolver/` directory with an empty SQLite database (`revolver.db`) and subdirectories (`problem/`, `datasets/`, `solutions/`, `benchmarks/`) | §4.1 |
-| FR-PRJ-002 | MUST | Generate a `project.yaml` file with project name, description, domain, and creation timestamp | §4.1 |
+| FR-PRJ-002 | MUST | Generate a `project.yaml` file with project name, description, and creation timestamp | §4.1 |
 | FR-PRJ-003 | MUST | Generate a template `initial_program.py` with `EVOLVE-BLOCK` markers and inline comments explaining the pattern | §4.2, Appendix A |
 | FR-PRJ-004 | MUST | Generate a template `evaluator.py` implementing the dual-mode pattern (single-instance + aggregated) with `REVOLVER_DATASET_DIR` / `REVOLVER_INSTANCE_PATH` environment variable reads | §4.4 |
 | FR-PRJ-005 | MUST | Generate a template `config.yaml` with OpenEvolve defaults and comments | Appendix A |
@@ -82,7 +83,6 @@ Created: .revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml
 ```yaml
 name: scheduling-optimizer
 description: ""
-domain: ""
 created_at: "2026-03-10T14:30:00Z"
 revolver_version: "0.1.0"
 ```

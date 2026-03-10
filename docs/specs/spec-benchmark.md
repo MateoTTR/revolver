@@ -27,7 +27,7 @@ Run a comparative benchmark of multiple solutions.
 | `--alias <name>` | string | No | User-friendly name for this benchmark |
 
 **Behavior**:
-1. Validate all solutions exist and dataset exists with split `eval`
+1. Validate all solutions exist and dataset exists (warn if split is not `eval`)
 2. For each solution that does not already have evaluation results on this dataset: run the evaluation (same as `revolver eval`)
 3. For each solution that already has results: reuse stored results (skip re-evaluation)
 4. Aggregate results into a comparative table
@@ -85,6 +85,37 @@ Display results of a previous benchmark.
 | `--latest` | flag | No | Show the most recent benchmark |
 | `--id <bench-id>` | string | No | Show a specific benchmark by ID |
 | `--metric <name>` | string | No | Filter to a single metric. Default: show all |
+| `--per-instance` | flag | No | Show per-instance comparison across solutions |
+| `--sort-by <solution>` | string | No | With `--per-instance`: sort instances by a solution's metric value |
+
+**Output** (human, `--per-instance --metric combined_score`):
+```
+Instance              claude-small  gemma-small  claude-large  best
+instance_001.json     0.91          0.78         0.95          claude-large
+instance_002.json     0.85          0.88         0.82          gemma-small
+instance_003.json     FAILED        0.72         0.90          claude-large
+...
+
+Summary: claude-large wins on 62/100, claude-small on 25/100, gemma-small on 13/100
+```
+
+**Output** (JSON, `--per-instance`):
+```json
+{
+  "benchmark_id": "bench-20260310-170000",
+  "dataset": "eval-benchmark",
+  "per_instance": [
+    {
+      "instance_id": "instance_001.json",
+      "solutions": {
+        "claude-small-v1.1": {"combined_score": 0.91, "makespan": 105.0, "status": "solved"},
+        "gemma-small-v1.1": {"combined_score": 0.78, "makespan": 160.0, "status": "solved"},
+        "claude-large-v1.1": {"combined_score": 0.95, "makespan": 98.0, "status": "solved"}
+      }
+    }
+  ]
+}
+```
 
 **Exit codes**: 0 success, 1 if no results found
 
@@ -100,6 +131,7 @@ Export benchmark results to a file.
 | `--id <bench-id>` | string | No | Export a specific benchmark by ID |
 | `--format <fmt>` | string | Yes | `csv` or `json` |
 | `--output <path>` | string | Yes | Output file path |
+| `--per-instance` | flag | No | Export raw per-instance data instead of aggregates |
 
 **CSV format** (see ConOps §8.1):
 ```
@@ -132,9 +164,9 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | FR-BEN-001 | MUST | Accept multiple solutions and a single evaluation dataset | §5.7 |
 | FR-BEN-002 | MUST | Reuse existing evaluation results when available (avoid redundant computation) | — |
 | FR-BEN-003 | MUST | Run evaluation for solutions without existing results on the dataset | §5.7 |
-| FR-BEN-004 | MUST | Produce a comparative table with per-metric aggregate statistics | §4.7 |
+| FR-BEN-004 | MUST | Produce a comparative table with per-metric aggregate statistics (computed from raw per-instance data) | §4.7 |
 | FR-BEN-005 | MUST | Include lineage information (problem version, LLM, training dataset, generation time) | §4.7 |
-| FR-BEN-006 | MUST | Store benchmark metadata and results in SQLite | NFR-013 |
+| FR-BEN-006 | MUST | Store benchmark metadata in SQLite; per-instance data is read from eval results (single source of truth) | NFR-013 |
 | FR-BEN-007 | MUST | Export results in CSV format matching ConOps §8.1 schema | §8.1 |
 | FR-BEN-008 | MUST | Export results in JSON format matching ConOps §8.2 schema | §8.2 |
 | FR-BEN-009 | MUST | Include eval_time_s and instances_solved in results | §4.7 |
@@ -142,6 +174,9 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | FR-BEN-011 | SHOULD | Include generation_time_s from solution lineage for cost/quality comparison | §4.7 |
 | FR-BEN-012 | MUST | `list` shows all past benchmarks with date, dataset, solution count | — |
 | FR-BEN-013 | MUST | No secrets (API keys, file paths) in exported data | NFR-052 |
+| FR-BEN-014 | MUST | `results --per-instance` shows per-instance comparison of all solutions side by side | — |
+| FR-BEN-015 | SHOULD | `results --per-instance` identifies the best solution per instance | — |
+| FR-BEN-016 | MUST | `export --per-instance` exports raw per-instance data for all solutions (enables histograms, scatter plots, custom analysis) | §8 |
 
 ---
 
@@ -152,7 +187,7 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | Fewer than 1 solution provided | Error: "Provide at least one solution" | 1 |
 | Solution not found | Error: "Solution '<id>' not found" | 1 |
 | Dataset not found | Error: "Dataset '<name>' not found" | 1 |
-| Dataset split is `train` | Error: "Use an evaluation dataset (split: eval)" | 1 |
+| Dataset split is `train` | Warning: "Dataset '<name>' has split 'train'. Results may reflect training performance." | 0 (continue) |
 | Evaluation fails for one solution | Mark as failed, continue with remaining solutions | — |
 | Evaluation fails for all solutions | Error: "Evaluation failed for all solutions" | 4 |
 | `--format` not `csv` or `json` | Error: "Unsupported format. Use 'csv' or 'json'" | 1 |
@@ -166,5 +201,5 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 
 - Requires solutions from `revolver run` ([spec-run.md](spec-run.md))
 - Uses the evaluation mechanism from `revolver eval` ([spec-eval.md](spec-eval.md))
-- Requires a registered dataset with split `eval` ([spec-dataset.md](spec-dataset.md))
+- Requires a registered dataset ([spec-dataset.md](spec-dataset.md))
 - Export formats defined in ConOps §8
