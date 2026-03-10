@@ -7,18 +7,18 @@
 | 1 | ConOps — Initial brainstorm and draft | [x] | 001 |
 | 2 | ConOps — User review and refinements | [x] | 002 |
 | 3 | Functional specifications — Draft | [x] | 003 |
-| 4 | Functional specifications — Review | [ ] | |
+| 4 | Functional specifications — Review | [x] | 004 |
 
 ## Phase 2 — Architecture
 
 | # | Task | Status | Session |
 |---|---|---|---|
-| 5 | ADR-001 — Ollama as local LLM backend (decision + tradeoffs from POC) | [ ] | |
-| 6 | ADR-002 — Programming language | [ ] | |
-| 7 | ADR-003 — CLI framework | [ ] | |
+| 5 | ADR-001 — Ollama as local LLM backend (decision + tradeoffs from POC) | [x] | 004 |
+| 6 | ADR-002 — Programming language (Python >= 3.11) | [x] | 004 |
+| 7 | ADR-003 — CLI framework (Typer) | [x] | 005 |
 | 8 | Design `revolver llm` subcommands based on Ollama API mapping | [ ] | |
-| 9 | Architecture overview — Draft | [ ] | |
-| 10 | Data model — Detailed design | [ ] | |
+| 9 | Architecture overview — Draft | [x] | 005 |
+| 10 | Data model — Detailed design | [x] | 005 |
 
 ## Phase 3 — POCs
 

@@ -24,7 +24,11 @@ At the start of each session, read this file entirely, then follow the "Session 
 
 ### Architecture Decision Records (ADRs)
 
-_None yet — will be created during Phase 2._
+| ADR | Title | Status |
+|---|---|---|
+| [ADR-001](docs/architecture/adr/ADR-001-ollama-local-llm-backend.md) | Ollama as local LLM backend | Accepted |
+| [ADR-002](docs/architecture/adr/ADR-002-python-language.md) | Python as implementation language | Accepted |
+| [ADR-003](docs/architecture/adr/ADR-003-cli-framework-typer.md) | Typer as CLI framework | Accepted |
 
 ---
 
@@ -49,8 +53,8 @@ Before starting any work in a session:
 
 | Phase | Focus | Status |
 |---|---|---|
-| Phase 1 | Cadrage: ConOps + Functional Specifications | **In progress** |
-| Phase 2 | Architecture, tech choices (ADRs), data model | Not started |
+| Phase 1 | Cadrage: ConOps + Functional Specifications | **Done** |
+| Phase 2 | Architecture, tech choices (ADRs), data model | **In progress** |
 | Phase 3 | POCs for critical aspects | Not started |
 | Phase 4 | Validation strategy, test plan, traceability | Not started |
 | Phase 5 | Implementation | Not started |
@@ -88,9 +92,9 @@ Before starting any work in a session:
 
 ## Open Questions / Decisions Pending
 
-- [ ] Primary programming language (Python? Rust? Mixed?)
+- [x] Primary programming language → **Python >= 3.11** (ADR-002)
 - [ ] Project/problem versioning strategy (git-based? internal?)
 - [ ] Dataset storage format and management
-- [ ] Local LLM deployment tool (Ollama? vLLM? both?)
-- [ ] CLI framework choice
+- [x] Local LLM deployment tool → **Ollama** (ADR-001)
+- [x] CLI framework choice → **Typer >= 0.21** (ADR-003)
 - [ ] Benchmark output format and visualization
