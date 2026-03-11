@@ -1,9 +1,9 @@
-# Revolver — SQLite Data Model
+# DES-001 — SQLite Data Model
 
 **Version**: 0.1 — Initial draft
 **Date**: 2026-03-10
 **Status**: Draft
-**Traceable to**: [Architecture Overview](architecture.md) §5, [Specifications](../specs/specifications.md) NFR-013/016
+**Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
 ---
 

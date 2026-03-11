@@ -143,6 +143,7 @@ src/revolver/
 │   ├── config.py            # Config hierarchy resolution (defaults → global → project → CLI → env)
 │   ├── output.py            # Output formatting (human tables, JSON, progress bars)
 │   ├── ollama.py            # Ollama HTTP client (pull, start, stop, status, models)
+│   ├── gpu.py               # nvidia-smi wrapper (GPU name, VRAM usage/total)
 │   └── openevolve.py        # OpenEvolve wrapper (import, configure, launch, monitor)
 │
 └── models/                  # Shared data models (dataclasses / Pydantic)
@@ -191,7 +192,7 @@ Each module encapsulates the business rules for one command group. Key responsib
 | Module | Key operations |
 |---|---|
 | `project` | Init project directory, discover `.revolver/`, resolve config hierarchy |
-| `llm` | Register/remove LLMs, start/stop local models via Ollama client, check status |
+| `llm` | Register/remove LLMs, start/stop local models via Ollama client, check status. See [DES-002](design/DES-002-llm-subcommands.md) for Ollama API mapping |
 | `problem` | Run evaluator on instances (test), create immutable snapshots (version), list versions |
 | `dataset` | Register dataset by reference, compute hashes, verify integrity, manage compatibility |
 | `run` | Configure OpenEvolve, set environment variables for instance injection, launch run, store solution + lineage |
@@ -217,13 +218,14 @@ Each module encapsulates the business rules for one command group. Key responsib
 | `config` | Configuration resolution | 5-level hierarchy: defaults → global → project → CLI → env vars (§4.4 of specs) |
 | `output` | Output formatting | Human-readable tables (rich), JSON serialization, progress bars (rich.progress) |
 | `ollama` | Ollama HTTP client | Wraps Ollama REST API: pull model, load/unload, list models, check health |
+| `gpu` | GPU monitoring | Wraps `nvidia-smi` for GPU name, VRAM used/total. Used by `llm status` and `doctor` |
 | `openevolve` | OpenEvolve integration | Import OpenEvolve as library, configure programmatically, launch evolution, monitor progress |
 
 ### 4.4 Data Models — `revolver.models`
 
 Shared dataclasses (or Pydantic models) used across layers. These are pure data containers with no side effects.
 
-**Design decision (pending ADR)**: dataclasses vs Pydantic. Pydantic adds validation and JSON serialization but is an extra dependency. Dataclasses are stdlib. Given that we already need YAML parsing and JSON output, Pydantic's `model_dump()` and `model_validate()` would reduce boilerplate. Decision deferred.
+Data models use **Pydantic v2** `BaseModel` ([ADR-005](adr/ADR-005-pydantic-data-models.md)). Immutable entities use `frozen=True`. Serialization via `model_dump()` / `model_dump_json()` for `--json` output. Validation via `model_validate()` at system boundaries (DB reads, CLI input, YAML parsing).
 
 ---
 
@@ -245,7 +247,7 @@ Shared dataclasses (or Pydantic models) used across layers. These are pure data 
 
 ### 5.3 SQLite schema (high-level)
 
-Detailed schema in a separate document (Task #10). Key tables:
+Detailed schema in [DES-001 — SQLite Data Model](design/DES-001-sqlite-data-model.md). Key tables:
 
 | Table | Purpose | Key columns |
 |---|---|---|
@@ -385,6 +387,7 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | Config/manifest format | YAML (PyYAML) | — |
 | Hashing | SHA-256 (hashlib, stdlib) | — |
 | Terminal output | rich | — |
+| Data models | Pydantic v2 | ADR-005 |
 | HTTP client | httpx (for Ollama API) | — |
 | Evolution engine | OpenEvolve (Python import) | — |
 | Package format | pip-installable (`pyproject.toml`) | NFR-060 |
@@ -398,14 +401,25 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | [ADR-001](adr/ADR-001-ollama-local-llm-backend.md) | Ollama as local LLM backend | Accepted |
 | [ADR-002](adr/ADR-002-python-language.md) | Python as implementation language | Accepted |
 | [ADR-003](adr/ADR-003-cli-framework-typer.md) | Typer as CLI framework | Accepted |
-| ADR-004 | SQLite schema (data model) | Pending |
-| ADR-005 | Dataclasses vs Pydantic for models | Pending |
+| [ADR-004](adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
+| [ADR-005](adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
 
 ---
 
-## 10. Open Architectural Questions
+## 10. Design Documents
 
-- [ ] **AQ-01**: Dataclasses vs Pydantic for data models (→ ADR-005)
+Detailed design notes expanding on specific architectural areas. Each document traces back to relevant ADRs and specifications.
+
+| ID | Title | Traces to | Status |
+|---|---|---|---|
+| [DES-001](design/DES-001-sqlite-data-model.md) | SQLite Data Model | ADR-004, NFR-013/016 | Draft |
+| [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Draft |
+
+---
+
+## 11. Open Architectural Questions
+
+- [x] **AQ-01**: Dataclasses vs Pydantic for data models → **Pydantic v2** (ADR-005)
 - [ ] **AQ-02**: SQLite schema migration strategy (manual SQL scripts vs alembic-like tool)
 - [ ] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training (ConOps OQ-05)
 - [ ] **AQ-04**: Project/problem versioning strategy — pure internal (manifest-based) vs git-integrated

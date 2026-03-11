@@ -8,7 +8,7 @@
 
 ## 1. Scope
 
-This spec covers LLM registration, lifecycle management, and monitoring. LLMs are managed **globally** (`~/.revolver/llms/`), not per-project, since models are shared resources.
+This spec covers LLM registration, lifecycle management, and monitoring. LLMs are managed **globally** (`~/.revolver/revolver.db`), not per-project, since models are shared resources.
 
 Revolver supports two LLM types:
 - **Remote**: API-based (Anthropic, Google, OpenAI) — configured with provider, model name, API key env var
@@ -185,7 +185,7 @@ Unregister an LLM from the global registry.
 
 **Behavior**:
 1. If the model is currently loaded, unload it first
-2. Remove the registration from `~/.revolver/llms/`
+2. Remove the registration from the global database
 3. Optionally delete model files from Ollama
 
 **Exit codes**: 0 success, 1 if name not found
@@ -198,7 +198,7 @@ Unregister an LLM from the global registry.
 |---|---|---|---|
 | FR-LLM-001 | MUST | Support registering remote LLMs with provider, model ID, and API key env var | §4.8 |
 | FR-LLM-002 | MUST | Support registering local LLMs served via Ollama | §4.8 |
-| FR-LLM-003 | MUST | Store LLM registrations in `~/.revolver/llms/` | §4.8 |
+| FR-LLM-003 | MUST | Store LLM registrations in global SQLite database (`~/.revolver/revolver.db`) | §4.8 |
 | FR-LLM-004 | MUST | For Ollama LLMs, trigger `ollama pull` at registration time (or on demand) | §5.1 |
 | FR-LLM-005 | MUST | Record and store Ollama model digest for reproducibility | §7, POC |
 | FR-LLM-006 | MUST | Provide `start` command that loads a local model into GPU via Ollama API | §5.1, POC |
@@ -231,31 +231,29 @@ Unregister an LLM from the global registry.
 
 ---
 
-## 5. LLM Registry Format
+## 5. LLM Registry Storage
 
-Each LLM is stored as a YAML file in `~/.revolver/llms/<name>.yaml`:
+LLM registrations are stored in the **global SQLite database** (`~/.revolver/revolver.db`, table `llms`). See [DES-001 §4.1](../architecture/design/DES-001-sqlite-data-model.md) for the schema definition.
 
-```yaml
-name: codestral-local
-type: local
-source: ollama
-model: "codestral:22b"
-digest: "sha256:0898a8b286d5..."
-base_url: "http://localhost:11434/v1"
-registered_at: "2026-03-10T14:30:00Z"
-measured_vram_mib: 19896
-measured_throughput_tps: 95.4
-```
+Using SQLite (rather than individual YAML files) ensures atomic writes and prevents manual edits that could introduce inconsistencies with actual LLM state. All mutations go through `revolver llm add/remove`.
 
-```yaml
-name: claude-opus
-type: remote
-provider: anthropic
-model: "claude-opus-4-6"
-api_key_env: "ANTHROPIC_API_KEY"
-base_url: "https://api.anthropic.com/v1"
-registered_at: "2026-03-10T14:30:00Z"
-```
+**Stored fields per LLM**:
+
+| Field | Local (Ollama) | Remote (API) |
+|---|---|---|
+| `name` | User-facing identifier | User-facing identifier |
+| `source` | `"local"` | `"remote"` |
+| `provider` | — | `"anthropic"`, `"openai"`, `"google"`, `"openai-compat"` |
+| `model` | `"codestral:22b"` | `"claude-opus-4-6"` |
+| `base_url` | `"http://localhost:11434/v1"` | Provider default or custom |
+| `api_key_env` | — | `"ANTHROPIC_API_KEY"` |
+| `registered_at` | ISO 8601 | ISO 8601 |
+
+**Runtime-only fields** (not persisted in the `llms` table, queried live):
+- VRAM usage → from Ollama `GET /api/ps`
+- Loaded/stopped status → from Ollama `GET /api/ps`
+- GPU info → from `nvidia-smi`
+- API key availability → from `os.environ`
 
 ---
 

@@ -29,6 +29,15 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [ADR-001](docs/architecture/adr/ADR-001-ollama-local-llm-backend.md) | Ollama as local LLM backend | Accepted |
 | [ADR-002](docs/architecture/adr/ADR-002-python-language.md) | Python as implementation language | Accepted |
 | [ADR-003](docs/architecture/adr/ADR-003-cli-framework-typer.md) | Typer as CLI framework | Accepted |
+| [ADR-004](docs/architecture/adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
+| [ADR-005](docs/architecture/adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
+
+### Design Documents (DES)
+
+| DES | Title | Status |
+|---|---|---|
+| [DES-001](docs/architecture/design/DES-001-sqlite-data-model.md) | SQLite Data Model | Draft |
+| [DES-002](docs/architecture/design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | Draft |
 
 ---
 
