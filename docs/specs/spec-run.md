@@ -55,27 +55,50 @@ Run started: v1.1 + claude-opus + train-small
   Iteration 42/200 | Best score: 0.87 | Elapsed: 1h15m | ETA: 2h05m
 ```
 
-**Output** (human, on completion):
+**Output** (human, on completion, `--top-n 1`):
 ```
 Run completed: 200 iterations in 3h45m
-  Solution: sol-20260310-143000
+  Solution: sol-20260310-143000 (rank #1)
   Alias: claude-small-v1.1
   Best combined_score: 0.91
   Stored in: .revolver/solutions/sol-20260310-143000/
 ```
 
+**Output** (human, on completion, `--top-n 3`):
+```
+Run completed: 200 iterations in 3h45m
+  Solutions (3):
+    #1  sol-20260310-143000     score=0.91  claude-small-v1.1
+    #2  sol-20260310-143000-1   score=0.85
+    #3  sol-20260310-143000-2   score=0.79
+  Stored in: .revolver/solutions/sol-20260310-143000{,-1,-2}/
+```
+
 **Output** (JSON, on completion):
 ```json
 {
-  "solution_id": "sol-20260310-143000",
-  "alias": "claude-small-v1.1",
+  "run_id": "sol-20260310-143000",
   "problem_version": "v1.1",
   "llm": "claude-opus",
   "dataset": "train-small",
   "iterations": 200,
-  "best_score": 0.91,
   "generation_time_s": 13500,
-  "path": ".revolver/solutions/sol-20260310-143000/"
+  "solutions": [
+    {
+      "solution_id": "sol-20260310-143000",
+      "alias": "claude-small-v1.1",
+      "rank": 1,
+      "best_score": 0.91,
+      "path": ".revolver/solutions/sol-20260310-143000/"
+    },
+    {
+      "solution_id": "sol-20260310-143000-1",
+      "alias": null,
+      "rank": 2,
+      "best_score": 0.85,
+      "path": ".revolver/solutions/sol-20260310-143000-1/"
+    }
+  ]
 }
 ```
 
@@ -128,7 +151,7 @@ Resume an interrupted run from its checkpoint.
 | FR-RUN-005c | SHOULD | Set `REVOLVER_EVAL_LOG` for optional evaluator log file | §4.4, ADR-006 |
 | FR-RUN-006 | MUST | Configure OpenEvolve to use the LLM's base URL and model ID | §3.2 |
 | FR-RUN-007 | MUST | Generate a unique solution ID: `sol-{YYYYMMDD}-{HHMMSS}` | §4.6 |
-| FR-RUN-008 | MUST | Store the top-N best programs in `.revolver/solutions/<id>/` | §4.6 |
+| FR-RUN-008 | MUST | Store the top-N best programs as N separate solutions (each in its own directory), linked by a shared `run_id` and distinguished by `rank` | §4.6 |
 | FR-RUN-009 | MUST | Record full lineage in `manifest.yaml`: problem version, dataset, LLM, config, timestamp, iterations, generation time | §4.6 |
 | FR-RUN-010 | MUST | Store metrics (best scores per iteration) in SQLite | §4.6 |
 | FR-RUN-019 | MUST | On completion, evaluate the best program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`) | §4.6 |
@@ -184,10 +207,12 @@ lineage:
 
 best_score: 0.91
 top_n: 1
+run_id: "sol-20260310-143000"    # Shared across top-N solutions from same run
+rank: 1                           # 1 = best program
 files:
   - "best.py"
 
-checkpoint: "oe-checkpoint/"
+checkpoint: "oe-checkpoint/"      # Only present for rank-1 solutions
 config_snapshot: "config.yaml"
 ```
 

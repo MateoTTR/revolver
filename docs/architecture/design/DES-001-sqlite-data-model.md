@@ -54,10 +54,9 @@ Both databases use **WAL mode** (NFR-016) for concurrent read access.
             1  │      │ 1          │       │              │
                │      │            │       │              │
     ┌──────────▼┐  ┌──▼──────────┐│  ┌────▼───────────┐  │
-    │ dataset_  │  │eval_results ││  │solution_lineage│  │
-    │ instances │  │(PK: eval_id,││  │(PK: solution_id│  │
-    └───────────┘  │metric_name) ││  └────────────────┘  │
-                   └──────┬──────┘│                       │
+    │ dataset_  │  │eval_metadata││  │solution_lineage│  │
+    │ instances │  │(PK: eval_id)││  │(PK: solution_id│  │
+    └───────────┘  └──────┬──────┘│  └────────────────┘  │
                           │       │                       │
                        1  │       │                       │
                           │       │                       │
@@ -177,41 +176,35 @@ CREATE TABLE solution_lineage (
     iterations      INTEGER NOT NULL,       -- OpenEvolve iterations completed
     generation_time_s REAL,                 -- wall-clock seconds
     top_n           INTEGER NOT NULL DEFAULT 1,
+    run_id          TEXT NOT NULL,          -- shared ID across top-N solutions from same run
+    rank            INTEGER NOT NULL DEFAULT 1, -- 1 = best, 2 = second best, etc.
     config_snapshot TEXT                    -- verbatim OpenEvolve YAML config (NFR-023)
 );
+
+CREATE INDEX idx_lineage_run ON solution_lineage(run_id);
 ```
 
-**Constraints**: Fully immutable. Written once at run completion.
+**Constraints**: Fully immutable. Written once at run completion. When `--top-n > 1`, all N solutions from the same run share the same `run_id` (equal to the first solution's ID). `rank` = 1 is the best program.
 
-### 3.7 `eval_results`
+### 3.7 `eval_metadata`
 
-Aggregate evaluation statistics per (solution, dataset, metric).
+Evaluation session metadata. Aggregate statistics (mean, min, max, p10, p50, p90, std) are **not stored** — they are computed at read time from raw `eval_instances` data in Python ([DES-006 §4](DES-006-eval-loop.md)).
 
 ```sql
-CREATE TABLE eval_results (
-    eval_id         TEXT NOT NULL,          -- "eval-YYYYMMDD-HHMMSS"
+CREATE TABLE eval_metadata (
+    eval_id         TEXT PRIMARY KEY,       -- "eval-YYYYMMDD-HHMMSS"
     solution_id     TEXT NOT NULL REFERENCES solutions(id),
     dataset_name    TEXT NOT NULL REFERENCES datasets(name),
-    metric_name     TEXT NOT NULL,          -- "combined_score", "makespan", etc.
-    mean            REAL NOT NULL,
-    min             REAL NOT NULL,
-    max             REAL NOT NULL,
-    p10             REAL NOT NULL,
-    p50             REAL NOT NULL,
-    p90             REAL NOT NULL,
-    std             REAL NOT NULL,
     instance_count  INTEGER NOT NULL,
     instances_solved INTEGER NOT NULL,
     eval_time_s     REAL,                   -- total wall-clock time
-    evaluated_at    TEXT NOT NULL,           -- ISO 8601
-    PRIMARY KEY (eval_id, metric_name)
+    evaluated_at    TEXT NOT NULL            -- ISO 8601
 );
 
-CREATE INDEX idx_eval_solution ON eval_results(solution_id, dataset_name);
-CREATE UNIQUE INDEX idx_eval_unique ON eval_results(solution_id, dataset_name, metric_name);
+CREATE UNIQUE INDEX idx_eval_unique ON eval_metadata(solution_id, dataset_name);
 ```
 
-**Note**: `idx_eval_unique` ensures at most one aggregate per (solution, dataset, metric). Re-evaluation replaces the previous result (INSERT OR REPLACE on this unique index).
+**Note**: `idx_eval_unique` ensures at most one evaluation per (solution, dataset). Re-evaluation replaces the previous result (DELETE old + INSERT new in a transaction).
 
 ### 3.8 `eval_instances`
 
@@ -219,15 +212,14 @@ Raw per-instance results. Stored for post-processing (histograms, plots, per-ins
 
 ```sql
 CREATE TABLE eval_instances (
-    eval_id         TEXT NOT NULL,
+    eval_id         TEXT NOT NULL REFERENCES eval_metadata(eval_id),
     instance_id     TEXT NOT NULL,
     metric_name     TEXT NOT NULL,
     value           REAL,                   -- NULL if failed/timeout
     status          TEXT NOT NULL CHECK (status IN ('solved', 'failed', 'timeout')),
     error_message   TEXT,                   -- if status != 'solved'
     compute_time_s  REAL,                   -- wall-clock time for this instance
-    PRIMARY KEY (eval_id, instance_id, metric_name),
-    FOREIGN KEY (eval_id, metric_name) REFERENCES eval_results(eval_id, metric_name)
+    PRIMARY KEY (eval_id, instance_id, metric_name)
 );
 
 CREATE INDEX idx_eval_inst_eval ON eval_instances(eval_id);
@@ -311,7 +303,7 @@ The `schema_version` table enables future schema migrations. On startup, Revolve
 SELECT s.id, s.alias, s.problem_version, s.llm, s.dataset,
        s.best_score, s.created_at,
        sl.llm_model, sl.iterations, sl.generation_time_s,
-       sl.top_n, sl.config_snapshot
+       sl.top_n, sl.run_id, sl.rank, sl.config_snapshot
 FROM solutions s
 JOIN solution_lineage sl ON s.id = sl.solution_id
 WHERE s.id = :id_or_alias OR s.alias = :id_or_alias;
@@ -321,10 +313,12 @@ WHERE s.id = :id_or_alias OR s.alias = :id_or_alias;
 
 ```sql
 SELECT s.id, s.alias, s.problem_version, s.llm, s.dataset,
-       s.best_score, s.created_at
+       s.best_score, s.created_at, sl.rank, sl.run_id
 FROM solutions s
+JOIN solution_lineage sl ON s.id = sl.solution_id
 WHERE (:version IS NULL OR s.problem_version = :version)
   AND (:llm IS NULL OR s.llm = :llm)
+  AND (:rank IS NULL OR sl.rank = :rank)
 ORDER BY
     CASE :sort
         WHEN 'created_at' THEN s.created_at
@@ -333,20 +327,25 @@ ORDER BY
     END;
 ```
 
-### 6.3 Benchmark comparison (`revolver benchmark results`)
+### 6.3 Benchmark: raw per-instance data (`revolver benchmark results`)
+
+Benchmark comparison loads raw per-instance data from `eval_instances` and computes aggregates in Python (see [DES-006 §4](DES-006-eval-loop.md)).
 
 ```sql
-SELECT s.id, s.alias,
-       er.metric_name, er.mean, er.min, er.max, er.p10, er.p50, er.p90, er.std,
-       sl.generation_time_s, er.eval_time_s
+SELECT ei.instance_id, s.id AS solution_id, s.alias,
+       ei.metric_name, ei.value, ei.status, ei.compute_time_s,
+       sl.generation_time_s
 FROM benchmark_solutions bs
 JOIN solutions s ON bs.solution_id = s.id
-JOIN eval_results er ON s.id = er.solution_id AND er.dataset_name = :dataset
+JOIN eval_metadata em ON s.id = em.solution_id AND em.dataset_name = :dataset
+JOIN eval_instances ei ON em.eval_id = ei.eval_id
 LEFT JOIN solution_lineage sl ON s.id = sl.solution_id
 WHERE bs.benchmark_id = :bench_id
-  AND (:metric IS NULL OR er.metric_name = :metric)
-ORDER BY er.metric_name, er.mean DESC;
+  AND (:metric IS NULL OR ei.metric_name = :metric)
+ORDER BY ei.instance_id, ei.metric_name, s.id;
 ```
+
+Aggregates (mean, min, max, p10, p50, p90, std) are computed per (solution, metric) in Python from this result set.
 
 ### 6.4 Per-instance comparison (`revolver benchmark results --per-instance`)
 
@@ -354,8 +353,8 @@ ORDER BY er.metric_name, er.mean DESC;
 SELECT ei.instance_id, s.alias, ei.metric_name, ei.value, ei.compute_time_s
 FROM benchmark_solutions bs
 JOIN solutions s ON bs.solution_id = s.id
-JOIN eval_results er ON s.id = er.solution_id AND er.dataset_name = :dataset
-JOIN eval_instances ei ON er.eval_id = ei.eval_id AND ei.metric_name = er.metric_name
+JOIN eval_metadata em ON s.id = em.solution_id AND em.dataset_name = :dataset
+JOIN eval_instances ei ON em.eval_id = ei.eval_id
 WHERE bs.benchmark_id = :bench_id
 ORDER BY ei.instance_id, ei.metric_name, ei.value DESC;
 ```
@@ -363,7 +362,7 @@ ORDER BY ei.instance_id, ei.metric_name, ei.value DESC;
 ### 6.5 Check existing eval results (benchmark reuse)
 
 ```sql
-SELECT eval_id FROM eval_results
+SELECT eval_id FROM eval_metadata
 WHERE solution_id = :solution_id AND dataset_name = :dataset_name
 LIMIT 1;
 ```
@@ -377,6 +376,16 @@ WHERE dataset_name = :dataset_name
 ORDER BY instance_id;
 ```
 
+### 6.7 Sibling solutions from same run (`revolver solution info`)
+
+```sql
+SELECT s.id, s.alias, sl.rank, s.best_score
+FROM solution_lineage sl
+JOIN solutions s ON s.id = sl.solution_id
+WHERE sl.run_id = :run_id AND sl.solution_id != :current_id
+ORDER BY sl.rank;
+```
+
 ---
 
 ## 7. ID Generation
@@ -386,6 +395,7 @@ ORDER BY instance_id;
 | Problem version | User-provided tag | `v1.0` | UNIQUE constraint, reject on duplicate |
 | Dataset | User-provided name | `train-small` | UNIQUE constraint, reject on duplicate |
 | Solution | `sol-{YYYYMMDD}-{HHMMSS}` | `sol-20260310-143000` | Append counter if needed: `sol-20260310-143000-1` |
+| Run ID | First solution's ID | `sol-20260310-143000` | Same as solution (shared across top-N) |
 | Evaluation | `eval-{YYYYMMDD}-{HHMMSS}` | `eval-20260310-160000` | Same counter strategy |
 | Benchmark | `bench-{YYYYMMDD}-{HHMMSS}` | `bench-20260310-170000` | Same counter strategy |
 
@@ -415,17 +425,17 @@ MIGRATIONS = {
 
 ### Why normalized tables for metrics (not JSON columns)?
 
-The evaluator returns `dict[str, float]` — one row per metric per instance in `eval_instances`, one row per metric in `eval_results`. This enables:
+The evaluator returns `dict[str, float]` — one row per metric per instance in `eval_instances`. This enables:
 - SQL filtering by metric name
-- Aggregate queries without JSON parsing
 - Index on metric_name for fast lookups
 - Simpler schema (no JSON functions required)
 
-### Why store aggregates AND raw data?
+### Why raw data only (no stored aggregates)?
 
-- **Raw data** (`eval_instances`): enables post-processing, histograms, per-instance comparison
-- **Aggregates** (`eval_results`): fast reads for listing/comparing without recomputing from thousands of rows
-- Aggregates are computed at eval time and stored as a cache. They could be recomputed from raw data if needed.
+Only raw per-instance data is stored in `eval_instances`. Aggregates (mean, min, max, percentiles, std) are computed at read time in Python from the raw data ([DES-006 §4](DES-006-eval-loop.md)). This provides:
+- **Single source of truth**: no risk of aggregates diverging from raw data
+- **Flexibility**: if aggregate formulas change (e.g., add p25/p75), no migration needed
+- **Acceptable performance**: computing aggregates from 10,000 instances takes <10ms in Python
 
 ### Why separate project and global DBs?
 
@@ -437,6 +447,6 @@ The evaluator returns `dict[str, float]` — one row per metric per instance in 
 
 ## 10. Resolved Design Questions
 
-- [x] **DM-01**: `eval_results` aggregates are **materialized** (written once at eval time). Fast reads for listing/comparing (NFR-032). Can be recomputed from `eval_instances` if needed.
+- [x] **DM-01**: Evaluation aggregates are **computed at read time** from raw `eval_instances` data in Python. Only `eval_metadata` (session info) and `eval_instances` (raw per-instance results) are stored in SQLite. See [DES-006 §4](DES-006-eval-loop.md) for rationale (FR-EVL-006).
 - [x] **DM-02**: LLM registry uses **SQLite** (`~/.revolver/revolver.db`), not YAML. Prevents manual edits that could introduce inconsistencies with actual LLM state. All mutations go through `revolver llm add/remove`. Inspection via `revolver llm list --json`.
 - [x] **DM-03**: Timestamp-based IDs use **counter suffix** for collision handling (`sol-20260310-143000`, then `sol-20260310-143000-1`). In practice, collisions are near-impossible (runs take minutes/hours).

@@ -41,6 +41,8 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [DES-002](docs/architecture/design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | Draft |
 | [DES-003](docs/architecture/design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | Draft |
 | [DES-004](docs/architecture/design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | Draft |
+| [DES-005](docs/architecture/design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | Draft |
+| [DES-006](docs/architecture/design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | Draft |
 
 ---
 

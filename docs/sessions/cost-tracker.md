@@ -13,15 +13,16 @@ Cumulative tracking of session duration and token usage across all Revolver sess
 | 5 | 2026-03-10 | session-005 | ~1h30 | N/A | Phase 2 | ADR-003 (Typer), architecture overview, data model SQLite, conda strategy, skills/agents |
 | 6 | 2026-03-11 | session-006 | ~2h | N/A | Phase 2 | ADR-004 (SQLite), ADR-005 (Pydantic), DES-003 (problem), DES-004 (dataset), POC #12 plan |
 | 7 | 2026-03-11 | session-007 | ~30min | N/A | Phase 2-3 | POC #12 integration: ADR-006, OQ-05/06 resolved, AQ-03 resolved, backlog updated |
+| 8 | 2026-03-11 | session-008 | ~2h30 | N/A | Phase 2 | DES-005 (run), DES-006 (eval), top-N design (DD-07), schema updates, spec-reviewer fixes |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 7 |
-| **Total duration** | ~9h15 |
+| **Total sessions** | 8 |
+| **Total duration** | ~11h45 |
 | **Total tokens** | N/A |
-| **Avg duration/session** | ~1h19 |
+| **Avg duration/session** | ~1h28 |
 | **Avg tokens/session** | N/A |
 
 ## Notes

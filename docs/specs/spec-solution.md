@@ -23,14 +23,16 @@ List all solutions in the current project.
 |---|---|---|---|
 | `--version <tag>` | string | — | Filter by problem version |
 | `--llm <name>` | string | — | Filter by LLM used |
+| `--rank <n>` | int | — | Filter by rank (1 = best from run). Useful to hide secondary solutions from top-N runs |
 | `--sort <field>` | string | `created_at` | Sort by: `created_at`, `score`, `alias` |
 
 **Output** (human):
 ```
-ID                      Alias               Version  LLM          Score   Date
-sol-20260310-143000     claude-small-v1.1   v1.1     claude-opus  0.91    2026-03-10
-sol-20260310-160000     gemma-small-v1.1    v1.1     gemma-local  0.82    2026-03-10
-sol-20260311-090000     —                   v1.0     claude-opus  0.78    2026-03-11
+ID                      Alias               Version  LLM          Score   Rank  Date
+sol-20260310-143000     claude-small-v1.1   v1.1     claude-opus  0.91    #1    2026-03-10
+sol-20260310-143000-1   —                   v1.1     claude-opus  0.85    #2    2026-03-10
+sol-20260310-160000     gemma-small-v1.1    v1.1     gemma-local  0.82    #1    2026-03-10
+sol-20260311-090000     —                   v1.0     claude-opus  0.78    #1    2026-03-11
 ```
 
 **Output** (JSON):
@@ -43,6 +45,8 @@ sol-20260311-090000     —                   v1.0     claude-opus  0.78    2026
       "problem_version": "v1.1",
       "llm": "claude-opus",
       "best_score": 0.91,
+      "rank": 1,
+      "run_id": "sol-20260310-143000",
       "created_at": "2026-03-10T14:30:00Z"
     }
   ]
@@ -66,6 +70,7 @@ Show detailed information about a solution.
 Solution: sol-20260310-143000
   Alias: claude-small-v1.1
   Best combined_score: 0.91
+  Rank: #1 of 3 (run: sol-20260310-143000)
 
 Lineage:
   Problem version: v1.1 (sha256:e5f6g7h8...)
@@ -80,6 +85,10 @@ Files:
   ├── config.yaml
   ├── manifest.yaml
   └── oe-checkpoint/
+
+Sibling solutions (same run):
+  sol-20260310-143000-1  #2  score=0.85  (no alias)
+  sol-20260310-143000-2  #3  score=0.79  (no alias)
 
 Evaluations:
   eval-benchmark: mean=0.87, p90=0.93 (2026-03-10)
@@ -111,14 +120,15 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 
 | ID | Priority | Requirement | ConOps Ref |
 |---|---|---|---|
-| FR-SOL-001 | MUST | `list` shows all solutions with ID, alias, problem version, LLM, best score, date | §4.6 |
-| FR-SOL-002 | MUST | `list` supports filtering by problem version and LLM | — |
-| FR-SOL-003 | MUST | `info` displays full lineage (problem version, dataset, LLM, config, generation time, iterations) | §4.6 |
+| FR-SOL-001 | MUST | `list` shows all solutions with ID, alias, problem version, LLM, best score, rank, date | §4.6 |
+| FR-SOL-002 | MUST | `list` supports filtering by problem version, LLM, and rank | — |
+| FR-SOL-003 | MUST | `info` displays full lineage (problem version, dataset, LLM, config, generation time, iterations, rank, run_id) | §4.6 |
 | FR-SOL-004 | MUST | `info` shows file paths to the stored solution programs | §4.6 |
 | FR-SOL-005 | MUST | `info` shows evaluation results if available | — |
 | FR-SOL-006 | MUST | `alias` sets a unique user-friendly name for a solution | §4.6 |
 | FR-SOL-007 | MUST | Aliases are unique within a project | §4.6 |
 | FR-SOL-008 | MUST | Solutions can be referenced by either ID or alias in all commands | — |
+| FR-SOL-009 | SHOULD | `info` shows sibling solutions from the same run (when top-N > 1) | §4.6 |
 
 ---
 
@@ -129,6 +139,7 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 | Solution ID or alias not found | Error: "Solution '<id>' not found" | 1 |
 | Alias already in use by another solution | Error: "Alias '<alias>' already in use by solution '<other-id>'" | 1 |
 | Empty alias string | Error: "Alias cannot be empty" | 1 |
+| `--rank` value <= 0 | Error: "Rank must be a positive integer" | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
 
 ---

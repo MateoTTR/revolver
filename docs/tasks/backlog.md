@@ -25,9 +25,11 @@
 | 21 | DES-004 — `revolver dataset` registration & integrity design | [x] | 006 |
 | 22 | Restructure architecture docs (DES-NNN convention) | [x] | 006 |
 | 23 | Update spec-dataset with `dataset remove` command | [x] | 006 |
-| 24 | DES-005 — `revolver run` design (unblocked by ADR-006) | [ ] | |
-| 25 | DES-006 — `revolver eval` design (unblocked by ADR-006) | [ ] | |
+| 24 | DES-005 — `revolver run` design (unblocked by ADR-006) | [x] | 008 |
+| 25 | DES-006 — `revolver eval` design (unblocked by ADR-006) | [x] | 008 |
 | 26 | Implement wrapper evaluator generator (evaluate_instance → evaluate) | [ ] | |
+| 27 | Update ConOps §4.1 directory structure for DD-07 (top-N → separate solution dirs) | [ ] | |
+| 28 | Review remaining spec-reviewer WARNs (ER diagram, benchmark JSON rank/run_id) | [ ] | |
 
 ## Phase 3 — POCs
 

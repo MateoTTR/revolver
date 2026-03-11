@@ -258,8 +258,8 @@ Detailed schema in [DES-001 — SQLite Data Model](design/DES-001-sqlite-data-mo
 | `dataset_compat` | Version compatibility | dataset_name, problem_version |
 | `llms` | LLM registry (global DB) | name, provider, model, source, base_url, api_key_env |
 | `solutions` | Generated solutions | id, alias, problem_version, llm, dataset, created_at |
-| `solution_lineage` | Full provenance | solution_id, config_snapshot, iterations, gen_time_s |
-| `eval_results` | Evaluation aggregates | eval_id, solution_id, dataset, metric, mean, min, max, p10, p50, p90, std |
+| `solution_lineage` | Full provenance | solution_id, config_snapshot, iterations, gen_time_s, run_id, rank, top_n |
+| `eval_metadata` | Evaluation session metadata | eval_id, solution_id, dataset_name, instance_count, instances_solved |
 | `eval_instances` | Per-instance results | eval_id, instance_id, metric, value, compute_time_s |
 | `benchmarks` | Benchmark metadata | bench_id, alias, dataset, created_at |
 | `benchmark_solutions` | Benchmark membership | bench_id, solution_id |
@@ -304,14 +304,16 @@ Domain Layer (core.eval)
   │ 2. Load dataset manifest + verify integrity
   │ 3. For each instance in dataset:
   │    a. Set REVOLVER_INSTANCE_PATH, REVOLVER_INSTANCE_ID
-  │    b. Import evaluator, call evaluate(solution_program_path)
-  │    c. Collect metrics dict + wall-clock time
-  │ 4. Compute aggregates: mean, min, max, p10, p50, p90, std
-  │ 5. Store all results in SQLite (per-instance + aggregates)
+  │    b. Import evaluator from problem version snapshot
+  │    c. Call evaluate_instance() or evaluate() in subprocess
+  │    d. Collect metrics dict + wall-clock time
+  │    e. Store raw per-instance result in SQLite immediately
+  │ 4. Store eval metadata in SQLite
+  │ 5. Compute aggregates at read time from raw data (not stored)
   ▼
 Infrastructure Layer
-  ├── store: read solution program file
-  ├── db: insert eval_results + eval_instances rows
+  ├── store: read solution program file, resolve evaluator path
+  ├── db: insert eval_metadata + eval_instances rows
   └── hashing: verify dataset integrity
 ```
 
@@ -418,6 +420,8 @@ Detailed design notes expanding on specific architectural areas. Each document t
 | [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Draft |
 | [DES-003](design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | spec-problem, AQ-04 | Draft |
 | [DES-004](design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | spec-dataset, DES-001 | Draft |
+| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | spec-run, ADR-006, DES-001, DES-003, DES-004, POC #12 | Draft |
+| [DES-006](design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | spec-eval, ADR-006, DES-001, DES-003, DES-005 | Draft |
 
 ---
 
