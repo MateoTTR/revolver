@@ -89,7 +89,43 @@ Dataset "train-small" updated
 
 **Exit codes**: 0 success, 1 if dataset not found or tag not found
 
-### 2.3 `revolver dataset list`
+### 2.3 `revolver dataset remove <name>`
+
+Unregister a dataset.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Dataset name |
+
+**Options**:
+
+| Option | Type | Description |
+|---|---|---|
+| `--force` | flag | Remove even if solutions reference this dataset |
+
+**Behavior**:
+1. Check if any solutions reference this dataset
+2. If yes and no `--force`: refuse with error listing the referencing solutions
+3. Delete all dataset metadata from SQLite (instances, compat, registration)
+4. Delete `.revolver/datasets/<name>/` directory (manifest + snapshot if any)
+
+**Output** (human):
+```
+Dataset "train-small" removed
+  Deleted: manifest, 50 instance records
+```
+
+**Output** (human, with references):
+```
+Error: Dataset "train-small" is referenced by 2 solutions: sol-20260310-143000, sol-20260311-091500
+Use --force to remove anyway.
+```
+
+**Exit codes**: 0 success, 1 if dataset not found, 1 if referenced without --force
+
+### 2.4 `revolver dataset list`
 
 List all registered datasets.
 
@@ -102,7 +138,7 @@ eval-benchmark  eval   100        v1.0             snapshot
 
 **Exit codes**: 0 always
 
-### 2.4 `revolver dataset info <name>`
+### 2.5 `revolver dataset info <name>`
 
 Show detailed information about a dataset, including integrity status.
 
@@ -158,6 +194,9 @@ Integrity check:
 | FR-DAT-011 | MUST | Refuse to register a name that already exists | — |
 | FR-DAT-012 | SHOULD | Support subdirectory instances (tree hash for directories containing multiple files per instance) | §4.3 |
 | FR-DAT-013 | SHOULD | Warn (do not block) if a dataset is used with an incompatible problem version | §7.4 |
+| FR-DAT-014 | MUST | `remove` deletes dataset metadata from SQLite and manifest from filesystem | — |
+| FR-DAT-015 | MUST | `remove` refuses if solutions reference this dataset (unless `--force`) | — |
+| FR-DAT-016 | MUST | `remove` with snapshot storage also deletes the copied files | — |
 
 ---
 
@@ -173,6 +212,8 @@ Integrity check:
 | `info --verify` finds hash mismatches | Warning on stderr + details; exit code 2 | 2 |
 | Dataset path no longer accessible | Error: "Dataset path no longer accessible: <path>" | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
+| `remove` dataset not found | Error: "Dataset '<name>' not found" | 1 |
+| `remove` dataset referenced by solutions (no --force) | Error: "Dataset referenced by N solutions. Use --force to remove anyway." | 1 |
 
 ---
 

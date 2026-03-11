@@ -193,8 +193,8 @@ Each module encapsulates the business rules for one command group. Key responsib
 |---|---|
 | `project` | Init project directory, discover `.revolver/`, resolve config hierarchy |
 | `llm` | Register/remove LLMs, start/stop local models via Ollama client, check status. See [DES-002](design/DES-002-llm-subcommands.md) for Ollama API mapping |
-| `problem` | Run evaluator on instances (test), create immutable snapshots (version), list versions |
-| `dataset` | Register dataset by reference, compute hashes, verify integrity, manage compatibility |
+| `problem` | Run evaluator on instances (test), create immutable snapshots (version), list versions. See [DES-003](design/DES-003-problem-versioning.md) |
+| `dataset` | Register dataset by reference, compute hashes, verify integrity, manage compatibility. See [DES-004](design/DES-004-dataset-registration.md) |
 | `run` | Configure OpenEvolve, set environment variables for instance injection, launch run, store solution + lineage |
 | `eval` | Iterate instances, invoke evaluator per instance, collect metrics, compute aggregates, store in SQLite |
 | `solution` | Query solutions from SQLite, manage aliases |
@@ -414,6 +414,8 @@ Detailed design notes expanding on specific architectural areas. Each document t
 |---|---|---|---|
 | [DES-001](design/DES-001-sqlite-data-model.md) | SQLite Data Model | ADR-004, NFR-013/016 | Draft |
 | [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Draft |
+| [DES-003](design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | spec-problem, AQ-04 | Draft |
+| [DES-004](design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | spec-dataset, DES-001 | Draft |
 
 ---
 
@@ -422,5 +424,5 @@ Detailed design notes expanding on specific architectural areas. Each document t
 - [x] **AQ-01**: Dataclasses vs Pydantic for data models → **Pydantic v2** (ADR-005)
 - [ ] **AQ-02**: SQLite schema migration strategy (manual SQL scripts vs alembic-like tool)
 - [ ] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training (ConOps OQ-05)
-- [ ] **AQ-04**: Project/problem versioning strategy — pure internal (manifest-based) vs git-integrated
+- [x] **AQ-04**: Project/problem versioning strategy → **Internal manifest-based** (DES-003 §9 DD-04)
 - [ ] **AQ-05**: Benchmark export format for visualization (CSV sufficient? or add Parquet/plots?)
