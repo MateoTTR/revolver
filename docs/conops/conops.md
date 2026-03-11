@@ -177,10 +177,12 @@ To decouple the evaluator from specific datasets, Revolver uses an **environment
 
 1. During an OpenEvolve run (training), Revolver sets:
    - `REVOLVER_DATASET_DIR` → path to the active training dataset
-   - `REVOLVER_INSTANCE_PATH` → path to the current instance (when iterating)
-   - `REVOLVER_INSTANCE_ID` → identifier of the current instance
+   - `REVOLVER_INSTANCE_LOG` → path to SQLite side-channel DB (optional, for per-instance visibility)
+   - `REVOLVER_EVAL_LOG` → path to evaluator log file (optional)
 
-2. During standalone evaluation or benchmarking, Revolver iterates over instances in the evaluation dataset, setting these variables for each invocation.
+2. During standalone evaluation or benchmarking, Revolver iterates over instances in the evaluation dataset, setting for each invocation:
+   - `REVOLVER_INSTANCE_PATH` → path to the current instance file
+   - `REVOLVER_INSTANCE_ID` → identifier of the current instance
 
 3. The evaluator reads these variables to locate data. This approach:
    - Preserves OpenEvolve's `evaluate(program_path)` interface
@@ -630,11 +632,11 @@ b-001,s-002,gemma-small-v1.1,scheduling-optimizer,v1.1,gemma-local,train-small,e
 ## 10. Open Questions
 
 - [x] **OQ-01**: Exact local LLM management tool — **Resolved: Ollama** (9x faster than vLLM, 4x less VRAM via quantization, native OpenAI-compatible API, clean lifecycle management) (→ ADR-001)
-- [ ] **OQ-02**: Primary programming language for Revolver itself (→ ADR)
-- [ ] **OQ-03**: CLI framework choice (→ ADR)
+- [x] **OQ-02**: Primary programming language for Revolver itself — **Resolved: Python >= 3.11** (→ ADR-002)
+- [x] **OQ-03**: CLI framework choice — **Resolved: Typer >= 0.21** (→ ADR-003)
 - [x] **OQ-04**: Internal store location — **Resolved**: project-local `.revolver/` for project data, global `~/.revolver/` for LLMs
-- [ ] **OQ-05**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training runs — wrapper approach? (→ POC)
-- [ ] **OQ-06**: Exact mechanism for Revolver to control which dataset the evaluator uses during an OpenEvolve run (→ POC)
+- [x] **OQ-05**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training runs — **Resolved: A+B hybrid strategy** — env var injection (`REVOLVER_DATASET_DIR`) as core mechanism + optional SQLite side-channel (`REVOLVER_INSTANCE_LOG`) for per-instance visibility. Callable evaluator (Strategy C) rejected (fork-dependent, fragile). Revolver generates the wrapper evaluator; user writes only `evaluate_instance()`. (→ ADR-006, POC #12)
+- [x] **OQ-06**: Exact mechanism for Revolver to control which dataset the evaluator uses during an OpenEvolve run — **Resolved: Dual-mode evaluator pattern** — `REVOLVER_DATASET_DIR` for aggregated training mode, `REVOLVER_INSTANCE_PATH` for single-instance eval/benchmark mode. `os.environ` propagates reliably to OpenEvolve worker processes. Resume requires `OpenEvolve` controller class (not `run_evolution()`). (→ ADR-006, POC #12)
 - [ ] **OQ-07**: Should `revolver problem test` block versioning on failure, or just warn? (→ UX decision)
 - [x] **OQ-08**: WSL2 + CUDA + RTX 5090 compatibility — **Resolved: Fully compatible** (RTX 5090 32 GB works out of the box in WSL2, no CUDA toolkit install needed, driver 595.71 forwarded via GPU-PV)
 

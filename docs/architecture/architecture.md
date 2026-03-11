@@ -404,6 +404,7 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | [ADR-003](adr/ADR-003-cli-framework-typer.md) | Typer as CLI framework | Accepted |
 | [ADR-004](adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
 | [ADR-005](adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
+| [ADR-006](adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
 
 ---
 
@@ -424,6 +425,6 @@ Detailed design notes expanding on specific architectural areas. Each document t
 
 - [x] **AQ-01**: Dataclasses vs Pydantic for data models → **Pydantic v2** (ADR-005)
 - [ ] **AQ-02**: SQLite schema migration strategy (manual SQL scripts vs alembic-like tool)
-- [ ] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training (ConOps OQ-05)
+- [x] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training → **A+B hybrid strategy**: env var injection (`REVOLVER_DATASET_DIR`) + optional SQLite side-channel (`REVOLVER_INSTANCE_LOG`). Wrapper uses `OpenEvolve` controller class for resume support. Revolver generates the dual-mode evaluator wrapper. (ADR-006, POC #12)
 - [x] **AQ-04**: Project/problem versioning strategy → **Internal manifest-based** (DES-003 §9 DD-06)
 - [ ] **AQ-05**: Benchmark export format for visualization (CSV sufficient? or add Parquet/plots?)

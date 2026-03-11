@@ -184,7 +184,7 @@ Configuration is resolved in this order (last wins):
 | [spec-project.md](spec-project.md) | `revolver project init` | §4.1, §5.2 | Project creation and initialization |
 | [spec-llm.md](spec-llm.md) | `revolver llm {add,start,stop,status,list,remove}` | §4.8, §5.1 | LLM registration, lifecycle, monitoring |
 | [spec-problem.md](spec-problem.md) | `revolver problem {test,version,versions}` | §4.2, §5.3, §5.4, §7.1 | Problem testing and versioning |
-| [spec-dataset.md](spec-dataset.md) | `revolver dataset {add,update,list,info}` | §4.3, §4.4, §5.4, §7.2 | Dataset registration, integrity, compatibility |
+| [spec-dataset.md](spec-dataset.md) | `revolver dataset {add,update,remove,list,info}` | §4.3, §4.4, §5.4, §7.2 | Dataset registration, integrity, compatibility |
 | [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume}` | §4.6, §5.5 | OpenEvolve orchestration, solution generation |
 | [spec-eval.md](spec-eval.md) | `revolver eval {<default>,results}` | §5.6 | Single solution evaluation |
 | [spec-benchmark.md](spec-benchmark.md) | `revolver benchmark {<default>,results,export}` | §4.7, §5.7, §8 | Multi-solution comparison and export |

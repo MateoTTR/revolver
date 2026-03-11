@@ -25,15 +25,16 @@
 | 21 | DES-004 — `revolver dataset` registration & integrity design | [x] | 006 |
 | 22 | Restructure architecture docs (DES-NNN convention) | [x] | 006 |
 | 23 | Update spec-dataset with `dataset remove` command | [x] | 006 |
-| 24 | DES-005 — `revolver run` design | [ ] | |
-| 25 | DES-006 — `revolver eval` design | [ ] | |
+| 24 | DES-005 — `revolver run` design (unblocked by ADR-006) | [ ] | |
+| 25 | DES-006 — `revolver eval` design (unblocked by ADR-006) | [ ] | |
+| 26 | Implement wrapper evaluator generator (evaluate_instance → evaluate) | [ ] | |
 
 ## Phase 3 — POCs
 
 | # | Task | Status | Session |
 |---|---|---|---|
 | 11 | POC — Local LLM deployment and inference | [x] | 003 |
-| 12 | POC — OpenEvolve integration with instance injection | [ ] | |
+| 12 | POC — OpenEvolve integration with instance injection | [x] | 007 |
 | 13 | POC — OpenEvolve + Claude API | [ ] | |
 | 14 | POC — Code generation quality with OpenEvolve + local LLM (quantization impact) | [ ] | |
 | 15 | POC — End-to-end OpenEvolve + Ollama endpoint integration | [ ] | |

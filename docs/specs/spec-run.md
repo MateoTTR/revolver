@@ -38,6 +38,8 @@ Launch an OpenEvolve evolution run.
 2. **Verify dataset integrity**: recompute hashes, warn on mismatch
 3. **Prepare environment**:
    - Set `REVOLVER_DATASET_DIR` to the dataset path
+   - Set `REVOLVER_INSTANCE_LOG` to the side-channel SQLite DB path (optional, for per-instance visibility — ADR-006)
+   - Set `REVOLVER_EVAL_LOG` to the evaluator log file path (optional — ADR-006)
    - Set OpenEvolve config to use the LLM's base URL
 4. **Launch OpenEvolve** with the problem version's files (initial_program, evaluator, config)
 5. **Monitor progress**: display iteration count, best score, elapsed time
@@ -122,6 +124,8 @@ Resume an interrupted run from its checkpoint.
 | FR-RUN-003 | MUST | Warn (do not block) if the dataset is not declared compatible with the problem version | §7.4 |
 | FR-RUN-004 | MUST | Verify dataset integrity (hash check) before starting; warn on mismatch | §7.2 |
 | FR-RUN-005 | MUST | Set `REVOLVER_DATASET_DIR` environment variable for the evaluator | §4.4 |
+| FR-RUN-005b | SHOULD | Set `REVOLVER_INSTANCE_LOG` for optional per-instance SQLite side-channel logging | §4.4, ADR-006 |
+| FR-RUN-005c | SHOULD | Set `REVOLVER_EVAL_LOG` for optional evaluator log file | §4.4, ADR-006 |
 | FR-RUN-006 | MUST | Configure OpenEvolve to use the LLM's base URL and model ID | §3.2 |
 | FR-RUN-007 | MUST | Generate a unique solution ID: `sol-{YYYYMMDD}-{HHMMSS}` | §4.6 |
 | FR-RUN-008 | MUST | Store the top-N best programs in `.revolver/solutions/<id>/` | §4.6 |

@@ -31,6 +31,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [ADR-003](docs/architecture/adr/ADR-003-cli-framework-typer.md) | Typer as CLI framework | Accepted |
 | [ADR-004](docs/architecture/adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
 | [ADR-005](docs/architecture/adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
+| [ADR-006](docs/architecture/adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
 
 ### Design Documents (DES)
 
@@ -108,4 +109,5 @@ Before starting any work in a session:
 - [x] Dataset storage format and management → **Reference + optional snapshot** (DES-004)
 - [x] Local LLM deployment tool → **Ollama** (ADR-001)
 - [x] CLI framework choice → **Typer >= 0.21** (ADR-003)
+- [x] OpenEvolve instance injection strategy → **A+B hybrid** (env var + optional SQLite side-channel) (ADR-006)
 - [ ] Benchmark output format and visualization
