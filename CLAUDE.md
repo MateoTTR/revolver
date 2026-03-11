@@ -104,8 +104,8 @@ Before starting any work in a session:
 ## Open Questions / Decisions Pending
 
 - [x] Primary programming language → **Python >= 3.11** (ADR-002)
-- [ ] Project/problem versioning strategy (git-based? internal?)
-- [ ] Dataset storage format and management
+- [x] Project/problem versioning strategy → **Internal manifest-based** (DES-003 DD-06)
+- [x] Dataset storage format and management → **Reference + optional snapshot** (DES-004)
 - [x] Local LLM deployment tool → **Ollama** (ADR-001)
 - [x] CLI framework choice → **Typer >= 0.21** (ADR-003)
 - [ ] Benchmark output format and visualization

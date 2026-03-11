@@ -114,7 +114,7 @@ src/revolver/
 │   ├── project.py           # revolver project init
 │   ├── llm.py               # revolver llm {add,start,stop,status,list,remove}
 │   ├── problem.py           # revolver problem {test,version,versions}
-│   ├── dataset.py           # revolver dataset {add,update,list,info}
+│   ├── dataset.py           # revolver dataset {add,update,remove,list,info}
 │   ├── run.py               # revolver run {<default>,status,resume}
 │   ├── eval.py              # revolver eval {<default>,results}
 │   ├── solution.py          # revolver solution {list,info,alias}
@@ -144,6 +144,7 @@ src/revolver/
 │   ├── output.py            # Output formatting (human tables, JSON, progress bars)
 │   ├── ollama.py            # Ollama HTTP client (pull, start, stop, status, models)
 │   ├── gpu.py               # nvidia-smi wrapper (GPU name, VRAM usage/total)
+│   ├── evaluator_loader.py  # Dynamic Python module loading for evaluator (DES-003)
 │   └── openevolve.py        # OpenEvolve wrapper (import, configure, launch, monitor)
 │
 └── models/                  # Shared data models (dataclasses / Pydantic)
@@ -424,5 +425,5 @@ Detailed design notes expanding on specific architectural areas. Each document t
 - [x] **AQ-01**: Dataclasses vs Pydantic for data models → **Pydantic v2** (ADR-005)
 - [ ] **AQ-02**: SQLite schema migration strategy (manual SQL scripts vs alembic-like tool)
 - [ ] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training (ConOps OQ-05)
-- [x] **AQ-04**: Project/problem versioning strategy → **Internal manifest-based** (DES-003 §9 DD-04)
+- [x] **AQ-04**: Project/problem versioning strategy → **Internal manifest-based** (DES-003 §9 DD-06)
 - [ ] **AQ-05**: Benchmark export format for visualization (CSV sufficient? or add Parquet/plots?)

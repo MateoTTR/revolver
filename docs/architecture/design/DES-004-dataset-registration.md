@@ -537,8 +537,8 @@ db.executemany(
 
 | Module | Change |
 |---|---|
-| `core/dataset.py` | Implement `register_dataset()`, `update_dataset()`, `list_datasets()`, `get_dataset_info()`, `verify_dataset_integrity()`, `resolve_dataset_path()` |
-| `cli/dataset.py` | Implement 4 Typer commands (`add`, `update`, `list`, `info`) |
+| `core/dataset.py` | Implement `register_dataset()`, `update_dataset()`, `remove_dataset()`, `list_datasets()`, `get_dataset_info()`, `verify_dataset_integrity()`, `resolve_dataset_path()` |
+| `cli/dataset.py` | Implement 5 Typer commands (`add`, `update`, `remove`, `list`, `info`) |
 | `models/dataset.py` | Define `DatasetRegistration`, `DatasetInstance`, `DatasetSummary`, `DatasetInfo`, `IntegrityReport` |
 | `infra/hashing.py` | Add `file_hash()`, `tree_hash()`, `global_hash()` (shared with problem versioning) |
 | `infra/store.py` | Add `write_dataset_manifest()`, `update_dataset_manifest()`, snapshot directory management |
