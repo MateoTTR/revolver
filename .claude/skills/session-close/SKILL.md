@@ -2,10 +2,12 @@
 name: session-close
 description: Close the current Revolver session with a report, cost tracker update, and backlog update
 disable-model-invocation: true
-argument-hint: "<duration> <tokens>"
+argument-hint: "<duration>"
 ---
 
-Close the current session. The user provides session duration and token count as arguments: $ARGUMENTS
+Close the current session. The user provides session duration as argument: $ARGUMENTS
+
+**Note**: Token counts are NOT tracked for this project. Only session durations are recorded.
 
 Follow these steps exactly:
 
@@ -28,7 +30,6 @@ Create `docs/sessions/YYYY-MM-DD-session-NNN.md` with this structure:
 
 **Phase**: (current phase)
 **Duration**: (from $ARGUMENTS or ask user)
-**Tokens**: (from $ARGUMENTS or ask user)
 
 ---
 
