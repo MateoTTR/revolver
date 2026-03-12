@@ -70,8 +70,7 @@ scheduling-optimizer/
 │   ├── revolver.db
 │   ├── problem/
 │   ├── datasets/
-│   ├── solutions/
-│   └── benchmarks/
+│   └── runs/
 ├── initial_program.py      # template with EVOLVE-BLOCK markers
 ├── evaluator.py            # template with dual-mode pattern
 ├── config.yaml             # OpenEvolve defaults
@@ -192,11 +191,11 @@ $ revolver run --version v1.0 --llm codestral-local --dataset train-small --iter
 Run started: v1.0 + codestral-local + train-small
   Iteration 100/100 | Best score: 0.74 | Elapsed: 1h30m
 
-Run completed: 100 iterations in 1h30m
-  Solution: sol-20260310-143000
-  Alias: codestral-v1.0
+Run completed: run-20260310-143000
+  100 iterations in 1h30m
+  Solution: sol-20260310-143000 (rank #1, alias: codestral-v1.0)
   Best combined_score: 0.74
-  Stored in: .revolver/solutions/sol-20260310-143000/
+  Stored in: .revolver/runs/run-20260310-143000/
 ```
 
 ```bash
@@ -215,20 +214,20 @@ $ revolver run --version v1.0 --llm claude-opus --dataset train-small --iteratio
 Run started: v1.0 + claude-opus + train-small
   Iteration 100/100 | Best score: 0.82 | Elapsed: 2h15m
 
-Run completed: 100 iterations in 2h15m
-  Solution: sol-20260310-173000
-  Alias: claude-v1.0
+Run completed: run-20260310-173000
+  100 iterations in 2h15m
+  Solution: sol-20260310-173000 (rank #1, alias: claude-v1.0)
   Best combined_score: 0.82
-  Stored in: .revolver/solutions/sol-20260310-173000/
+  Stored in: .revolver/runs/run-20260310-173000/
 ```
 
 ```bash
 # See both solutions
 $ revolver solution list
 
-ID                      Alias            Version  LLM              Score   Date
-sol-20260310-143000     codestral-v1.0   v1.0     codestral-local  0.74    2026-03-10
-sol-20260310-173000     claude-v1.0      v1.0     claude-opus      0.82    2026-03-10
+ID                      Alias            Version  LLM              Score   Rank  Run                   Date
+sol-20260310-143000     codestral-v1.0   v1.0     codestral-local  0.74    #1    run-20260310-143000   2026-03-10
+sol-20260310-173000     claude-v1.0      v1.0     claude-opus      0.82    #1    run-20260310-173000   2026-03-10
 ```
 
 ---

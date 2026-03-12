@@ -109,16 +109,18 @@ scheduling-optimizer/           # Project root (user's working directory)
 │   │   ├── train-small/
 │   │   │   └── manifest.yaml   # Path, hashes, instance count, split, compat
 │   │   └── eval-benchmark/
-│   ├── solutions/              # Generated solutions
-│   │   ├── <auto-id>/
-│   │   │   ├── best.py
-│   │   │   ├── top-N/
-│   │   │   ├── oe-checkpoint/  # OpenEvolve checkpoint for resume
-│   │   │   └── manifest.yaml   # Lineage, alias, metrics
-│   │   └── ...
-│   └── benchmarks/             # Benchmark results
-│       └── <bench-id>/
-│           └── manifest.yaml
+│   ├── runs/                  # Evolution runs (physical artifacts)
+│   │   ├── <run-id>/
+│   │   │   ├── manifest.yaml  # Run metadata + lineage
+│   │   │   ├── config.yaml    # OpenEvolve config used
+│   │   │   ├── _revolver_evaluator.py  # Generated wrapper
+│   │   │   ├── oe-checkpoint/ # OpenEvolve checkpoint for resume
+│   │   │   └── programs/      # Top-N evolved programs
+│   │   │       ├── rank-1.py
+│   │   │       ├── rank-2.py
+│   │   │       └── rank-3.py
+│   │   └── locks/             # Lock files for active runs
+│   │       └── <run-id>.lock
 ├── initial_program.py          # Mutable working copy
 ├── evaluator.py                # Mutable working copy
 ├── config.yaml                 # OpenEvolve config (mutable)
@@ -209,21 +211,23 @@ The evaluator returns a `dict[str, float]` where each key is a metric or objecti
 
 ### 4.6 Solution
 
-A **Solution** is the output of an OpenEvolve run. It contains:
+A **Solution** is a **lightweight reference** to a program within a Run. It is a database row with `(run_id, rank)` and an optional alias. A Solution does **not** own a filesystem directory.
 
-- **Program(s)**: The top-N best evolved programs (N configurable, default 1)
-- **Metrics**: Scores from the evolution run (objective values)
 - **Identity**:
-  - Auto-generated name: `{problem}-{version}-{llm}-{dataset}-{timestamp}`
+  - Auto-generated ID
   - Optional user-defined alias for readability
-- **Lineage** (traceability):
-  - Problem name + version
-  - Training dataset name + version
-  - LLM name + version/model ID
-  - OpenEvolve config used
-  - Generation time (wall clock)
-  - Number of iterations
-- **Checkpoint**: Reference to the OpenEvolve checkpoint for potential resume
+  - Rank within the parent run (e.g., #1 = best program)
+- **Metrics**: Best score from the evolution run
+- **Program path** (derived): `.revolver/runs/<run_id>/programs/rank-<N>.py`
+- **Lineage**: Inherited from the parent Run (problem version, dataset, LLM, config, generation time, iterations)
+- **Run reference**: Links to the Run that produced it (`run_id`)
+
+A **Run** is the first-class physical entity that owns all artifacts from an OpenEvolve evolution:
+- **Programs**: The top-N best evolved programs (N configurable, default 1), stored in `.revolver/runs/<run_id>/programs/`
+- **Checkpoint**: OpenEvolve checkpoint for potential resume, stored in `.revolver/runs/<run_id>/oe-checkpoint/`
+- **Config**: The OpenEvolve config used for this run
+- **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)
+- **Manifest**: Full lineage metadata (problem version, dataset, LLM, iterations, generation time, status)
 
 ### 4.7 Benchmark
 
@@ -396,12 +400,20 @@ revolver run \
 # Monitor a running evolution
 revolver run status
 
-# Resume an interrupted run
-revolver run resume --solution claude-small-v1.1
+# Resume an interrupted run (creates a new run linked to the original)
+revolver run resume --run <run-id>
+
+# List all runs (filter by version, LLM, status)
+revolver run list
+
+# Show detailed run info (solutions, resume chain)
+revolver run info <run-id>
 
 # List generated solutions
 revolver solution list
 ```
+
+**End-to-end walkthrough**: See [user-story-e2e.md](../specs/user-story-e2e.md) for a concrete scenario covering all workflows from project creation to benchmark export.
 
 ### 5.6 Workflow 6 — Evaluate a Single Solution
 
@@ -462,11 +474,12 @@ revolver benchmark export --latest --format csv --output results.csv
 │  │  problem/           datasets/           revolver.db              │    │
 │  │  ├── v1.0/          ├── train-small/    (metrics, lineage,      │    │
 │  │  │   ├── prog.py    │   └── manifest     timestamps, costs)     │    │
-│  │  │   ├── eval.py    └── eval-bench/      solutions/             │    │
-│  │  │   └── manifest       └── manifest     ├── <auto-id>/         │    │
-│  │  └── v1.1/              └── ...          │   ├── best.py        │    │
-│  │      └── ...                             │   ├── top-N/         │    │
-│  │                                          │   └── oe-checkpoint/ │    │
+│  │  │   ├── eval.py    └── eval-bench/      runs/                  │    │
+│  │  │   └── manifest       └── manifest     ├── <run-id>/          │    │
+│  │  └── v1.1/              └── ...          │   ├── programs/      │    │
+│  │      └── ...                             │   │   └── rank-N.py  │    │
+│  │                                          │   ├── oe-checkpoint/ │    │
+│  │                                          │   └── manifest.yaml  │    │
 │  │                                          └── ...                │    │
 │  └──────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘

@@ -1,7 +1,7 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-10
+**Version**: 0.2 — Run/Solution refactor
+**Date**: 2026-03-12
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
@@ -13,7 +13,7 @@ Revolver uses two SQLite databases:
 
 | Database | Location | Scope | Contents |
 |---|---|---|---|
-| **Project DB** | `.revolver/revolver.db` | Per-project | Problem versions, datasets, solutions, evaluations, benchmarks |
+| **Project DB** | `.revolver/revolver.db` | Per-project | Problem versions, datasets, runs, solutions, evaluations, benchmarks |
 | **Global DB** | `~/.revolver/revolver.db` | Per-user | LLM registry |
 
 Both databases use **WAL mode** (NFR-016) for concurrent read access.
@@ -41,41 +41,43 @@ Both databases use **WAL mode** (NFR-016) for concurrent read access.
                     ┌────────────┼────────────┐
                     │            │            │
                     │ N          │ N          │ N
-           ┌───────┴──────┐  ┌──┴───────┐  ┌┴─────────────┐
-           │dataset_compat│  │ solutions │  │              │
-           └───────┬──────┘  └──┬───┬───┘  │              │
-                   │ N          │   │       │              │
-                   │         1  │   │ 1     │              │
-            ┌──────▼──────┐    │   │       │              │
-            │  datasets   │◄───┘   │       │              │
-            │ (PK: name)  │        │       │              │
-            └──┬──────┬───┘        │       │              │
-               │      │            │       │              │
-            1  │      │ 1          │       │              │
-               │      │            │       │              │
-    ┌──────────▼┐  ┌──▼──────────┐│  ┌────▼───────────┐  │
-    │ dataset_  │  │eval_metadata││  │solution_lineage│  │
-    │ instances │  │(PK: eval_id)││  │(PK: solution_id│  │
-    └───────────┘  └──────┬──────┘│  └────────────────┘  │
-                          │       │                       │
-                       1  │       │                       │
-                          │       │                       │
-                   ┌──────▼──────┐│  ┌───────────────────┐│
-                   │eval_instance││  │benchmark_solutions││
-                   │    s        ││  └────────┬──────────┘│
-                   └─────────────┘│           │           │
-                                  │        N  │           │
-                                  │           │           │
-                                  │  ┌────────▼──────┐    │
-                                  │  │  benchmarks   │    │
-                                  │  │ (PK: id)      │    │
-                                  │  └───────────────┘    │
-                                  │                       │
-                                  │  ~/.revolver/         │
-                                  │  ┌───────────────┐    │
-                                  └──│     llms      │    │
-                                     │ (PK: name)    │    │
-                                     └───────────────┘    │
+           ┌───────┴──────┐  ┌──┴───────┐  ┌┴───────────┐
+           │dataset_compat│  │   runs   │  │            │
+           └───────┬──────┘  └──┬───┬───┘  │            │
+                   │ N          │   │       │            │
+                   │         1  │   │self   │            │
+            ┌──────▼──────┐    │   │(resume)│            │
+            │  datasets   │◄───┘   │       │            │
+            │ (PK: name)  │        │       │            │
+            └──┬──────┬───┘     N  │       │            │
+               │      │     ┌─────┘       │            │
+            1  │      │  1  │              │            │
+               │      │     │              │            │
+    ┌──────────▼┐  ┌──▼──┐ ┌▼───────────┐ │            │
+    │ dataset_  │  │eval_│ │ solutions  │ │            │
+    │ instances │  │meta │ │(PK: id)    │ │            │
+    └───────────┘  │data │ └──┬─────────┘ │            │
+                   └──┬──┘    │            │            │
+                      │    1  │            │            │
+                   1  │       │            │            │
+                      │  ┌────▼──────────┐ │            │
+               ┌──────▼┐ │benchmark_    │ │            │
+               │eval_  │ │solutions     │ │            │
+               │inst.  │ └────┬─────────┘ │            │
+               └───────┘      │            │            │
+                           N  │            │            │
+                              │            │            │
+                     ┌────────▼──────┐     │            │
+                     │  benchmarks   │     │            │
+                     │ (PK: id)      │     │            │
+                     └───────────────┘     │            │
+                                           │            │
+                              ~/.revolver/ │            │
+                              ┌────────────┘            │
+                              │  ┌───────────────┐      │
+                              └──│     llms      │      │
+                                 │ (PK: name)    │      │
+                                 └───────────────┘      │
 ```
 
 ---
@@ -141,50 +143,54 @@ CREATE TABLE dataset_compat (
 );
 ```
 
-### 3.5 `solutions`
+### 3.5 `runs`
 
-Solution metadata created by `revolver run`.
+Run metadata created by `revolver run`. A run is the physical unit of an OpenEvolve evolution session: it owns the checkpoint, config, wrapper evaluator, and N ranked programs. Full provenance for traceability (NFR-020).
+
+```sql
+CREATE TABLE runs (
+    id                TEXT PRIMARY KEY,       -- "run-YYYYMMDD-HHMMSS"
+    problem_version   TEXT NOT NULL REFERENCES problem_versions(tag),
+    llm               TEXT NOT NULL,          -- LLM name from registry
+    dataset           TEXT NOT NULL REFERENCES datasets(name),
+    top_n             INTEGER NOT NULL DEFAULT 1,
+    iterations        INTEGER NOT NULL,
+    generation_time_s REAL,
+    config_snapshot   TEXT,                   -- verbatim OpenEvolve YAML config (NFR-023)
+    problem_hash      TEXT NOT NULL,          -- hash of problem snapshot used
+    dataset_hash      TEXT NOT NULL,          -- hash of dataset at registration
+    llm_model         TEXT NOT NULL,          -- full model ID (e.g., "claude-opus-4-6")
+    resumed_from      TEXT REFERENCES runs(id), -- NULL if fresh run, parent run_id if resumed
+    status            TEXT NOT NULL DEFAULT 'running'
+                      CHECK (status IN ('running', 'completed', 'interrupted')),
+    created_at        TEXT NOT NULL           -- ISO 8601
+);
+
+CREATE INDEX idx_runs_version ON runs(problem_version);
+CREATE INDEX idx_runs_created ON runs(created_at DESC);
+CREATE INDEX idx_runs_resumed ON runs(resumed_from);
+```
+
+**Constraints**: Fully immutable once completed. A completed run never changes — its programs, lineage, and files are frozen. `resumed_from` links to the parent run whose checkpoint was used to seed this run (resume = new run, not mutation of the old one).
+
+### 3.6 `solutions`
+
+Lightweight logical entity referencing a program within a run. A solution is a pointer `(run_id, rank)` with an optional alias. It has no directory of its own — the program file is resolved via `.revolver/runs/<run_id>/programs/rank-<N>.py`.
 
 ```sql
 CREATE TABLE solutions (
-    id              TEXT PRIMARY KEY,       -- "sol-YYYYMMDD-HHMMSS"
-    alias           TEXT UNIQUE,            -- nullable, user-friendly name
-    problem_version TEXT NOT NULL REFERENCES problem_versions(tag),
-    llm             TEXT NOT NULL,          -- LLM name from registry
-    dataset         TEXT NOT NULL REFERENCES datasets(name),
-    best_score      REAL,                   -- best combined_score from training
-    created_at      TEXT NOT NULL           -- ISO 8601
+    id         TEXT PRIMARY KEY,       -- "sol-YYYYMMDD-HHMMSS"
+    run_id     TEXT NOT NULL REFERENCES runs(id),
+    rank       INTEGER NOT NULL,       -- 1 = best
+    best_score REAL,
+    alias      TEXT UNIQUE,
+    UNIQUE(run_id, rank)
 );
 
-CREATE INDEX idx_solutions_version ON solutions(problem_version);
-CREATE INDEX idx_solutions_llm ON solutions(llm);
-CREATE INDEX idx_solutions_created ON solutions(created_at DESC);
+CREATE INDEX idx_solutions_run ON solutions(run_id);
 ```
 
-**Constraints**: ID, problem_version, llm, dataset immutable. Alias updateable.
-
-### 3.6 `solution_lineage`
-
-Full provenance for traceability (NFR-020).
-
-```sql
-CREATE TABLE solution_lineage (
-    solution_id     TEXT PRIMARY KEY REFERENCES solutions(id),
-    problem_hash    TEXT NOT NULL,          -- hash of problem snapshot used
-    dataset_hash    TEXT NOT NULL,          -- hash of dataset at registration
-    llm_model       TEXT NOT NULL,          -- full model ID (e.g., "claude-opus-4-6")
-    iterations      INTEGER NOT NULL,       -- OpenEvolve iterations completed
-    generation_time_s REAL,                 -- wall-clock seconds
-    top_n           INTEGER NOT NULL DEFAULT 1,
-    run_id          TEXT NOT NULL,          -- shared ID across top-N solutions from same run
-    rank            INTEGER NOT NULL DEFAULT 1, -- 1 = best, 2 = second best, etc.
-    config_snapshot TEXT                    -- verbatim OpenEvolve YAML config (NFR-023)
-);
-
-CREATE INDEX idx_lineage_run ON solution_lineage(run_id);
-```
-
-**Constraints**: Fully immutable. Written once at run completion. When `--top-n > 1`, all N solutions from the same run share the same `run_id` (equal to the first solution's ID). `rank` = 1 is the best program.
+**Constraints**: ID, run_id, rank immutable. Alias updateable. `UNIQUE(run_id, rank)` ensures each rank appears only once per run.
 
 ### 3.7 `eval_metadata`
 
@@ -192,19 +198,22 @@ Evaluation session metadata. Aggregate statistics (mean, min, max, p10, p50, p90
 
 ```sql
 CREATE TABLE eval_metadata (
-    eval_id         TEXT PRIMARY KEY,       -- "eval-YYYYMMDD-HHMMSS"
-    solution_id     TEXT NOT NULL REFERENCES solutions(id),
-    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
-    instance_count  INTEGER NOT NULL,
+    eval_id          TEXT PRIMARY KEY,       -- "eval-YYYYMMDD-HHMMSS"
+    solution_id      TEXT NOT NULL REFERENCES solutions(id),
+    dataset_name     TEXT NOT NULL REFERENCES datasets(name),
+    instance_count   INTEGER NOT NULL,
     instances_solved INTEGER NOT NULL,
-    eval_time_s     REAL,                   -- total wall-clock time
-    evaluated_at    TEXT NOT NULL            -- ISO 8601
+    eval_time_s      REAL,                   -- total wall-clock time
+    user_aggregates  TEXT,                   -- JSON: {"combined_score": 0.72, "makespan": 155.3}
+                                             -- NULL if evaluate_instance() mode (no custom aggregator)
+                                             -- Populated by global evaluate() call for legacy evaluators (D-006-g)
+    evaluated_at     TEXT NOT NULL            -- ISO 8601
 );
 
 CREATE UNIQUE INDEX idx_eval_unique ON eval_metadata(solution_id, dataset_name);
 ```
 
-**Note**: `idx_eval_unique` ensures at most one evaluation per (solution, dataset). Re-evaluation replaces the previous result (DELETE old + INSERT new in a transaction).
+**Note**: `idx_eval_unique` ensures at most one evaluation per (solution, dataset). Re-evaluation replaces the previous result (DELETE old + INSERT new in a transaction). `user_aggregates` stores the raw result of a global `evaluate()` call (legacy mode only) — see [DES-006](DES-006-eval-loop.md) D-006-g.
 
 ### 3.8 `eval_instances`
 
@@ -300,46 +309,77 @@ The `schema_version` table enables future schema migrations. On startup, Revolve
 ### 6.1 Solution detail (`revolver solution info`)
 
 ```sql
-SELECT s.id, s.alias, s.problem_version, s.llm, s.dataset,
-       s.best_score, s.created_at,
-       sl.llm_model, sl.iterations, sl.generation_time_s,
-       sl.top_n, sl.run_id, sl.rank, sl.config_snapshot
+SELECT s.id, s.alias, s.rank, s.best_score,
+       r.id AS run_id, r.problem_version, r.llm, r.dataset,
+       r.llm_model, r.iterations, r.generation_time_s,
+       r.top_n, r.config_snapshot, r.resumed_from, r.created_at
 FROM solutions s
-JOIN solution_lineage sl ON s.id = sl.solution_id
+JOIN runs r ON s.run_id = r.id
 WHERE s.id = :id_or_alias OR s.alias = :id_or_alias;
 ```
 
 ### 6.2 Solution list with filters (`revolver solution list`)
 
 ```sql
-SELECT s.id, s.alias, s.problem_version, s.llm, s.dataset,
-       s.best_score, s.created_at, sl.rank, sl.run_id
+SELECT s.id, s.alias, s.rank, s.best_score,
+       r.id AS run_id, r.problem_version, r.llm, r.dataset, r.created_at
 FROM solutions s
-JOIN solution_lineage sl ON s.id = sl.solution_id
-WHERE (:version IS NULL OR s.problem_version = :version)
-  AND (:llm IS NULL OR s.llm = :llm)
-  AND (:rank IS NULL OR sl.rank = :rank)
-ORDER BY
-    CASE :sort
-        WHEN 'created_at' THEN s.created_at
-        WHEN 'score' THEN s.best_score
-        WHEN 'alias' THEN s.alias
-    END;
+JOIN runs r ON s.run_id = r.id
+WHERE (:version IS NULL OR r.problem_version = :version)
+  AND (:llm IS NULL OR r.llm = :llm)
+  AND (:rank IS NULL OR s.rank = :rank)
+ORDER BY r.created_at DESC, s.rank;
 ```
 
-### 6.3 Benchmark: raw per-instance data (`revolver benchmark results`)
+### 6.3 Run list (`revolver run list`)
+
+```sql
+SELECT r.id, r.problem_version, r.llm, r.dataset, r.top_n,
+       r.iterations, r.generation_time_s, r.status, r.resumed_from,
+       r.created_at,
+       MIN(s.best_score) AS worst_score,
+       MAX(s.best_score) AS best_score
+FROM runs r
+LEFT JOIN solutions s ON s.run_id = r.id
+GROUP BY r.id
+ORDER BY r.created_at DESC;
+```
+
+### 6.4 Sibling solutions from same run
+
+```sql
+SELECT s.id, s.alias, s.rank, s.best_score
+FROM solutions s
+WHERE s.run_id = :run_id
+ORDER BY s.rank;
+```
+
+### 6.5 Resume chain (run lineage)
+
+```sql
+-- Recursive: all ancestors of a run
+WITH RECURSIVE chain(id, resumed_from, depth) AS (
+    SELECT id, resumed_from, 0 FROM runs WHERE id = :run_id
+    UNION ALL
+    SELECT r.id, r.resumed_from, c.depth + 1
+    FROM runs r JOIN chain c ON r.id = c.resumed_from
+)
+SELECT * FROM chain ORDER BY depth;
+```
+
+### 6.6 Benchmark: raw per-instance data (`revolver benchmark results`)
 
 Benchmark comparison loads raw per-instance data from `eval_instances` and computes aggregates in Python (see [DES-006 §4](DES-006-eval-loop.md)).
 
 ```sql
 SELECT ei.instance_id, s.id AS solution_id, s.alias,
        ei.metric_name, ei.value, ei.status, ei.compute_time_s,
-       sl.generation_time_s
+       r.generation_time_s
 FROM benchmark_solutions bs
 JOIN solutions s ON bs.solution_id = s.id
+JOIN runs r ON s.run_id = r.id
 JOIN eval_metadata em ON s.id = em.solution_id AND em.dataset_name = :dataset
 JOIN eval_instances ei ON em.eval_id = ei.eval_id
-LEFT JOIN solution_lineage sl ON s.id = sl.solution_id
 WHERE bs.benchmark_id = :bench_id
   AND (:metric IS NULL OR ei.metric_name = :metric)
 ORDER BY ei.instance_id, ei.metric_name, s.id;
@@ -347,7 +387,7 @@ ORDER BY ei.instance_id, ei.metric_name, s.id;
 
 Aggregates (mean, min, max, p10, p50, p90, std) are computed per (solution, metric) in Python from this result set.
 
-### 6.4 Per-instance comparison (`revolver benchmark results --per-instance`)
+### 6.7 Per-instance comparison (`revolver benchmark results --per-instance`)
 
 ```sql
 SELECT ei.instance_id, s.alias, ei.metric_name, ei.value, ei.compute_time_s
@@ -359,7 +399,7 @@ WHERE bs.benchmark_id = :bench_id
 ORDER BY ei.instance_id, ei.metric_name, ei.value DESC;
 ```
 
-### 6.5 Check existing eval results (benchmark reuse)
+### 6.8 Check existing eval results (benchmark reuse)
 
 ```sql
 SELECT eval_id FROM eval_metadata
@@ -367,23 +407,13 @@ WHERE solution_id = :solution_id AND dataset_name = :dataset_name
 LIMIT 1;
 ```
 
-### 6.6 Dataset integrity verification
+### 6.9 Dataset integrity verification
 
 ```sql
 SELECT instance_id, hash
 FROM dataset_instances
 WHERE dataset_name = :dataset_name
 ORDER BY instance_id;
-```
-
-### 6.7 Sibling solutions from same run (`revolver solution info`)
-
-```sql
-SELECT s.id, s.alias, sl.rank, s.best_score
-FROM solution_lineage sl
-JOIN solutions s ON s.id = sl.solution_id
-WHERE sl.run_id = :run_id AND sl.solution_id != :current_id
-ORDER BY sl.rank;
 ```
 
 ---
@@ -394,8 +424,8 @@ ORDER BY sl.rank;
 |---|---|---|---|
 | Problem version | User-provided tag | `v1.0` | UNIQUE constraint, reject on duplicate |
 | Dataset | User-provided name | `train-small` | UNIQUE constraint, reject on duplicate |
-| Solution | `sol-{YYYYMMDD}-{HHMMSS}` | `sol-20260310-143000` | Append counter if needed: `sol-20260310-143000-1` |
-| Run ID | First solution's ID | `sol-20260310-143000` | Same as solution (shared across top-N) |
+| Run | `run-{YYYYMMDD}-{HHMMSS}` | `run-20260310-143000` | Append counter if needed: `run-20260310-143000-1` |
+| Solution | `sol-{YYYYMMDD}-{HHMMSS}` | `sol-20260310-143000` | Same counter strategy |
 | Evaluation | `eval-{YYYYMMDD}-{HHMMSS}` | `eval-20260310-160000` | Same counter strategy |
 | Benchmark | `bench-{YYYYMMDD}-{HHMMSS}` | `bench-20260310-170000` | Same counter strategy |
 
@@ -423,6 +453,22 @@ MIGRATIONS = {
 
 ## 9. Design Decisions
 
+### Why `runs` as a first-class entity (not just a `run_id` in `solution_lineage`)?
+
+The initial design stored lineage data in `solution_lineage` with a `run_id` column linking top-N solutions. This had several problems:
+- **Resume mutated the solution**: `run resume` updated the existing solution in-place, breaking traceability if eval results referenced the old program.
+- **Lineage duplication**: every top-N solution duplicated `iterations`, `config_snapshot`, `generation_time_s`, etc.
+- **No run lifecycle**: no way to track run status (`running`/`completed`/`interrupted`).
+
+With `runs` as a table, the run is the **physical** entity (owns files, checkpoint, config) and solutions are lightweight **logical** references. Resume creates a new run (`resumed_from: <parent>`), preserving the old run and its eval results intact.
+
+### Why `solutions` is a lightweight reference (not a directory)?
+
+Solutions no longer have their own filesystem directory. The program file is resolved via `.revolver/runs/<run_id>/programs/rank-<N>.py`. This:
+- **Eliminates duplication**: checkpoint, config, wrapper live once in the run directory, not copied per solution
+- **Simplifies resume**: resume operates on the run (checkpoint), not on a solution
+- **Keeps the model clean**: solution = pointer to (run, rank), not a filesystem artifact
+
 ### Why normalized tables for metrics (not JSON columns)?
 
 The evaluator returns `dict[str, float]` — one row per metric per instance in `eval_instances`. This enables:
@@ -437,6 +483,10 @@ Only raw per-instance data is stored in `eval_instances`. Aggregates (mean, min,
 - **Flexibility**: if aggregate formulas change (e.g., add p25/p75), no migration needed
 - **Acceptable performance**: computing aggregates from 10,000 instances takes <10ms in Python
 
+### Why `user_aggregates` as a JSON column?
+
+Legacy evaluators (`evaluate()`) may compute custom aggregation (e.g., weighted average, min-based) that differs from Revolver's standard mean/p10/p90 stats. The `user_aggregates` column in `eval_metadata` stores the raw result of a global `evaluate()` call, allowing both visions to coexist. It is NULL when using `evaluate_instance()` mode (no custom aggregator). See [DES-006](DES-006-eval-loop.md) D-006-g.
+
 ### Why separate project and global DBs?
 
 - **Project DB** travels with the project (git, backup, sharing)
@@ -447,6 +497,7 @@ Only raw per-instance data is stored in `eval_instances`. Aggregates (mean, min,
 
 ## 10. Resolved Design Questions
 
-- [x] **DM-01**: Evaluation aggregates are **computed at read time** from raw `eval_instances` data in Python. Only `eval_metadata` (session info) and `eval_instances` (raw per-instance results) are stored in SQLite. See [DES-006 §4](DES-006-eval-loop.md) for rationale (FR-EVL-006).
+- [x] **DM-01**: Evaluation aggregates are **computed at read time** from raw `eval_instances` data in Python. Only `eval_metadata` (session info + optional `user_aggregates`) and `eval_instances` (raw per-instance results) are stored in SQLite. See [DES-006 §4](DES-006-eval-loop.md) for rationale (FR-EVL-006).
 - [x] **DM-02**: LLM registry uses **SQLite** (`~/.revolver/revolver.db`), not YAML. Prevents manual edits that could introduce inconsistencies with actual LLM state. All mutations go through `revolver llm add/remove`. Inspection via `revolver llm list --json`.
-- [x] **DM-03**: Timestamp-based IDs use **counter suffix** for collision handling (`sol-20260310-143000`, then `sol-20260310-143000-1`). In practice, collisions are near-impossible (runs take minutes/hours).
+- [x] **DM-03**: Timestamp-based IDs use **counter suffix** for collision handling (`run-20260310-143000`, then `run-20260310-143000-1`). In practice, collisions are near-impossible (runs take minutes/hours).
+- [x] **DM-04**: **Run is the first-class physical entity**; solution is a lightweight logical reference `(run_id, rank)`. Lineage, checkpoint, config all live on the run. Resume creates a new run (`resumed_from`), preserving the old run intact. See refactor-run-solution.md §1–2.

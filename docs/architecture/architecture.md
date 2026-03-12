@@ -115,7 +115,7 @@ src/revolver/
 │   ├── llm.py               # revolver llm {add,start,stop,status,list,remove}
 │   ├── problem.py           # revolver problem {test,version,versions}
 │   ├── dataset.py           # revolver dataset {add,update,remove,list,info}
-│   ├── run.py               # revolver run {<default>,status,resume}
+│   ├── run.py               # revolver run {<default>,status,resume,list,info}
 │   ├── eval.py              # revolver eval {<default>,results}
 │   ├── solution.py          # revolver solution {list,info,alias}
 │   ├── benchmark.py         # revolver benchmark {<default>,results,export,list}
@@ -153,7 +153,8 @@ src/revolver/
     ├── llm.py               # LLMEntry, LLMStatus
     ├── problem.py           # ProblemVersion, ProblemManifest
     ├── dataset.py           # DatasetRegistration, InstanceHash
-    ├── solution.py          # Solution, SolutionLineage
+    ├── run.py               # Run, RunManifest, RunResult
+    ├── solution.py          # Solution (lightweight reference)
     ├── eval.py              # EvalResult, InstanceResult
     └── benchmark.py         # BenchmarkResult, BenchmarkExport
 ```
@@ -196,7 +197,7 @@ Each module encapsulates the business rules for one command group. Key responsib
 | `llm` | Register/remove LLMs, start/stop local models via Ollama client, check status. See [DES-002](design/DES-002-llm-subcommands.md) for Ollama API mapping |
 | `problem` | Run evaluator on instances (test), create immutable snapshots (version), list versions. See [DES-003](design/DES-003-problem-versioning.md) |
 | `dataset` | Register dataset by reference, compute hashes, verify integrity, manage compatibility. See [DES-004](design/DES-004-dataset-registration.md) |
-| `run` | Configure OpenEvolve, set environment variables for instance injection, launch run, store solution + lineage |
+| `run` | Configure OpenEvolve, set environment variables for instance injection, launch run, store run artifacts, create solution DB references (run_id, rank), record lineage in runs table |
 | `eval` | Iterate instances, invoke evaluator per instance, collect metrics, compute aggregates, store in SQLite |
 | `solution` | Query solutions from SQLite, manage aliases |
 | `benchmark` | Orchestrate multi-solution eval, reuse existing results, compute comparison stats, export CSV/JSON |
@@ -236,7 +237,7 @@ Data models use **Pydantic v2** `BaseModel` ([ADR-005](adr/ADR-005-pydantic-data
 
 | Store | Format | Contents | Scope |
 |---|---|---|---|
-| `.revolver/` (project) | Files + YAML manifests | Problem snapshots, dataset manifests, solution files, OE checkpoints | Per-project |
+| `.revolver/` (project) | Files + YAML manifests | Problem snapshots, dataset manifests, run artifacts (programs, checkpoints, configs, wrapper evaluators) | Per-project |
 | `.revolver/revolver.db` | SQLite | Metrics, lineage, eval results, benchmark results, timestamps | Per-project |
 | `~/.revolver/` (global) | YAML | LLM registry, global config | Per-user |
 
@@ -257,12 +258,12 @@ Detailed schema in [DES-001 — SQLite Data Model](design/DES-001-sqlite-data-mo
 | `dataset_instances` | Per-instance hashes | dataset_name, instance_id, hash |
 | `dataset_compat` | Version compatibility | dataset_name, problem_version |
 | `llms` | LLM registry (global DB) | name, provider, model, source, base_url, api_key_env |
-| `solutions` | Generated solutions | id, alias, problem_version, llm, dataset, created_at |
-| `solution_lineage` | Full provenance | solution_id, config_snapshot, iterations, gen_time_s, run_id, rank, top_n |
-| `eval_metadata` | Evaluation session metadata | eval_id, solution_id, dataset_name, instance_count, instances_solved |
-| `eval_instances` | Per-instance results | eval_id, instance_id, metric, value, compute_time_s |
-| `benchmarks` | Benchmark metadata | bench_id, alias, dataset, created_at |
-| `benchmark_solutions` | Benchmark membership | bench_id, solution_id |
+| `runs` | Evolution run metadata + lineage | id, problem_version, llm, dataset, status, resumed_from, created_at |
+| `solutions` | Lightweight solution references | id, run_id, rank, best_score, alias |
+| `eval_metadata` | Evaluation session metadata | eval_id, solution_id, dataset_name, instance_count, instances_solved, eval_time_s, user_aggregates, evaluated_at |
+| `eval_instances` | Per-instance results | eval_id, instance_id, metric_name, value, compute_time_s |
+| `benchmarks` | Benchmark metadata | id, alias, dataset_name, created_at |
+| `benchmark_solutions` | Benchmark membership | benchmark_id, solution_id |
 
 ---
 
@@ -284,11 +285,11 @@ Domain Layer (core.run)
   │ 5. Set env vars: REVOLVER_DATASET_DIR
   │ 6. Configure OpenEvolve programmatically
   │ 7. Launch OpenEvolve evolution loop
-  │ 8. On completion: store solution files + lineage in SQLite
+  │ 8. On completion: store run artifacts, create solution references in SQLite
   ▼
 Infrastructure Layer
-  ├── store: read problem snapshot, write solution files
-  ├── db: insert solution + lineage rows
+  ├── store: read problem snapshot, write run directory
+  ├── db: insert run + solution rows
   ├── hashing: verify dataset integrity
   ├── ollama: (if local LLM) ensure model is loaded
   └── openevolve: import and run OpenEvolve
@@ -300,19 +301,20 @@ Infrastructure Layer
 User: revolver eval --solution claude-v1.1 --dataset eval-bench
 
 Domain Layer (core.eval)
-  │ 1. Load solution metadata
-  │ 2. Load dataset manifest + verify integrity
-  │ 3. For each instance in dataset:
+  │ 1. Load solution metadata + parent run
+  │ 2. Resolve program path from run directory: `.revolver/runs/<run_id>/programs/rank-<N>.py`
+  │ 3. Load dataset manifest + verify integrity
+  │ 4. For each instance in dataset:
   │    a. Set REVOLVER_INSTANCE_PATH, REVOLVER_INSTANCE_ID
   │    b. Import evaluator from problem version snapshot
   │    c. Call evaluate_instance() or evaluate() in subprocess
   │    d. Collect metrics dict + wall-clock time
   │    e. Store raw per-instance result in SQLite immediately
-  │ 4. Store eval metadata in SQLite
-  │ 5. Compute aggregates at read time from raw data (not stored)
+  │ 5. Store eval metadata in SQLite
+  │ 6. Compute aggregates at read time from raw data (not stored)
   ▼
 Infrastructure Layer
-  ├── store: read solution program file, resolve evaluator path
+  ├── store: resolve program path from run dir, resolve evaluator path
   ├── db: insert eval_metadata + eval_instances rows
   └── hashing: verify dataset integrity
 ```
@@ -386,7 +388,7 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | Language | Python >= 3.11 | ADR-002 |
 | CLI framework | Typer (>= 0.21) on Click | ADR-003 |
 | Local LLM server | Ollama | ADR-001 |
-| Structured storage | SQLite (WAL mode) | — |
+| Structured storage | SQLite (WAL mode) | ADR-004 |
 | Config/manifest format | YAML (PyYAML) | — |
 | Hashing | SHA-256 (hashlib, stdlib) | — |
 | Terminal output | rich | — |

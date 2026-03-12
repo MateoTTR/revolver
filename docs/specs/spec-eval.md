@@ -1,6 +1,6 @@
 # Spec: revolver eval
 
-**Traceable to**: ConOps §5.6 (Workflow: Evaluate a Single Solution), §4.4 (Instance Injection), §4.5 (Metrics)
+**Traceable to**: ConOps §5.6 (Workflow: Evaluate a Single Solution), §4.4 (Instance Injection), §4.5 (Metrics), DES-006 v0.2
 **Status**: Draft
 
 ---
@@ -25,18 +25,22 @@ Evaluate a solution against an evaluation dataset.
 | `--dataset <name>` | string | Yes | Registered evaluation dataset |
 | `--timeout <seconds>` | int | No | Per-instance timeout. Default: 300s |
 | `--parallelism <n>` | int | No | Number of instances to evaluate concurrently. Default: 1 |
+| `--force` | flag | No | Skip confirmation and re-evaluate even if results already exist |
+| `--per-instance` | flag | No | Show per-instance results on completion instead of aggregates only |
 
 **Behavior**:
 1. **Validate inputs**: solution exists, dataset exists (warn if split is not `eval`)
-2. **Verify dataset integrity**: recompute hashes, warn on mismatch
-3. **Check compatibility**: warn if dataset not declared compatible with the solution's problem version
-4. **Evaluation loop**: for each instance in the dataset:
+2. **Check for existing results**: check for existing evaluation results for this (solution, dataset) pair. If results exist: in interactive mode, prompt for confirmation ("Evaluation already exists for solution X on dataset Y. Re-evaluate? [y/N]"); in `--json` mode, return error (use `--force` to override). If `--force` is set, skip confirmation and delete existing results before proceeding.
+3. **Verify dataset integrity**: recompute hashes, warn on mismatch
+4. **Check compatibility**: warn if dataset not declared compatible with the solution's problem version
+5. **Evaluation loop**: for each instance in the dataset:
    - Set `REVOLVER_INSTANCE_PATH` → path to the instance
    - Set `REVOLVER_INSTANCE_ID` → instance identifier (filename or dirname)
    - Call `evaluate(solution_best_program_path)`
    - Collect returned `dict[str, float]` and wall-clock time
-5. **Store raw results** in SQLite: full `dict[str, float]` per instance (all metrics, not just aggregates)
-6. **Compute and display aggregates** at read time from stored raw data
+6. **Legacy global aggregation** (D-006-g): if the evaluator uses `evaluate()` (legacy mode), make one additional call to `evaluate()` with `REVOLVER_DATASET_DIR` set (and `REVOLVER_INSTANCE_PATH` unset) to collect user-defined aggregates. Store the result in `user_aggregates` JSON column of `eval_metadata`.
+7. **Store raw results** in SQLite: full `dict[str, float]` per instance (all metrics, not just aggregates)
+8. **Compute and display aggregates** at read time from stored raw data
 
 **Output** (human):
 ```
@@ -50,6 +54,10 @@ Results:
 
   Instances: 100/100 solved
   Compute time: mean=1.2s, max=4.5s, total=120s
+
+  User aggregates (legacy evaluator):
+    combined_score: 0.84
+    makespan: 148.2
 ```
 
 **Output** (JSON, default — aggregates):
@@ -65,6 +73,7 @@ Results:
     "makespan": {"mean": 142.5, "min": 98.0, "max": 210.0, "p10": 105.0, "p50": 140.0, "p90": 185.0, "std": 28.3}
   },
   "compute_time": {"mean_s": 1.2, "max_s": 4.5, "total_s": 120.0},
+  "user_aggregates": {"combined_score": 0.84, "makespan": 148.2},
   "evaluated_at": "2026-03-10T16:00:00Z"
 }
 ```
@@ -83,7 +92,7 @@ Results:
 }
 ```
 
-**Exit codes**: 0 success, 1 invalid inputs, 2 dataset integrity failure, 4 if evaluator fails on all instances
+**Exit codes**: 0 success, 1 invalid inputs (including existing results in `--json` mode without `--force`), 2 dataset integrity failure, 4 if evaluator fails on all instances
 
 ### 2.2 `revolver eval results`
 
@@ -131,6 +140,9 @@ instance_003.json     FAILED          —         —
 | FR-EVL-015 | MUST | `results` command retrieves stored evaluation results from SQLite | — |
 | FR-EVL-016 | MUST | `results --per-instance` shows per-instance breakdown with full metrics dict | — |
 | FR-EVL-017 | MUST | `results --per-instance --json` exports all raw per-instance data for external post-processing (histograms, plots, custom analysis) | — |
+| FR-EVL-018 | MUST | If evaluation results already exist for a (solution, dataset) pair, require confirmation before re-evaluating. `--force` skips confirmation. In `--json` mode, return error without `--force`. | — |
+| FR-EVL-019 | MUST | For legacy evaluators (`evaluate()`), perform a global aggregation call after per-instance evaluation: call `evaluate()` with `REVOLVER_DATASET_DIR` set and `REVOLVER_INSTANCE_PATH` unset. Store result in `user_aggregates`. | DES-006 v0.2 |
+| FR-EVL-020 | MUST | Display both Revolver-computed aggregates and user aggregates (if available) in results output. | DES-006 v0.2 |
 
 ---
 
@@ -144,7 +156,8 @@ instance_003.json     FAILED          —         —
 | Dataset hash mismatch | Warning: "Dataset modified since registration" | 0 (continue) |
 | Evaluator fails on a single instance | Mark as failed, continue to next instance | — |
 | Evaluator fails on all instances | Error: "Evaluation failed on all instances" | 4 |
-| No previous results found (for `results`) | Error: "No evaluation results for '<solution>' on '<dataset>'" | 1 |
+| Evaluation results already exist (without `--force`) | Error (JSON mode): "Evaluation already exists for solution X on dataset Y. Use --force to re-evaluate." / Warning + prompt (interactive mode) | 1 (JSON) / 0 (interactive, user confirms) |
+| No previous results found (for `results`) | Error: "No evaluation found for solution '<id>' on dataset '<name>'. Run `revolver eval --solution <id> --dataset <name>` first." | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
 
 ---

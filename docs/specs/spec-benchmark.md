@@ -1,6 +1,6 @@
 # Spec: revolver benchmark
 
-**Traceable to**: ConOps §4.7 (Benchmark), §5.7 (Workflow: Benchmark Multiple Solutions), §8 (Export Format)
+**Traceable to**: ConOps §4.7 (Benchmark), §5.7 (Workflow: Benchmark Multiple Solutions), §8 (Export Format), DES-006 v0.2
 **Status**: Draft
 
 ---
@@ -54,9 +54,11 @@ combined_score:
     {
       "solution_id": "sol-20260310-143000",
       "alias": "claude-small-v1.1",
+      "run_id": "run-20260310-143000",
       "lineage": {
         "problem_version": "v1.1",
         "llm": "claude-opus",
+        "llm_model": "claude-opus-4-6",
         "train_dataset": "train-small",
         "iterations": 200,
         "generation_time_s": 8100
@@ -165,7 +167,7 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | FR-BEN-002 | MUST | Reuse existing evaluation results when available (avoid redundant computation) | — |
 | FR-BEN-003 | MUST | Run evaluation for solutions without existing results on the dataset | §5.7 |
 | FR-BEN-004 | MUST | Produce a comparative table with per-metric aggregate statistics (computed from raw per-instance data) | §4.7 |
-| FR-BEN-005 | MUST | Include lineage information (problem version, LLM, training dataset, generation time) | §4.7 |
+| FR-BEN-005 | MUST | Include lineage information (from the solution's parent run: problem version, LLM, training dataset, generation time) | §4.7 |
 | FR-BEN-006 | MUST | Store benchmark metadata in SQLite; per-instance data is read from eval results (single source of truth) | NFR-013 |
 | FR-BEN-007 | MUST | Export results in CSV format matching ConOps §8.1 schema | §8.1 |
 | FR-BEN-008 | MUST | Export results in JSON format matching ConOps §8.2 schema | §8.2 |
@@ -177,6 +179,7 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | FR-BEN-014 | MUST | `results --per-instance` shows per-instance comparison of all solutions side by side | — |
 | FR-BEN-015 | SHOULD | `results --per-instance` identifies the best solution per instance | — |
 | FR-BEN-016 | MUST | `export --per-instance` exports raw per-instance data for all solutions (enables histograms, scatter plots, custom analysis) | §8 |
+| FR-BEN-017 | MUST | Include `run_id` in benchmark result entries for traceability back to the physical run | DES-001 §3.6 |
 
 ---
 
@@ -203,3 +206,5 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 - Uses the evaluation mechanism from `revolver eval` ([spec-eval.md](spec-eval.md))
 - Requires a registered dataset ([spec-dataset.md](spec-dataset.md))
 - Export formats defined in ConOps §8
+- DES-005 v0.2 (Run orchestration — run as first-class entity, solution lineage)
+- DES-006 v0.2 (Evaluation loop — legacy evaluator support, user aggregates)

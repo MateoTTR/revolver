@@ -92,7 +92,7 @@ Each `spec-*.md` file follows this structure:
 | NFR-020 | MUST | Every solution records its full lineage: problem version, dataset, LLM, config, timestamp |
 | NFR-021 | MUST | Local LLM models can be pinned by digest (e.g., `codestral:22b@sha256:...`) |
 | NFR-022 | MUST | Dataset registration records per-instance hashes for integrity verification |
-| NFR-023 | SHOULD | OpenEvolve config used for a run is stored verbatim in the solution manifest |
+| NFR-023 | SHOULD | OpenEvolve config used for a run is stored verbatim in the run manifest |
 
 ### 3.4 Performance
 
@@ -185,11 +185,12 @@ Configuration is resolved in this order (last wins):
 | [spec-llm.md](spec-llm.md) | `revolver llm {add,start,stop,status,list,remove}` | §4.8, §5.1 | LLM registration, lifecycle, monitoring |
 | [spec-problem.md](spec-problem.md) | `revolver problem {test,version,versions}` | §4.2, §5.3, §5.4, §7.1 | Problem testing and versioning |
 | [spec-dataset.md](spec-dataset.md) | `revolver dataset {add,update,remove,list,info}` | §4.3, §4.4, §5.4, §7.2 | Dataset registration, integrity, compatibility |
-| [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume}` | §4.6, §5.5 | OpenEvolve orchestration, solution generation |
+| [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume,list,info}` | §4.6, §5.5 | OpenEvolve orchestration, solution generation |
 | [spec-eval.md](spec-eval.md) | `revolver eval {<default>,results}` | §5.6 | Single solution evaluation |
 | [spec-benchmark.md](spec-benchmark.md) | `revolver benchmark {<default>,results,export}` | §4.7, §5.7, §8 | Multi-solution comparison and export |
 | [spec-solution.md](spec-solution.md) | `revolver solution {list,info,alias}` | §4.6 | Solution browsing and metadata |
 | [spec-setup.md](spec-setup.md) | `revolver doctor`, `revolver setup` | NFR-060–068 | Dependency verification and assisted installation |
+| [user-story-e2e.md](user-story-e2e.md) | All (end-to-end walkthrough) | §5.1–§5.7 | Concrete scenario validating the full CLI workflow |
 
 ---
 

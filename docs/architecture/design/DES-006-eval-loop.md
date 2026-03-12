@@ -1,9 +1,9 @@
 # DES-006 — `revolver eval` — Evaluation Loop
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-11
+**Version**: 0.2 — Run/Solution refactor
+**Date**: 2026-03-12
 **Status**: Draft
-**Traceable to**: [spec-eval.md](../../specs/spec-eval.md), [Architecture](../architecture.md) §4/§6.2, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.7–3.8, [DES-003](DES-003-problem-versioning.md) §2.1.1, [DES-005](DES-005-run-orchestration.md) §7
+**Traceable to**: [spec-eval.md](../../specs/spec-eval.md), [Architecture](../architecture.md) §4/§6.2, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.6–3.8 (solutions, eval_metadata, eval_instances), [DES-003](DES-003-problem-versioning.md) §2.1.1, [DES-005](DES-005-run-orchestration.md) §7
 
 ---
 
@@ -39,36 +39,45 @@ Evaluate a solution against an evaluation dataset.
 
 ```
 CLI (cli/eval.py)
-  │ Parse: --solution, --dataset, --timeout, --parallelism
+  │ Parse: --solution, --dataset, --timeout, --parallelism, --force
   ▼
 Core (core/eval.py) → evaluate_solution()
   │ 1. Resolve project root                        ──► Infra: store.find_project_root()
   │ 2. Load solution metadata                       ──► Infra: db.get_solution(id_or_alias)
-  │ 3. Load solution lineage                        ──► Infra: db.get_lineage(solution_id)
+  │                                                     → returns solution with run_id
+  │ 3. Load run metadata                            ──► Infra: db.get_run(solution.run_id)
+  │                                                     → provides problem_version, llm, etc.
   │ 4. Load dataset registration                    ──► Infra: db.get_dataset(name)
   │    Quick integrity check                        ──► Core: dataset.verify_dataset_integrity()
   │    Warn if split != 'eval'                     (FR-EVL-009)
   │    Warn if not compatible with version          (FR-EVL-008)
-  │ 5. Resolve evaluator path:
+  │ 5. Check for existing results                   ──► Infra: db.get_eval_metadata()
+  │    If exists and not --force:
+  │      JSON mode → raise error                   (D-006-a)
+  │      Interactive → prompt confirmation          (D-006-a)
+  │    If confirmed or --force → db.delete_eval()
+  │ 6. Resolve program path:
+  │    .revolver/runs/<run_id>/programs/rank-<N>.py
+  │ 7. Resolve evaluator path:
   │    .revolver/problem/<version>/evaluator.py     (FR-EVL-003)
-  │ 6. Load evaluator module                        ──► Infra: evaluator_loader.load(path)
-  │ 7. Resolve dataset path                         ──► Core: dataset.resolve_dataset_path()
-  │ 8. Enumerate instances:
-  │    sorted(p for p in dataset_path.iterdir() if not p.name.startswith('.'))
-  │ 9. Generate eval ID                             ──► generate_eval_id()
-  │ 10. Evaluation loop: for each instance:
+  │ 8. Load evaluator module                        ──► Infra: evaluator_loader.load(path)
+  │ 9. Resolve dataset path                         ──► Core: dataset.resolve_dataset_path()
+  │ 10. Enumerate instances:
+  │     sorted(p for p in dataset_path.iterdir() if not p.name.startswith('.'))
+  │ 11. Generate eval ID                            ──► generate_eval_id()
+  │ 12. Evaluation loop: for each instance:
   │     a. Set REVOLVER_INSTANCE_PATH               (FR-EVL-002)
   │     b. Set REVOLVER_INSTANCE_ID
   │     c. Call evaluator in subprocess with timeout (§3)
   │     d. Collect metrics dict + wall-clock time
   │     e. Store raw result in SQLite immediately    ──► Infra: db.insert_eval_instance()
   │     f. Report progress                           ──► callback to CLI
-  │ 11. Store eval metadata in SQLite               ──► Infra: db.insert_eval_metadata()
-  │ 12. Return EvalResult
+  │ 13. Store eval metadata in SQLite               ──► Infra: db.insert_eval_metadata()
+  │ 14. Return EvalResult
   ▼
 Infra
   ├── store: project root, evaluator path resolution
-  ├── db: read solution/dataset, write eval results
+  ├── db: read solution/run/dataset, write eval results
   ├── evaluator_loader: dynamic module loading
   └── hashing: dataset integrity verification
 ```
@@ -84,6 +93,10 @@ CLI (cli/eval.py)
 Core (core/eval.py) → get_eval_results()
   │ 1. Resolve solution                             ──► Infra: db.get_solution(id_or_alias)
   │ 2. Query eval metadata                          ──► Infra: db.get_eval_metadata()
+  │    If no results found → error:                (D-006-b)
+  │      "No evaluation found for solution X on dataset Y.
+  │       Run `revolver eval --solution X --dataset Y` first."
+  │      Exit code 1
   │ 3. If --per-instance:
   │    a. Query all raw instance results            ──► Infra: db.get_eval_instances()
   │    b. Return EvalDetailResult
@@ -148,13 +161,15 @@ The evaluator is loaded from the **immutable problem version snapshot**, not the
 This ensures evaluation results are reproducible — the evaluator code cannot change between evaluations of the same problem version.
 
 **Dual-mode detection**: The evaluator may define either:
-1. `evaluate(program_path)` — standard OpenEvolve interface, used as-is
+1. `evaluate(program_path)` — standard OpenEvolve interface (legacy), used as-is
 2. `evaluate_instance(program_path, instance_path)` — Revolver-style, called directly with instance path
 
-Detection priority:
-1. If `evaluate_instance` exists → call it with `(program_path, instance_path)`
-2. Else if `evaluate` exists → set `REVOLVER_INSTANCE_PATH` env var, call `evaluate(program_path)`
+Detection priority (D-005-a):
+1. If `evaluate()` exists → set `REVOLVER_INSTANCE_PATH` env var, call `evaluate(program_path)` (legacy mode)
+2. Else if `evaluate_instance()` exists → call directly with `(program_path, instance_path)` (Revolver mode)
 3. Else → error
+
+**Rationale for priority order**: If both functions exist in the same file, `evaluate()` takes precedence because it is the "complete" implementation — the user may call `evaluate_instance()` internally from their `evaluate()`. Revolver should not bypass the user's orchestration logic by calling `evaluate_instance()` directly when `evaluate()` is available.
 
 ### 3.4 Parallelism (FR-EVL-014 — MAY)
 
@@ -187,9 +202,9 @@ if parallelism > 1:
 
 FR-EVL-006 specifies: "Compute aggregate statistics at read time from stored raw data — aggregates are not stored separately."
 
-This contradicts DES-001 §3.7 which defines an `eval_results` table for stored aggregates, and DES-001 DM-01 which says aggregates are materialized.
+The initial DES-001 (v0.1) defined an `eval_results` table for stored aggregates (DM-01). Following FR-EVL-006, this was replaced by the current `eval_metadata` table (DES-001 v0.2 §3.7), which stores only evaluation session metadata — no per-metric aggregate rows.
 
-**Resolution**: We follow the spec (FR-EVL-006). Aggregates are computed in Python from raw `eval_instances` data at display time. The `eval_results` table from DES-001 is **replaced** by a lighter `eval_metadata` table that stores only the evaluation session metadata (no per-metric aggregate rows).
+**Decision**: Aggregates are computed in Python from raw `eval_instances` data at display time. DES-001 §3.7 defines `eval_metadata` (session metadata only), consistent with this approach.
 
 **Rationale**:
 - **Single source of truth**: raw per-instance data is the only stored data; aggregates are derived
@@ -197,9 +212,9 @@ This contradicts DES-001 §3.7 which defines an `eval_results` table for stored 
 - **Simplicity**: one table for raw data, one for metadata, instead of three (metadata + aggregates + instances)
 - **Performance is acceptable**: computing aggregates from 10,000 instances in Python takes <10ms; even 100,000 instances complete in <100ms
 
-### 4.2 Revised Schema
+### 4.2 Schema Reference
 
-Replace `eval_results` (DES-001 §3.7) with:
+The definitive schema is in DES-001 §3.7–3.8. Key tables for reference:
 
 ```sql
 CREATE TABLE eval_metadata (
@@ -209,6 +224,8 @@ CREATE TABLE eval_metadata (
     instance_count  INTEGER NOT NULL,
     instances_solved INTEGER NOT NULL,
     eval_time_s     REAL,                   -- total wall-clock time
+    user_aggregates TEXT,                   -- JSON: {"combined_score": 0.72, ...}
+                                            -- NULL if evaluate_instance() mode (D-006-g)
     evaluated_at    TEXT NOT NULL            -- ISO 8601
 );
 
@@ -295,26 +312,65 @@ def _percentile(sorted_values: list[float], p: float) -> float:
     return sorted_values[f] + d * (sorted_values[c] - sorted_values[f])
 ```
 
+### 4.4 Legacy Global Aggregation (D-006-g)
+
+For legacy evaluators (`evaluate()` mode), after per-instance evaluation, an additional global call is made to retrieve the user's custom aggregates (e.g., `combined_score`):
+
+1. **Per-instance** (as before): call `evaluate()` with `REVOLVER_INSTANCE_PATH` set per instance → collects per-instance metrics → Revolver computes its own aggregates (mean, min, max, p10, p50, p90, std)
+2. **Global aggregation** (new): one final call to `evaluate()` **without** `REVOLVER_INSTANCE_PATH`, **with** `REVOLVER_DATASET_DIR` set to the dataset directory → retrieves the user's custom `combined_score` and any other aggregated metrics
+
+The result of the global aggregation call is stored in `eval_metadata.user_aggregates` as a JSON string.
+
+For `evaluate_instance()` mode, this step is skipped (`user_aggregates = NULL`), since the Revolver-style evaluator has no built-in global aggregation mechanism.
+
+| Evaluator mode | Per-instance step | Global aggregation step |
+|---|---|---|
+| `evaluate_instance()` | Direct call per instance | Not applicable |
+| `evaluate()` (legacy) | Call with `REVOLVER_INSTANCE_PATH` | Call with `REVOLVER_DATASET_DIR` |
+
+**Display**: `revolver eval results` shows both sections when user aggregates are available:
+- "Revolver aggregates": computed from per-instance raw data (mean, p10, p50, p90, etc.)
+- "User aggregates": raw result from the global `evaluate()` call (only in legacy mode)
+
 ---
 
-## 5. Re-Evaluation Handling
+## 5. Re-Evaluation Handling (D-006-a)
 
-When evaluating a solution that already has results on the same dataset:
+When evaluating a solution that already has results on the same dataset, the user must confirm or use `--force`:
 
 ```python
-def evaluate_solution(...) -> EvalResult:
-    # Check for existing results
+def evaluate_solution(
+    ...,
+    force: bool = False,
+    json_mode: bool = False,
+) -> EvalResult:
     existing = db.get_eval_metadata(solution_id, dataset_name)
     if existing:
-        # Delete old results and re-evaluate
+        if json_mode and not force:
+            raise EvalError("Evaluation already exists. Use --force to re-evaluate.")
+        if not force:
+            # Interactive confirmation
+            confirm = prompt(f"Evaluation already exists for solution {solution_id} "
+                           f"on dataset {dataset_name}. Re-evaluate? [y/N]")
+            if not confirm:
+                raise EvalAborted("Re-evaluation cancelled by user.")
         db.delete_eval(existing.eval_id)  # Cascades to eval_instances
     # Proceed with evaluation...
 ```
 
-This is an **unconditional replace** — if the user runs `revolver eval` again on the same (solution, dataset), the previous results are deleted and replaced. Rationale:
-- The evaluator code is immutable (from problem version snapshot), so results should be identical
-- But the dataset may have changed (integrity check warns but doesn't block)
-- Re-evaluation is an explicit user action, so replacing is expected behavior
+**Behavior summary**:
+
+| Mode | `--force` | Existing results | Action |
+|---|---|---|---|
+| Interactive | No | Yes | Prompt confirmation (`[y/N]`) |
+| Interactive | Yes | Yes | Delete and re-evaluate silently |
+| `--json` | No | Yes | Error (exit code 1) |
+| `--json` | Yes | Yes | Delete and re-evaluate silently |
+| Any | Any | No | Proceed normally |
+
+**Rationale**: Re-evaluation is a destructive operation (deletes previous results). Unlike the previous unconditional replace, the confirmation step protects against accidental data loss — especially in scripted pipelines where `--json` mode requires explicit `--force`. For interactive use, the prompt gives the user a chance to abort. The `--force` flag preserves scriptability for intentional re-evaluation.
+
+Note: `revolver eval` always re-evaluates (never returns cached results). To view existing results without recalculating, use `revolver eval results`.
 
 ---
 
@@ -361,6 +417,7 @@ class EvalMetadata(BaseModel):
     instances_solved: int
     eval_time_s: float | None = None
     evaluated_at: datetime
+    user_aggregates: dict[str, float] | None = None  # Legacy evaluate() global aggregation (D-006-g)
 
 class ComputeTimeSummary(BaseModel):
     """Compute time statistics across all instances."""
@@ -372,9 +429,12 @@ class ComputeTimeSummary(BaseModel):
 
 class EvalResult(BaseModel):
     """Full evaluation result returned to CLI.
-    JSON serialization produces nested 'compute_time' matching spec-eval §2.1."""
+    JSON serialization produces nested 'compute_time' matching spec-eval §2.1.
+    When user_aggregates is present (legacy evaluate() mode), the CLI displays
+    both 'Revolver aggregates' and 'User aggregates' sections."""
     metadata: EvalMetadata
-    aggregates: dict[str, MetricAggregate]
+    aggregates: dict[str, MetricAggregate]          # Revolver-computed from raw per-instance data
+    user_aggregates: dict[str, float] | None = None # From legacy evaluate() global call (D-006-g)
     compute_time: ComputeTimeSummary | None = None
 
 class EvalDetailResult(BaseModel):
@@ -451,12 +511,19 @@ def evaluate_solution(
     dataset_name: str,
     timeout_s: int = 300,
     parallelism: int = 1,
+    force: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> EvalResult:
     """
     Evaluate a solution against a dataset.
-    Iterates instances, stores raw results, computes aggregates.
+    Resolves solution → run → program path, iterates instances,
+    stores raw results, computes aggregates.
     Called by both CLI (revolver eval) and core.run (post-run eval).
+
+    If results already exist for this (solution, dataset) pair:
+    - force=True: delete and re-evaluate silently
+    - force=False, interactive: prompt for confirmation (D-006-a)
+    - force=False, json_mode: raise EvalError
     """
 
 def get_eval_results(
@@ -468,6 +535,10 @@ def get_eval_results(
     Retrieve stored evaluation results.
     If per_instance=True, returns all raw instance data.
     Otherwise, computes aggregates from raw data.
+
+    Raises EvalNotFoundError if no evaluation exists for the given
+    (solution, dataset) pair (D-006-b). The error message directs
+    the user to run `revolver eval` first.
     """
 
 # --- Internal ---
@@ -507,6 +578,7 @@ def eval_default(
     dataset: str = typer.Option(..., "--dataset", help="Evaluation dataset name"),
     timeout: int = typer.Option(300, "--timeout", help="Per-instance timeout (seconds)"),
     parallelism: int = typer.Option(1, "--parallelism", help="Concurrent instances"),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation for re-evaluation (D-006-a)"),
     per_instance: bool = typer.Option(False, "--per-instance", help="Show per-instance results on completion"),
 ): ...
 
@@ -516,6 +588,9 @@ def results(
     dataset: str | None = typer.Option(None, "--dataset", help="Filter by dataset"),
     per_instance: bool = typer.Option(False, "--per-instance", help="Show per-instance results"),
 ): ...
+# Note: exits with code 1 if no evaluation results found (D-006-b).
+# Error message: "No evaluation found for solution X on dataset Y.
+#                 Run `revolver eval --solution X --dataset Y` first."
 ```
 
 ---
@@ -530,9 +605,13 @@ User      CLI         Core            EvalLoader   Subprocess   DB       Hashing
  │─ eval ─►│           │                │            │           │         │
  │         │─evaluate()►│               │            │           │         │
  │         │           │── get solution ──────────────────────►│         │
- │         │           │── get lineage ───────────────────────►│         │
+ │         │           │── get run (via solution.run_id) ─────►│         │
  │         │           │── get dataset ───────────────────────►│         │
  │         │           │── check integrity ──────────────────────────────►│
+ │         │           │── check existing eval results ───────►│         │
+ │         │           │   (if exists: prompt or --force)       │         │
+ │         │           │── resolve program path                │         │
+ │         │           │   .revolver/runs/<run_id>/programs/rank-<N>.py  │
  │         │           │── resolve evaluator path              │         │
  │         │           │── enumerate instances                 │         │
  │         │           │── generate eval ID                    │         │
@@ -571,9 +650,7 @@ User      CLI         Core            DB
 
 ### DD-01: Aggregates computed at read time, not stored
 
-See §4.1 for full rationale. This resolves the tension between FR-EVL-006 (no stored aggregates) and DES-001 DM-01 (materialized aggregates). We follow the spec.
-
-**DES-001 update required**: Replace `eval_results` table with `eval_metadata`. The `eval_instances` table is retained with a simplified FK. DES-001 §3.7 and DM-01 should be updated to reflect this decision.
+See §4.1 for full rationale. FR-EVL-006 specifies aggregates are computed at read time, not stored. DES-001 v0.2 §3.7 reflects this: `eval_metadata` stores session metadata only (no aggregate rows). The `eval_instances` table stores raw per-instance data from which aggregates are derived at display time.
 
 ### DD-02: Evaluator from problem version snapshot (FR-EVL-003)
 
@@ -590,20 +667,55 @@ Each instance result is stored in SQLite immediately after completion, not batch
 
 Trade-off: more frequent SQLite writes. Mitigated by WAL mode and the fact that each write is a single INSERT (~0.1ms).
 
-### DD-04: Re-evaluation replaces previous results
+### DD-04: Re-evaluation with confirmation (D-006-a)
 
-Running `revolver eval` on the same (solution, dataset) pair deletes and replaces previous results. Alternatives considered:
+Running `revolver eval` on the same (solution, dataset) pair requires confirmation before deleting and replacing previous results:
+- **Interactive mode**: prompt `"Re-evaluate? [y/N]"` — user can abort
+- **`--json` mode**: error unless `--force` is provided
+- **`--force` flag**: skip confirmation and re-evaluate silently
+
+Alternatives considered:
+- **Unconditional replace** (previous design): deletes without warning. Rejected: risk of accidental data loss, especially in scripted pipelines.
 - **Keep history**: store multiple evaluations per (solution, dataset). Rejected: adds complexity (which eval to display by default?), and the evaluator is immutable so results should be identical.
-- **Block re-evaluation**: error if results exist. Rejected: prevents legitimate use cases (dataset modified, evaluator bug fixed in new problem version).
+- **Block re-evaluation**: error if results exist, no override. Rejected: prevents legitimate use cases (dataset modified, evaluator bug fixed in new problem version).
 
-### DD-05: Single `_evaluate_instance` implementation shared with DES-003
+The confirmation approach balances safety (no accidental deletion) with usability (`--force` for scripts and automation).
+
+### DD-05: Shared evaluator runner at `infra/evaluator_runner.py` (D-006-f resolved)
 
 The subprocess-based instance evaluation logic is shared between `core.eval._evaluate_instance()` and `core.problem._test_instance()` (DES-003). Both:
 - Run the evaluator in a subprocess with timeout
 - Set `REVOLVER_INSTANCE_PATH` and `REVOLVER_INSTANCE_ID`
 - Collect `dict[str, float]` result
 
-The difference: `problem test` loads the mutable evaluator, while `eval` loads the snapshot evaluator. The subprocess wrapper is the same. This should be factored into a shared function in `core/_eval_common.py` or `infra/evaluator_runner.py`.
+The difference: `problem test` loads the mutable evaluator, while `eval` loads the snapshot evaluator. The subprocess wrapper is the same.
+
+**Resolution**: The shared implementation lives at `infra/evaluator_runner.py`. This is an infrastructure-level concern (subprocess management, timeout enforcement, environment variable handling) rather than a core-level concern. Both `core/eval.py` and `core/problem.py` call this shared runner.
+
+### DD-06: Evaluator detection priority — evaluate() over evaluate_instance() (D-005-a)
+
+When both `evaluate()` and `evaluate_instance()` are present in the evaluator module, `evaluate()` takes precedence:
+
+1. If `evaluate()` exists → use it (legacy mode with `REVOLVER_INSTANCE_PATH`)
+2. Else if `evaluate_instance()` exists → use it (Revolver mode with direct call)
+3. Else → error
+
+**Rationale**: If the user defined both functions, `evaluate()` is the "complete" implementation. The user may call `evaluate_instance()` internally from `evaluate()` for instance-level logic while adding orchestration or aggregation in `evaluate()`. Revolver should not bypass that orchestration by calling `evaluate_instance()` directly.
+
+This is the reverse of the initial design (v0.1) which prioritized `evaluate_instance()`. The change was motivated by reviewing real-world evaluator patterns during D-005-a.
+
+### DD-07: Legacy global aggregation step (D-006-g)
+
+For legacy evaluators (`evaluate()` mode), after per-instance evaluation, one additional global `evaluate()` call retrieves the user's custom aggregates:
+
+- **Per-instance**: `evaluate()` called with `REVOLVER_INSTANCE_PATH` per instance → per-instance metrics
+- **Global**: `evaluate()` called without `REVOLVER_INSTANCE_PATH`, with `REVOLVER_DATASET_DIR` → custom aggregates (e.g., `combined_score`)
+
+The custom aggregates are stored in `eval_metadata.user_aggregates` as JSON. This allows `revolver eval results` and `revolver benchmark` to display both Revolver-computed aggregates (mean, p10, p90...) and the user's own aggregation logic side by side.
+
+For `evaluate_instance()` mode, this step is skipped — no global aggregation is available.
+
+**Rationale**: Revolver's per-instance aggregation (mean, p50, etc.) may differ from the user's intended scoring (e.g., weighted average, min-based). Rather than guessing or overriding, we let both coexist and show them separately.
 
 ---
 
@@ -626,16 +738,21 @@ The difference: `problem test` loads the mutable evaluator, while `eval` loads t
 | `infra/evaluator_loader.py` | Already exists (DES-003) — no change |
 | `core/problem.py` | Refactor `_test_instance()` to use shared `evaluator_runner` |
 
-### DES-001 Schema Update (done)
+### DES-001 Schema Update (updated for Run/Solution refactor)
 
-The `eval_results` table (DES-001 §3.7) has been replaced by `eval_metadata`. Updated sections:
-- [x] DES-001 §2 ER diagram → `eval_metadata` replaces `eval_results`
-- [x] DES-001 §3.7 → `eval_metadata` table definition
-- [x] DES-001 §3.8 → FK simplified to reference `eval_metadata(eval_id)`
-- [x] DES-001 §6.3 → benchmark query loads raw data, aggregates computed in Python
-- [x] DES-001 §6.5 → queries `eval_metadata`
-- [x] DES-001 §9 → "Why raw data only" replaces "Why store aggregates AND raw data"
-- [x] DES-001 DM-01 → updated to reflect read-time computation
+The schema has undergone two rounds of changes:
+
+**Round 1** (v0.1): `eval_results` table replaced by `eval_metadata`.
+**Round 2** (v0.2 — Run/Solution refactor): `runs` table added as first-class entity, `solutions` simplified to (run_id, rank) reference, `solution_lineage` removed, `user_aggregates TEXT` column added to `eval_metadata`.
+
+All updates completed in DES-001 v0.2:
+- [x] DES-001 §2 ER diagram → `runs` + simplified `solutions`, `eval_metadata` with `user_aggregates`
+- [x] DES-001 §3.5 (new) → `runs` table definition
+- [x] DES-001 §3.6 → `solutions` table simplified (run_id, rank, alias)
+- [x] DES-001 §3.7 → `eval_metadata` with `user_aggregates TEXT` column
+- [x] DES-001 §3.8 → `eval_instances` FK unchanged (references `eval_metadata`)
+- [x] DES-001 §6 → queries updated for run-based joins
+- [x] DES-001 §9 → design decisions updated for run/solution split
 
 ### Impact on `core/benchmark.py`
 
@@ -650,7 +767,7 @@ This is consistent with spec-benchmark FR-BEN-004 ("per-metric aggregate statist
 
 | Dependency | Direction | Details |
 |---|---|---|
-| DES-001 | DES-006 → DES-001 | Uses `eval_metadata` + `eval_instances` tables (schema update required) |
+| DES-001 | DES-006 → DES-001 | Uses `eval_metadata` + `eval_instances` tables (schema defined in DES-001 v0.2 §3.7–3.8) |
 | DES-003 | DES-006 ↔ DES-003 | Shares evaluator subprocess pattern; uses evaluator_loader |
 | DES-004 | DES-006 → DES-004 | Uses `resolve_dataset_path()` and `verify_dataset_integrity()` |
 | DES-005 | DES-005 → DES-006 | Post-run evaluation calls `evaluate_solution()` |
@@ -659,6 +776,6 @@ This is consistent with spec-benchmark FR-BEN-004 ("per-metric aggregate statist
 
 ## 13. Open Questions
 
-- **EQ-01**: Should re-evaluation ask for confirmation before deleting existing results? Current design: no, `revolver eval` is idempotent — running it again simply refreshes the results. If we add confirmation, it should probably be a `--force` flag.
+- ~~**EQ-01**: Should re-evaluation ask for confirmation before deleting existing results?~~ **Resolved** (D-006-a): Yes. Interactive mode prompts for confirmation; `--json` mode requires `--force`. See §5 and DD-04.
 - **EQ-02**: Should `eval results` support filtering by instance status (e.g., `--failed-only`)? Useful for debugging, but adds CLI complexity. Could be deferred to a later version.
-- **EQ-03**: The shared evaluator subprocess logic (DD-05) could live in `infra/evaluator_runner.py` (new module) or `core/_eval_common.py` (private module in core). Which is the better location? Subprocess management is infrastructure-level, suggesting `infra/`.
+- ~~**EQ-03**: The shared evaluator subprocess logic (DD-05) could live in `infra/evaluator_runner.py` or `core/_eval_common.py`.~~ **Resolved** (D-006-f): Placed at `infra/evaluator_runner.py`. Subprocess management is infrastructure-level. See DD-05.
