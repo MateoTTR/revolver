@@ -563,23 +563,25 @@ Datasets declare compatibility with Problem versions. Revolver **warns** (but do
 ### 8.1 Benchmark Export (CSV)
 
 ```csv
-benchmark_id,solution_id,solution_alias,problem,problem_version,llm,train_dataset,eval_dataset,objective,mean,min,max,p10,p50,p90,std,gen_time_s,eval_time_s,instances_count,instances_solved
-b-001,s-001,claude-small-v1.1,scheduling-optimizer,v1.1,claude-opus,train-small,eval-benchmark,makespan,0.87,0.62,0.95,0.71,0.88,0.93,0.08,8100,60,50,50
-b-001,s-002,gemma-small-v1.1,scheduling-optimizer,v1.1,gemma-local,train-small,eval-benchmark,makespan,0.82,0.55,0.91,0.65,0.83,0.89,0.11,5400,55,50,48
+benchmark_id,solution_id,solution_alias,run_id,problem,problem_version,llm,llm_model,train_dataset,eval_dataset,metric_name,mean,min,max,p10,p50,p90,std,gen_time_s,eval_time_s,instances_count,instances_solved
+bench-20260310-170000,sol-20260310-143000,claude-small-v1.1,run-20260310-143000,scheduling-optimizer,v1.1,claude-opus,claude-opus-4-6,train-small,eval-benchmark,makespan,0.87,0.62,0.95,0.71,0.88,0.93,0.08,8100,60,50,50
+bench-20260310-170000,sol-20260310-150000,gemma-small-v1.1,run-20260310-150000,scheduling-optimizer,v1.1,gemma-local,gemma3:4b,train-small,eval-benchmark,makespan,0.82,0.55,0.91,0.65,0.83,0.89,0.11,5400,55,50,48
 ```
 
 ### 8.2 Benchmark Export (JSON)
 
 ```json
 {
-  "benchmark_id": "b-001",
-  "problem": "scheduling-optimizer",
+  "benchmark_id": "bench-20260310-170000",
+  "alias": "baseline-comparison",
   "eval_dataset": "eval-benchmark",
-  "date": "2026-03-10T14:30:00Z",
+  "instance_count": 50,
+  "created_at": "2026-03-10T17:00:00Z",
   "results": [
     {
-      "solution_id": "s-001",
+      "solution_id": "sol-20260310-143000",
       "alias": "claude-small-v1.1",
+      "run_id": "run-20260310-143000",
       "lineage": {
         "problem_version": "v1.1",
         "llm": "claude-opus",
@@ -588,13 +590,14 @@ b-001,s-002,gemma-small-v1.1,scheduling-optimizer,v1.1,gemma-local,train-small,e
         "iterations": 200,
         "generation_time_s": 8100
       },
-      "objectives": {
+      "metrics": {
         "makespan": {
           "mean": 0.87, "min": 0.62, "max": 0.95,
           "p10": 0.71, "p50": 0.88, "p90": 0.93,
-          "std": 0.08
+          "std": 0.08, "count": 50
         }
       },
+      "user_aggregates": null,
       "eval_time_s": 60,
       "instances_count": 50,
       "instances_solved": 50

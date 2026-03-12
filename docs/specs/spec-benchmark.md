@@ -48,7 +48,8 @@ combined_score:
 ```json
 {
   "benchmark_id": "bench-20260310-170000",
-  "dataset": "eval-benchmark",
+  "alias": null,
+  "eval_dataset": "eval-benchmark",
   "instance_count": 100,
   "results": [
     {
@@ -64,9 +65,11 @@ combined_score:
         "generation_time_s": 8100
       },
       "metrics": {
-        "combined_score": {"mean": 0.87, "min": 0.62, "max": 0.95, "p10": 0.71, "p50": 0.88, "p90": 0.93, "std": 0.08}
+        "combined_score": {"mean": 0.87, "min": 0.62, "max": 0.95, "p10": 0.71, "p50": 0.88, "p90": 0.93, "std": 0.08, "count": 100}
       },
+      "user_aggregates": null,
       "eval_time_s": 60,
+      "instances_count": 100,
       "instances_solved": 100
     }
   ],
@@ -137,7 +140,7 @@ Export benchmark results to a file.
 
 **CSV format** (see ConOps §8.1):
 ```
-benchmark_id,solution_id,solution_alias,problem,problem_version,llm,train_dataset,eval_dataset,objective,mean,min,max,p10,p50,p90,std,gen_time_s,eval_time_s,instances_count,instances_solved
+benchmark_id,solution_id,solution_alias,run_id,problem,problem_version,llm,llm_model,train_dataset,eval_dataset,metric_name,mean,min,max,p10,p50,p90,std,gen_time_s,eval_time_s,instances_count,instances_solved
 ```
 
 **JSON format**: same structure as ConOps §8.2.

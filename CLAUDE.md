@@ -43,6 +43,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [DES-004](docs/architecture/design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | Draft |
 | [DES-005](docs/architecture/design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | Draft |
 | [DES-006](docs/architecture/design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | Draft |
+| [DES-007](docs/architecture/design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | Draft |
 
 ---
 
@@ -112,4 +113,4 @@ Before starting any work in a session:
 - [x] Local LLM deployment tool → **Ollama** (ADR-001)
 - [x] CLI framework choice → **Typer >= 0.21** (ADR-003)
 - [x] OpenEvolve instance injection strategy → **A+B hybrid** (env var + optional SQLite side-channel) (ADR-006)
-- [ ] Benchmark output format and visualization
+- [x] Benchmark output format and visualization → **CSV + JSON** (DES-007 DD-03, no Parquet in v1)
