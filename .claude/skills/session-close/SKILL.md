@@ -68,4 +68,9 @@ Verify `docs/tasks/backlog.md` — ensure all completed tasks are marked `[x]` w
 ## 6. Confirm with user
 
 Show a summary of what was created/updated and ask for validation before committing.
-Do NOT commit automatically — wait for explicit user instruction.
+
+## 7. Commit and push
+
+After user validation, commit all session files (report, cost-tracker, backlog) and push to remote.
+Commit message format: `Close session NNN: <brief summary>`
+Do NOT commit or push without explicit user validation from step 6.
