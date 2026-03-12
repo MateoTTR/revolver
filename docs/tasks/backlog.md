@@ -30,6 +30,9 @@
 | 26 | Implement wrapper evaluator generator (evaluate_instance → evaluate) | [ ] | |
 | 27 | Update ConOps §4.1 directory structure for DD-07 (top-N → separate solution dirs) | [ ] | |
 | 28 | Review remaining spec-reviewer WARNs (ER diagram, benchmark JSON rank/run_id) | [ ] | |
+| 29 | Refactor: introduce Run entity + Solution as reference (per refactor-run-solution.md) | [ ] | |
+| 30 | DES-007 — `revolver benchmark` design (after run/solution refactor) | [ ] | |
+| 31 | Review DES-005/006 decisions (D-005-a..h, D-006-a..f) into updated docs | [ ] | |
 
 ## Phase 3 — POCs
 
