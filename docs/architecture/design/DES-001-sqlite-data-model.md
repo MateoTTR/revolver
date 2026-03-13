@@ -155,6 +155,8 @@ CREATE TABLE runs (
     dataset           TEXT NOT NULL REFERENCES datasets(name),
     iterations        INTEGER NOT NULL,
     generation_time_s REAL,
+    prompt_tokens     INTEGER,               -- total input tokens consumed (NULL if unavailable)
+    completion_tokens INTEGER,               -- total output tokens consumed (NULL if unavailable)
     config_snapshot   TEXT,                   -- verbatim OpenEvolve YAML config (NFR-023)
     problem_hash      TEXT NOT NULL,          -- hash of problem snapshot used
     dataset_hash      TEXT NOT NULL,          -- hash of dataset at registration
@@ -276,6 +278,8 @@ CREATE TABLE llms (
     source          TEXT NOT NULL CHECK (source IN ('local', 'remote')),
     base_url        TEXT,                   -- e.g., "http://localhost:11434/v1"
     api_key_env     TEXT,                   -- env var name (e.g., "ANTHROPIC_API_KEY")
+    input_cost_per_mtok  REAL,             -- USD per million input tokens (NULL = no pricing)
+    output_cost_per_mtok REAL,             -- USD per million output tokens (NULL = no pricing)
     registered_at   TEXT NOT NULL           -- ISO 8601
 );
 ```
@@ -335,6 +339,7 @@ ORDER BY r.created_at DESC, s.rank;
 ```sql
 SELECT r.id, r.problem_version, r.llm, r.dataset,
        r.iterations, r.generation_time_s, r.status, r.resumed_from,
+       r.prompt_tokens, r.completion_tokens,
        r.created_at,
        MAX(s.best_score) AS best_score
 FROM runs r

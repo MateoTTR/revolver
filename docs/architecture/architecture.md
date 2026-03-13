@@ -145,7 +145,8 @@ src/revolver/
 │   ├── ollama.py            # Ollama HTTP client (pull, start, stop, status, models)
 │   ├── gpu.py               # nvidia-smi wrapper (GPU name, VRAM usage/total)
 │   ├── evaluator_loader.py  # Dynamic Python module loading for evaluator (DES-003)
-│   └── openevolve.py        # OpenEvolve wrapper (import, configure, launch, monitor)
+│   ├── openevolve.py        # OpenEvolve wrapper (import, configure, launch, monitor)
+│   └── token_proxy.py      # Transparent HTTP proxy for token usage tracking (DES-005 DD-14)
 │
 └── models/                  # Shared data models (dataclasses / Pydantic)
     ├── __init__.py

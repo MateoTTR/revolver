@@ -27,7 +27,7 @@
 | 23 | Update spec-dataset with `dataset remove` command | [x] | 006 |
 | 24 | DES-005 — `revolver run` design (unblocked by ADR-006) | [x] | 008 |
 | 25 | DES-006 — `revolver eval` design (unblocked by ADR-006) | [x] | 008 |
-| 26 | Implement wrapper evaluator generator (evaluate_instance → evaluate) | [ ] | |
+| 26 | ~~Implement wrapper evaluator generator~~ → moved to Phase 5 | — | |
 | 27 | Update ConOps §4.1 directory structure for DD-07 (top-N → separate solution dirs) | [x] | 010 |
 | 28 | Review remaining spec-reviewer WARNs (ER diagram, benchmark JSON rank/run_id) | [x] | 010 |
 | 29 | Refactor: introduce Run entity + Solution as reference (per refactor-run-solution.md) | [x] | 010 |
@@ -44,8 +44,8 @@
 | 11 | POC — Local LLM deployment and inference | [x] | 003 |
 | 12 | POC — OpenEvolve integration with instance injection | [x] | 007 |
 | 13 | POC — OpenEvolve + Claude API | [x] | 012 |
-| 14 | POC — Code generation quality with OpenEvolve + local LLM (quantization impact) | [ ] | |
-| 15 | POC — End-to-end OpenEvolve + Ollama endpoint integration | [ ] | |
+| 14 | POC — Code generation quality with OpenEvolve + local LLM (quantization impact) | [~] Covered by POC #11/12/13 | |
+| 15 | POC — End-to-end OpenEvolve + Ollama endpoint integration | [~] Covered by POC #11/12/13 | |
 
 ## Phase 4 — Validation
 
@@ -56,4 +56,8 @@
 
 ## Phase 5 — Implementation
 
-_Tasks to be defined after Phase 2-4 completion._
+| # | Task | Status | Session |
+|---|---|---|---|
+| 26 | Implement wrapper evaluator generator (evaluate_instance → evaluate) | [ ] | |
+
+_Additional tasks to be defined after Phase 2-4 completion._

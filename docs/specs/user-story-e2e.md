@@ -35,9 +35,9 @@ Model pulled successfully (12 GB, digest: sha256:0898a8b2...)
 
 ```bash
 # Register the remote LLM (Claude via Anthropic API)
-$ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY
+$ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
 
-LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6)
+LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6, pricing: $15.00/$75.00 per Mtok)
 ```
 
 ```bash
@@ -197,6 +197,8 @@ Run completed: run-20260310-143000
   100 iterations in 1h30m
   Solution: sol-20260310-143000 (rank #1, alias: codestral-v1.0)
   Best combined_score: 0.74
+  Programs stored: 3 (use `run info` to inspect, `solution extract` to promote)
+  Tokens: 890,000 prompt + 215,000 completion = 1,105,000 total
   Stored in: .revolver/runs/run-20260310-143000/
 ```
 
@@ -220,6 +222,9 @@ Run completed: run-20260310-173000
   100 iterations in 2h15m
   Solution: sol-20260310-173000 (rank #1, alias: claude-v1.0)
   Best combined_score: 0.82
+  Programs stored: 3 (use `run info` to inspect, `solution extract` to promote)
+  Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
+  Estimated cost: $43.28 (based on claude-opus pricing)
   Stored in: .revolver/runs/run-20260310-173000/
 ```
 

@@ -38,11 +38,21 @@ Register a new LLM in the global registry.
 | `--api-key-env <var>` | string | For remote | Environment variable name holding the API key (e.g., `ANTHROPIC_API_KEY`) |
 | `--base-url <url>` | string | No | Override API base URL. Auto-set to `http://localhost:11434/v1` for Ollama |
 | `--pull` | flag | No | For Ollama: immediately pull the model after registration (default: prompt user) |
+| `--input-cost <price>` | float | No | Cost per million input tokens in USD (e.g., `3.0` for $3/Mtok). Used for cost estimation. |
+| `--output-cost <price>` | float | No | Cost per million output tokens in USD (e.g., `15.0` for $15/Mtok). Used for cost estimation. |
 
 **Output** (human):
 ```
 LLM "codestral-local" registered (source: ollama, model: codestral:22b)
 Model pulled successfully (12 GB, digest: sha256:0898a8b2...)
+```
+
+```bash
+# Example with pricing for cost estimation
+$ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
+```
+```
+LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6, pricing: $15.00/$75.00 per Mtok)
 ```
 
 **Output** (JSON):
@@ -213,6 +223,7 @@ Unregister an LLM from the global registry.
 | FR-LLM-015 | MUST | Remote LLMs have status `ready` if the API key env var is set, `unconfigured` otherwise | §4.8 |
 | FR-LLM-016 | SHOULD | Support `--provider openai-compat` for arbitrary OpenAI-compatible endpoints | §3.2 |
 | FR-LLM-017 | MUST | API keys are never stored in Revolver files — only the env var name is stored | NFR-050 |
+| FR-LLM-018 | SHOULD | Support optional `--input-cost` and `--output-cost` pricing (USD per Mtok) for cost estimation in `revolver run` | POC #13 |
 
 ---
 
@@ -247,6 +258,8 @@ Using SQLite (rather than individual YAML files) ensures atomic writes and preve
 | `model` | `"codestral:22b"` | `"claude-opus-4-6"` |
 | `base_url` | `"http://localhost:11434/v1"` | Provider default or custom |
 | `api_key_env` | — | `"ANTHROPIC_API_KEY"` |
+| `input_cost_per_mtok` | — (local = free) | `15.0` (USD per million input tokens, optional) |
+| `output_cost_per_mtok` | — (local = free) | `75.0` (USD per million output tokens, optional) |
 | `registered_at` | ISO 8601 | ISO 8601 |
 
 **Runtime-only fields** (not persisted in the `llms` table, queried live):

@@ -64,32 +64,37 @@ Core (core/run.py) → start_run()
   │     (paths point to .revolver/runs/<id>/)
   │ 11. Configure OpenEvolve programmatically       ──► Infra: openevolve.build_config()
   │     Includes: problem.md injection if present   (§4.4, DD-13)
-  │ 12. Write run lock file                         ──► Infra: store.write_run_lock(id)
+  │ 12. Start token-counting proxy (§4.5, DD-14)   ──► Infra: token_proxy.start()
+  │     Rewrite llm.base_url → proxy local URL
+  │ 13. Write run lock file                         ──► Infra: store.write_run_lock(id)
   │     .revolver/runs/locks/<id>.lock
-  │ 13. Launch OpenEvolve                           ──► Infra: openevolve.run()
-  │ 14. Monitor progress                            ──► callback to CLI for display
-  │ 15. On completion:
-  │     a. Collect all top-ranked programs           ──► Infra: openevolve.collect_results()
+  │ 14. Launch OpenEvolve                           ──► Infra: openevolve.run()
+  │ 15. Monitor progress                            ──► callback to CLI for display
+  │ 16. On completion:
+  │     a. Stop token proxy, read token counts      ──► Infra: token_proxy.stop()
+  │     b. Collect all top-ranked programs           ──► Infra: openevolve.collect_results()
   │        Save as rank-1.py, rank-2.py, ...
   │        in .revolver/runs/<id>/programs/
-  │     b. Copy checkpoint, config, evaluator       ──► Infra: store
+  │     c. Copy checkpoint, config, evaluator       ──► Infra: store
   │        into run directory
-  │     c. Generate solution ID for rank-1          ──► generate_solution_id()
+  │     d. Generate solution ID for rank-1          ──► generate_solution_id()
   │        Insert solution row (run_id, rank=1)     ──► Infra: db.insert_solution()
   │        Set alias (if provided)
-  │     d. Post-run training evaluation             ──► Core: eval.evaluate_solution()
+  │     e. Post-run training evaluation             ──► Core: eval.evaluate_solution()
   │        on rank-1 solution only (FR-RUN-019)
-  │     e. Update run status to 'completed'         ──► Infra: db.update_run_status()
-  │     f. Write run manifest                       ──► Infra: store.write_run_manifest()
-  │     g. Remove run lock                          ──► Infra: store.remove_run_lock(id)
-  │ 16. Return RunResult (containing 1 SolutionResult + programs_stored count)
+  │     f. Store token usage in run row             ──► Infra: db.update_run_tokens()
+  │     g. Update run status to 'completed'         ──► Infra: db.update_run_status()
+  │     h. Write run manifest (incl. token_usage)   ──► Infra: store.write_run_manifest()
+  │     i. Remove run lock                          ──► Infra: store.remove_run_lock(id)
+  │ 17. Return RunResult (containing 1 SolutionResult + programs_stored + token_usage)
   ▼
 Infra
   ├── store: run dirs, manifests, lock files
-  ├── db: read problem/LLM/dataset, insert run + solutions, update run status
+  ├── db: read problem/LLM/dataset, insert run + solutions, update run status + tokens
   ├── hashing: snapshot integrity verification
   ├── ollama: check model loaded (local LLMs)
   ├── openevolve: configure, launch, monitor, collect results
+  ├── token_proxy: transparent HTTP proxy for token counting (DD-14)
   └── dataset (core): integrity verification
 ```
 
@@ -496,6 +501,55 @@ def build_config(..., problem_description: str | None = None) -> dict:
 - The `--config-override` mechanism can still override `prompt.system_message` if the user provides an explicit override (merge order in `build_config()`)
 - Resume runs inherit the same problem version snapshot, so the same `problem.md` is injected
 
+### 4.5 Token Usage Tracking
+
+OpenEvolve does not track token usage internally (POC #13 limitation). Revolver fills this gap by intercepting LLM API responses through a lightweight HTTP proxy.
+
+**Mechanism**:
+
+1. Before launching OpenEvolve, Revolver starts a local token-counting proxy on a random available port
+2. The proxy forwards all requests to the real LLM endpoint (`base_url`) and transparently counts tokens from the OpenAI-compatible response `usage` field (`prompt_tokens`, `completion_tokens`)
+3. In `build_config()`, the `llm.base_url` is rewritten to point to the proxy instead of the real endpoint
+4. After the run completes, Revolver reads the accumulated token counts from the proxy and stores them in the DB
+
+```python
+# In revolver/infra/token_proxy.py
+class TokenCountingProxy:
+    """Transparent HTTP proxy that counts tokens from OpenAI-compatible API responses."""
+
+    def __init__(self, target_url: str):
+        self.target_url = target_url
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+
+    def start(self) -> str:
+        """Start proxy server, return local URL (e.g., http://127.0.0.1:54321/v1)."""
+        ...
+
+    def stop(self) -> TokenUsage:
+        """Stop proxy, return accumulated token counts."""
+        return TokenUsage(
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+        )
+```
+
+**Key properties**:
+- **Transparent**: OpenEvolve is unaware of the proxy — it sees a normal OpenAI-compatible endpoint
+- **Protocol-compatible**: works with any provider (Anthropic, OpenAI, Ollama) since all expose the `usage` field in chat completion responses
+- **Best-effort**: if a response lacks `usage` data (e.g., streaming without final usage), the count is incomplete. Token columns are NULLable for this reason.
+- **No overhead**: the proxy adds negligible latency (< 1ms per request) compared to LLM inference time
+
+**Cost estimation** (computed at read time, not stored):
+
+```python
+def estimate_cost(prompt_tokens: int, completion_tokens: int, llm: LLMEntry) -> float | None:
+    """Estimate cost in USD from token counts and LLM pricing. Returns None if no pricing configured."""
+    if llm.input_cost_per_mtok is None or llm.output_cost_per_mtok is None:
+        return None
+    return (prompt_tokens * llm.input_cost_per_mtok + completion_tokens * llm.output_cost_per_mtok) / 1_000_000
+```
+
 ---
 
 ## 5. Environment Variables
@@ -616,6 +670,13 @@ class RunConfig(BaseModel):
     config_overrides: list[str] = []
     dry_run: bool = False
 
+class TokenUsage(BaseModel):
+    """Token usage accumulated during a run."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0              # prompt + completion (convenience, NOT persisted in DB)
+    estimated_cost_usd: float | None = None  # computed at read time, NOT persisted in DB
+
 class RunManifest(BaseModel):
     """Manifest stored in .revolver/runs/<id>/manifest.yaml."""
     model_config = ConfigDict(frozen=True)
@@ -634,6 +695,9 @@ class RunManifest(BaseModel):
     llm: str
     llm_model: str
     resumed_from: str | None = None
+
+    # Token usage (FR-RUN-028/029/030)
+    token_usage: TokenUsage | None = None  # None while running or if tracking unavailable
 
     # Solution
     solution: "SolutionResult | None" = None  # Auto-created rank-1 solution (None while running)
@@ -659,6 +723,7 @@ class RunResult(BaseModel):
     dataset: str
     iterations: int
     generation_time_s: float
+    token_usage: TokenUsage | None = None  # Token counts from proxy (FR-RUN-028)
     resumed_from: str | None = None
 
 class SolutionResult(BaseModel):
@@ -691,6 +756,7 @@ class RunSummary(BaseModel):
     dataset: str
     iterations: int
     generation_time_s: float | None = None
+    token_usage: TokenUsage | None = None  # Token counts for run list display
     status: str
     resumed_from: str | None = None
     created_at: datetime
@@ -707,6 +773,7 @@ class RunInfo(BaseModel):
     dataset_hash: str
     iterations: int
     generation_time_s: float | None = None
+    token_usage: TokenUsage | None = None  # Token counts + cost estimate
     status: str
     resumed_from: str | None = None
     created_at: datetime
@@ -1078,6 +1145,25 @@ When a problem version snapshot includes `problem.md`, its content is injected i
 - **Override-compatible**: The user can still override `prompt.system_message` via `--config-override`, which takes precedence in the merge order.
 - **Motivation**: POC #13 (OpenEvolve + Claude API) identified that the LLM only receives code and metric names without context. Adding a problem description to the system prompt significantly improves solution quality by giving the LLM domain knowledge.
 
+### DD-14: Token tracking via transparent HTTP proxy (FR-RUN-028)
+
+OpenEvolve does not expose token usage data (POC #13 finding). Revolver solves this by injecting a lightweight local HTTP proxy between OpenEvolve and the LLM API endpoint:
+
+**Why a proxy** (vs alternatives):
+- **OpenEvolve callback/hook**: OpenEvolve does not expose per-request hooks — no way to intercept responses
+- **Log parsing**: OpenEvolve does not log token usage to any file
+- **Provider billing API**: Provider-specific, not real-time, requires additional credentials
+- **Proxy**: universal (works with any OpenAI-compatible endpoint), transparent, no OpenEvolve modification needed
+
+**Trade-offs**:
+- Adds a local network hop (+< 1ms vs LLM inference of seconds)
+- Requires a local port allocation (random available port)
+- Streaming responses may not include `usage` in intermediate chunks — the proxy reads the final `usage` from the stream termination message
+
+**Lifecycle**: The proxy is started before `openevolve.run()` and stopped after it returns. It lives within the same process as `revolver run`, managed by `TokenCountingProxy`. On resume, a new proxy is started for the new run (token counts are per-run).
+
+**Note on `config_snapshot`**: The `config_snapshot` stored in SQLite (NFR-023) will contain the proxy URL (`http://127.0.0.1:<port>/v1`) instead of the real LLM endpoint. This is acceptable because: (1) the proxy is ephemeral and only exists during the run, (2) the real LLM endpoint is always recoverable from the `llms` registry via `runs.llm`, (3) `run info` displays the LLM name and model from the run metadata, not from the config snapshot.
+
 ---
 
 ## 14. Architecture Impact
@@ -1087,6 +1173,7 @@ When a problem version snapshot includes `problem.md`, its content is injected i
 | Module | Layer | Purpose |
 |---|---|---|
 | `infra/openevolve.py` | Infrastructure | OpenEvolve controller wrapper (launch, monitor, collect results) |
+| `infra/token_proxy.py` | Infrastructure | Transparent HTTP proxy for token usage tracking (DD-14) |
 
 ### Existing modules impacted
 
@@ -1094,7 +1181,7 @@ When a problem version snapshot includes `problem.md`, its content is injected i
 |---|---|
 | `core/run.py` | Implement `start_run()`, `resume_run()`, `get_run_status()`, `list_runs()`, `get_run_info()`, `generate_wrapper()` |
 | `cli/run.py` | Implement 5 Typer commands (`run`, `status`, `resume`, `list`, `info`) |
-| `models/run.py` | Define `RunConfig`, `RunManifest`, `RunResult`, `SolutionResult`, `RunStatus`, `RunSummary`, `RunInfo`, `ProgressInfo` (new file) |
+| `models/run.py` | Define `TokenUsage`, `RunConfig`, `RunManifest`, `RunResult`, `SolutionResult`, `RunStatus`, `RunSummary`, `RunInfo`, `ProgressInfo` (new file) |
 | `infra/store.py` | Add `create_run_dir()`, `write_run_manifest()`, per-run lock management (`write_run_lock()`, `remove_run_lock()`, `get_active_runs()`) |
 | `infra/db.py` | Add `insert_run()`, `insert_solution()` (run_id + rank), `get_run()`, `list_runs()`, `get_solutions_for_run()`, `get_resume_chain()`, `get_latest_run()`, `update_run_status()` |
 | `core/solution.py` | Add `extract_solution()` — creates solution row, triggers training eval |

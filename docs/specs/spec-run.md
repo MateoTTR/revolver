@@ -63,6 +63,19 @@ Run completed: run-20260310-143000
   Solution: sol-20260310-143000 (rank #1, alias: claude-small-v1.1)
   Best combined_score: 0.91
   Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
+  Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
+  Estimated cost: $5.65 (based on claude-opus pricing)
+  Stored in: .revolver/runs/run-20260310-143000/
+```
+
+**Output** (human, on completion — local LLM, no pricing):
+```
+Run completed: run-20260310-143000
+  100 iterations in 1h30m
+  Solution: sol-20260310-143000 (rank #1, alias: codestral-v1.0)
+  Best combined_score: 0.74
+  Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
+  Tokens: 890,000 prompt + 215,000 completion = 1,105,000 total
   Stored in: .revolver/runs/run-20260310-143000/
 ```
 
@@ -76,6 +89,12 @@ Run completed: run-20260310-143000
   "dataset": "train-small",
   "iterations": 200,
   "generation_time_s": 13500,
+  "token_usage": {
+    "prompt_tokens": 1245000,
+    "completion_tokens": 328000,
+    "total_tokens": 1573000,
+    "estimated_cost_usd": 5.65
+  },
   "solution": {
     "solution_id": "sol-20260310-143000",
     "alias": "claude-small-v1.1",
@@ -163,6 +182,8 @@ Run: run-20260310-143000
   Dataset: train-small (sha256:f1e2d3c4...)
   Iterations: 200
   Generation time: 3h45m
+  Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
+  Estimated cost: $5.65
   Resumed from: —
   Directory: .revolver/runs/run-20260310-143000/
 
@@ -213,6 +234,9 @@ Resume chain: (none)
 | FR-RUN-023 | MUST | `--dry-run` validates all inputs and displays resolved config without launching | — |
 | FR-RUN-024 | MUST | Resume copies the wrapper evaluator from the parent run (no regeneration) | — |
 | FR-RUN-025 | SHOULD | Per-run lock files in `.revolver/runs/locks/` enable concurrent run tracking | §3.3 |
+| FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run by intercepting LLM API responses | §4.6, POC #13 |
+| FR-RUN-029 | SHOULD | Display token usage in run completion output and `run info` | §4.6 |
+| FR-RUN-030 | SHOULD | Estimate cost from token usage and optional LLM pricing (if configured). Display in run output when pricing is available. | §4.6, POC #13 |
 
 ---
 
@@ -246,6 +270,12 @@ status: "completed"
 created_at: "2026-03-10T14:30:00Z"
 generation_time_s: 13500
 iterations: 200
+
+token_usage:
+  prompt_tokens: 1245000
+  completion_tokens: 328000
+  total_tokens: 1573000
+  estimated_cost_usd: 5.65      # null if no pricing configured
 
 lineage:
   problem_version: "v1.1"

@@ -232,6 +232,7 @@ A **Run** is the first-class physical entity that owns all artifacts from an Ope
 - **Config**: The OpenEvolve config used for this run
 - **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)
 - **Manifest**: Full lineage metadata (problem version, dataset, LLM, iterations, generation time, status)
+- **Token usage**: Total prompt and completion tokens consumed during the evolution (tracked via a transparent proxy). Combined with optional LLM pricing to estimate cost per run.
 
 ### 4.7 Benchmark
 
@@ -630,7 +631,7 @@ bench-20260310-170000,sol-20260310-150000,gemma-small-v1.1,run-20260310-150000,s
 - Standalone solution evaluation with aggregate statistics (mean, min, max, percentiles, std)
 - Multi-solution benchmarking
 - Full traceability (problem version, dataset, LLM, config → solution)
-- Cost metrics (generation time, per-instance compute time)
+- Cost metrics (generation time, per-instance compute time, token usage, estimated API cost)
 - Result export (CSV, JSON)
 - Sequential local LLM runs, parallel remote LLM runs
 - Automatic rank-1 solution creation, on-demand extraction for other ranks
