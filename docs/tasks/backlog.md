@@ -51,8 +51,8 @@
 
 | # | Task | Status | Session |
 |---|---|---|---|
-| 16 | Validation strategy and test plan | [ ] | |
-| 17 | Traceability matrix (specs → design → tests) | [ ] | |
+| 16 | Validation strategy and test plan | [x] | 015 |
+| 17 | Traceability matrix (specs → design → tests) | [x] | 015 |
 
 ## Phase 5 — Implementation
 

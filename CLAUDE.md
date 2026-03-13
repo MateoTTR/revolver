@@ -45,6 +45,15 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [DES-006](docs/architecture/design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | Draft |
 | [DES-007](docs/architecture/design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | Draft |
 
+### Validation Documents
+
+| Document | Path | Purpose |
+|---|---|---|
+| Validation overview | [docs/validation/validation.md](docs/validation/validation.md) | Strategy, levels, tools, CI pipeline, coverage targets |
+| Integration tests | [docs/validation/val-integration-tests.md](docs/validation/val-integration-tests.md) | L2 command test matrix, fixtures, scenarios |
+| E2E tests | [docs/validation/val-e2e-tests.md](docs/validation/val-e2e-tests.md) | L3 scenarios, LLM mocking, fake server |
+| Traceability matrix | [docs/validation/traceability-matrix.md](docs/validation/traceability-matrix.md) | FR/NFR → DES → test mapping |
+
 ---
 
 ## Session Checklist
@@ -69,9 +78,9 @@ Before starting any work in a session:
 | Phase | Focus | Status |
 |---|---|---|
 | Phase 1 | Cadrage: ConOps + Functional Specifications | **Done** |
-| Phase 2 | Architecture, tech choices (ADRs), data model | **In progress** |
-| Phase 3 | POCs for critical aspects | Not started |
-| Phase 4 | Validation strategy, test plan, traceability | Not started |
+| Phase 2 | Architecture, tech choices (ADRs), data model | **Done** |
+| Phase 3 | POCs for critical aspects | **Done** (covered by POC #11/12/13) |
+| Phase 4 | Validation strategy, test plan, traceability | **Done** |
 | Phase 5 | Implementation | Not started |
 
 ---
