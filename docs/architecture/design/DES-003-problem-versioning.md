@@ -13,13 +13,14 @@ This document details the design of the `revolver problem` commands: `test`, `ve
 
 ### 1.1 Problem Structure
 
-A Revolver problem is composed of three files in the project root:
+A Revolver problem is composed of the following files in the project root:
 
 | File | Purpose | Required |
 |---|---|---|
 | `initial_program.py` | Starting code with `EVOLVE-BLOCK` markers | Yes |
 | `evaluator.py` | Evaluator defining `evaluate(program_path) -> dict[str, float]` | Yes |
 | `config.yaml` | OpenEvolve configuration (iterations, LLM params, etc.) | Yes |
+| `problem.md` | Free-form problem description injected into OpenEvolve system prompt | No |
 
 These files are **mutable** — the user edits them freely. `revolver problem version` creates an **immutable snapshot** at a point in time.
 
@@ -101,11 +102,14 @@ CLI (cli/problem.py)
 Core (core/problem.py) → create_version()
   │ 1. Resolve project root                       ──► Infra: store.find_project_root()
   │ 2. Check required files exist:
-  │    initial_program.py, evaluator.py, config.yaml
+  │    initial_program.py, evaluator.py, config.yaml (required)
+  │    problem.md (optional — checked but not required)
   │ 3. Check tag uniqueness                        ──► Infra: db.get_problem_version(tag)
   │ 4. Create snapshot directory:
   │    .revolver/problem/<tag>/
   │ 5. Copy files to snapshot directory             ──► shutil.copy2()
+  │    Copies: initial_program.py, evaluator.py, config.yaml
+  │    + problem.md if present in project root
   │ 6. Set snapshot files read-only (0o444)        ──► chmod() on each file
   │ 7. Compute per-file SHA-256 hashes             ──► Infra: hashing.file_hash()
   │ 8. Compute snapshot hash:
@@ -220,12 +224,14 @@ class TestResult(BaseModel):
     │   ├── manifest.yaml
     │   ├── initial_program.py     # immutable copy
     │   ├── evaluator.py           # immutable copy
-    │   └── config.yaml            # immutable copy
+    │   ├── config.yaml            # immutable copy
+    │   └── problem.md             # immutable copy (if present)
     └── v1.1/
         ├── manifest.yaml
         ├── initial_program.py
         ├── evaluator.py
-        └── config.yaml
+        ├── config.yaml
+        └── problem.md             # immutable copy (if present)
 ```
 
 ### 4.2 Manifest Format
@@ -244,9 +250,11 @@ files:
     hash: "sha256:..."
   - name: "initial_program.py"
     hash: "sha256:..."
+  - name: "problem.md"          # Only present if problem.md exists
+    hash: "sha256:..."
 ```
 
-Files are listed in sorted order (matching the hash algorithm).
+Files are listed in sorted order (matching the hash algorithm). `problem.md` appears only when it exists in the project root at versioning time.
 
 ### 4.3 SQLite
 
@@ -455,6 +463,16 @@ Problem versioning is **internal to Revolver**, not git-integrated. Rationale:
 - **Coexistence**: users can (and should) also use git for their project. The two systems are complementary — git for collaboration, Revolver for traceability.
 
 The user provides explicit tags (`v1.0`, `v1.1`) rather than auto-generated version numbers. This mirrors git's tagging model and gives the user control over versioning semantics.
+
+### DD-07: `problem.md` — optional free-form problem description
+
+An optional `problem.md` file in the project root provides a free-form markdown description of the optimization problem. Design choices:
+
+- **Optional**: `problem.md` is not required. The three mandatory files (initial_program.py, evaluator.py, config.yaml) are sufficient for a valid problem definition. `version` succeeds without it.
+- **Free-form markdown**: In v1, the file content is not parsed, validated, or structured. It is treated as opaque text.
+- **Included in snapshot**: When present, `problem.md` is copied into the versioned snapshot alongside the other files, included in the manifest, and factored into the snapshot hash.
+- **Injected into system prompt**: During `revolver run`, if the problem version snapshot contains `problem.md`, its content is injected into OpenEvolve's `prompt.system_message` configuration (see [DES-005](DES-005-run-orchestration.md) §4.4). If absent, the default OpenEvolve system prompt is left unchanged.
+- **Motivation**: POC #13 identified that without a problem description, the LLM only receives code and metric names, which limits solution quality. Providing structured domain knowledge via the system prompt significantly improves the quality of generated solutions.
 
 ---
 

@@ -27,12 +27,14 @@ docs/architecture/design/DES-NNN-*.md  — detailed design documents (expand on 
 docs/pocs/poc-*.md                     — POC summaries (validated decisions, key findings)
 ```
 
-### Current documents
+### Document discovery
 
-**Specs**: spec-project, spec-llm, spec-problem, spec-dataset, spec-run, spec-eval, spec-solution, spec-benchmark, spec-setup
-**ADRs**: ADR-001 (Ollama), ADR-002 (Python), ADR-003 (Typer), ADR-004 (SQLite), ADR-005 (Pydantic), ADR-006 (OpenEvolve injection)
-**Design docs**: DES-001 (SQLite data model), DES-002 (llm subcommands), DES-003 (problem versioning), DES-004 (dataset registration), DES-005 (run orchestration), DES-006 (eval loop)
-**POCs**: poc-local-llm, poc-openevolve-integration
+Do NOT rely on a hardcoded list. Use Glob to discover documents at runtime:
+- `docs/specs/spec-*.md` — individual functional specifications
+- `docs/architecture/adr/ADR-*.md` — architecture decision records
+- `docs/architecture/design/DES-*.md` — detailed design documents
+- `docs/pocs/poc-*.md` — POC summaries
+- `CLAUDE.md` — canonical index (ADR table, DES table)
 
 ### Traceability chain
 

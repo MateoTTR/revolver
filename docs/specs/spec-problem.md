@@ -7,7 +7,7 @@
 
 ## 1. Scope
 
-This spec covers problem testing and versioning. A problem is the user's optimization problem definition: initial program + evaluator + config. The user works on mutable files in the project root and creates immutable versioned snapshots when ready.
+This spec covers problem testing and versioning. A problem is the user's optimization problem definition: initial program + evaluator + config + optional problem description (`problem.md`). The user works on mutable files in the project root and creates immutable versioned snapshots when ready.
 
 ---
 
@@ -86,12 +86,20 @@ Create an immutable snapshot of the current problem definition.
 | `--message <text>` | string | No | Description of what changed. Default: `""` |
 
 **Behavior**:
-1. Copy `initial_program.py`, `evaluator.py`, and `config.yaml` to `.revolver/problem/<tag>/`
+1. Copy `initial_program.py`, `evaluator.py`, `config.yaml`, and `problem.md` (if present) to `.revolver/problem/<tag>/`
 2. Compute SHA-256 hash of the snapshot contents
 3. Create `manifest.yaml` with hash, timestamp, message, and file list
 4. Verify the tag does not already exist
 
 **Output** (human):
+```
+Problem version "v1.0" created
+  Files: initial_program.py, evaluator.py, config.yaml, problem.md
+  Hash: sha256:a1b2c3d4...
+  Message: Initial formulation
+```
+
+**Output** (human, without problem.md):
 ```
 Problem version "v1.0" created
   Files: initial_program.py, evaluator.py, config.yaml
@@ -104,7 +112,7 @@ Problem version "v1.0" created
 {
   "tag": "v1.0",
   "hash": "sha256:a1b2c3d4...",
-  "files": ["initial_program.py", "evaluator.py", "config.yaml"],
+  "files": ["initial_program.py", "evaluator.py", "config.yaml", "problem.md"],
   "message": "Initial formulation",
   "created_at": "2026-03-10T14:30:00Z"
 }
@@ -150,10 +158,12 @@ v1.1   e5f6g7h8      2026-03-11 09:15     Refined objective function
 | FR-PRB-007 | MUST | `version` computes and stores a SHA-256 hash of the snapshot | §7.1 |
 | FR-PRB-008 | MUST | `version` refuses to overwrite an existing tag | §7.1 |
 | FR-PRB-009 | MUST | `version` creates a `manifest.yaml` with hash, timestamp, message, file list | §7.1 |
-| FR-PRB-010 | MUST | `version` fails if any of the required files (initial_program.py, evaluator.py, config.yaml) are missing | — |
+| FR-PRB-010 | MUST | `version` fails if any of the required files (initial_program.py, evaluator.py, config.yaml) are missing. `problem.md` is **not** required. | — |
 | FR-PRB-011 | SHOULD | `test --verbose` shows full stdout/stderr and stack traces | §5.3 |
 | FR-PRB-012 | SHOULD | `test` displays a progress bar when testing a dataset with many instances | — |
 | FR-PRB-013 | MAY | `test` warns if `combined_score` is not in the returned dict (non-blocking warning) | §4.5 |
+| FR-PRB-014 | SHOULD | `version` includes `problem.md` in the snapshot if it exists in the project root | §4.2 |
+| FR-PRB-015 | SHOULD | `problem.md` content is injected into the OpenEvolve system prompt during `revolver run` (see DES-005) | §4.2 |
 
 ---
 
@@ -189,6 +199,8 @@ files:
   - name: "evaluator.py"
     hash: "sha256:..."
   - name: "config.yaml"
+    hash: "sha256:..."
+  - name: "problem.md"       # Only present if problem.md exists in project root
     hash: "sha256:..."
 ```
 
