@@ -1,0 +1,5 @@
+iterations: 10
+population_size: 5
+llm:
+  model: "test-model"
+  temperature: 0.8

@@ -1,0 +1,227 @@
+"""SQLite database connection factory and schema management.
+
+Provides connection factories for both the project-level database
+(.revolver/revolver.db) and the global user-level database
+(~/.revolver/revolver.db). Both use WAL mode and enforce foreign keys.
+
+Traceable to: DES-001 (SQLite Data Model), NFR-013, NFR-016.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
+
+# Current schema version — bump when adding migrations.
+CURRENT_SCHEMA_VERSION = 1
+
+# ── Project DB schema ────────────────────────────────────────────────────────
+
+_PROJECT_SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS schema_version (
+    version     INTEGER PRIMARY KEY,
+    applied_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS problem_versions (
+    tag             TEXT PRIMARY KEY,
+    hash            TEXT NOT NULL UNIQUE,
+    message         TEXT DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS datasets (
+    name            TEXT PRIMARY KEY,
+    path            TEXT NOT NULL,
+    split           TEXT NOT NULL CHECK (split IN ('train', 'eval')),
+    storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
+    description     TEXT DEFAULT '',
+    global_hash     TEXT NOT NULL,
+    instance_count  INTEGER NOT NULL,
+    registered_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dataset_instances (
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    instance_id     TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    PRIMARY KEY (dataset_name, instance_id)
+);
+
+CREATE TABLE IF NOT EXISTS dataset_compat (
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    problem_version TEXT NOT NULL REFERENCES problem_versions(tag),
+    PRIMARY KEY (dataset_name, problem_version)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id                TEXT PRIMARY KEY,
+    problem_version   TEXT NOT NULL REFERENCES problem_versions(tag),
+    llm               TEXT NOT NULL,
+    dataset           TEXT NOT NULL REFERENCES datasets(name),
+    iterations        INTEGER NOT NULL,
+    generation_time_s REAL,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    config_snapshot   TEXT,
+    problem_hash      TEXT NOT NULL,
+    dataset_hash      TEXT NOT NULL,
+    llm_model         TEXT NOT NULL,
+    resumed_from      TEXT REFERENCES runs(id),
+    status            TEXT NOT NULL DEFAULT 'running'
+                      CHECK (status IN ('running', 'completed', 'interrupted')),
+    created_at        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_runs_version ON runs(problem_version);
+CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_resumed ON runs(resumed_from);
+
+CREATE TABLE IF NOT EXISTS solutions (
+    id         TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL REFERENCES runs(id),
+    rank       INTEGER NOT NULL,
+    best_score REAL,
+    alias      TEXT UNIQUE,
+    UNIQUE(run_id, rank)
+);
+
+CREATE INDEX IF NOT EXISTS idx_solutions_run ON solutions(run_id);
+
+CREATE TABLE IF NOT EXISTS eval_metadata (
+    eval_id          TEXT PRIMARY KEY,
+    solution_id      TEXT NOT NULL REFERENCES solutions(id),
+    dataset_name     TEXT NOT NULL REFERENCES datasets(name),
+    instance_count   INTEGER NOT NULL,
+    instances_solved INTEGER NOT NULL,
+    eval_time_s      REAL,
+    user_aggregates  TEXT,
+    evaluated_at     TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_eval_unique ON eval_metadata(solution_id, dataset_name);
+
+CREATE TABLE IF NOT EXISTS eval_instances (
+    eval_id         TEXT NOT NULL REFERENCES eval_metadata(eval_id),
+    instance_id     TEXT NOT NULL,
+    metric_name     TEXT NOT NULL,
+    value           REAL,
+    status          TEXT NOT NULL CHECK (status IN ('solved', 'failed', 'timeout')),
+    error_message   TEXT,
+    compute_time_s  REAL,
+    PRIMARY KEY (eval_id, instance_id, metric_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_inst_eval ON eval_instances(eval_id);
+
+CREATE TABLE IF NOT EXISTS benchmarks (
+    id              TEXT PRIMARY KEY,
+    alias           TEXT,
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_benchmarks_created ON benchmarks(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS benchmark_solutions (
+    benchmark_id    TEXT NOT NULL REFERENCES benchmarks(id),
+    solution_id     TEXT NOT NULL REFERENCES solutions(id),
+    PRIMARY KEY (benchmark_id, solution_id)
+);
+"""
+
+# ── Global DB schema ─────────────────────────────────────────────────────────
+
+_GLOBAL_SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS schema_version (
+    version     INTEGER PRIMARY KEY,
+    applied_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS llms (
+    name            TEXT PRIMARY KEY,
+    provider        TEXT,
+    model           TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK (source IN ('local', 'remote')),
+    base_url        TEXT,
+    api_key_env     TEXT,
+    input_cost_per_mtok  REAL,
+    output_cost_per_mtok REAL,
+    registered_at   TEXT NOT NULL
+);
+"""
+
+# ── Migrations ───────────────────────────────────────────────────────────────
+
+# Forward-only migrations. Key = target version, value = SQL to apply.
+# Version 1 is the initial schema (handled by _apply_schema above).
+MIGRATIONS: dict[int, str] = {}
+
+
+def _configure_connection(conn: sqlite3.Connection) -> None:
+    """Apply standard PRAGMAs to a connection."""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _ensure_schema_version(conn: sqlite3.Connection) -> None:
+    """Insert schema_version row if not present."""
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (CURRENT_SCHEMA_VERSION, now),
+    )
+    conn.commit()
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply any pending forward-only migrations."""
+    cursor = conn.execute("SELECT MAX(version) FROM schema_version")
+    row = cursor.fetchone()
+    current = row[0] if row[0] is not None else 0
+
+    for target_version in sorted(MIGRATIONS.keys()):
+        if target_version > current:
+            conn.executescript(MIGRATIONS[target_version])
+            now = datetime.now(UTC).isoformat()
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                (target_version, now),
+            )
+            conn.commit()
+
+
+def get_project_db(path: Path) -> sqlite3.Connection:
+    """Open (or create) the project SQLite database.
+
+    Args:
+        path: Path to the SQLite database file (e.g. ``.revolver/revolver.db``).
+
+    Returns:
+        A configured ``sqlite3.Connection`` with WAL mode and foreign keys enabled.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    _configure_connection(conn)
+    conn.executescript(_PROJECT_SCHEMA_SQL)
+    _ensure_schema_version(conn)
+    _run_migrations(conn)
+    return conn
+
+
+def get_global_db() -> sqlite3.Connection:
+    """Open (or create) the global user-level database at ``~/.revolver/revolver.db``.
+
+    Returns:
+        A configured ``sqlite3.Connection`` with WAL mode and foreign keys enabled.
+    """
+    global_dir = Path.home() / ".revolver"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    db_path = global_dir / "revolver.db"
+    conn = sqlite3.connect(str(db_path))
+    _configure_connection(conn)
+    conn.executescript(_GLOBAL_SCHEMA_SQL)
+    _ensure_schema_version(conn)
+    _run_migrations(conn)
+    return conn
