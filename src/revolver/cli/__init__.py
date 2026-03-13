@@ -93,3 +93,9 @@ app.add_typer(eval_app, name="eval")
 
 benchmark_app = typer.Typer(help="Multi-solution comparison and export.")
 app.add_typer(benchmark_app, name="benchmark")
+
+# ── Command registrations ───────────────────────────────────────────────────
+# Import command modules to register their commands on the group apps above.
+# These imports MUST come after the Typer instances are created.
+
+import revolver.cli.project as _project_commands  # noqa: F401, E402
