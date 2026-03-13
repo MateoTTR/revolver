@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
 import pytest
@@ -18,6 +19,13 @@ from revolver.cli import app
 
 runner = CliRunner()
 
+# ANSI escape codes pattern (rich formatting in CI)
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
 
 @pytest.mark.unit
 class TestCliGlobalOptions:
@@ -26,10 +34,11 @@ class TestCliGlobalOptions:
     def test_help_shows_global_options(self) -> None:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "--json" in result.stdout
-        assert "--verbose" in result.stdout
-        assert "--quiet" in result.stdout
-        assert "--version" in result.stdout
+        output = _strip_ansi(result.stdout)
+        assert "--json" in output
+        assert "--verbose" in output
+        assert "--quiet" in output
+        assert "--version" in output
 
     def test_version_flag(self) -> None:
         result = runner.invoke(app, ["--version"])
@@ -60,11 +69,12 @@ class TestCliCommandGroups:
     def test_help_shows_all_command_groups(self) -> None:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
+        output = _strip_ansi(result.stdout)
         for group in self.EXPECTED_GROUPS:
-            assert group in result.stdout, f"Command group '{group}' not found in --help"
+            assert group in output, f"Command group '{group}' not found in --help"
 
     def test_no_args_shows_help(self) -> None:
         """When invoked with no args, help is displayed (Typer uses exit code 0)."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "OpenEvolve" in result.stdout
+        assert "OpenEvolve" in _strip_ansi(result.stdout)
