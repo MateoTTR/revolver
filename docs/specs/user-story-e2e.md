@@ -74,6 +74,7 @@ scheduling-optimizer/
 ├── initial_program.py      # template with EVOLVE-BLOCK markers
 ├── evaluator.py            # template with dual-mode pattern
 ├── config.yaml             # OpenEvolve defaults
+├── problem.md              # optional problem description (free-form markdown)
 └── project.yaml            # project metadata
 ```
 
@@ -85,6 +86,7 @@ Alice edits the template files to define her scheduling problem:
 
 - **`initial_program.py`** — a naive greedy scheduler with `EVOLVE-BLOCK` markers around the heuristic
 - **`evaluator.py`** — reads a job-shop instance, runs the program, computes makespan and a combined_score
+- **`problem.md`** — describes the job-shop scheduling domain, constraints, and optimization objectives in natural language (injected into the LLM system prompt during `revolver run`)
 
 ```bash
 # Test the evaluator on a single instance to make sure it works
@@ -124,7 +126,7 @@ Summary: 50 passed, 0 failed, mean time: 0.9s, max time: 3.8s
 $ revolver problem version --tag v1.0 --message "Initial formulation: greedy heuristic, makespan objective"
 
 Problem version "v1.0" created
-  Files: initial_program.py, evaluator.py, config.yaml
+  Files: initial_program.py, evaluator.py, config.yaml, problem.md
   Hash: sha256:a1b2c3d4...
   Message: Initial formulation: greedy heuristic, makespan objective
 ```
