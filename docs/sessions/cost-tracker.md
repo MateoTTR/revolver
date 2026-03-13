@@ -19,13 +19,14 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 11 | 2026-03-12 | session-011 | ~1h | Phase 2 | DES-007 (benchmark design), AQ-05 resolved, spec-reviewer validation + fixes |
 | 12 | 2026-03-13 | session-012 | ~2h | Phase 2-3 | POC #13 (Claude API), problem.md integration, triage v1/v2, tooling updates |
 | 13 | 2026-03-13 | session-013 | ~1h30 | Phase 2 | Top-N → extract on demand refactor, backlog update, spec-reviewer, session reports |
+| 14 | 2026-03-13 | session-014 | ~1h30 | Phase 2 | Token/cost tracking design (task 34), user-story-e2e update, spec-reviewer validation |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 13 |
-| **Total duration** | ~19h45 |
+| **Total sessions** | 14 |
+| **Total duration** | ~21h15 |
 | **Avg duration/session** | ~1h31 |
 
 ## Notes
