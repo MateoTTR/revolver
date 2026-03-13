@@ -1,6 +1,6 @@
 # Sprint 001 — Foundation: Project Scaffolding, DB, Shared Infrastructure
 
-**Status**: Planning
+**Status**: Done
 **Goal**: Establish the project skeleton (`pyproject.toml`, package layout, Typer root app), shared infrastructure modules (SQLite, hashing, config, output, store), Pydantic base models, typed exceptions, and the `revolver project init` command. This sprint delivers the foundation that every subsequent sprint depends on.
 **Demo**: `revolver project init my-project` creates a working project with `.revolver/`, `project.yaml`, template files (`initial_program.py`, `evaluator.py`, `config.yaml`), and an initialized SQLite database. `revolver --help` displays the command structure.
 
@@ -64,10 +64,10 @@ Tests from `val-integration-tests.md §2.1` that must pass at sprint end:
 
 | Command | Scenario | Test ID | Status |
 |---|---|---|---|
-| `project init` | Create project in empty dir — `.revolver/`, `project.yaml`, `revolver.db` created | `test_init_creates_structure` | Planned |
-| `project init` | Dir already has `.revolver/` — exit code 1, error message | `test_init_existing_project_fails` | Planned |
-| `project init --path` | Create and init new dir at target path | `test_init_with_path_option` | Planned |
-| `project init` | Check `.revolver/` permissions — mode 700 | `test_init_directory_permissions` | Planned |
+| `project init` | Create project in empty dir — `.revolver/`, `project.yaml`, `revolver.db` created | `test_init_creates_structure` | Passing |
+| `project init` | Dir already has `.revolver/` — exit code 1, error message | `test_init_existing_project_fails` | Passing |
+| `project init --path` | Create and init new dir at target path | `test_init_with_path_option` | Passing |
+| `project init` | Check `.revolver/` permissions — mode 700 | `test_init_directory_permissions` | Passing |
 
 **Cumulative L2 tests passing: 4 / 4 (this sprint)**
 
