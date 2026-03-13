@@ -117,7 +117,7 @@ src/revolver/
 │   ├── dataset.py           # revolver dataset {add,update,remove,list,info}
 │   ├── run.py               # revolver run {<default>,status,resume,list,info}
 │   ├── eval.py              # revolver eval {<default>,results}
-│   ├── solution.py          # revolver solution {list,info,alias}
+│   ├── solution.py          # revolver solution {list,info,alias,extract}
 │   ├── benchmark.py         # revolver benchmark {<default>,results,export,list}
 │   ├── doctor.py            # revolver doctor
 │   └── setup.py             # revolver setup
@@ -130,7 +130,7 @@ src/revolver/
 │   ├── dataset.py           # Dataset registration, integrity verification
 │   ├── run.py               # OpenEvolve orchestration, run management
 │   ├── eval.py              # Evaluation loop (per-instance iteration)
-│   ├── solution.py          # Solution browsing, alias management
+│   ├── solution.py          # Solution browsing, alias management, on-demand extraction
 │   ├── benchmark.py         # Multi-solution comparison, export
 │   ├── doctor.py            # Dependency health checks
 │   └── setup.py             # Assisted dependency installation
@@ -422,7 +422,7 @@ Detailed design notes expanding on specific architectural areas. Each document t
 | [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Draft |
 | [DES-003](design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | spec-problem, AQ-04 | Draft |
 | [DES-004](design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | spec-dataset, DES-001 | Draft |
-| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | spec-run, ADR-006, DES-001, DES-003, DES-004, POC #12 | Draft |
+| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | spec-run, ADR-006, DES-001, DES-003, DES-004, POC #12, POC #13 | Draft |
 | [DES-006](design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | spec-eval, ADR-006, DES-001, DES-003, DES-005 | Draft |
 | [DES-007](design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | spec-benchmark, DES-001, DES-005, DES-006 | Draft |
 

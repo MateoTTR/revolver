@@ -1,7 +1,7 @@
 # DES-005 — `revolver run` — OpenEvolve Orchestration
 
-**Version**: 0.2 — Run/Solution refactor
-**Date**: 2026-03-12
+**Version**: 0.3 — Extract on demand refactor
+**Date**: 2026-03-13
 **Status**: Draft
 **Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
 
@@ -21,8 +21,8 @@ This document details the design of the `revolver run` commands: `run` (launch a
 | **OpenEvolve configuration** | Programmatically configure LLM endpoint, iterations, output dir |
 | **Execution** | Launch OpenEvolve via controller class (not `run_evolution()`) |
 | **Progress monitoring** | Display iteration count, best score, elapsed time |
-| **Result collection** | Extract top-N programs, store in run directory + create solution references in DB |
-| **Post-run evaluation** | Evaluate all top-N programs on training instances (FR-RUN-019) |
+| **Result collection** | Store all top-ranked programs in run directory, auto-create rank-1 solution reference in DB |
+| **Post-run evaluation** | Evaluate rank-1 program on training instances (FR-RUN-019) |
 | **Concurrency control** | Per-run lock files in `.revolver/runs/locks/` |
 
 ---
@@ -35,7 +35,7 @@ Launch an OpenEvolve evolution run.
 
 ```
 CLI (cli/run.py)
-  │ Parse: --version, --llm, --dataset, --iterations, --alias, --top-n,
+  │ Parse: --version, --llm, --dataset, --iterations, --alias,
   │        --config-override, --dry-run
   │ Validate: all required options provided
   ▼
@@ -63,26 +63,26 @@ Core (core/run.py) → start_run()
   │     REVOLVER_DATASET_DIR, REVOLVER_INSTANCE_LOG, REVOLVER_EVAL_LOG
   │     (paths point to .revolver/runs/<id>/)
   │ 11. Configure OpenEvolve programmatically       ──► Infra: openevolve.build_config()
+  │     Includes: problem.md injection if present   (§4.4, DD-13)
   │ 12. Write run lock file                         ──► Infra: store.write_run_lock(id)
   │     .revolver/runs/locks/<id>.lock
   │ 13. Launch OpenEvolve                           ──► Infra: openevolve.run()
   │ 14. Monitor progress                            ──► callback to CLI for display
   │ 15. On completion:
-  │     a. Collect top-N programs                   ──► Infra: openevolve.collect_results()
+  │     a. Collect all top-ranked programs           ──► Infra: openevolve.collect_results()
   │        Save as rank-1.py, rank-2.py, ...
   │        in .revolver/runs/<id>/programs/
   │     b. Copy checkpoint, config, evaluator       ──► Infra: store
   │        into run directory
-  │     c. For each of the N programs (rank 1..N):
-  │        i.   Generate solution ID                ──► generate_solution_id()
-  │        ii.  Insert solution row (run_id, rank)  ──► Infra: db.insert_solution()
-  │        iii. Set alias on rank-1 only (if provided)
+  │     c. Generate solution ID for rank-1          ──► generate_solution_id()
+  │        Insert solution row (run_id, rank=1)     ──► Infra: db.insert_solution()
+  │        Set alias (if provided)
   │     d. Post-run training evaluation             ──► Core: eval.evaluate_solution()
-  │        on EACH top-N solution (FR-RUN-019)
+  │        on rank-1 solution only (FR-RUN-019)
   │     e. Update run status to 'completed'         ──► Infra: db.update_run_status()
   │     f. Write run manifest                       ──► Infra: store.write_run_manifest()
   │     g. Remove run lock                          ──► Infra: store.remove_run_lock(id)
-  │ 16. Return RunResult (containing N SolutionResults)
+  │ 16. Return RunResult (containing 1 SolutionResult + programs_stored count)
   ▼
 Infra
   ├── store: run dirs, manifests, lock files
@@ -143,13 +143,12 @@ Core (core/run.py) → resume_run()
   │ 15. Launch OpenEvolve with checkpoint           ──► Infra: openevolve.run(checkpoint=...)
   │ 16. Monitor progress                            ──► callback to CLI for display
   │ 17. On completion (same as fresh run):
-  │     a. Collect top-N programs → save as rank-1.py, rank-2.py, ...
+  │     a. Collect all top-ranked programs → save as rank-1.py, rank-2.py, ...
   │        in .revolver/runs/<new_id>/programs/
   │     b. Copy checkpoint, config into new run directory
-  │     c. For each of the N programs:
-  │        i.   Generate solution ID
-  │        ii.  Insert solution row (run_id, rank) in DB
-  │     d. Post-run training evaluation on EACH top-N solution
+  │     c. Generate solution ID for rank-1
+  │        Insert solution row (run_id, rank=1) in DB
+  │     d. Post-run training evaluation on rank-1 solution
   │     e. Update run status to 'completed'
   │     f. Write run manifest
   │     g. Remove run lock
@@ -188,8 +187,10 @@ CLI (cli/run.py)
 Core (core/run.py) → get_run_info()
   │ 1. Query run metadata                           ──► Infra: db.get_run(run_id)
   │ 2. Query associated solutions                   ──► Infra: db.get_solutions_for_run(run_id)
-  │ 3. Query resume chain (CTE recursive)           ──► Infra: db.get_resume_chain(run_id)
-  │ 4. Return RunInfo
+  │ 3. Read programs list from run manifest          ──► Infra: store.read_run_manifest(run_id)
+  │    (programs with ranks and scores for display)
+  │ 4. Query resume chain (CTE recursive)           ──► Infra: db.get_resume_chain(run_id)
+  │ 5. Return RunInfo (with solutions + programs)
   ▼
 Infra
   └── db: query runs + solutions tables
@@ -426,6 +427,7 @@ def build_config(
     iterations: int | None,
     config_overrides: list[str] | None,
     output_dir: Path,
+    problem_description: str | None = None,
 ) -> dict:
     """
     Build the OpenEvolve config dict.
@@ -433,9 +435,10 @@ def build_config(
     Merge order (last wins):
         1. Problem version's config.yaml (base)
         2. LLM endpoint configuration (base_url, model, api_key)
-        3. --iterations override
-        4. --config-override key=value pairs
-        5. Output directory (always Revolver-controlled)
+        3. Problem description injection into prompt.system_message (if provided)
+        4. --iterations override
+        5. --config-override key=value pairs
+        6. Output directory (always Revolver-controlled)
     """
 ```
 
@@ -450,6 +453,48 @@ OpenEvolve expects LLM configuration in its config. Revolver injects it based on
 | `api_key` | `llm.api_key` | Read from env var named in `llms.api_key_env` |
 
 For local LLMs (Ollama), `base_url` is typically `http://localhost:11434/v1` and no API key is needed.
+
+### 4.4 Problem Description Injection
+
+When the problem version snapshot contains a `problem.md` file, Revolver reads its content and injects it into the OpenEvolve system prompt. This gives the LLM structured domain knowledge about the optimization problem.
+
+**Mechanism**:
+
+1. During `start_run()`, after loading the problem version snapshot (step 2), read `problem.md` from `.revolver/problem/<tag>/problem.md`
+2. If the file exists, pass its content as the `problem_description` parameter to `build_config()`
+3. In `build_config()`, if `problem_description` is not None, set `config["prompt"]["system_message"]` to a template that includes the content:
+
+```python
+SYSTEM_PROMPT_TEMPLATE = """You are an expert programmer tasked with improving code \
+to optimize a specific problem.
+
+## Problem Description
+
+{problem_description}
+
+## Instructions
+
+Analyze the provided code and suggest improvements to optimize the metrics \
+returned by the evaluator. Focus on the code sections marked with EVOLVE-BLOCK."""
+
+def build_config(..., problem_description: str | None = None) -> dict:
+    ...
+    if problem_description:
+        config.setdefault("prompt", {})
+        config["prompt"]["system_message"] = SYSTEM_PROMPT_TEMPLATE.format(
+            problem_description=problem_description
+        )
+    ...
+```
+
+4. If `problem.md` does not exist in the snapshot, `problem_description` is None, and the default OpenEvolve system prompt is left unchanged
+5. The injection happens in `build_config()` at configuration time, **not** at runtime
+
+**Key properties**:
+- The injection is **static**: the entire `problem.md` content is embedded in the config before OpenEvolve starts
+- The content is treated as **opaque text** — no parsing, no validation, no templating beyond the wrapping template
+- The `--config-override` mechanism can still override `prompt.system_message` if the user provides an explicit override (merge order in `build_config()`)
+- Resume runs inherit the same problem version snapshot, so the same `problem.md` is injected
 
 ---
 
@@ -530,25 +575,27 @@ start_run()  → write .revolver/runs/locks/<run_id>.lock
 
 ## 7. Post-Run Training Evaluation (FR-RUN-019/020)
 
-After OpenEvolve completes, Revolver evaluates **all top-N programs** on all training instances to produce per-instance results accessible via `revolver eval results` (DD-12).
+After OpenEvolve completes, Revolver evaluates the **rank-1 program** (the auto-created solution) on all training instances to produce per-instance results accessible via `revolver eval results` (DD-12).
 
 ```python
 def _post_run_evaluation(
     run_id: str,
+    solution_id: str,
     problem_version: str,
     dataset_name: str,
 ) -> None:
     """
-    Evaluate all top-N programs on training instances.
-    For each solution created by the run, calls core.eval.evaluate_solution().
-    The program path for each solution is resolved via (run_id, rank).
+    Evaluate the rank-1 program on training instances.
+    Calls core.eval.evaluate_solution() for the auto-created solution.
     Results are stored in eval_metadata/eval_instances with the training
     dataset, making them accessible via:
       revolver eval results --solution <id> --dataset <train-dataset>
     """
 ```
 
-This step is **synchronous** — it runs after OpenEvolve completes but before the run is marked as finished. Each of the N solutions is evaluated sequentially. If evaluation fails for a specific solution, a warning is emitted but evaluation continues for remaining solutions. The run is still considered successful regardless of post-run evaluation failures (the run and solutions are already stored).
+This step is **synchronous** — it runs after OpenEvolve completes but before the run is marked as finished. If evaluation fails, a warning is emitted. The run is still considered successful regardless of post-run evaluation failures (the run and solution are already stored).
+
+**On-demand extraction**: When a user later calls `revolver solution extract --run <id> --rank N`, the same evaluation is performed on the newly extracted solution. This ensures every solution has training eval results, whether auto-created or extracted.
 
 ---
 
@@ -566,7 +613,6 @@ class RunConfig(BaseModel):
     dataset_name: str
     iterations: int | None = None
     alias: str | None = None
-    top_n: int = 1
     config_overrides: list[str] = []
     dry_run: bool = False
 
@@ -578,7 +624,6 @@ class RunManifest(BaseModel):
     created_at: datetime
     generation_time_s: float | None = None
     iterations: int
-    top_n: int = 1
     status: str = "running"  # running | completed | interrupted
 
     # Lineage
@@ -590,15 +635,25 @@ class RunManifest(BaseModel):
     llm_model: str
     resumed_from: str | None = None
 
+    # Solution
+    solution: "SolutionResult | None" = None  # Auto-created rank-1 solution (None while running)
+
     # Files
-    programs: list[str] = []  # ["rank-1.py", "rank-2.py", ...]
+    programs: list["ProgramEntry"] = []  # All stored programs from OpenEvolve output
     checkpoint: str = "oe-checkpoint/"
-    config_snapshot: str = "config.yaml"
+    config_file: str = "config.yaml"    # Relative path to config in run dir (NB: SQLite stores verbatim content as config_snapshot)
+
+class ProgramEntry(BaseModel):
+    """A stored program from OpenEvolve output."""
+    rank: int
+    score: float | None = None
+    file: str                          # e.g. "programs/rank-1.py"
 
 class RunResult(BaseModel):
     """Returned to CLI after a run completes."""
     run_id: str                        # This run's own ID
-    solutions: list["SolutionResult"]  # One per top-N program (rank 1 first)
+    solution: "SolutionResult"         # Auto-created rank-1 solution
+    programs_stored: int               # Total programs stored from OpenEvolve output
     problem_version: str
     llm: str
     dataset: str
@@ -607,11 +662,11 @@ class RunResult(BaseModel):
     resumed_from: str | None = None
 
 class SolutionResult(BaseModel):
-    """One solution from a top-N run."""
+    """One solution reference."""
     solution_id: str
     run_id: str                        # Run that produced this solution
     alias: str | None = None
-    rank: int                          # 1 = best
+    rank: int                          # 1 = best (auto-created), or extracted rank
     best_score: float | None = None
 
 class RunStatus(BaseModel):
@@ -634,7 +689,6 @@ class RunSummary(BaseModel):
     problem_version: str
     llm: str
     dataset: str
-    top_n: int
     iterations: int
     generation_time_s: float | None = None
     status: str
@@ -651,14 +705,14 @@ class RunInfo(BaseModel):
     llm_model: str
     dataset: str
     dataset_hash: str
-    top_n: int
     iterations: int
     generation_time_s: float | None = None
     status: str
     resumed_from: str | None = None
     created_at: datetime
-    solutions: list["SolutionResult"] = []
-    resume_chain: list[str] = []       # Ordered list of ancestor run IDs
+    solutions: list["SolutionResult"] = []  # Auto-created + extracted solutions
+    programs: list["ProgramEntry"] = []     # All stored programs (for run info display)
+    resume_chain: list[str] = []            # Ordered list of ancestor run IDs
 
 class ProgressInfo(BaseModel):
     """Progress callback data from OpenEvolve."""
@@ -672,7 +726,7 @@ class ProgressInfo(BaseModel):
 
 ## 9. Storage Layout
 
-Each run has its own directory under `.revolver/runs/`. Solutions do not have their own directories — they are DB references to programs stored in the run directory.
+Each run has its own directory under `.revolver/runs/`. Solutions do not have their own directories — they are DB references to programs stored in the run directory. All top-ranked programs from OpenEvolve are stored as `rank-N.py` files; only rank-1 is auto-promoted to a solution. Others can be promoted on demand via `solution extract`.
 
 ```
 .revolver/
@@ -715,8 +769,8 @@ def start_run(config: RunConfig) -> RunResult:
     """
     Launch an OpenEvolve evolution run.
     Validates inputs, generates wrapper, launches OE, stores results.
-    Creates a run directory, then N solution rows in DB (one per top-N program).
-    Post-run evaluation runs on all top-N solutions.
+    Creates a run directory, stores all programs, creates 1 solution row (rank-1).
+    Post-run evaluation runs on rank-1 solution only.
     If config.dry_run is True, validates everything and returns without launching.
     """
 
@@ -725,7 +779,7 @@ def resume_run(run_id: str) -> RunResult:
     Resume a run from its checkpoint.
     Creates a NEW run with resumed_from pointing to the parent run.
     Copies wrapper and checkpoint from parent, launches OE with checkpoint.
-    On completion: creates new solutions, runs post-run eval.
+    On completion: creates 1 solution (rank-1), runs post-run eval.
     """
 
 def get_run_status() -> RunStatus:
@@ -757,10 +811,11 @@ def generate_wrapper(
 
 def _post_run_evaluation(
     run_id: str,
+    solution_id: str,
     problem_version: str,
     dataset_name: str,
 ) -> None:
-    """Evaluate all top-N programs on training instances after run. Iterates over solutions for the run."""
+    """Evaluate rank-1 program on training instances after run."""
 
 def generate_run_id() -> str:
     """Generate run-YYYYMMDD-HHMMSS with counter for collisions."""
@@ -785,8 +840,7 @@ def run_default(
     llm: str = typer.Option(..., "--llm", help="Registered LLM name"),
     dataset: str = typer.Option(..., "--dataset", help="Training dataset name"),
     iterations: int | None = typer.Option(None, "--iterations", help="Override iteration count"),
-    alias: str | None = typer.Option(None, "--alias", help="Solution alias (rank-1 only)"),
-    top_n: int = typer.Option(1, "--top-n", help="Number of top solutions to keep"),
+    alias: str | None = typer.Option(None, "--alias", help="Solution alias"),
     config_override: list[str] | None = typer.Option(None, "--config-override", help="key=value overrides"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate inputs and show config without launching"),
 ): ...
@@ -846,10 +900,9 @@ User      CLI         Core            OpenEvolve    Store    DB       Hashing
  │         │           │◄── results ─────────│            │        │
  │         │           │── save programs ────►│ (rank-N.py)│        │
  │         │           │── copy checkpoint ──►│            │        │
- │         │           │── for each top-N:    │            │        │
- │         │           │   ── gen solution ID  │            │        │
- │         │           │   ── insert solution ───────────►│         │
- │         │           │── post-run eval (all) │            │        │
+ │         │           │── gen solution ID (rank-1)         │        │
+ │         │           │── insert solution ──────────────►│         │
+ │         │           │── post-run eval (rank-1)│            │        │
  │         │           │── update run status ─────────────►│         │
  │         │           │── write manifest ───►│            │        │
  │         │           │── remove run lock ──►│            │        │
@@ -883,9 +936,9 @@ User      CLI         Core            OpenEvolve    Store    DB
  │◄progress│◄─progress─│◄── on_progress ─────│            │
  │         │           │◄── results ──────────│            │
  │         │           │── save programs ─────►│ (rank-N.py)│
- │         │           │── for each top-N:     │            │
- │         │           │   ── insert solution ────────────►│
- │         │           │── post-run eval (all)  │            │
+ │         │           │── gen solution ID (rank-1)          │
+ │         │           │── insert solution ─────────────────►│
+ │         │           │── post-run eval (rank-1) │            │
  │         │           │── update run status ──────────────►│
  │         │           │── write manifest ────►│            │
  │         │           │── remove run lock ───►│            │
@@ -942,36 +995,33 @@ The `_revolver_evaluator.py` is stored in the run directory (not a temporary fil
 
 Env vars are set before the run and cleaned up after. The context manager pattern ensures cleanup even on exceptions, preventing env var pollution between sequential operations in the same process (e.g., running `revolver run` followed by `revolver eval` in a script).
 
-### DD-07: Top-N creates N solutions pointing to the same run
+### DD-07: Extract on demand — rank-1 auto-created, others on demand
 
-When `--top-n > 1`, the run produces N ranked programs stored as `rank-1.py`, `rank-2.py`, ..., `rank-N.py` in the run's `programs/` directory. For each program, a solution row is inserted in the DB referencing `(run_id, rank)`. Solutions have no directory of their own — they are lightweight DB references.
+`revolver run` always stores all top-ranked programs from OpenEvolve output as `rank-1.py`, `rank-2.py`, ..., `rank-N.py` in the run's `programs/` directory. However, only the best program (rank-1) is automatically promoted to a solution in the DB. Additional programs can be promoted on demand via `revolver solution extract --run <id> --rank N`.
 
 **Key properties**:
-- All N solutions share the same `run_id`
-- Each solution has a distinct `solution_id` and `rank`
-- The program path is resolved as `.revolver/runs/<run_id>/programs/rank-<N>.py`
-- Checkpoint, config, wrapper, and logs belong to the **run**, not to individual solutions
+- One auto-created solution per run (rank-1), with post-run training eval
+- All programs stored in the run directory for inspection via `run info`
+- `solution extract` creates a new solution row `(run_id, rank)` and runs training eval at extraction time
+- `UNIQUE(run_id, rank)` constraint prevents duplicate extractions
+- No `--top-n` flag on `revolver run` — the number of programs stored is determined by OpenEvolve's internal behavior
 
-**Alternatives considered**:
+**Why extract on demand** (v0.2 → v0.3 evolution):
 
-| Approach | Pros | Cons |
-|---|---|---|
-| **A: N files in one solution** | Simple storage, one ID | Only one program usable by eval; others are dead artifacts |
-| **B: N separate solution directories** | Each independently evaluable | N directories with duplicated lineage; complex resume |
-| **C: N solution rows, one run directory** (chosen) | Clean separation: run owns files, solutions are references | Requires join to resolve program path |
+The previous design (v0.2 DD-07) auto-created N solution rows when `--top-n > 1`. This was problematic:
+- **Solution pollution**: top-N programs from the same run are often quasi-identical (optimized on the same `combined_score`), flooding `solution list` with near-duplicates
+- **Wasted eval time**: post-run eval on all N solutions is expensive and often pointless for programs the user never inspects
+- **User agency**: the user should see scores first (`run info`), then decide which ranks are worth promoting
 
-**Why option C**: the run is the physical entity (checkpoint, config, wrapper), and solutions are the logical entity (evaluable, aliasable, benchmarkable). This avoids directory proliferation while keeping each solution as a first-class entity in the DB.
+**Workflow**:
+1. `revolver run --version v1.1 --llm claude --dataset train-small` → auto-creates rank-1 solution
+2. `revolver run info run-20260310-143000` → shows all stored programs with scores
+3. `revolver solution extract --run run-20260310-143000 --rank 2 --alias "alt-approach"` → promotes rank-2
 
-**Managing proliferation**: The user manages many solutions via:
-- `revolver solution list --rank 1` — show only the best from each run
-- `revolver solution list --version v1.1 --llm claude` — filter by lineage (via run join)
-- `revolver solution list --sort score` — sort by score to find the best
-- `revolver solution alias <id> "my-champion"` — name what matters (FR-SOL-006)
-
-**Post-run behavior with top-N**:
-- Post-run training evaluation (FR-RUN-019) runs on **all top-N solutions** (DD-12).
+**Post-run behavior**:
+- Post-run training evaluation (FR-RUN-019) runs on **rank-1 only** (DD-12 revised).
 - `revolver run resume` operates on the **run** (which contains the full checkpoint with the entire population). It does not resume a specific solution.
-- The `--alias` option (if provided) is set only on the rank-1 solution. Rank > 1 solutions have no alias by default.
+- The `--alias` option (if provided) is set on the rank-1 solution.
 
 ### DD-08: `--dry-run` validates without launching (D-005-g)
 
@@ -1007,13 +1057,26 @@ Each active run has its own lock file in `.revolver/runs/locks/<run_id>.lock`, r
 
 The concurrency constraint (only one local-LLM run at a time, FR-RUN-014) is enforced by scanning all lock files and checking `llm_source` — not by the existence of a single lock.
 
-### DD-12: Post-run eval on all top-N solutions (D-005-e)
+### DD-12: Post-run eval on rank-1 only, eval at extraction time (D-005-e revised)
 
-Post-run training evaluation (FR-RUN-019) runs on **all top-N solutions**, not just rank-1. The cost is N sequential evaluations, which is acceptable because:
-- The user typically sets N to a small value (1–5)
-- Evaluation per solution is fast compared to the evolution run itself
-- Having per-instance results for all solutions enables immediate comparison without manual `revolver eval` calls
-- This aligns with the principle that every solution is a first-class entity (DD-07)
+Post-run training evaluation (FR-RUN-019) runs on **rank-1 only** (the auto-created solution). This is a revision from v0.2, where all top-N solutions were evaluated post-run.
+
+**Rationale for the change**:
+- Evaluating N solutions post-run is expensive and often wasted — the user may never inspect ranks > 1
+- With the extract-on-demand model, `revolver solution extract` triggers training eval at extraction time, so every promoted solution still gets training eval results
+- The user inspects scores via `run info` (read from OpenEvolve output, no eval needed), then only extracts the ranks worth evaluating
+
+**Guarantee**: every solution in the DB (whether auto-created or extracted) has training eval results. The eval is just deferred to extraction time for ranks > 1.
+
+### DD-13: Problem description injection into system prompt (D-005-i)
+
+When a problem version snapshot includes `problem.md`, its content is injected into OpenEvolve's `prompt.system_message` via `build_config()`. Design rationale:
+
+- **Configuration-time injection**: The problem description is embedded in the config dict before OpenEvolve starts, not injected at runtime. This is simpler and consistent with how all other config values are handled.
+- **Full replacement of system prompt**: When `problem.md` is present, the default OpenEvolve system prompt is replaced entirely with a template that includes the problem description. This avoids concatenation ambiguity and gives a clean, predictable prompt.
+- **Optional**: If `problem.md` is absent from the snapshot, the default OpenEvolve system prompt is used unchanged. Existing problems without a `problem.md` are unaffected.
+- **Override-compatible**: The user can still override `prompt.system_message` via `--config-override`, which takes precedence in the merge order.
+- **Motivation**: POC #13 (OpenEvolve + Claude API) identified that the LLM only receives code and metric names without context. Adding a problem description to the system prompt significantly improves solution quality by giving the LLM domain knowledge.
 
 ---
 
@@ -1033,7 +1096,9 @@ Post-run training evaluation (FR-RUN-019) runs on **all top-N solutions**, not j
 | `cli/run.py` | Implement 5 Typer commands (`run`, `status`, `resume`, `list`, `info`) |
 | `models/run.py` | Define `RunConfig`, `RunManifest`, `RunResult`, `SolutionResult`, `RunStatus`, `RunSummary`, `RunInfo`, `ProgressInfo` (new file) |
 | `infra/store.py` | Add `create_run_dir()`, `write_run_manifest()`, per-run lock management (`write_run_lock()`, `remove_run_lock()`, `get_active_runs()`) |
-| `infra/db.py` | Add `insert_run()`, `insert_solution()` (simplified: run_id + rank), `get_run()`, `list_runs()`, `get_solutions_for_run()`, `get_resume_chain()`, `get_latest_run()`, `update_run_status()` |
+| `infra/db.py` | Add `insert_run()`, `insert_solution()` (run_id + rank), `get_run()`, `list_runs()`, `get_solutions_for_run()`, `get_resume_chain()`, `get_latest_run()`, `update_run_status()` |
+| `core/solution.py` | Add `extract_solution()` — creates solution row, triggers training eval |
+| `cli/solution.py` | Add `extract` Typer command |
 | `core/eval.py` | Called by `_post_run_evaluation()` — must be implemented before or alongside DES-005 |
 
 ### Cross-DES dependencies

@@ -1,6 +1,6 @@
 # Spec: revolver run
 
-**Traceable to**: ConOps §4.6 (Solution), §5.5 (Workflow: Generate a Solution), §3.3 (Concurrency Model), §4.4 (Instance Injection), DES-005 v0.2
+**Traceable to**: ConOps §4.6 (Solution), §5.5 (Workflow: Generate a Solution), §3.3 (Concurrency Model), §4.4 (Instance Injection), DES-005 v0.3
 **Status**: Draft
 
 ---
@@ -25,8 +25,7 @@ Launch an OpenEvolve evolution run.
 | `--llm <name>` | string | Yes | Registered LLM to use |
 | `--dataset <name>` | string | Yes | Registered training dataset |
 | `--iterations <n>` | int | No | Number of evolution iterations. Overrides config.yaml value. |
-| `--alias <name>` | string | No | User-friendly name for the generated solution. Applied to rank-1 solution only when `--top-n > 1`. |
-| `--top-n <n>` | int | No | Number of top solutions to keep. Default: 1 |
+| `--alias <name>` | string | No | User-friendly name for the generated solution |
 | `--config-override <key=value>` | string[] | No | Override specific OpenEvolve config values |
 | `--dry-run` | flag | No | Validate all inputs and display resolved OpenEvolve config without launching the run |
 
@@ -45,10 +44,10 @@ Launch an OpenEvolve evolution run.
 4. **Launch OpenEvolve** with the problem version's files (initial_program, evaluator, config)
 5. **Monitor progress**: display iteration count, best score, elapsed time
 6. **On completion**:
-   - Store the top-N best programs as `rank-1.py`, `rank-2.py`, etc. in `.revolver/runs/<run-id>/programs/`
+   - Store all top-ranked programs as `rank-1.py`, `rank-2.py`, etc. in `.revolver/runs/<run-id>/programs/` (OpenEvolve internal output, preserved for later extraction)
+   - Create **one** solution DB row for the best program (rank-1) with `(run_id, rank=1)`
    - Record full lineage in `RunManifest` stored in the run directory
    - Store metrics in SQLite
-   - Create one solution DB row per top-N program (lightweight reference: `run_id`, `rank`)
    - Store the OpenEvolve checkpoint in the run directory for potential resume
 
 **Output** (human, during run):
@@ -57,23 +56,13 @@ Run started: v1.1 + claude-opus + train-small
   Iteration 42/200 | Best score: 0.87 | Elapsed: 1h15m | ETA: 2h05m
 ```
 
-**Output** (human, on completion, `--top-n 1`):
+**Output** (human, on completion):
 ```
 Run completed: run-20260310-143000
   200 iterations in 3h45m
   Solution: sol-20260310-143000 (rank #1, alias: claude-small-v1.1)
   Best combined_score: 0.91
-  Stored in: .revolver/runs/run-20260310-143000/
-```
-
-**Output** (human, on completion, `--top-n 3`):
-```
-Run completed: run-20260310-143000
-  200 iterations in 3h45m
-  Solutions (3):
-    #1  sol-20260310-143000     score=0.91  claude-small-v1.1
-    #2  sol-20260310-143001     score=0.85
-    #3  sol-20260310-143002     score=0.79
+  Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
   Stored in: .revolver/runs/run-20260310-143000/
 ```
 
@@ -87,20 +76,13 @@ Run completed: run-20260310-143000
   "dataset": "train-small",
   "iterations": 200,
   "generation_time_s": 13500,
-  "solutions": [
-    {
-      "solution_id": "sol-20260310-143000",
-      "alias": "claude-small-v1.1",
-      "rank": 1,
-      "best_score": 0.91
-    },
-    {
-      "solution_id": "sol-20260310-143001",
-      "alias": null,
-      "rank": 2,
-      "best_score": 0.85
-    }
-  ]
+  "solution": {
+    "solution_id": "sol-20260310-143000",
+    "alias": "claude-small-v1.1",
+    "rank": 1,
+    "best_score": 0.91
+  },
+  "programs_stored": 5
 }
 ```
 
@@ -136,7 +118,7 @@ Resume an interrupted run from its checkpoint. Creates a NEW run from the parent
 3. Create a new run (`resumed_from: <parent-run-id>`). The parent run's checkpoint is READ but not modified
 4. Copy the wrapper evaluator from the parent run (no regeneration)
 5. Re-launch OpenEvolve from the checkpoint with the same configuration
-6. On completion: the new run gets its own ID, directory, programs, and solution DB rows
+6. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
 
 **Exit codes**: 0 success, 1 if run or checkpoint not found, 4 if OpenEvolve fails
 
@@ -155,9 +137,9 @@ List all runs in the current project.
 
 **Output** (human):
 ```
-ID                    Version  LLM              Dataset      Top-N  Iter  Score   Status      Date
-run-20260310-143000   v1.0     codestral-local  train-small  3      100   0.74    completed   2026-03-10
-run-20260310-173000   v1.0     claude-opus      train-small  3      100   0.82    completed   2026-03-10
+ID                    Version  LLM              Dataset      Iter  Score   Status      Date
+run-20260310-143000   v1.0     codestral-local  train-small  100   0.74    completed   2026-03-10
+run-20260310-173000   v1.0     claude-opus      train-small  100   0.82    completed   2026-03-10
 ```
 
 **Exit codes**: 0 always
@@ -181,14 +163,17 @@ Run: run-20260310-143000
   Dataset: train-small (sha256:f1e2d3c4...)
   Iterations: 200
   Generation time: 3h45m
-  Top-N: 3
   Resumed from: —
   Directory: .revolver/runs/run-20260310-143000/
 
-Solutions:
-  #1  sol-20260310-143000  score=0.91  claude-small-v1.1
-  #2  sol-20260310-143001  score=0.85  (no alias)
-  #3  sol-20260310-143002  score=0.79  (no alias)
+Solution (auto-created):
+  sol-20260310-143000  rank=#1  score=0.91  claude-small-v1.1
+
+Programs (from OpenEvolve output):
+  #1  score=0.91  → sol-20260310-143000 (extracted)
+  #2  score=0.85
+  #3  score=0.79
+  Use `revolver solution extract --run run-20260310-143000 --rank <N>` to promote.
 
 Resume chain: (none)
 ```
@@ -210,10 +195,10 @@ Resume chain: (none)
 | FR-RUN-027 | SHOULD | Set `REVOLVER_EVAL_LOG` for optional evaluator log file | §4.4, ADR-006 |
 | FR-RUN-006 | MUST | Configure OpenEvolve to use the LLM's base URL and model ID | §3.2 |
 | FR-RUN-007 | MUST | Generate a unique run ID: `run-{YYYYMMDD}-{HHMMSS}`. Generate solution IDs: `sol-{YYYYMMDD}-{HHMMSS}` | §4.6 |
-| FR-RUN-008 | MUST | Store the top-N best programs as `rank-N.py` files in the run directory. Create one solution DB row per program, referencing (`run_id`, `rank`). | §4.6 |
+| FR-RUN-008 | MUST | Store all top-ranked programs as `rank-N.py` files in the run directory (from OpenEvolve output). Create **one** solution DB row for the best program (rank-1), referencing (`run_id`, `rank=1`). Additional programs can be promoted to solutions via `revolver solution extract`. | §4.6 |
 | FR-RUN-009 | MUST | Record full lineage in `RunManifest` in the run directory: problem version, dataset, LLM, config, timestamp, iterations, generation time | §4.6 |
 | FR-RUN-010 | MUST | Store metrics (best scores per iteration) in SQLite | §4.6 |
-| FR-RUN-019 | MUST | On completion, evaluate ALL top-N programs on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`) | §4.6 |
+| FR-RUN-019 | MUST | On completion, evaluate the rank-1 program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`) | §4.6 |
 | FR-RUN-020 | MUST | Training results are accessible via `revolver eval results --solution <id> --dataset <train-dataset>` | — |
 | FR-RUN-011 | MUST | Store the OpenEvolve checkpoint in the run directory for resume capability | §4.6, §5.5 |
 | FR-RUN-012 | MUST | Support `--alias` for user-friendly solution naming | §4.6 |
@@ -224,7 +209,7 @@ Resume chain: (none)
 | FR-RUN-017 | SHOULD | Store the OpenEvolve config used (verbatim copy) in the run directory | NFR-023 |
 | FR-RUN-018 | SHOULD | Record generation wall-clock time in solution lineage | §4.6 |
 | FR-RUN-021 | MUST | `run list` shows all runs with filtering by version, LLM, status | — |
-| FR-RUN-022 | MUST | `run info` displays full run details including solutions, resume chain | — |
+| FR-RUN-022 | MUST | `run info` displays full run details including the auto-created solution, all stored programs with scores, and resume chain | — |
 | FR-RUN-023 | MUST | `--dry-run` validates all inputs and displays resolved config without launching | — |
 | FR-RUN-024 | MUST | Resume copies the wrapper evaluator from the parent run (no regeneration) | — |
 | FR-RUN-025 | SHOULD | Per-run lock files in `.revolver/runs/locks/` enable concurrent run tracking | §3.3 |
@@ -270,24 +255,26 @@ lineage:
   llm: "claude-opus"
   llm_model: "claude-opus-4-6"
 
-top_n: 3
 resumed_from: null
 config_file: "config.yaml"        # relative path to config in run dir (verbatim content stored in SQLite as config_snapshot)
 
-solutions:
-  - id: "sol-20260310-143000"
-    rank: 1
-    best_score: 0.91
-    alias: "claude-small-v1.1"
-    program: "programs/rank-1.py"
-  - id: "sol-20260310-143001"
-    rank: 2
-    best_score: 0.85
-    program: "programs/rank-2.py"
-  - id: "sol-20260310-143002"
-    rank: 3
-    best_score: 0.79
-    program: "programs/rank-3.py"
+solution:                          # auto-created rank-1 solution
+  id: "sol-20260310-143000"
+  rank: 1
+  best_score: 0.91
+  alias: "claude-small-v1.1"
+  program: "programs/rank-1.py"
+
+programs:                          # all programs stored from OpenEvolve output
+  - rank: 1
+    score: 0.91
+    file: "programs/rank-1.py"
+  - rank: 2
+    score: 0.85
+    file: "programs/rank-2.py"
+  - rank: 3
+    score: 0.79
+    file: "programs/rank-3.py"
 ```
 
 ---

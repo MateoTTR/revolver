@@ -145,7 +145,7 @@ CREATE TABLE dataset_compat (
 
 ### 3.5 `runs`
 
-Run metadata created by `revolver run`. A run is the physical unit of an OpenEvolve evolution session: it owns the checkpoint, config, wrapper evaluator, and N ranked programs. Full provenance for traceability (NFR-020).
+Run metadata created by `revolver run`. A run is the physical unit of an OpenEvolve evolution session: it owns the checkpoint, config, wrapper evaluator, and stored programs. A single solution (rank-1) is auto-created on completion; additional solutions can be extracted on demand via `revolver solution extract`. Full provenance for traceability (NFR-020).
 
 ```sql
 CREATE TABLE runs (
@@ -153,7 +153,6 @@ CREATE TABLE runs (
     problem_version   TEXT NOT NULL REFERENCES problem_versions(tag),
     llm               TEXT NOT NULL,          -- LLM name from registry
     dataset           TEXT NOT NULL REFERENCES datasets(name),
-    top_n             INTEGER NOT NULL DEFAULT 1,
     iterations        INTEGER NOT NULL,
     generation_time_s REAL,
     config_snapshot   TEXT,                   -- verbatim OpenEvolve YAML config (NFR-023)
@@ -312,7 +311,7 @@ The `schema_version` table enables future schema migrations. On startup, Revolve
 SELECT s.id, s.alias, s.rank, s.best_score,
        r.id AS run_id, r.problem_version, r.llm, r.dataset,
        r.llm_model, r.iterations, r.generation_time_s,
-       r.top_n, r.config_snapshot, r.resumed_from, r.created_at
+       r.config_snapshot, r.resumed_from, r.created_at
 FROM solutions s
 JOIN runs r ON s.run_id = r.id
 WHERE s.id = :id_or_alias OR s.alias = :id_or_alias;
@@ -334,10 +333,9 @@ ORDER BY r.created_at DESC, s.rank;
 ### 6.3 Run list (`revolver run list`)
 
 ```sql
-SELECT r.id, r.problem_version, r.llm, r.dataset, r.top_n,
+SELECT r.id, r.problem_version, r.llm, r.dataset,
        r.iterations, r.generation_time_s, r.status, r.resumed_from,
        r.created_at,
-       MIN(s.best_score) AS worst_score,
        MAX(s.best_score) AS best_score
 FROM runs r
 LEFT JOIN solutions s ON s.run_id = r.id
@@ -345,7 +343,7 @@ GROUP BY r.id
 ORDER BY r.created_at DESC;
 ```
 
-### 6.4 Sibling solutions from same run
+### 6.4 Solutions from same run
 
 ```sql
 SELECT s.id, s.alias, s.rank, s.best_score
@@ -455,12 +453,12 @@ MIGRATIONS = {
 
 ### Why `runs` as a first-class entity (not just a `run_id` in `solution_lineage`)?
 
-The initial design stored lineage data in `solution_lineage` with a `run_id` column linking top-N solutions. This had several problems:
+The initial design stored lineage data in `solution_lineage` with a `run_id` column linking solutions. This had several problems:
 - **Resume mutated the solution**: `run resume` updated the existing solution in-place, breaking traceability if eval results referenced the old program.
-- **Lineage duplication**: every top-N solution duplicated `iterations`, `config_snapshot`, `generation_time_s`, etc.
+- **Lineage duplication**: every solution duplicated `iterations`, `config_snapshot`, `generation_time_s`, etc.
 - **No run lifecycle**: no way to track run status (`running`/`completed`/`interrupted`).
 
-With `runs` as a table, the run is the **physical** entity (owns files, checkpoint, config) and solutions are lightweight **logical** references. Resume creates a new run (`resumed_from: <parent>`), preserving the old run and its eval results intact.
+With `runs` as a table, the run is the **physical** entity (owns files, checkpoint, config) and solutions are lightweight **logical** references. `revolver run` auto-creates a single rank-1 solution; additional solutions can be extracted on demand via `revolver solution extract`. Resume creates a new run (`resumed_from: <parent>`), preserving the old run and its eval results intact.
 
 ### Why `solutions` is a lightweight reference (not a directory)?
 

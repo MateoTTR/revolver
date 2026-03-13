@@ -33,6 +33,9 @@
 | 29 | Refactor: introduce Run entity + Solution as reference (per refactor-run-solution.md) | [x] | 010 |
 | 30 | DES-007 — `revolver benchmark` design (after run/solution refactor) | [x] | 011 |
 | 31 | Review DES-005/006 decisions (D-005-a..h, D-006-a..f) into updated docs | [x] | 010 |
+| 32 | Integrate `problem.md` feature into ConOps, spec-problem, DES-003, DES-005 | [x] | 012 |
+| 33 | Refactor top-N → extract on demand (spec-run, DES-005, spec-solution, DES-001, ConOps) | [x] | 013 |
+| 34 | Token/cost tracking — lightweight requirement + design integration | [ ] | |
 
 ## Phase 3 — POCs
 
@@ -40,7 +43,7 @@
 |---|---|---|---|
 | 11 | POC — Local LLM deployment and inference | [x] | 003 |
 | 12 | POC — OpenEvolve integration with instance injection | [x] | 007 |
-| 13 | POC — OpenEvolve + Claude API | [ ] | |
+| 13 | POC — OpenEvolve + Claude API | [x] | 012 |
 | 14 | POC — Code generation quality with OpenEvolve + local LLM (quantization impact) | [ ] | |
 | 15 | POC — End-to-end OpenEvolve + Ollama endpoint integration | [ ] | |
 

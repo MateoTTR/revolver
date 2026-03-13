@@ -103,6 +103,7 @@ scheduling-optimizer/           # Project root (user's working directory)
 │   │   │   ├── initial_program.py
 │   │   │   ├── evaluator.py
 │   │   │   ├── config.yaml
+│   │   │   ├── problem.md      # Optional problem description
 │   │   │   └── manifest.yaml   # Hash, timestamp, message
 │   │   └── v1.1/
 │   ├── datasets/               # Dataset registrations (reference + hashes)
@@ -115,7 +116,7 @@ scheduling-optimizer/           # Project root (user's working directory)
 │   │   │   ├── config.yaml    # OpenEvolve config used
 │   │   │   ├── _revolver_evaluator.py  # Generated wrapper
 │   │   │   ├── oe-checkpoint/ # OpenEvolve checkpoint for resume
-│   │   │   └── programs/      # Top-N evolved programs
+│   │   │   └── programs/      # Stored programs (rank-1 auto-promoted, others extractable)
 │   │   │       ├── rank-1.py
 │   │   │       ├── rank-2.py
 │   │   │       └── rank-3.py
@@ -124,6 +125,7 @@ scheduling-optimizer/           # Project root (user's working directory)
 ├── initial_program.py          # Mutable working copy
 ├── evaluator.py                # Mutable working copy
 ├── config.yaml                 # OpenEvolve config (mutable)
+├── problem.md                  # Optional problem description (free-form markdown)
 ├── project.yaml                # Project metadata (name, description, domain)
 └── data/                       # User's raw data (not managed by Revolver)
     ├── instances-small/
@@ -142,6 +144,7 @@ A **Problem** is the user's optimization problem definition within a project. It
 
 - **Initial program**: The starting code that OpenEvolve will evolve. Contains `EVOLVE-BLOCK` markers delimiting what can be modified. **Can be any language** (Python, C++, Rust, etc.).
 - **Evaluator**: A Python file with an `evaluate(program_path) -> dict[str, float]` function. Must be able to work with any dataset (not hardcoded). Reads the active dataset location from an environment variable set by Revolver.
+- **Problem description** (optional): A free-form markdown file (`problem.md`) that describes the optimization problem in natural language. When present, its content is injected into the OpenEvolve system prompt during `revolver run` to give the LLM structured domain knowledge about the problem.
 - **Metadata**: Name, description, domain, objectives description (stored in `project.yaml`).
 
 A Problem can have multiple **Versions**. Each version is an **immutable snapshot** of the initial program + evaluator + config, stored in `.revolver/problem/`. Once versioned, the snapshot cannot be modified — the user works on a mutable working copy and creates new versions when ready.
@@ -221,9 +224,10 @@ A **Solution** is a **lightweight reference** to a program within a Run. It is a
 - **Program path** (derived): `.revolver/runs/<run_id>/programs/rank-<N>.py`
 - **Lineage**: Inherited from the parent Run (problem version, dataset, LLM, config, generation time, iterations)
 - **Run reference**: Links to the Run that produced it (`run_id`)
+- **Creation**: The rank-1 solution is auto-created by `revolver run`. Additional solutions can be extracted on demand via `revolver solution extract --run <id> --rank <N>`, which promotes a stored program to a first-class solution with post-extraction training evaluation.
 
 A **Run** is the first-class physical entity that owns all artifacts from an OpenEvolve evolution:
-- **Programs**: The top-N best evolved programs (N configurable, default 1), stored in `.revolver/runs/<run_id>/programs/`
+- **Programs**: All top-ranked evolved programs stored in `.revolver/runs/<run_id>/programs/` (from OpenEvolve output). Only the best (rank-1) is auto-promoted to a solution; others are available for inspection and on-demand extraction.
 - **Checkpoint**: OpenEvolve checkpoint for potential resume, stored in `.revolver/runs/<run_id>/oe-checkpoint/`
 - **Config**: The OpenEvolve config used for this run
 - **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)
@@ -520,7 +524,7 @@ revolver benchmark export --latest --format csv --output results.csv
 
 When the user creates a problem version (`revolver problem version`), Revolver:
 
-1. **Copies** the initial program, evaluator, and config into `.revolver/problem/<tag>/`
+1. **Copies** the initial program, evaluator, config, and `problem.md` (if present) into `.revolver/problem/<tag>/`
 2. **Computes a SHA-256 hash** of the snapshot contents
 3. **Records** the hash, timestamp, and user message in `manifest.yaml`
 
@@ -629,7 +633,7 @@ bench-20260310-170000,sol-20260310-150000,gemma-small-v1.1,run-20260310-150000,s
 - Cost metrics (generation time, per-instance compute time)
 - Result export (CSV, JSON)
 - Sequential local LLM runs, parallel remote LLM runs
-- Top-N solution storage (configurable, default 1)
+- Automatic rank-1 solution creation, on-demand extraction for other ranks
 - SQLite for metrics + YAML for configs
 - Example problems and evaluators demonstrating the instance injection pattern (Python + non-Python examples)
 - Dataset registration by reference (hash-only) with optional `--snapshot` for full copy

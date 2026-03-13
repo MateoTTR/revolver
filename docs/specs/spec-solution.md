@@ -7,7 +7,7 @@
 
 ## 1. Scope
 
-This spec covers solution browsing and metadata management. Solutions are lightweight DB references to (`run_id`, `rank`) — they do NOT own filesystem directories. The program file for a solution is located at `.revolver/runs/<run_id>/programs/rank-<N>.py`. Solutions are created by `revolver run` ([spec-run.md](spec-run.md)) — this spec only covers read and update operations on existing solutions.
+This spec covers solution browsing, metadata management, and on-demand extraction. Solutions are lightweight DB references to (`run_id`, `rank`) — they do NOT own filesystem directories. The program file for a solution is located at `.revolver/runs/<run_id>/programs/rank-<N>.py`. The rank-1 solution is auto-created by `revolver run` ([spec-run.md](spec-run.md)). Additional solutions can be extracted from a run's stored programs via `solution extract`.
 
 ---
 
@@ -23,7 +23,7 @@ List all solutions in the current project.
 |---|---|---|---|
 | `--version <tag>` | string | — | Filter by problem version |
 | `--llm <name>` | string | — | Filter by LLM used |
-| `--rank <n>` | int | — | Filter by rank (1 = best from run). Useful to hide secondary solutions from top-N runs |
+| `--rank <n>` | int | — | Filter by rank (1 = best from run). Useful to show only auto-created or only extracted solutions |
 | `--sort <field>` | string | `created_at` | Sort by: `created_at`, `score`, `alias` |
 
 **Output** (human):
@@ -70,7 +70,8 @@ Show detailed information about a solution.
 Solution: sol-20260310-143000
   Alias: claude-small-v1.1
   Best combined_score: 0.91
-  Rank: #1 of 3
+  Rank: #1
+  Source: auto (created by run)
 
 Run: run-20260310-143000
   Problem version: v1.1 (sha256:e5f6g7h8...)
@@ -81,9 +82,8 @@ Run: run-20260310-143000
 
 Program: .revolver/runs/run-20260310-143000/programs/rank-1.py
 
-Sibling solutions (same run):
-  sol-20260310-143001  #2  score=0.85  (no alias)
-  sol-20260310-143002  #3  score=0.79  (no alias)
+Other solutions from same run:
+  sol-20260311-091500  #2  score=0.85  (extracted)
 
 Evaluations:
   eval-benchmark: mean=0.87, p90=0.93 (2026-03-10)
@@ -109,6 +109,54 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 
 **Exit codes**: 0 success, 1 if ID not found or alias already in use
 
+### 2.4 `revolver solution extract`
+
+Promote a lower-ranked program from a run into a first-class solution. This enables on-demand inspection: the user runs `revolver run info` to see all stored programs with scores, then extracts the ones worth evaluating.
+
+**Options**:
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `--run <run-id>` | string | Yes | Run containing the program to extract |
+| `--rank <n>` | int | Yes | Rank of the program to promote (e.g., 2, 3) |
+| `--alias <name>` | string | No | User-friendly name for the new solution |
+
+**Behavior**:
+1. Verify the run exists and has status `completed`
+2. Verify a program file `rank-<N>.py` exists in the run's `programs/` directory
+3. Verify no solution already exists for `(run_id, rank)` — prevent duplicates
+4. Generate a new solution ID (`sol-YYYYMMDD-HHMMSS`)
+5. Insert a solution DB row referencing `(run_id, rank)`
+6. Evaluate the program on the training dataset (same as post-run eval for rank-1) and store results
+7. Set alias if provided
+
+**Output** (human):
+```
+Solution extracted: sol-20260311-091500
+  Run: run-20260310-143000
+  Rank: #2
+  Score: 0.85
+  Alias: claude-v1.1-rank2
+  Training eval: 50 instances, mean combined_score=0.83
+```
+
+**Output** (JSON):
+```json
+{
+  "solution_id": "sol-20260311-091500",
+  "run_id": "run-20260310-143000",
+  "rank": 2,
+  "best_score": 0.85,
+  "alias": "claude-v1.1-rank2",
+  "training_eval": {
+    "instance_count": 50,
+    "mean_combined_score": 0.83
+  }
+}
+```
+
+**Exit codes**: 0 success, 1 if run not found, 1 if rank not found, 1 if solution already exists for this (run, rank)
+
 ---
 
 ## 3. Functional Requirements
@@ -123,8 +171,11 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 | FR-SOL-006 | MUST | `alias` sets a unique user-friendly name for a solution | §4.6 |
 | FR-SOL-007 | MUST | Aliases are unique within a project | §4.6 |
 | FR-SOL-008 | MUST | Solutions can be referenced by either ID or alias in all commands | — |
-| FR-SOL-009 | SHOULD | `info` shows sibling solutions from the same run (when top-N > 1) | §4.6 |
+| FR-SOL-009 | SHOULD | `info` shows other solutions from the same run (if any were extracted) | §4.6 |
 | FR-SOL-010 | MUST | Solutions reference their parent run via `run_id`. All lineage data is accessed through the run. | §4.6 |
+| FR-SOL-011 | MUST | `extract` promotes a stored program from a completed run into a solution with post-extraction training eval | — |
+| FR-SOL-012 | MUST | `extract` prevents duplicate solutions for the same `(run_id, rank)` | — |
+| FR-SOL-013 | MUST | `extract` generates a unique solution ID and inserts a solution DB row | — |
 
 ---
 
@@ -136,12 +187,18 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 | Alias already in use by another solution | Error: "Alias '<alias>' already in use by solution '<other-id>'" | 1 |
 | Empty alias string | Error: "Alias cannot be empty" | 1 |
 | `--rank` value <= 0 | Error: "Rank must be a positive integer" | 1 |
+| `extract` with non-existent run | Error: "Run '<run-id>' not found" | 1 |
+| `extract` with run not completed | Error: "Run '<run-id>' is not completed (status: '<status>')" | 1 |
+| `extract` with non-existent rank file | Error: "No program found at rank <N> for run '<run-id>'" | 1 |
+| `extract` with already extracted rank | Error: "Solution already exists for run '<run-id>' rank <N>: '<sol-id>'" | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
 
 ---
 
 ## 5. Dependencies
 
-- Solutions are created by `revolver run` ([spec-run.md](spec-run.md))
+- Rank-1 solutions are auto-created by `revolver run` ([spec-run.md](spec-run.md))
+- Additional solutions are created by `solution extract` (this spec)
+- `extract` reuses `core.eval.evaluate_solution()` for post-extraction training eval ([spec-eval.md](spec-eval.md))
 - Evaluation results referenced in `info` come from `revolver eval` ([spec-eval.md](spec-eval.md))
 - Solution schema defined in DES-001 (solutions table)
