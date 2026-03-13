@@ -27,7 +27,7 @@
 | 23 | Update spec-dataset with `dataset remove` command | [x] | 006 |
 | 24 | DES-005 — `revolver run` design (unblocked by ADR-006) | [x] | 008 |
 | 25 | DES-006 — `revolver eval` design (unblocked by ADR-006) | [x] | 008 |
-| 26 | ~~Implement wrapper evaluator generator~~ → moved to Phase 5 | — | |
+| 26 | ~~Implement wrapper evaluator generator~~ → moved to Phase 5 (Sprint 004, task S4-03) | — | |
 | 27 | Update ConOps §4.1 directory structure for DD-07 (top-N → separate solution dirs) | [x] | 010 |
 | 28 | Review remaining spec-reviewer WARNs (ER diagram, benchmark JSON rank/run_id) | [x] | 010 |
 | 29 | Refactor: introduce Run entity + Solution as reference (per refactor-run-solution.md) | [x] | 010 |
@@ -56,8 +56,113 @@
 
 ## Phase 5 — Implementation
 
-| # | Task | Status | Session |
-|---|---|---|---|
-| 26 | Implement wrapper evaluator generator (evaluate_instance → evaluate) | [ ] | |
+### Sprint 001 — Foundation: Project Scaffolding, DB, Shared Infrastructure
 
-_Additional tasks to be defined after Phase 2-4 completion._
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 35 | Create `pyproject.toml`, `src/revolver/` layout, pip-installable package, CI pipeline | [x] | S1 — session 016, PR #1 |
+| 36 | Implement root Typer app with `--json`, `--verbose`, `--quiet` callback | [ ] | S1 |
+| 37 | Implement `infra.db` — SQLite connection, WAL, schema creation (DES-001), migration | [ ] | S1 |
+| 38 | Implement `infra.hashing` — `file_hash()`, `tree_hash()`, `global_hash()`, `compute_snapshot_hash()` | [ ] | S1 |
+| 39 | Implement `infra.store` — `.revolver/` management, `find_project_root()`, `write_manifest()` | [ ] | S1 |
+| 40 | Implement `infra.config` — 5-level config hierarchy resolution | [ ] | S1 |
+| 41 | Implement `infra.output` — `render()` for human tables (rich) and JSON | [ ] | S1 |
+| 42 | Implement `models.project` — `ProjectConfig` Pydantic model | [ ] | S1 |
+| 43 | Implement `core.project` — `init_project()` | [ ] | S1 |
+| 44 | Implement `cli.project` — `project init` Typer command | [ ] | S1 |
+| 45 | Implement typed exceptions and CLI error mapping (exit codes 0-4) | [ ] | S1 |
+| 46 | Create test fixtures (`tests/fixtures/`) | [ ] | S1 |
+| 47 | Write L2 integration tests for `project init` (4 scenarios) | [ ] | S1 |
+| 48 | Write L1 unit tests for infra modules (db, hashing, store, config, output) | [ ] | S1 |
+
+### Sprint 002 — LLM Registration & Problem Versioning
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 49 | Implement `infra.ollama` — `OllamaClient` (DES-002 §3) | [ ] | S2 |
+| 50 | Implement `infra.gpu` — `get_gpu_info()` via nvidia-smi (DES-002 §4) | [ ] | S2 |
+| 51 | Implement `models.llm` — LLM Pydantic models (DES-002) | [ ] | S2 |
+| 52 | Add LLM CRUD queries to `infra.db` (global DB) | [ ] | S2 |
+| 53 | Implement `core.llm` — 6 orchestration functions (DES-002 §5) | [ ] | S2 |
+| 54 | Implement `cli.llm` — 6 Typer commands (DES-002 §6) | [ ] | S2 |
+| 55 | Implement `infra.evaluator_loader` — dynamic module loading (DES-003 §7) | [ ] | S2 |
+| 56 | Implement `infra.evaluator_runner` — subprocess evaluator execution with timeout (DES-006 DD-05) | [ ] | S2 |
+| 57 | Implement `models.problem` — Problem Pydantic models (DES-003 §3) | [ ] | S2 |
+| 58 | Add problem CRUD queries to `infra.db` | [ ] | S2 |
+| 59 | Implement `core.problem` — test, version, list (DES-003 §5) | [ ] | S2 |
+| 60 | Implement `cli.problem` — 3 Typer commands (DES-003 §6) | [ ] | S2 |
+| 61 | Write L2 integration tests for `llm` (11 scenarios) | [ ] | S2 |
+| 62 | Write L2 integration tests for `problem` (10 scenarios) | [ ] | S2 |
+
+### Sprint 003 — Dataset Registration & Integrity
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 63 | Implement `models.dataset` — Dataset Pydantic models (DES-004 §5) | [ ] | S3 |
+| 64 | Add dataset CRUD queries to `infra.db` (DES-004) | [ ] | S3 |
+| 65 | Add dataset manifest ops to `infra.store` (DES-004) | [ ] | S3 |
+| 66 | Implement `core.dataset` — register, update, remove, list, info, verify (DES-004 §7) | [ ] | S3 |
+| 67 | Implement `cli.dataset` — 5 Typer commands (DES-004 §8) | [ ] | S3 |
+| 68 | Write L2 integration tests for `dataset` (14 scenarios) | [ ] | S3 |
+
+### Sprint 004 — Run Orchestration (OpenEvolve Integration)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 69 | Implement `infra.openevolve` — OpenEvolve wrapper (DES-005 §4-6) | [ ] | S4 |
+| 70 | Implement `infra.token_proxy` — HTTP proxy for token tracking (DES-005 DD-14) | [ ] | S4 |
+| 26 | Implement wrapper evaluator generator (DES-005 §3) | [ ] | S4 |
+| 71 | Implement `models.run` — Run Pydantic models (DES-005) | [ ] | S4 |
+| 72 | Implement `models.solution` — Solution model | [ ] | S4 |
+| 73 | Add run/solution CRUD queries to `infra.db` | [ ] | S4 |
+| 74 | Implement `core.run` — `launch_run()`: full orchestration (DES-005 §4-7) | [ ] | S4 |
+| 75 | Implement `core.run` — `_post_run_evaluation()` (FR-RUN-019) | [ ] | S4 |
+| 76 | Implement `core.run` — resume, status, list, info | [ ] | S4 |
+| 77 | Implement `cli.run` — 5 Typer commands | [ ] | S4 |
+| 78 | Write L2 integration tests for `run` (13 scenarios) | [ ] | S4 |
+
+### Sprint 005 — Solution Management & Evaluation Loop
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 79 | Implement `models.eval` — Eval Pydantic models (DES-006 §6) | [ ] | S5 |
+| 80 | Add eval CRUD queries to `infra.db` | [ ] | S5 |
+| 81 | Add solution extended queries to `infra.db` (alias, run-based) | [ ] | S5 |
+| 82 | Implement `core.eval` — `evaluate_solution()`, `get_eval_results()`, `compute_aggregates()` (DES-006 §8) | [ ] | S5 |
+| 83 | Implement `core.eval` — legacy evaluator support + global aggregation (D-006-g) | [ ] | S5 |
+| 84 | Implement `core.eval` — re-evaluation handling with confirmation (D-006-a) | [ ] | S5 |
+| 85 | Implement `core.solution` — list, info, alias, extract | [ ] | S5 |
+| 86 | Refactor `core.run._post_run_evaluation()` to reuse `core.eval` | [ ] | S5 |
+| 87 | Implement `cli.solution` — 4 Typer commands | [ ] | S5 |
+| 88 | Implement `cli.eval` — 2 Typer commands (DES-006 §9) | [ ] | S5 |
+| 89 | Write L2 integration tests for `solution` (9 scenarios) | [ ] | S5 |
+| 90 | Write L2 integration tests for `eval` (10 scenarios) | [ ] | S5 |
+
+### Sprint 006 — Benchmark: Multi-Solution Comparison & Export
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 91 | Implement `models.benchmark` — Benchmark Pydantic models (DES-007 §7) | [ ] | S6 |
+| 92 | Add benchmark CRUD queries to `infra.db` (DES-007 §9) | [ ] | S6 |
+| 93 | Implement `core.benchmark` — `run_benchmark()` with eval reuse (DES-007 §2.1, §3) | [ ] | S6 |
+| 94 | Implement `core.benchmark` — `get_benchmark_results()` with per-instance comparison (DES-007 §2.2, §5) | [ ] | S6 |
+| 95 | Implement `core.benchmark` — `export_benchmark()` CSV/JSON + `list_benchmarks()` (DES-007 §2.3-4, §6) | [ ] | S6 |
+| 96 | Implement `cli.benchmark` — 4 Typer commands (DES-007 §11) | [ ] | S6 |
+| 97 | Write L2 integration tests for `benchmark` (9 scenarios) | [ ] | S6 |
+
+### Sprint 007 — Doctor, Setup & Cross-Cutting Polish
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 98 | Implement `core.doctor` — dependency health checks | [ ] | S7 |
+| 99 | Implement `core.setup` — assisted installation | [ ] | S7 |
+| 100 | Implement `cli.doctor` — Typer command with `--fix` | [ ] | S7 |
+| 101 | Implement `cli.setup` — Typer command with `--dry-run`, `--force` | [ ] | S7 |
+| 102 | Cross-cutting: audit `--json` output consistency on all commands | [ ] | S7 |
+| 103 | Cross-cutting: audit error handling (stderr + exit codes) | [ ] | S7 |
+| 104 | Cross-cutting: add progress indicators to long commands | [ ] | S7 |
+| 105 | Cross-cutting: add confirmation summaries to state-modifying commands | [ ] | S7 |
+| 106 | Implement tab completion for bash/zsh | [ ] | S7 |
+| 107 | Write L2 integration tests for `doctor` and `setup` (8 scenarios) | [ ] | S7 |
+| 108 | Write L2 cross-cutting integration tests (6 scenarios) | [ ] | S7 |
+| 109 | Full regression: run all ~80 L2 integration tests (4+21+14+13+19+9+14 = 94 scenarios) | [ ] | S7 |

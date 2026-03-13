@@ -54,6 +54,12 @@ At the start of each session, read this file entirely, then follow the "Session 
 | E2E tests | [docs/validation/val-e2e-tests.md](docs/validation/val-e2e-tests.md) | L3 scenarios, LLM mocking, fake server |
 | Traceability matrix | [docs/validation/traceability-matrix.md](docs/validation/traceability-matrix.md) | FR/NFR → DES → test mapping |
 
+### Sprint Planning
+
+| Document | Path | Purpose |
+|---|---|---|
+| Sprint files | [docs/sprints/](docs/sprints/) | One file per sprint: scope, tasks, parallelization, review |
+
 ---
 
 ## Session Checklist
@@ -81,7 +87,7 @@ Before starting any work in a session:
 | Phase 2 | Architecture, tech choices (ADRs), data model | **Done** |
 | Phase 3 | POCs for critical aspects | **Done** (covered by POC #11/12/13) |
 | Phase 4 | Validation strategy, test plan, traceability | **Done** |
-| Phase 5 | Implementation | Not started |
+| Phase 5 | Implementation | **In progress** — Sprint 001 started (PR #1 done: scaffold + CI) |
 
 ---
 
@@ -95,11 +101,17 @@ Before starting any work in a session:
 - ADRs: `ADR-NNN-short-title.md` (zero-padded 3-digit number)
 - Tasks: `TASK-NNN-short-title.md`
 - Sessions: `YYYY-MM-DD-session-NNN.md`
+- Sprints: `sprint-NNN.md` (zero-padded 3-digit number)
 - ConOps: `conops.md` (single living document)
 
 ### Git
 - Commit message format: English, imperative mood (`Add`, `Fix`, `Update`...)
-- Branching strategy: TBD (ADR)
+- Branching strategy: **Git Flow**
+  - `main` — production-ready, tagged at sprint end (e.g. `v0.1.0`)
+  - `develop` — integration branch, PRs target here
+  - `feature/*` — one branch per PR (e.g. `feature/s1-scaffold-ci`)
+  - `release/*`, `hotfix/*` — as needed
+- CI pipeline: `.github/workflows/ci.yml` — ruff, mypy, pytest + coverage (≥80%), runs on push/PR to main/develop
 
 ---
 
