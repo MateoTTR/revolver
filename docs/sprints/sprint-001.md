@@ -128,18 +128,26 @@ Peak parallelism: 3 agents simultaneously (after S1-01, before S1-10).
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Completed**: 2026-03-14 (session 017)
 
 ### Tests passing
-- 0 / 4 integration tests passing
+- 4 / 4 integration tests passing
+- 64 total tests (30 infra L1 + 25 exceptions + 5 CLI + 4 L2 integration)
+- Coverage: 95%
 
 ### Demo-able features
-- [ ] `revolver --help` shows command groups with global options
-- [ ] `revolver project init my-project` creates complete project structure
-- [ ] `revolver project init --path ./new-dir` creates and initializes new directory
-- [ ] `revolver project init my-project --json` outputs structured JSON
-- [ ] Re-init of existing project exits with code 1 and error message on stderr
-- [ ] `.revolver/` directory has 700 permissions
+- [x] `revolver --help` shows command groups with global options
+- [x] `revolver project init my-project` creates complete project structure
+- [x] `revolver project init --path ./new-dir` creates and initializes new directory
+- [x] `revolver project init my-project --json` outputs structured JSON
+- [x] Re-init of existing project exits with code 1 and error message on stderr
+- [x] `.revolver/` directory has 700 permissions
+
+### PRs merged
+- PR #1: Scaffold + CI (S1-01)
+- PR #2: Infra + Models + Fixtures + L1 tests (S1-03..08, S1-12, S1-14)
+- PR #3: CLI skeleton + Exceptions (S1-02, S1-09)
+- PR #4: Project init domain + CLI + L2 tests (S1-10, S1-11, S1-13)
 
 ### Carry-over
-- Tasks or issues deferred to next sprint
+- None — all 14 tasks completed

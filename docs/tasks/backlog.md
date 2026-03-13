@@ -61,19 +61,19 @@
 | # | Task | Status | Sprint |
 |---|---|---|---|
 | 35 | Create `pyproject.toml`, `src/revolver/` layout, pip-installable package, CI pipeline | [x] | S1 — session 016, PR #1 |
-| 36 | Implement root Typer app with `--json`, `--verbose`, `--quiet` callback | [ ] | S1 |
-| 37 | Implement `infra.db` — SQLite connection, WAL, schema creation (DES-001), migration | [ ] | S1 |
-| 38 | Implement `infra.hashing` — `file_hash()`, `tree_hash()`, `global_hash()`, `compute_snapshot_hash()` | [ ] | S1 |
-| 39 | Implement `infra.store` — `.revolver/` management, `find_project_root()`, `write_manifest()` | [ ] | S1 |
-| 40 | Implement `infra.config` — 5-level config hierarchy resolution | [ ] | S1 |
-| 41 | Implement `infra.output` — `render()` for human tables (rich) and JSON | [ ] | S1 |
-| 42 | Implement `models.project` — `ProjectConfig` Pydantic model | [ ] | S1 |
-| 43 | Implement `core.project` — `init_project()` | [ ] | S1 |
-| 44 | Implement `cli.project` — `project init` Typer command | [ ] | S1 |
-| 45 | Implement typed exceptions and CLI error mapping (exit codes 0-4) | [ ] | S1 |
-| 46 | Create test fixtures (`tests/fixtures/`) | [ ] | S1 |
-| 47 | Write L2 integration tests for `project init` (4 scenarios) | [ ] | S1 |
-| 48 | Write L1 unit tests for infra modules (db, hashing, store, config, output) | [ ] | S1 |
+| 36 | Implement root Typer app with `--json`, `--verbose`, `--quiet` callback | [x] | S1 — session 017, PR #3 |
+| 37 | Implement `infra.db` — SQLite connection, WAL, schema creation (DES-001), migration | [x] | S1 — session 017, PR #2 |
+| 38 | Implement `infra.hashing` — `file_hash()`, `tree_hash()`, `global_hash()`, `compute_snapshot_hash()` | [x] | S1 — session 017, PR #2 |
+| 39 | Implement `infra.store` — `.revolver/` management, `find_project_root()`, `write_manifest()` | [x] | S1 — session 017, PR #2 |
+| 40 | Implement `infra.config` — 5-level config hierarchy resolution | [x] | S1 — session 017, PR #2 |
+| 41 | Implement `infra.output` — `render()` for human tables (rich) and JSON | [x] | S1 — session 017, PR #2 |
+| 42 | Implement `models.project` — `ProjectConfig` Pydantic model | [x] | S1 — session 017, PR #2 |
+| 43 | Implement `core.project` — `init_project()` | [x] | S1 — session 017, PR #4 |
+| 44 | Implement `cli.project` — `project init` Typer command | [x] | S1 — session 017, PR #4 |
+| 45 | Implement typed exceptions and CLI error mapping (exit codes 0-4) | [x] | S1 — session 017, PR #3 |
+| 46 | Create test fixtures (`tests/fixtures/`) | [x] | S1 — session 017, PR #2 |
+| 47 | Write L2 integration tests for `project init` (4 scenarios) | [x] | S1 — session 017, PR #4 |
+| 48 | Write L1 unit tests for infra modules (db, hashing, store, config, output) | [x] | S1 — session 017, PR #2 |
 
 ### Sprint 002 — LLM Registration & Problem Versioning
 
