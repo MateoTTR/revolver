@@ -5,7 +5,6 @@ All tests mock the OpenEvolve controller to avoid a hard dependency.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 
-from revolver.core.exceptions import ExternalError
+from revolver.core.exceptions import ExternalError, ValidationError
 from revolver.infra.openevolve import (
     SYSTEM_PROMPT_TEMPLATE,
     OpenEvolveRunner,
@@ -23,6 +22,8 @@ from revolver.infra.openevolve import (
     revolver_env,
 )
 from revolver.models.llm import LLMEntry
+
+pytestmark = [pytest.mark.unit]
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -106,9 +107,11 @@ class TestOpenEvolveRunner:
             output_dir=tmp_path / "output",
         )
 
-        with patch.dict("sys.modules", {"openevolve": None, "openevolve.controller": None}):
-            with pytest.raises(ExternalError, match="OpenEvolve is not installed"):
-                runner._init_controller()
+        with (
+            patch.dict("sys.modules", {"openevolve": None, "openevolve.controller": None}),
+            pytest.raises(ExternalError, match="OpenEvolve is not installed"),
+        ):
+            runner._init_controller()
 
     def test_run_controller_exception(self, tmp_path: Path) -> None:
         """ExternalError raised when the controller fails."""
@@ -242,6 +245,33 @@ class TestBuildConfig:
         assert "llm" in result
         assert result["llm"]["model"] == "test-model"
 
+    def test_build_config_null_llm_key(self, tmp_path: Path) -> None:
+        """build_config works when base config has ``llm: null``."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump({"llm": None, "prompt": None}))
+
+        llm = _make_llm()
+        result = build_config(
+            problem_config=config_file,
+            llm=llm,
+            problem_description="Test problem",
+        )
+
+        assert isinstance(result["llm"], dict)
+        assert result["llm"]["model"] == "test-model"
+        assert isinstance(result["prompt"], dict)
+        assert "system_message" in result["prompt"]
+
+    def test_malformed_override_raises(self) -> None:
+        """Malformed config override (missing =) raises ValidationError."""
+        llm = _make_llm()
+        with pytest.raises(ValidationError, match="Malformed config override"):
+            build_config(
+                problem_config=None,
+                llm=llm,
+                config_overrides=["no-equals-sign"],
+            )
+
     def test_system_prompt_template_format(self) -> None:
         """SYSTEM_PROMPT_TEMPLATE contains expected placeholders."""
         rendered = SYSTEM_PROMPT_TEMPLATE.format(
@@ -284,10 +314,9 @@ class TestRevolverEnv:
         key = "REVOLVER_TEST_EXCEPT"
         assert key not in os.environ
 
-        with pytest.raises(ValueError, match="intentional"):
-            with revolver_env({key: "value"}):
-                assert os.environ[key] == "value"
-                raise ValueError("intentional")
+        with pytest.raises(ValueError, match="intentional"), revolver_env({key: "value"}):
+            assert os.environ[key] == "value"
+            raise ValueError("intentional")
 
         assert key not in os.environ
 

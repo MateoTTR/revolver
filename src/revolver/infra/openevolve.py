@@ -15,13 +15,14 @@ import asyncio
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from revolver.core.exceptions import ExternalError
+from revolver.core.exceptions import ExternalError, ValidationError
+from revolver.infra.token_proxy import TokenUsage
 from revolver.models.llm import LLMEntry
 
 # ── System prompt template (DES-005 §4.4) ────────────────────────────────────
@@ -132,6 +133,12 @@ class OpenEvolveRunner:
     ) -> RunOutput:
         """Launch the OpenEvolve evolution loop.
 
+        Uses ``asyncio.run()`` internally, so this method **must not** be
+        called from within an already-running async event loop (e.g. inside
+        an ``async def`` or Jupyter notebook).  If nested-loop support is
+        needed in the future, consider ``nest_asyncio`` or refactoring to
+        an ``async run()`` method.
+
         Args:
             iterations: Number of evolution iterations.
             checkpoint: Path to checkpoint directory for resume (optional).
@@ -214,12 +221,12 @@ def build_config(
             llm_config["api_key"] = api_key
 
     if llm_config:
-        config.setdefault("llm", {})
+        config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
         config["llm"].update(llm_config)
 
     # 3. Problem description injection (DES-005 §4.4)
     if problem_description:
-        config.setdefault("prompt", {})
+        config["prompt"] = config.get("prompt") if isinstance(config.get("prompt"), dict) else {}
         config["prompt"]["system_message"] = SYSTEM_PROMPT_TEMPLATE.format(
             problem_description=problem_description,
         )
@@ -232,7 +239,9 @@ def build_config(
     if config_overrides:
         for override in config_overrides:
             if "=" not in override:
-                continue
+                raise ValidationError(
+                    f"Malformed config override (expected key=value): {override!r}"
+                )
             key, value = override.split("=", 1)
             _set_nested(config, key.strip(), _parse_value(value.strip()))
 
@@ -305,23 +314,4 @@ def revolver_env(env_vars: dict[str, str]) -> Iterator[None]:
                 os.environ[key] = prev
 
 
-# ── Token usage dataclass ────────────────────────────────────────────────────
-
-
-@dataclass
-class TokenUsage:
-    """Accumulated token usage from a run.
-
-    Attributes:
-        prompt_tokens: Total prompt tokens consumed.
-        completion_tokens: Total completion tokens consumed.
-    """
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def total_tokens(self) -> int:
-        """Total tokens (prompt + completion)."""
-        return self.prompt_tokens + self.completion_tokens
+__all__ = ["TokenUsage"]

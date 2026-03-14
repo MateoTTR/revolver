@@ -6,7 +6,6 @@ Uses actual HTTP requests to verify the proxy works end-to-end.
 from __future__ import annotations
 
 import json
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from typing import Any
@@ -20,6 +19,8 @@ from revolver.infra.token_proxy import (
     estimate_cost,
 )
 
+pytestmark = [pytest.mark.unit]
+
 
 # ── Fake LLM backend ─────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ class _FakeLLMHandler(BaseHTTPRequestHandler):
     # Class-level override for custom response
     custom_response: dict[str, Any] | None = None
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
         _body = self.rfile.read(content_length) if content_length > 0 else b""
 
@@ -54,7 +55,7 @@ class _FakeLLMHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         body = json.dumps({"status": "ok"}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -62,7 +63,7 @@ class _FakeLLMHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: Any) -> None:
         pass  # Suppress logging
 
 
