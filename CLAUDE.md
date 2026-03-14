@@ -122,6 +122,18 @@ Before starting any work in a session:
   - `release/*`, `hotfix/*` — as needed
 - CI pipeline: `.github/workflows/ci.yml` — ruff, mypy, pytest + coverage (≥80%), runs on push/PR to main/develop
 
+### PR Development Workflow
+
+Each PR follows a standardized 5-step process:
+
+1. **GitHub Issue** — `gh issue create` with: scope (sprint tasks), files to create/modify, acceptance criteria, test scenarios, DES/spec references. The issue is the single source of truth for the feature.
+2. **Dev Agent (worktree)** — Launch a worktree-isolated agent. The agent reads the issue via `gh issue view <number>`, plus project docs (DES, specs, existing code). It implements, tests, and commits.
+3. **PR Creation** — Push branch, `gh pr create` linking the issue (`Closes #N`). PR body summarizes changes and test plan.
+4. **Code Review Agent** — Automatically triggered after `gh pr create` (PostToolUse hook). Reviews the diff, posts structured findings as a PR comment (CRITICAL/WARNING/SUGGESTION/GOOD).
+5. **Fix & Merge** — Address review findings, push fixes, user merges on GitHub.
+
+Independent PRs are developed in parallel using separate worktree agents. Dependent PRs wait for their prerequisites to be merged into `develop`.
+
 ---
 
 ## Key Constraints
