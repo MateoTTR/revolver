@@ -8,6 +8,7 @@ Traceable to: DES-004 section 7, FR-DAT-001..016.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,6 +56,26 @@ from revolver.models.dataset import (
     IntegrityMismatch,
     IntegrityReport,
 )
+
+# Regex for safe dataset names: alphanumeric start, then alphanum/dot/hyphen/underscore.
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _validate_dataset_name(name: str) -> None:
+    """Validate that a dataset name is safe for use as a path segment.
+
+    Args:
+        name: The dataset name to validate.
+
+    Raises:
+        ValidationError: If the name contains invalid characters.
+    """
+    if not _SAFE_NAME_RE.match(name):
+        raise ValidationError(
+            f"Invalid dataset name '{name}': "
+            "must start with a letter or digit and contain only "
+            "letters, digits, dots, hyphens, and underscores."
+        )
 
 
 def _resolve_project_root(project_root: Path | None) -> Path:
@@ -116,6 +137,8 @@ def register_dataset(
         DuplicateNameError: If a dataset with *name* already exists.
         RevolverError: If a referenced problem version does not exist.
     """
+    _validate_dataset_name(name)
+
     root = _resolve_project_root(project_root)
     resolved_path = path.resolve()
 
@@ -193,13 +216,17 @@ def register_dataset(
             description=description,
         )
 
-        # Insert into DB
-        insert_dataset(conn, registration)
-        insert_dataset_instances(conn, name, instances)
-
-        if compatible_with:
-            for tag in compatible_with:
-                insert_dataset_compat(conn, name, tag)
+        # Insert into DB atomically — defer commits to avoid partial state
+        try:
+            insert_dataset(conn, registration, commit=False)
+            insert_dataset_instances(conn, name, instances, commit=False)
+            if compatible_with:
+                for tag in compatible_with:
+                    insert_dataset_compat(conn, name, tag, commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
         # Write manifest
         compat_list = compatible_with or []
@@ -248,6 +275,8 @@ def update_dataset(
     Raises:
         RevolverError: If the dataset or a referenced problem version is not found.
     """
+    _validate_dataset_name(name)
+
     root = _resolve_project_root(project_root)
     db_path = root / REVOLVER_DIR / "revolver.db"
     conn = get_project_db(db_path)
@@ -256,26 +285,35 @@ def update_dataset(
         if existing is None:
             raise RevolverError(f"Dataset '{name}' not found")
 
-        # Add compat entries
+        # Validate all problem versions exist before starting writes
         if add_compat:
             for tag in add_compat:
                 pv = get_problem_version(conn, tag)
                 if pv is None:
                     raise RevolverError(f"Problem version '{tag}' not found")
-                insert_dataset_compat(conn, name, tag)
 
-        # Remove compat entries
-        if remove_compat:
-            for tag in remove_compat:
-                delete_dataset_compat(conn, name, tag)
+        # Apply all DB mutations atomically
+        try:
+            if add_compat:
+                for tag in add_compat:
+                    insert_dataset_compat(conn, name, tag, commit=False)
 
-        # Update description
-        if description is not None:
-            update_dataset_description(conn, name, description)
+            if remove_compat:
+                for tag in remove_compat:
+                    delete_dataset_compat(conn, name, tag, commit=False)
+
+            if description is not None:
+                update_dataset_description(conn, name, description, commit=False)
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
         # Re-fetch updated registration
         updated = get_dataset(conn, name)
-        assert updated is not None
+        if updated is None:
+            raise RevolverError(f"Dataset '{name}' not found after update")
 
         # Update manifest
         compat_versions = get_dataset_compat(conn, name)
@@ -318,6 +356,8 @@ def remove_dataset(
     Raises:
         RevolverError: If the dataset is not found or is referenced by solutions.
     """
+    _validate_dataset_name(name)
+
     root = _resolve_project_root(project_root)
     db_path = root / REVOLVER_DIR / "revolver.db"
     conn = get_project_db(db_path)
