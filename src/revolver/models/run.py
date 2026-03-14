@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class TokenUsage(BaseModel):
@@ -31,7 +31,12 @@ class TokenUsage(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def total_tokens(self) -> int:
-        """Return the sum of prompt and completion tokens."""
+        """Return the sum of prompt and completion tokens.
+
+        Note: DES-005 §8 specifies ``total_tokens`` as a stored field.
+        We use a computed property instead to avoid data inconsistency
+        and eliminate a redundant column.
+        """
         return self.prompt_tokens + self.completion_tokens
 
 
@@ -54,7 +59,7 @@ class RunConfig(BaseModel):
     dataset_name: str
     iterations: int | None = None
     alias: str | None = None
-    config_overrides: list[str] = []
+    config_overrides: list[str] = Field(default_factory=list)
     dry_run: bool = False
 
 

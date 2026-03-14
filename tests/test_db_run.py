@@ -412,6 +412,25 @@ class TestGetResumeChain:
         chain = get_resume_chain(db_conn, "run-child")
         assert chain == ["run-parent", "run-child"]
 
+    @pytest.mark.unit
+    def test_resume_chain_nonexistent(self, db_conn: sqlite3.Connection) -> None:
+        """get_resume_chain returns empty list for a non-existent run ID."""
+        chain = get_resume_chain(db_conn, "nonexistent-run")
+        assert chain == []
+
+
+class TestUpdateRunTokensEdgeCases:
+    """Edge-case tests for update_run_tokens."""
+
+    @pytest.mark.unit
+    def test_update_tokens_nonexistent_run(self, db_conn: sqlite3.Connection) -> None:
+        """update_run_tokens on a non-existent run is a no-op (0 rows affected)."""
+        # Should not raise — just updates zero rows.
+        update_run_tokens(db_conn, "nonexistent-run", 1000, 500)
+        # Verify no run was created
+        result = get_run(db_conn, "nonexistent-run")
+        assert result is None
+
 
 # ── Solution CRUD tests ──────────────────────────────────────────────────────
 

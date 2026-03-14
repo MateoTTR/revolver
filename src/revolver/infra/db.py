@@ -12,6 +12,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from revolver.core.exceptions import DuplicateNameError
 from revolver.models.dataset import (
@@ -868,7 +869,11 @@ def insert_run(
     conn.commit()
 
 
-def update_run_status(conn: sqlite3.Connection, run_id: str, status: str) -> None:
+def update_run_status(
+    conn: sqlite3.Connection,
+    run_id: str,
+    status: Literal["running", "completed", "interrupted"],
+) -> None:
     """Update the status of a run.
 
     Args:
@@ -974,6 +979,8 @@ def list_runs(
 
     where = ""
     if clauses:
+        # `clauses` contains only hardcoded column-name fragments;
+        # values are parameterized via `params`.
         where = "WHERE " + " AND ".join(clauses)
 
     query = f"""\
@@ -1100,8 +1107,7 @@ def get_solutions_for_run(conn: sqlite3.Connection, run_id: str) -> list[Solutio
         A list of :class:`Solution` instances sorted by rank.
     """
     cursor = conn.execute(
-        "SELECT id, run_id, rank, best_score, alias FROM solutions "
-        "WHERE run_id = ? ORDER BY rank",
+        "SELECT id, run_id, rank, best_score, alias FROM solutions WHERE run_id = ? ORDER BY rank",
         (run_id,),
     )
     return [
@@ -1150,6 +1156,8 @@ def list_solutions(
 
     where = ""
     if clauses:
+        # `clauses` contains only hardcoded column-name fragments;
+        # values are parameterized via `params`.
         where = "WHERE " + " AND ".join(clauses)
 
     query = f"""\
