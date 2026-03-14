@@ -10,6 +10,7 @@ import pytest
 from revolver.core.exceptions import DuplicateNameError
 from revolver.infra.db import (
     get_problem_version,
+    get_problem_version_by_hash,
     get_project_db,
     insert_problem_version,
     list_problem_versions,
@@ -89,4 +90,19 @@ class TestProblemVersionCRUD:
     def test_get_nonexistent_returns_none(self, db_conn) -> None:
         """Getting a non-existent tag returns None."""
         result = get_problem_version(db_conn, "nonexistent")
+        assert result is None
+
+    def test_get_by_hash_found(self, db_conn) -> None:
+        """Retrieve a version by its content hash."""
+        now = datetime(2026, 3, 14, 10, 0, 0, tzinfo=UTC)
+        pv = ProblemVersion(tag="v1.0", hash="sha256:aabbccdd", message="First", created_at=now)
+        insert_problem_version(db_conn, pv)
+        result = get_problem_version_by_hash(db_conn, "sha256:aabbccdd")
+        assert result is not None
+        assert result.tag == "v1.0"
+        assert result.hash == "sha256:aabbccdd"
+
+    def test_get_by_hash_not_found(self, db_conn) -> None:
+        """Querying a non-existent hash returns None."""
+        result = get_problem_version_by_hash(db_conn, "sha256:nonexistent")
         assert result is None

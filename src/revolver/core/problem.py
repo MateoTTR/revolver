@@ -178,6 +178,7 @@ def create_version(
     Raises:
         ValidationError: If required files are missing (FR-PRB-010).
         DuplicateNameError: If *tag* already exists (FR-PRB-008).
+        DuplicateNameError: If content is identical to an existing version.
     """
     root = _resolve_project_root(project_root)
 
