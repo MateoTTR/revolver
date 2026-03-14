@@ -20,6 +20,7 @@ from revolver.core.exceptions import (
 )
 from revolver.infra.db import (
     get_problem_version,
+    get_problem_version_by_hash,
     get_project_db,
     insert_problem_version,
 )
@@ -177,6 +178,7 @@ def create_version(
     Raises:
         ValidationError: If required files are missing (FR-PRB-010).
         DuplicateNameError: If *tag* already exists (FR-PRB-008).
+        DuplicateNameError: If content is identical to an existing version.
     """
     root = _resolve_project_root(project_root)
 
@@ -224,6 +226,16 @@ def create_version(
 
         # Compute snapshot hash
         snap_hash = compute_snapshot_hash(file_hash_pairs)
+
+        # FR-PRB-008: check hash uniqueness (duplicate content detection)
+        existing_by_hash = get_problem_version_by_hash(conn, snap_hash)
+        if existing_by_hash is not None:
+            # Clean up the snapshot directory we already created
+            shutil.rmtree(snapshot_dir)
+            raise DuplicateNameError(
+                f"Content unchanged since version '{existing_by_hash.tag}'. "
+                f"No new version created — problem files are identical."
+            )
 
         # Write manifest.yaml
         now = datetime.now(UTC)

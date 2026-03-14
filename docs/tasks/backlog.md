@@ -98,12 +98,12 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 63 | Implement `models.dataset` — Dataset Pydantic models (DES-004 §5) | [ ] | S3 |
-| 64 | Add dataset CRUD queries to `infra.db` (DES-004) | [ ] | S3 |
-| 65 | Add dataset manifest ops to `infra.store` (DES-004) | [ ] | S3 |
-| 66 | Implement `core.dataset` — register, update, remove, list, info, verify (DES-004 §7) | [ ] | S3 |
-| 67 | Implement `cli.dataset` — 5 Typer commands (DES-004 §8) | [ ] | S3 |
-| 68 | Write L2 integration tests for `dataset` (14 scenarios) | [ ] | S3 |
+| 63 | Implement `models.dataset` — Dataset Pydantic models (DES-004 §5) | [x] | S3 — session 020, PR #13 |
+| 64 | Add dataset CRUD queries to `infra.db` (DES-004) | [x] | S3 — session 020, PR #13 |
+| 65 | Add dataset manifest ops to `infra.store` (DES-004) | [x] | S3 — session 020, PR #13 |
+| 66 | Implement `core.dataset` — register, update, remove, list, info, verify (DES-004 §7) | [x] | S3 — session 020, PR #14 |
+| 67 | Implement `cli.dataset` — 5 Typer commands (DES-004 §8) | [x] | S3 — session 020, PR #14 |
+| 68 | Write L2 integration tests for `dataset` (14 scenarios) | [x] | S3 — session 020, PR #14 |
 
 ### Sprint 004 — Run Orchestration (OpenEvolve Integration)
 

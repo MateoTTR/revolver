@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS problem_versions (
 CREATE TABLE IF NOT EXISTS datasets (
     name            TEXT PRIMARY KEY,
     path            TEXT NOT NULL,
-    split           TEXT NOT NULL CHECK (split IN ('train', 'eval')),
+    split           TEXT CHECK (split IN ('train', 'eval')),
     storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
     description     TEXT DEFAULT '',
     global_hash     TEXT NOT NULL,
@@ -310,6 +310,33 @@ def get_problem_version(conn: sqlite3.Connection, tag: str) -> ProblemVersion | 
     )
 
 
+def get_problem_version_by_hash(
+    conn: sqlite3.Connection, content_hash: str
+) -> ProblemVersion | None:
+    """Retrieve a problem version by content hash.
+
+    Args:
+        conn: An open project database connection.
+        content_hash: The snapshot hash to look up.
+
+    Returns:
+        The :class:`ProblemVersion` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        "SELECT tag, hash, message, created_at FROM problem_versions WHERE hash = ?",
+        (content_hash,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return ProblemVersion(
+        tag=row[0],
+        hash=row[1],
+        message=row[2] or "",
+        created_at=datetime.fromisoformat(row[3]),
+    )
+
+
 def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
     """List all problem versions ordered by creation time (ascending).
 
@@ -460,12 +487,19 @@ def update_llm_stats(
 # ── Dataset CRUD operations ────────────────────────────────────────────────
 
 
-def insert_dataset(conn: sqlite3.Connection, registration: DatasetRegistration) -> None:
+def insert_dataset(
+    conn: sqlite3.Connection,
+    registration: DatasetRegistration,
+    *,
+    commit: bool = True,
+) -> None:
     """Insert a dataset registration into the project database.
 
     Args:
         conn: An open project database connection.
         registration: The :class:`DatasetRegistration` to insert.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
 
     Raises:
         DuplicateNameError: If a dataset with the same name already exists.
@@ -489,7 +523,8 @@ def insert_dataset(conn: sqlite3.Connection, registration: DatasetRegistration) 
                 registration.created_at.isoformat(),
             ),
         )
-        conn.commit()
+        if commit:
+            conn.commit()
     except sqlite3.IntegrityError as exc:
         raise DuplicateNameError(f"A dataset named '{registration.name}' already exists") from exc
 
@@ -498,6 +533,8 @@ def insert_dataset_instances(
     conn: sqlite3.Connection,
     name: str,
     instances: list[DatasetInstance],
+    *,
+    commit: bool = True,
 ) -> None:
     """Batch-insert dataset instance hashes.
 
@@ -507,18 +544,23 @@ def insert_dataset_instances(
         conn: An open project database connection.
         name: Dataset name (foreign key to ``datasets``).
         instances: List of :class:`DatasetInstance` to insert.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
     """
     conn.executemany(
         "INSERT INTO dataset_instances (dataset_name, instance_id, hash) VALUES (?, ?, ?)",
         [(name, inst.filename, inst.hash) for inst in instances],
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def insert_dataset_compat(
     conn: sqlite3.Connection,
     name: str,
     problem_version_tag: str,
+    *,
+    commit: bool = True,
 ) -> None:
     """Insert a dataset compatibility entry.
 
@@ -526,12 +568,15 @@ def insert_dataset_compat(
         conn: An open project database connection.
         name: Dataset name.
         problem_version_tag: Problem version tag this dataset is compatible with.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
     """
     conn.execute(
         "INSERT INTO dataset_compat (dataset_name, problem_version) VALUES (?, ?)",
         (name, problem_version_tag),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def get_dataset(conn: sqlite3.Connection, name: str) -> DatasetRegistration | None:
@@ -650,6 +695,8 @@ def update_dataset_description(
     conn: sqlite3.Connection,
     name: str,
     description: str,
+    *,
+    commit: bool = True,
 ) -> None:
     """Update the description of a dataset.
 
@@ -657,12 +704,15 @@ def update_dataset_description(
         conn: An open project database connection.
         name: The dataset name.
         description: New description text.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
     """
     conn.execute(
         "UPDATE datasets SET description = ? WHERE name = ?",
         (description, name),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def delete_dataset(conn: sqlite3.Connection, name: str) -> None:
@@ -696,6 +746,30 @@ def delete_dataset_compat_all(conn: sqlite3.Connection, name: str) -> None:
     """
     conn.execute("DELETE FROM dataset_compat WHERE dataset_name = ?", (name,))
     conn.commit()
+
+
+def delete_dataset_compat(
+    conn: sqlite3.Connection,
+    name: str,
+    problem_version_tag: str,
+    *,
+    commit: bool = True,
+) -> None:
+    """Delete a single compatibility entry for a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name.
+        problem_version_tag: Problem version tag to remove from compat.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
+    """
+    conn.execute(
+        "DELETE FROM dataset_compat WHERE dataset_name = ? AND problem_version = ?",
+        (name, problem_version_tag),
+    )
+    if commit:
+        conn.commit()
 
 
 def get_solutions_by_dataset(conn: sqlite3.Connection, name: str) -> list[str]:
