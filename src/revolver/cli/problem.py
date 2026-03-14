@@ -69,9 +69,7 @@ def problem_test(
     with cli_error_boundary():
         # Validate at least one of --instance or --dataset
         if instance is None and dataset is None:
-            raise typer.BadParameter(
-                "At least one of --instance or --dataset must be provided."
-            )
+            raise typer.BadParameter("At least one of --instance or --dataset must be provided.")
 
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         ctx_verbose: bool = ctx.obj.get("verbose", False) if ctx.obj else False

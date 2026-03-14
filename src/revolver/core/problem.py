@@ -114,9 +114,7 @@ def test_problem(
     elif dataset is not None:
         if not dataset.is_dir():
             raise ValidationError(f"Dataset directory not found: {dataset}")
-        instance_paths = sorted(
-            p for p in dataset.iterdir() if p.is_file()
-        )
+        instance_paths = sorted(p for p in dataset.iterdir() if p.is_file())
         if not instance_paths:
             raise ValidationError(f"No instance files found in {dataset}")
         mode = "dataset"
@@ -137,8 +135,7 @@ def test_problem(
         # FR-PRB-013: warn if metrics present but no combined_score
         if result.metrics and "combined_score" not in result.metrics:
             sys.stderr.write(
-                f"Warning: instance {result.instance_id} has metrics "
-                f"but no 'combined_score' key\n"
+                f"Warning: instance {result.instance_id} has metrics but no 'combined_score' key\n"
             )
 
     # Compute summary
@@ -186,10 +183,7 @@ def create_version(
     # FR-PRB-010: check required files
     for fname in _REQUIRED_FILES:
         if not (root / fname).is_file():
-            raise ValidationError(
-                f"Required file missing: {fname}. "
-                f"Expected at {root / fname}"
-            )
+            raise ValidationError(f"Required file missing: {fname}. Expected at {root / fname}")
 
     # Collect files to snapshot (required + optional if present)
     files_to_copy: list[str] = list(_REQUIRED_FILES)
