@@ -330,6 +330,26 @@ def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
 
 # ── LLM CRUD operations ─────────────────────────────────────────────────────
 
+_LLM_COLUMNS = (
+    "name, provider, model, source, base_url, api_key_env, "
+    "input_cost_per_mtok, output_cost_per_mtok, registered_at"
+)
+
+
+def _row_to_llm_entry(row: tuple[object, ...]) -> LLMEntry:
+    """Map a database row (with columns in ``_LLM_COLUMNS`` order) to an :class:`LLMEntry`."""
+    return LLMEntry(
+        name=row[0],  # type: ignore[arg-type]
+        provider=row[1],  # type: ignore[arg-type]
+        model=row[2],  # type: ignore[arg-type]
+        source=row[3],  # type: ignore[arg-type]
+        base_url=row[4],  # type: ignore[arg-type]
+        api_key_env=row[5],  # type: ignore[arg-type]
+        input_cost_per_mtok=row[6],  # type: ignore[arg-type]
+        output_cost_per_mtok=row[7],  # type: ignore[arg-type]
+        registered_at=row[8],  # type: ignore[arg-type]
+    )
+
 
 def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
     """Insert an LLM entry into the ``llms`` table.
@@ -376,23 +396,14 @@ def get_llm(conn: sqlite3.Connection, name: str) -> LLMEntry | None:
     Returns:
         The matching :class:`LLMEntry`, or ``None`` if not found.
     """
-    cursor = conn.execute("SELECT * FROM llms WHERE name = ?", (name,))
+    cursor = conn.execute(
+        f"SELECT {_LLM_COLUMNS} FROM llms WHERE name = ?",
+        (name,),
+    )
     row = cursor.fetchone()
     if row is None:
         return None
-
-    # Map columns by position (matches CREATE TABLE order).
-    return LLMEntry(
-        name=row[0],
-        provider=row[1],
-        model=row[2],
-        source=row[3],
-        base_url=row[4],
-        api_key_env=row[5],
-        input_cost_per_mtok=row[6],
-        output_cost_per_mtok=row[7],
-        registered_at=row[8],
-    )
+    return _row_to_llm_entry(row)
 
 
 def list_llms(conn: sqlite3.Connection) -> list[LLMEntry]:
@@ -404,21 +415,8 @@ def list_llms(conn: sqlite3.Connection) -> list[LLMEntry]:
     Returns:
         A list of :class:`LLMEntry` instances sorted alphabetically by name.
     """
-    cursor = conn.execute("SELECT * FROM llms ORDER BY name")
-    return [
-        LLMEntry(
-            name=row[0],
-            provider=row[1],
-            model=row[2],
-            source=row[3],
-            base_url=row[4],
-            api_key_env=row[5],
-            input_cost_per_mtok=row[6],
-            output_cost_per_mtok=row[7],
-            registered_at=row[8],
-        )
-        for row in cursor.fetchall()
-    ]
+    cursor = conn.execute(f"SELECT {_LLM_COLUMNS} FROM llms ORDER BY name")
+    return [_row_to_llm_entry(row) for row in cursor.fetchall()]
 
 
 def delete_llm(conn: sqlite3.Connection, name: str) -> None:

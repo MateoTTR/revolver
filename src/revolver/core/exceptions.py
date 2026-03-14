@@ -8,6 +8,8 @@ Exit codes follow the specification (specs §4.2):
 - 4: External error (OpenEvolve failure, LLM API error)
 """
 
+from __future__ import annotations
+
 
 class RevolverError(Exception):
     """Base exception for all Revolver errors.

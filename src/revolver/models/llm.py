@@ -9,6 +9,7 @@ Traceable to: DES-002, FR-LLM-001..008.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -33,7 +34,7 @@ class LLMEntry(BaseModel):
     name: str
     provider: str | None = None
     model: str
-    source: str
+    source: Literal["local", "remote"]
     base_url: str | None = None
     api_key_env: str | None = None
     input_cost_per_mtok: float | None = None
@@ -55,8 +56,8 @@ class LLMStatus(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    source: str
-    status: str
+    source: Literal["local", "remote"]
+    status: Literal["loaded", "stopped", "unavailable", "ready", "unconfigured"]
     vram_mib: int | None = None
 
 

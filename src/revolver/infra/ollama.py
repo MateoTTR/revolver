@@ -77,10 +77,31 @@ class OllamaClient:
         self.base_url = base_url
         self._client = httpx.Client(base_url=base_url, timeout=30.0)
 
+    # ── Resource management ─────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """Close the underlying httpx client and release resources."""
+        self._client.close()
+
+    def __enter__(self) -> OllamaClient:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     # ── Health ───────────────────────────────────────────────────────────────
 
     def health_check(self) -> bool:
-        """Return ``True`` if the Ollama server is reachable (``GET /``)."""
+        """Check whether the Ollama server is reachable (``GET /``).
+
+        Returns:
+            ``True`` if the server responds with HTTP 200.
+            ``False`` if the server responds with a non-200 status code.
+
+        Raises:
+            OllamaNotRunningError: If the server cannot be reached at all
+                (connection refused / timeout).
+        """
         try:
             resp = self._client.get("/")
             return resp.status_code == 200
