@@ -8,6 +8,8 @@ Exit codes follow the specification (specs §4.2):
 - 4: External error (OpenEvolve failure, LLM API error)
 """
 
+from __future__ import annotations
+
 
 class RevolverError(Exception):
     """Base exception for all Revolver errors.
@@ -62,3 +64,36 @@ class EvaluatorLoadError(RevolverError):
     """Raised when an evaluator module cannot be loaded or is invalid."""
 
     exit_code: int = 1
+
+
+# ── Ollama / LLM exceptions ─────────────────────────────────────────────────
+
+
+class OllamaNotRunningError(ResourceError):
+    """Raised when the Ollama daemon is not reachable."""
+
+    exit_code: int = 3
+
+
+class ModelNotFoundError(RevolverError):
+    """Raised when a requested model is not found locally."""
+
+    exit_code: int = 1
+
+
+class ModelPullError(ExternalError):
+    """Raised when a model pull from the Ollama registry fails."""
+
+    exit_code: int = 4
+
+
+class ModelHealthCheckError(ExternalError):
+    """Raised when a health-check prompt to a model fails."""
+
+    exit_code: int = 4
+
+
+class ModelLoadTimeoutError(ResourceError):
+    """Raised when a model fails to load within the allowed timeout."""
+
+    exit_code: int = 3
