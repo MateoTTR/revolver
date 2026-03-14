@@ -100,3 +100,4 @@ app.add_typer(benchmark_app, name="benchmark")
 
 import revolver.cli.llm as _llm_commands  # noqa: F401, E402
 import revolver.cli.project as _project_commands  # noqa: F401, E402
+import revolver.cli.problem as _problem_commands  # noqa: F401, E402
