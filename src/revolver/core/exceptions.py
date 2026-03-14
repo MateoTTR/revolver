@@ -56,3 +56,9 @@ class DuplicateNameError(RevolverError):
     """Raised when a resource with the same name already exists."""
 
     exit_code: int = 1
+
+
+class EvaluatorLoadError(RevolverError):
+    """Raised when an evaluator module cannot be loaded or is invalid."""
+
+    exit_code: int = 1
