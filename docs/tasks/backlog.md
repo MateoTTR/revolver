@@ -83,16 +83,16 @@
 | 50 | Implement `infra.gpu` — `get_gpu_info()` via nvidia-smi (DES-002 §4) | [x] | S2 — session 018, PR #5 |
 | 51 | Implement `models.llm` — LLM Pydantic models (DES-002) | [x] | S2 — session 018, PR #5 |
 | 52 | Add LLM CRUD queries to `infra.db` (global DB) | [x] | S2 — session 018, PR #5 |
-| 53 | Implement `core.llm` — 6 orchestration functions (DES-002 §5) | [ ] | S2 |
-| 54 | Implement `cli.llm` — 6 Typer commands (DES-002 §6) | [ ] | S2 |
+| 53 | Implement `core.llm` — 6 orchestration functions (DES-002 §5) | [x] | S2 — session 019, PR #9 |
+| 54 | Implement `cli.llm` — 6 Typer commands (DES-002 §6) | [x] | S2 — session 019, PR #9 |
 | 55 | Implement `infra.evaluator_loader` — dynamic module loading (DES-003 §7) | [x] | S2 — session 018, PR #6 |
 | 56 | Implement `infra.evaluator_runner` — subprocess evaluator execution with timeout (DES-006 DD-05) | [x] | S2 — session 018, PR #6 |
 | 57 | Implement `models.problem` — Problem Pydantic models (DES-003 §3) | [x] | S2 — session 018, PR #6 |
 | 58 | Add problem CRUD queries to `infra.db` | [x] | S2 — session 018, PR #6 |
-| 59 | Implement `core.problem` — test, version, list (DES-003 §5) | [ ] | S2 |
-| 60 | Implement `cli.problem` — 3 Typer commands (DES-003 §6) | [ ] | S2 |
-| 61 | Write L2 integration tests for `llm` (11 scenarios) | [ ] | S2 |
-| 62 | Write L2 integration tests for `problem` (10 scenarios) | [ ] | S2 |
+| 59 | Implement `core.problem` — test, version, list (DES-003 §5) | [x] | S2 — session 019, PR #10 |
+| 60 | Implement `cli.problem` — 3 Typer commands (DES-003 §6) | [x] | S2 — session 019, PR #10 |
+| 61 | Write L2 integration tests for `llm` (11 scenarios) | [x] | S2 — session 019, PR #9 |
+| 62 | Write L2 integration tests for `problem` (10 scenarios) | [x] | S2 — session 019, PR #10 |
 
 ### Sprint 003 — Dataset Registration & Integrity
 
