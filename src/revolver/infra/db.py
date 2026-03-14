@@ -14,6 +14,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from revolver.core.exceptions import DuplicateNameError
+from revolver.models.dataset import (
+    DatasetInstance,
+    DatasetRegistration,
+    DatasetSummary,
+)
 from revolver.models.llm import LLMEntry
 from revolver.models.problem import ProblemVersion
 
@@ -450,3 +455,267 @@ def update_llm_stats(
     """
     # Placeholder: schema extension for stats columns is planned.
     _ = conn, name, vram_mib, throughput_tps
+
+
+# ── Dataset CRUD operations ────────────────────────────────────────────────
+
+
+def insert_dataset(conn: sqlite3.Connection, registration: DatasetRegistration) -> None:
+    """Insert a dataset registration into the project database.
+
+    Args:
+        conn: An open project database connection.
+        registration: The :class:`DatasetRegistration` to insert.
+
+    Raises:
+        DuplicateNameError: If a dataset with the same name already exists.
+    """
+    try:
+        conn.execute(
+            """\
+            INSERT INTO datasets (
+                name, path, split, storage, description,
+                global_hash, instance_count, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                registration.name,
+                registration.path,
+                registration.split,
+                registration.storage,
+                registration.description or "",
+                registration.global_hash,
+                registration.instance_count,
+                registration.created_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"A dataset named '{registration.name}' already exists") from exc
+
+
+def insert_dataset_instances(
+    conn: sqlite3.Connection,
+    name: str,
+    instances: list[DatasetInstance],
+) -> None:
+    """Batch-insert dataset instance hashes.
+
+    Uses ``executemany`` for performance with large instance counts (DD-05).
+
+    Args:
+        conn: An open project database connection.
+        name: Dataset name (foreign key to ``datasets``).
+        instances: List of :class:`DatasetInstance` to insert.
+    """
+    conn.executemany(
+        "INSERT INTO dataset_instances (dataset_name, instance_id, hash) VALUES (?, ?, ?)",
+        [(name, inst.filename, inst.hash) for inst in instances],
+    )
+    conn.commit()
+
+
+def insert_dataset_compat(
+    conn: sqlite3.Connection,
+    name: str,
+    problem_version_tag: str,
+) -> None:
+    """Insert a dataset compatibility entry.
+
+    Args:
+        conn: An open project database connection.
+        name: Dataset name.
+        problem_version_tag: Problem version tag this dataset is compatible with.
+    """
+    conn.execute(
+        "INSERT INTO dataset_compat (dataset_name, problem_version) VALUES (?, ?)",
+        (name, problem_version_tag),
+    )
+    conn.commit()
+
+
+def get_dataset(conn: sqlite3.Connection, name: str) -> DatasetRegistration | None:
+    """Retrieve a dataset registration by name.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name to look up.
+
+    Returns:
+        The :class:`DatasetRegistration` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        """\
+        SELECT name, path, split, storage, description,
+               global_hash, instance_count, registered_at
+        FROM datasets WHERE name = ?
+        """,
+        (name,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return DatasetRegistration(
+        name=row[0],
+        path=row[1],
+        split=row[2],
+        storage=row[3],
+        description=row[4] or None,
+        global_hash=row[5],
+        instance_count=row[6],
+        created_at=datetime.fromisoformat(row[7]),
+    )
+
+
+def get_dataset_instances(
+    conn: sqlite3.Connection,
+    name: str,
+) -> list[DatasetInstance]:
+    """Retrieve all instance hashes for a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name.
+
+    Returns:
+        List of :class:`DatasetInstance` sorted by instance_id.
+    """
+    cursor = conn.execute(
+        """\
+        SELECT instance_id, hash
+        FROM dataset_instances
+        WHERE dataset_name = ?
+        ORDER BY instance_id
+        """,
+        (name,),
+    )
+    return [
+        DatasetInstance(
+            filename=row[0],
+            relative_path=row[0],
+            hash=row[1],
+            size_bytes=0,
+        )
+        for row in cursor.fetchall()
+    ]
+
+
+def get_dataset_compat(conn: sqlite3.Connection, name: str) -> list[str]:
+    """Retrieve compatible problem version tags for a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name.
+
+    Returns:
+        List of problem version tags.
+    """
+    cursor = conn.execute(
+        "SELECT problem_version FROM dataset_compat "
+        "WHERE dataset_name = ? ORDER BY problem_version",
+        (name,),
+    )
+    return [row[0] for row in cursor.fetchall()]
+
+
+def list_datasets(conn: sqlite3.Connection) -> list[DatasetSummary]:
+    """List all registered datasets ordered by name.
+
+    Args:
+        conn: An open project database connection.
+
+    Returns:
+        A list of :class:`DatasetSummary` instances sorted alphabetically.
+    """
+    cursor = conn.execute(
+        """\
+        SELECT name, split, instance_count, storage, registered_at
+        FROM datasets
+        ORDER BY name
+        """
+    )
+    return [
+        DatasetSummary(
+            name=row[0],
+            split=row[1],
+            instance_count=row[2],
+            storage=row[3],
+            created_at=datetime.fromisoformat(row[4]),
+        )
+        for row in cursor.fetchall()
+    ]
+
+
+def update_dataset_description(
+    conn: sqlite3.Connection,
+    name: str,
+    description: str,
+) -> None:
+    """Update the description of a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name.
+        description: New description text.
+    """
+    conn.execute(
+        "UPDATE datasets SET description = ? WHERE name = ?",
+        (description, name),
+    )
+    conn.commit()
+
+
+def delete_dataset(conn: sqlite3.Connection, name: str) -> None:
+    """Delete a dataset registration.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name to delete.
+    """
+    conn.execute("DELETE FROM datasets WHERE name = ?", (name,))
+    conn.commit()
+
+
+def delete_dataset_instances(conn: sqlite3.Connection, name: str) -> None:
+    """Delete all instance hashes for a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name whose instances to delete.
+    """
+    conn.execute("DELETE FROM dataset_instances WHERE dataset_name = ?", (name,))
+    conn.commit()
+
+
+def delete_dataset_compat_all(conn: sqlite3.Connection, name: str) -> None:
+    """Delete all compatibility entries for a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name whose compat entries to delete.
+    """
+    conn.execute("DELETE FROM dataset_compat WHERE dataset_name = ?", (name,))
+    conn.commit()
+
+
+def get_solutions_by_dataset(conn: sqlite3.Connection, name: str) -> list[str]:
+    """Get solution IDs that reference a dataset (via runs).
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name.
+
+    Returns:
+        List of solution IDs referencing this dataset.
+    """
+    cursor = conn.execute(
+        """\
+        SELECT s.id
+        FROM solutions s
+        JOIN runs r ON s.run_id = r.id
+        WHERE r.dataset = ?
+        ORDER BY s.id
+        """,
+        (name,),
+    )
+    return [row[0] for row in cursor.fetchall()]
