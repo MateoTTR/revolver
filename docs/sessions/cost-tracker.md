@@ -23,13 +23,14 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 15 | 2026-03-13 | session-015 | ~1h30 | Phase 4 | Validation strategy, traceability matrix, validation-reviewer agent, doc hierarchy refactor |
 | 16 | 2026-03-13 | session-016 | ~1h30 | Phase 5 | Sprint planning (7 sprints), Git Flow, Sprint 001 PR #1 (scaffold + CI) |
 | 17 | 2026-03-14 | session-017 | ~1h | Phase 5 | Sprint 001 complete: PRs #2 (infra), #3 (CLI), #4 (project init) — 64 tests, 95% cov |
+| 18 | 2026-03-14 | session-018 | ~1h30 | Phase 5 | Sprint 002 PRs #5+#6 (LLM+Problem infra), code-reviewer agent, PR workflow |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 17 |
-| **Total duration** | ~25h15 |
+| **Total sessions** | 18 |
+| **Total duration** | ~26h45 |
 | **Avg duration/session** | ~1h29 |
 
 ## Notes
