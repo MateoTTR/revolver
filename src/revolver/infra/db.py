@@ -13,6 +13,9 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from revolver.core.exceptions import DuplicateNameError
+from revolver.models.problem import ProblemVersion
+
 # Current schema version — bump when adding migrations.
 CURRENT_SCHEMA_VERSION = 1
 
@@ -225,3 +228,81 @@ def get_global_db() -> sqlite3.Connection:
     _ensure_schema_version(conn)
     _run_migrations(conn)
     return conn
+
+
+# ── Problem version CRUD ────────────────────────────────────────────────────
+
+
+def insert_problem_version(conn: sqlite3.Connection, version: ProblemVersion) -> None:
+    """Insert a problem version into the project database.
+
+    Args:
+        conn: An open project database connection.
+        version: The :class:`ProblemVersion` to insert.
+
+    Raises:
+        DuplicateNameError: If a version with the same tag already exists.
+    """
+    try:
+        conn.execute(
+            "INSERT INTO problem_versions (tag, hash, message, created_at) VALUES (?, ?, ?, ?)",
+            (
+                version.tag,
+                version.hash,
+                version.message,
+                version.created_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(
+            f"Problem version with tag '{version.tag}' already exists"
+        ) from exc
+
+
+def get_problem_version(conn: sqlite3.Connection, tag: str) -> ProblemVersion | None:
+    """Retrieve a problem version by tag.
+
+    Args:
+        conn: An open project database connection.
+        tag: The version tag to look up.
+
+    Returns:
+        The :class:`ProblemVersion` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        "SELECT tag, hash, message, created_at FROM problem_versions WHERE tag = ?",
+        (tag,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return ProblemVersion(
+        tag=row[0],
+        hash=row[1],
+        message=row[2] or "",
+        created_at=datetime.fromisoformat(row[3]),
+    )
+
+
+def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
+    """List all problem versions ordered by creation time (ascending).
+
+    Args:
+        conn: An open project database connection.
+
+    Returns:
+        A list of :class:`ProblemVersion` instances, oldest first.
+    """
+    cursor = conn.execute(
+        "SELECT tag, hash, message, created_at FROM problem_versions ORDER BY created_at ASC"
+    )
+    return [
+        ProblemVersion(
+            tag=row[0],
+            hash=row[1],
+            message=row[2] or "",
+            created_at=datetime.fromisoformat(row[3]),
+        )
+        for row in cursor.fetchall()
+    ]
