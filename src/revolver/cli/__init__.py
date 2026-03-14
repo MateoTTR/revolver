@@ -98,4 +98,5 @@ app.add_typer(benchmark_app, name="benchmark")
 # Import command modules to register their commands on the group apps above.
 # These imports MUST come after the Typer instances are created.
 
+import revolver.cli.llm as _llm_commands  # noqa: F401, E402
 import revolver.cli.project as _project_commands  # noqa: F401, E402
