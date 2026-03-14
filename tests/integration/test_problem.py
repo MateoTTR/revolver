@@ -255,24 +255,10 @@ def test_problem_version_creates_snapshot(tmp_project: Path) -> None:
     shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
     shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
 
-    result = runner.invoke(
-        app,
-        [
-            "problem",
-            "version",
-            "--tag",
-            "v1.0",
-            "-m",
-            "Initial version",
-        ],
-        catch_exceptions=False,
-        env={"PWD": str(tmp_project)},
-    )
-
     # Use core API directly since CliRunner may not chdir properly
     from revolver.core.problem import create_version
 
-    pv = create_version(tag="v1.0-cli", message="Initial", project_root=tmp_project)
+    create_version(tag="v1.0-cli", message="Initial", project_root=tmp_project)
 
     # Snapshot directory exists
     snapshot_dir = tmp_project / ".revolver" / "problem" / "v1.0-cli"
