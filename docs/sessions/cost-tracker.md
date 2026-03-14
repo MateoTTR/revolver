@@ -26,14 +26,15 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 18 | 2026-03-14 | session-018 | ~1h30 | Phase 5 | Sprint 002 PRs #5+#6 (LLM+Problem infra), code-reviewer agent, PR workflow |
 | 19 | 2026-03-14 | session-019 | ~1h | Phase 5 | Sprint 002 PRs #9+#10 (LLM+Problem commands), 21 L2 tests, Sprint 002 complete |
 | 20 | 2026-03-14 | session-020 | ~1h30 | Phase 5 | S2 review + v0.2.0, TSP demo project, Sprint 003 complete (v0.3.0), 244 tests |
+| 21 | 2026-03-14 | session-021 | ~45min | Phase 5 | Demo feedback fixes (PR #16), v0.3.0 re-tag, release checklist, permission workflow |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 20 |
-| **Total duration** | ~29h15 |
-| **Avg duration/session** | ~1h28 |
+| **Total sessions** | 21 |
+| **Total duration** | ~30h |
+| **Avg duration/session** | ~1h26 |
 
 ## Notes
 

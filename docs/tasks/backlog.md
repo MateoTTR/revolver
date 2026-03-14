@@ -166,3 +166,9 @@
 | 107 | Write L2 integration tests for `doctor` and `setup` (8 scenarios) | [ ] | S7 |
 | 108 | Write L2 cross-cutting integration tests (6 scenarios) | [ ] | S7 |
 | 109 | Full regression: run all ~80 L2 integration tests (4+21+14+13+19+9+14 = 94 scenarios) | [ ] | S7 |
+
+### Unscheduled — Release Process
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 110 | CI guard: version-tag consistency check on `v*` tag push (compare pyproject.toml version vs tag) | [ ] | TBD |

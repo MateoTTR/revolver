@@ -122,6 +122,16 @@ Before starting any work in a session:
   - `release/*`, `hotfix/*` — as needed
 - CI pipeline: `.github/workflows/ci.yml` — ruff, mypy, pytest + coverage (≥80%), runs on push/PR to main/develop
 
+### Release Checklist
+
+Before tagging a release (`vX.Y.Z`):
+
+1. **Version bump** — Update `version` in `pyproject.toml` to match the tag
+2. **Merge completeness** — Ensure ALL sprint PRs are merged into `develop`
+3. **Merge `develop` → `main`** — `git checkout main && git merge develop`
+4. **Tag on `main`** — `git tag vX.Y.Z && git push origin main --tags`
+5. **Verify install** — `pip install "revolver @ git+file:///home/mathi/revolver@vX.Y.Z"` then `revolver --version`
+
 ### PR Development Workflow
 
 Each PR follows a standardized 5-step process:
