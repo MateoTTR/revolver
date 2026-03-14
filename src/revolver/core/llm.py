@@ -141,13 +141,11 @@ def register_llm(
             )
         if api_key_env is None:
             raise ValidationError(
-                "API key environment variable is required for remote LLMs. "
-                "Use --api-key-env."
+                "API key environment variable is required for remote LLMs. Use --api-key-env."
             )
         if provider == "openai-compat" and base_url is None:
             raise ValidationError(
-                "Base URL is required for openai-compat provider. "
-                "Use --base-url."
+                "Base URL is required for openai-compat provider. Use --base-url."
             )
 
         resolved_provider = provider

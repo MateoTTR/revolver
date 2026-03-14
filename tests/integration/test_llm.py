@@ -140,9 +140,14 @@ def test_llm_add_ollama_with_pull(mock_global_db: Path) -> None:
         result = runner.invoke(
             app,
             [
-                "--json", "llm", "add", "codestral-local",
-                "--model", "codestral:22b",
-                "--source", "local",
+                "--json",
+                "llm",
+                "add",
+                "codestral-local",
+                "--model",
+                "codestral:22b",
+                "--source",
+                "local",
                 "--pull",
             ],
         )
@@ -176,13 +181,22 @@ def test_llm_add_remote_with_pricing(mock_global_db: Path) -> None:
     result = runner.invoke(
         app,
         [
-            "--json", "llm", "add", "claude-sonnet",
-            "--model", "claude-sonnet-4-20250514",
-            "--source", "remote",
-            "--provider", "anthropic",
-            "--api-key-env", "ANTHROPIC_API_KEY",
-            "--input-cost", "3.0",
-            "--output-cost", "15.0",
+            "--json",
+            "llm",
+            "add",
+            "claude-sonnet",
+            "--model",
+            "claude-sonnet-4-20250514",
+            "--source",
+            "remote",
+            "--provider",
+            "anthropic",
+            "--api-key-env",
+            "ANTHROPIC_API_KEY",
+            "--input-cost",
+            "3.0",
+            "--output-cost",
+            "15.0",
         ],
     )
 
@@ -210,12 +224,20 @@ def test_llm_add_openai_compat(mock_global_db: Path) -> None:
     result = runner.invoke(
         app,
         [
-            "--json", "llm", "add", "vllm-local",
-            "--model", "meta-llama/Llama-3-8B",
-            "--source", "remote",
-            "--provider", "openai-compat",
-            "--api-key-env", "VLLM_API_KEY",
-            "--base-url", "http://localhost:8000/v1",
+            "--json",
+            "llm",
+            "add",
+            "vllm-local",
+            "--model",
+            "meta-llama/Llama-3-8B",
+            "--source",
+            "remote",
+            "--provider",
+            "openai-compat",
+            "--api-key-env",
+            "VLLM_API_KEY",
+            "--base-url",
+            "http://localhost:8000/v1",
         ],
     )
 
@@ -239,11 +261,17 @@ def test_llm_add_duplicate_name(mock_global_db: Path) -> None:
     result1 = runner.invoke(
         app,
         [
-            "llm", "add", "my-llm",
-            "--model", "gpt-4o",
-            "--source", "remote",
-            "--provider", "openai",
-            "--api-key-env", "OPENAI_API_KEY",
+            "llm",
+            "add",
+            "my-llm",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
         ],
     )
     assert result1.exit_code == 0, f"output: {_get_all_output(result1)}"
@@ -252,11 +280,17 @@ def test_llm_add_duplicate_name(mock_global_db: Path) -> None:
     result2 = runner.invoke(
         app,
         [
-            "llm", "add", "my-llm",
-            "--model", "gpt-4o-mini",
-            "--source", "remote",
-            "--provider", "openai",
-            "--api-key-env", "OPENAI_API_KEY",
+            "llm",
+            "add",
+            "my-llm",
+            "--model",
+            "gpt-4o-mini",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
         ],
     )
     assert result2.exit_code == 1
@@ -275,11 +309,17 @@ def test_llm_list_after_two_adds(mock_global_db: Path) -> None:
     runner.invoke(
         app,
         [
-            "llm", "add", "llm-alpha",
-            "--model", "gpt-4o",
-            "--source", "remote",
-            "--provider", "openai",
-            "--api-key-env", "OPENAI_API_KEY",
+            "llm",
+            "add",
+            "llm-alpha",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
         ],
     )
 
@@ -287,11 +327,17 @@ def test_llm_list_after_two_adds(mock_global_db: Path) -> None:
     runner.invoke(
         app,
         [
-            "llm", "add", "llm-beta",
-            "--model", "claude-sonnet-4-20250514",
-            "--source", "remote",
-            "--provider", "anthropic",
-            "--api-key-env", "ANTHROPIC_API_KEY",
+            "llm",
+            "add",
+            "llm-beta",
+            "--model",
+            "claude-sonnet-4-20250514",
+            "--source",
+            "remote",
+            "--provider",
+            "anthropic",
+            "--api-key-env",
+            "ANTHROPIC_API_KEY",
         ],
     )
 
@@ -316,11 +362,17 @@ def test_llm_remove_existing(mock_global_db: Path) -> None:
     runner.invoke(
         app,
         [
-            "llm", "add", "to-remove",
-            "--model", "gpt-4o",
-            "--source", "remote",
-            "--provider", "openai",
-            "--api-key-env", "OPENAI_API_KEY",
+            "llm",
+            "add",
+            "to-remove",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
         ],
     )
 
@@ -365,9 +417,13 @@ def test_llm_status_with_mock_ollama(mock_global_db: Path) -> None:
         runner.invoke(
             app,
             [
-                "llm", "add", "local-model",
-                "--model", "codestral:22b",
-                "--source", "local",
+                "llm",
+                "add",
+                "local-model",
+                "--model",
+                "codestral:22b",
+                "--source",
+                "local",
             ],
         )
 
@@ -375,11 +431,17 @@ def test_llm_status_with_mock_ollama(mock_global_db: Path) -> None:
     runner.invoke(
         app,
         [
-            "llm", "add", "remote-model",
-            "--model", "gpt-4o",
-            "--source", "remote",
-            "--provider", "openai",
-            "--api-key-env", "OPENAI_API_KEY",
+            "llm",
+            "add",
+            "remote-model",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
         ],
     )
 
@@ -435,9 +497,13 @@ def test_llm_start_mock_load(mock_global_db: Path) -> None:
         result_add = runner.invoke(
             app,
             [
-                "llm", "add", "test-model",
-                "--model", "codestral:22b",
-                "--source", "local",
+                "llm",
+                "add",
+                "test-model",
+                "--model",
+                "codestral:22b",
+                "--source",
+                "local",
             ],
         )
     assert result_add.exit_code == 0, f"output: {_get_all_output(result_add)}"
@@ -482,9 +548,13 @@ def test_llm_start_unloads_previous(mock_global_db: Path) -> None:
         runner.invoke(
             app,
             [
-                "llm", "add", "new-model",
-                "--model", "codestral:22b",
-                "--source", "local",
+                "llm",
+                "add",
+                "new-model",
+                "--model",
+                "codestral:22b",
+                "--source",
+                "local",
             ],
         )
 
@@ -532,9 +602,13 @@ def test_llm_stop_mock_unload(mock_global_db: Path) -> None:
         runner.invoke(
             app,
             [
-                "llm", "add", "running-model",
-                "--model", "codestral:22b",
-                "--source", "local",
+                "llm",
+                "add",
+                "running-model",
+                "--model",
+                "codestral:22b",
+                "--source",
+                "local",
             ],
         )
 
