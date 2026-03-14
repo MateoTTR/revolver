@@ -124,7 +124,7 @@ Use this template:
 
 ## Important notes
 
-- Report in **French** (project communication language)
+- Report in **English** (all project documentation is in English per CLAUDE.md conventions)
 - Code references use `file:line` format
 - Be specific — show the problematic code snippet and suggest a fix
 - Don't flag issues already caught by ruff/mypy (the CI handles those)
