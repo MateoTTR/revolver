@@ -255,9 +255,7 @@ def insert_problem_version(conn: sqlite3.Connection, version: ProblemVersion) ->
         )
         conn.commit()
     except sqlite3.IntegrityError as exc:
-        raise DuplicateNameError(
-            f"Problem version with tag '{version.tag}' already exists"
-        ) from exc
+        raise DuplicateNameError(f"Problem version conflict: {exc}") from exc
 
 
 def get_problem_version(conn: sqlite3.Connection, tag: str) -> ProblemVersion | None:

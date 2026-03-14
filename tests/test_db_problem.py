@@ -59,7 +59,7 @@ class TestProblemVersionCRUD:
             created_at=now,
         )
         insert_problem_version(db_conn, pv1)
-        with pytest.raises(DuplicateNameError, match=r"v1\.0"):
+        with pytest.raises(DuplicateNameError, match=r"Problem version conflict"):
             insert_problem_version(db_conn, pv2)
 
     def test_list_ascending_order(self, db_conn) -> None:

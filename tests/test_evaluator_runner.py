@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from revolver.infra.evaluator_runner import run_instance
+from revolver.models.problem import InstanceTestResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -19,6 +20,7 @@ class TestRunInstance:
             program_path=FIXTURES / "initial_program_simple.py",
             instance_path=FIXTURES / "instances" / "instance_001.json",
         )
+        assert isinstance(result, InstanceTestResult)
         assert result.status == "pass"
         assert result.metrics is not None
         assert "combined_score" in result.metrics

@@ -15,20 +15,9 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass
-class InstanceRunResult:
-    """Result of a single instance evaluation."""
-
-    instance_id: str
-    status: str  # "pass" | "fail" | "timeout"
-    metrics: dict[str, float] | None = None
-    time_s: float = 0.0
-    error: str | None = None
-    traceback: str | None = None
+from revolver.models.problem import InstanceTestResult
 
 
 def _run_in_subprocess(
@@ -61,7 +50,7 @@ def run_instance(
     program_path: Path,
     instance_path: Path,
     timeout_s: float = 300.0,
-) -> InstanceRunResult:
+) -> InstanceTestResult:
     """Run an evaluator on a single instance with subprocess isolation and timeout.
 
     Sets ``REVOLVER_INSTANCE_PATH`` and ``REVOLVER_INSTANCE_ID`` environment
@@ -75,32 +64,34 @@ def run_instance(
             considered timed out.  Defaults to 300.
 
     Returns:
-        An :class:`InstanceRunResult` with status ``"pass"``, ``"fail"``,
+        An :class:`InstanceTestResult` with status ``"pass"``, ``"fail"``,
         or ``"timeout"``.
     """
     instance_id = instance_path.name
     start = time.monotonic()
 
+    executor = ProcessPoolExecutor(max_workers=1)
     try:
-        with ProcessPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                _run_in_subprocess,
-                str(evaluator_path),
-                str(program_path),
-                str(instance_path.resolve()),
-                instance_id,
-            )
-            metrics = future.result(timeout=timeout_s)
-            elapsed = time.monotonic() - start
-            return InstanceRunResult(
-                instance_id=instance_id,
-                status="pass",
-                metrics=metrics,
-                time_s=elapsed,
-            )
-    except FuturesTimeoutError:
+        future = executor.submit(
+            _run_in_subprocess,
+            str(evaluator_path),
+            str(program_path),
+            str(instance_path.resolve()),
+            instance_id,
+        )
+        metrics = future.result(timeout=timeout_s)
         elapsed = time.monotonic() - start
-        return InstanceRunResult(
+        return InstanceTestResult(
+            instance_id=instance_id,
+            status="pass",
+            metrics=metrics,
+            time_s=elapsed,
+        )
+    except FuturesTimeoutError:
+        future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        elapsed = time.monotonic() - start
+        return InstanceTestResult(
             instance_id=instance_id,
             status="timeout",
             time_s=elapsed,
@@ -108,10 +99,12 @@ def run_instance(
         )
     except Exception as exc:
         elapsed = time.monotonic() - start
-        return InstanceRunResult(
+        return InstanceTestResult(
             instance_id=instance_id,
             status="fail",
             time_s=elapsed,
             error=str(exc),
             traceback=traceback.format_exc(),
         )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)

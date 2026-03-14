@@ -87,6 +87,12 @@ class TestInstanceTestResult:
         assert result.metrics is not None
         assert result.metrics["combined_score"] == 0.5
 
+    def test_instance_test_result_frozen(self) -> None:
+        """InstanceTestResult is frozen and rejects attribute assignment."""
+        result = InstanceTestResult(instance_id="x", status="pass", time_s=1.0)
+        with pytest.raises(ValidationError):
+            result.status = "fail"  # type: ignore[misc]
+
 
 class TestTestResult:
     """Tests for TestResult model."""
@@ -105,6 +111,20 @@ class TestTestResult:
             max_time_s=0.5,
         )
         assert r.total == 1
+
+    def test_test_result_frozen(self) -> None:
+        """TestResult is frozen and rejects attribute assignment."""
+        result = TestResult(
+            mode="single",
+            results=[],
+            total=0,
+            passed=0,
+            failed=0,
+            mean_time_s=0.0,
+            max_time_s=0.0,
+        )
+        with pytest.raises(ValidationError):
+            result.mode = "dataset"  # type: ignore[misc]
 
     def test_serializes_to_json(self) -> None:
         """TestResult can be serialised to JSON and back."""

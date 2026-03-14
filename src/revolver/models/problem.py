@@ -9,6 +9,7 @@ Traceable to: DES-003 (Problem Versioning), FR-PBM-001..004.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -59,8 +60,10 @@ class InstanceTestResult(BaseModel):
         traceback: Full traceback string if available.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     instance_id: str
-    status: str
+    status: Literal["pass", "fail", "timeout"]
     metrics: dict[str, float] | None = None
     time_s: float
     error: str | None = None
@@ -82,7 +85,9 @@ class TestResult(BaseModel):
 
     __test__ = False  # Prevent pytest from collecting this as a test class
 
-    mode: str
+    model_config = ConfigDict(frozen=True)
+
+    mode: Literal["single", "dataset"]
     results: list[InstanceTestResult]
     total: int
     passed: int
