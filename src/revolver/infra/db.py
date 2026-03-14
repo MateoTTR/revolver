@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS problem_versions (
 CREATE TABLE IF NOT EXISTS datasets (
     name            TEXT PRIMARY KEY,
     path            TEXT NOT NULL,
-    split           TEXT NOT NULL CHECK (split IN ('train', 'eval')),
+    split           TEXT CHECK (split IN ('train', 'eval')),
     storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
     description     TEXT DEFAULT '',
     global_hash     TEXT NOT NULL,
@@ -695,6 +695,25 @@ def delete_dataset_compat_all(conn: sqlite3.Connection, name: str) -> None:
         name: The dataset name whose compat entries to delete.
     """
     conn.execute("DELETE FROM dataset_compat WHERE dataset_name = ?", (name,))
+    conn.commit()
+
+
+def delete_dataset_compat(
+    conn: sqlite3.Connection,
+    name: str,
+    problem_version_tag: str,
+) -> None:
+    """Delete a single compatibility entry for a dataset.
+
+    Args:
+        conn: An open project database connection.
+        name: The dataset name.
+        problem_version_tag: Problem version tag to remove from compat.
+    """
+    conn.execute(
+        "DELETE FROM dataset_compat WHERE dataset_name = ? AND problem_version = ?",
+        (name, problem_version_tag),
+    )
     conn.commit()
 
 
