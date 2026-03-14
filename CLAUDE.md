@@ -54,6 +54,15 @@ At the start of each session, read this file entirely, then follow the "Session 
 | E2E tests | [docs/validation/val-e2e-tests.md](docs/validation/val-e2e-tests.md) | L3 scenarios, LLM mocking, fake server |
 | Traceability matrix | [docs/validation/traceability-matrix.md](docs/validation/traceability-matrix.md) | FR/NFR → DES → test mapping |
 
+### Claude Agents
+
+| Agent | Path | Trigger |
+|---|---|---|
+| code-reviewer | [.claude/agents/code-reviewer/agent.md](.claude/agents/code-reviewer/agent.md) | Auto after `gh pr create` (PostToolUse hook) |
+| spec-reviewer | [.claude/agents/spec-reviewer/agent.md](.claude/agents/spec-reviewer/agent.md) | When spec/DES/ADR files are modified |
+| validation-reviewer | [.claude/agents/validation-reviewer/agent.md](.claude/agents/validation-reviewer/agent.md) | When validation docs or specs change |
+| scrum-master | [.claude/agents/scrum-master/agent.md](.claude/agents/scrum-master/agent.md) | At sprint planning/review boundaries |
+
 ### Sprint Planning
 
 | Document | Path | Purpose |
