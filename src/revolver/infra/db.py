@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from revolver.core.exceptions import DuplicateNameError
+from revolver.models.llm import LLMEntry
 from revolver.models.problem import ProblemVersion
 
 # Current schema version — bump when adding migrations.
@@ -230,6 +231,27 @@ def get_global_db() -> sqlite3.Connection:
     return conn
 
 
+def get_global_db_at(path: Path) -> sqlite3.Connection:
+    """Open (or create) a global-schema database at a custom *path*.
+
+    This is primarily intended for testing, so tests can avoid touching
+    the real ``~/.revolver/`` directory.
+
+    Args:
+        path: Full path to the SQLite database file.
+
+    Returns:
+        A configured ``sqlite3.Connection`` with WAL mode and foreign keys enabled.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    _configure_connection(conn)
+    conn.executescript(_GLOBAL_SCHEMA_SQL)
+    _ensure_schema_version(conn)
+    _run_migrations(conn)
+    return conn
+
+
 # ── Problem version CRUD ────────────────────────────────────────────────────
 
 
@@ -304,3 +326,129 @@ def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
         )
         for row in cursor.fetchall()
     ]
+
+
+# ── LLM CRUD operations ─────────────────────────────────────────────────────
+
+
+def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
+    """Insert an LLM entry into the ``llms`` table.
+
+    Args:
+        conn: A connection to the global database.
+        entry: The LLM entry to insert.
+
+    Raises:
+        DuplicateNameError: If an LLM with the same *name* already exists.
+    """
+    try:
+        conn.execute(
+            """\
+            INSERT INTO llms (
+                name, provider, model, source, base_url, api_key_env,
+                input_cost_per_mtok, output_cost_per_mtok, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry.name,
+                entry.provider,
+                entry.model,
+                entry.source,
+                entry.base_url,
+                entry.api_key_env,
+                entry.input_cost_per_mtok,
+                entry.output_cost_per_mtok,
+                entry.registered_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"An LLM named '{entry.name}' already exists") from exc
+
+
+def get_llm(conn: sqlite3.Connection, name: str) -> LLMEntry | None:
+    """Retrieve an LLM entry by name.
+
+    Args:
+        conn: A connection to the global database.
+        name: The unique LLM name.
+
+    Returns:
+        The matching :class:`LLMEntry`, or ``None`` if not found.
+    """
+    cursor = conn.execute("SELECT * FROM llms WHERE name = ?", (name,))
+    row = cursor.fetchone()
+    if row is None:
+        return None
+
+    # Map columns by position (matches CREATE TABLE order).
+    return LLMEntry(
+        name=row[0],
+        provider=row[1],
+        model=row[2],
+        source=row[3],
+        base_url=row[4],
+        api_key_env=row[5],
+        input_cost_per_mtok=row[6],
+        output_cost_per_mtok=row[7],
+        registered_at=row[8],
+    )
+
+
+def list_llms(conn: sqlite3.Connection) -> list[LLMEntry]:
+    """List all registered LLMs, ordered by name.
+
+    Args:
+        conn: A connection to the global database.
+
+    Returns:
+        A list of :class:`LLMEntry` instances sorted alphabetically by name.
+    """
+    cursor = conn.execute("SELECT * FROM llms ORDER BY name")
+    return [
+        LLMEntry(
+            name=row[0],
+            provider=row[1],
+            model=row[2],
+            source=row[3],
+            base_url=row[4],
+            api_key_env=row[5],
+            input_cost_per_mtok=row[6],
+            output_cost_per_mtok=row[7],
+            registered_at=row[8],
+        )
+        for row in cursor.fetchall()
+    ]
+
+
+def delete_llm(conn: sqlite3.Connection, name: str) -> None:
+    """Delete an LLM by name.
+
+    Args:
+        conn: A connection to the global database.
+        name: The unique LLM name to delete.
+    """
+    conn.execute("DELETE FROM llms WHERE name = ?", (name,))
+    conn.commit()
+
+
+def update_llm_stats(
+    conn: sqlite3.Connection,
+    name: str,
+    vram_mib: int | None = None,
+    throughput_tps: float | None = None,
+) -> None:
+    """Update measured runtime stats for an LLM after loading.
+
+    Currently a no-op placeholder — the ``llms`` table does not yet have
+    stat columns.  This function is provided so that calling code can
+    record stats without breaking when the schema is extended.
+
+    Args:
+        conn: A connection to the global database.
+        name: The unique LLM name.
+        vram_mib: Measured VRAM usage in MiB (reserved for future use).
+        throughput_tps: Measured tokens-per-second (reserved for future use).
+    """
+    # Placeholder: schema extension for stats columns is planned.
+    _ = conn, name, vram_mib, throughput_tps
