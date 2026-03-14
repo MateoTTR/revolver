@@ -310,6 +310,31 @@ def get_problem_version(conn: sqlite3.Connection, tag: str) -> ProblemVersion | 
     )
 
 
+def get_problem_version_by_hash(conn: sqlite3.Connection, hash: str) -> ProblemVersion | None:
+    """Retrieve a problem version by content hash.
+
+    Args:
+        conn: An open project database connection.
+        hash: The snapshot hash to look up.
+
+    Returns:
+        The :class:`ProblemVersion` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        "SELECT tag, hash, message, created_at FROM problem_versions WHERE hash = ?",
+        (hash,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return ProblemVersion(
+        tag=row[0],
+        hash=row[1],
+        message=row[2] or "",
+        created_at=datetime.fromisoformat(row[3]),
+    )
+
+
 def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
     """List all problem versions ordered by creation time (ascending).
 

@@ -346,6 +346,29 @@ def test_problem_version_duplicate_tag(tmp_project: Path) -> None:
 
 
 @pytest.mark.integration
+def test_problem_version_duplicate_hash(tmp_project: Path) -> None:
+    """Identical content with different tag raises DuplicateNameError with original tag."""
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+    from revolver.core.exceptions import DuplicateNameError
+    from revolver.core.problem import create_version
+
+    create_version(tag="v1.0", message="First", project_root=tmp_project)
+
+    # Do NOT modify any files — content is identical to v1.0
+    with pytest.raises(DuplicateNameError, match=r"v1\.0") as exc_info:
+        create_version(tag="v1.1", message="Second", project_root=tmp_project)
+
+    assert "unchanged" in str(exc_info.value).lower()
+
+    # Snapshot directory for v1.1 should have been cleaned up
+    snapshot_dir = tmp_project / ".revolver" / "problem" / "v1.1"
+    assert not snapshot_dir.exists()
+
+
+@pytest.mark.integration
 def test_problem_versions_list(tmp_project: Path) -> None:
     """Create two versions and list them; verify both appear."""
     shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
