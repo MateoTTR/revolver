@@ -151,9 +151,7 @@ class TestTokenCountingProxy:
             "id": "chatcmpl-test",
             "choices": [{"message": {"content": "Hello"}}],
         }
-        fake_server, fake_port = _start_fake_llm(
-            custom_response=no_usage_response
-        )
+        fake_server, fake_port = _start_fake_llm(custom_response=no_usage_response)
         try:
             proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
             proxy_url = proxy.start()

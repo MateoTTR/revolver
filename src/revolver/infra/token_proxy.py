@@ -63,8 +63,7 @@ def estimate_cost(
     if input_cost_per_mtok is None or output_cost_per_mtok is None:
         return None
     return (
-        prompt_tokens * input_cost_per_mtok
-        + completion_tokens * output_cost_per_mtok
+        prompt_tokens * input_cost_per_mtok + completion_tokens * output_cost_per_mtok
     ) / 1_000_000
 
 
@@ -122,9 +121,7 @@ class TokenCountingProxy:
                     with urlopen(req, timeout=300) as resp:
                         resp_body = resp.read()
                         status = resp.status
-                        resp_headers: list[tuple[str, str]] = list(
-                            resp.getheaders()
-                        )
+                        resp_headers: list[tuple[str, str]] = list(resp.getheaders())
                 except URLError as exc:
                     error_msg = json.dumps({"error": str(exc)}).encode()
                     self.send_response(502)

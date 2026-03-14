@@ -137,17 +137,14 @@ def generate_wrapper(
     """
     evaluator_path = snapshot_dir / EVALUATOR_FILENAME
     if not evaluator_path.exists():
-        raise FileNotFoundError(
-            f"Evaluator file not found: {evaluator_path}"
-        )
+        raise FileNotFoundError(f"Evaluator file not found: {evaluator_path}")
 
     module = _load_evaluator_module(evaluator_path)
     output_path = output_dir / WRAPPER_FILENAME
 
     has_evaluate = hasattr(module, "evaluate") and callable(module.evaluate)
-    has_evaluate_instance = (
-        hasattr(module, "evaluate_instance")
-        and callable(module.evaluate_instance)
+    has_evaluate_instance = hasattr(module, "evaluate_instance") and callable(
+        module.evaluate_instance
     )
 
     if has_evaluate:
@@ -198,8 +195,6 @@ def _load_evaluator_module(path: Path) -> ModuleType:
     try:
         spec.loader.exec_module(module)
     except Exception as exc:
-        raise EvaluatorLoadError(
-            f"Failed to import evaluator: {exc}"
-        ) from exc
+        raise EvaluatorLoadError(f"Failed to import evaluator: {exc}") from exc
 
     return module

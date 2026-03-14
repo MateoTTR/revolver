@@ -63,9 +63,7 @@ class TestOpenEvolveRunner:
             output_dir=tmp_path / "output",
         )
 
-        with patch(
-            "revolver.infra.openevolve.OpenEvolveRunner._init_controller"
-        ) as mock_init:
+        with patch("revolver.infra.openevolve.OpenEvolveRunner._init_controller") as mock_init:
 
             def set_controller() -> None:
                 runner._controller = mock_controller
@@ -140,11 +138,13 @@ class TestBuildConfig:
         """Base config + LLM + iterations + overrides applied in order."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "iterations": 10,
-                "population_size": 5,
-                "llm": {"model": "base-model", "temperature": 0.8},
-            })
+            yaml.dump(
+                {
+                    "iterations": 10,
+                    "population_size": 5,
+                    "llm": {"model": "base-model", "temperature": 0.8},
+                }
+            )
         )
 
         llm = _make_llm(
@@ -274,9 +274,7 @@ class TestBuildConfig:
 
     def test_system_prompt_template_format(self) -> None:
         """SYSTEM_PROMPT_TEMPLATE contains expected placeholders."""
-        rendered = SYSTEM_PROMPT_TEMPLATE.format(
-            problem_description="My test problem"
-        )
+        rendered = SYSTEM_PROMPT_TEMPLATE.format(problem_description="My test problem")
         assert "My test problem" in rendered
         assert "EVOLVE-BLOCK" in rendered
         assert "Problem Description" in rendered

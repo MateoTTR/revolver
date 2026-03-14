@@ -114,8 +114,7 @@ class OpenEvolveRunner:
             )
         except ImportError as exc:
             raise ExternalError(
-                "OpenEvolve is not installed. "
-                "Install it with: pip install 'revolver[openevolve]'"
+                "OpenEvolve is not installed. Install it with: pip install 'revolver[openevolve]'"
             ) from exc
 
         self._controller = OEController(
