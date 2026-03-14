@@ -1,6 +1,6 @@
 # Sprint 003 — Dataset Registration & Integrity
 
-**Status**: Planning
+**Status**: Done
 **Goal**: Deliver the `revolver dataset` command group (registration, integrity verification, compatibility tracking, snapshot support, remove). Datasets are a mandatory prerequisite for `revolver run`. This sprint completes the "pre-run" layer: problem versions + datasets are now both managed by Revolver.
 **Demo**: Register a training dataset with per-instance SHA-256 hashing; register an eval dataset with snapshot copy; verify integrity with `--verify` after modifying a file; declare compatibility with a problem version; remove a dataset.
 
@@ -111,20 +111,30 @@ Note: Sprint 003 is intentionally simpler and narrower than Sprint 002. The data
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Completed**: 2026-03-14 (session 020)
 
 ### Tests passing
-- 0 / 14 integration tests passing (this sprint)
-- 0 / 39 total cumulative integration tests
+- 14 / 14 integration tests passing (this sprint)
+- 39 / 39 total cumulative L2 integration tests
+- 244 total tests (230 from S1+S2 + 58 infra + 14 L2 — some overlap from PR merge)
+
+### PRs merged
+- PR #13: Dataset infra — models, DB CRUD, store ops (S3-01, S3-02, S3-03)
+- PR #14: Dataset commands — core, CLI, 14 L2 tests (S3-04, S3-05, S3-06)
+
+### Code review findings addressed
+- CRITICAL: Transaction safety — `register_dataset` and `update_dataset` now use atomic transactions (`commit=False` + single commit/rollback)
+- WARNING: Path traversal — dataset name validated with regex
+- WARNING: `assert` replaced with explicit `RevolverError`
 
 ### Demo-able features
-- [ ] `revolver dataset add --name train --path ./data/ --split train --compatible-with v1.0`
-- [ ] `revolver dataset add --name eval --path ./eval/ --split eval --compatible-with v1.0 --snapshot`
-- [ ] `revolver dataset list` shows both datasets with counts and splits
-- [ ] `revolver dataset info train` shows detail with global hash and compat versions
-- [ ] `revolver dataset info train --verify` detects file modification with per-instance report
-- [ ] `revolver dataset update train --add-compatible-with v1.1`
-- [ ] `revolver dataset remove eval` removes dataset entry and snapshot directory
+- [x] `revolver dataset add --name train --path ./data/ --split train --compatible-with v1.0`
+- [x] `revolver dataset add --name eval --path ./eval/ --split eval --compatible-with v1.0 --snapshot`
+- [x] `revolver dataset list` shows both datasets with counts and splits
+- [x] `revolver dataset info train` shows detail with global hash and compat versions
+- [x] `revolver dataset info train --verify` detects file modification with per-instance report
+- [x] `revolver dataset update train --add-compatible-with v1.1`
+- [x] `revolver dataset remove eval` removes dataset entry and snapshot directory
 
 ### Carry-over
-- Tasks or issues deferred to next sprint
+- None — all 6 tasks completed
