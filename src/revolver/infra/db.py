@@ -909,6 +909,30 @@ def update_run_tokens(
     conn.commit()
 
 
+def update_run_generation_time(
+    conn: sqlite3.Connection,
+    run_id: str,
+    generation_time_s: float,
+    status: Literal["running", "completed", "interrupted"] = "completed",
+) -> None:
+    """Atomically update generation time and status for a run.
+
+    Combines the ``generation_time_s`` and ``status`` updates in a single
+    statement to avoid partial DB state when one succeeds and the other fails.
+
+    Args:
+        conn: An open project database connection.
+        run_id: The run ID to update.
+        generation_time_s: Total wall-clock generation time in seconds.
+        status: New status (defaults to ``"completed"``).
+    """
+    conn.execute(
+        "UPDATE runs SET generation_time_s = ?, status = ? WHERE id = ?",
+        (generation_time_s, status, run_id),
+    )
+    conn.commit()
+
+
 def get_run(conn: sqlite3.Connection, run_id: str) -> dict[str, object] | None:
     """Retrieve a single run by ID.
 
