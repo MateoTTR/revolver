@@ -115,9 +115,9 @@
 | 71 | Implement `models.run` — Run Pydantic models (DES-005) | [x] | S4 — session 022, PR #19 |
 | 72 | Implement `models.solution` — Solution model | [x] | S4 — session 022, PR #19 |
 | 73 | Add run/solution CRUD queries to `infra.db` | [x] | S4 — session 022, PR #19 |
-| 74 | Implement `core.run` — `launch_run()`: full orchestration (DES-005 §4-7) | [ ] | S4 |
-| 75 | Implement `core.run` — `_post_run_evaluation()` (FR-RUN-019) | [ ] | S4 |
-| 76 | Implement `core.run` — resume, status, list, info | [ ] | S4 |
+| 74 | Implement `core.run` — `launch_run()`: full orchestration (DES-005 §4-7) | [x] | S4 — session 023, PR #22 |
+| 75 | Implement `core.run` — `_post_run_evaluation()` (FR-RUN-019) | [x] | S4 — session 023, PR #22 |
+| 76 | Implement `core.run` — resume, status, list, info | [x] | S4 — session 023, PR #22 |
 | 77 | Implement `cli.run` — 5 Typer commands | [ ] | S4 |
 | 78 | Write L2 integration tests for `run` (13 scenarios) | [ ] | S4 |
 

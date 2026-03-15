@@ -28,13 +28,14 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 20 | 2026-03-14 | session-020 | ~1h30 | Phase 5 | S2 review + v0.2.0, TSP demo project, Sprint 003 complete (v0.3.0), 244 tests |
 | 21 | 2026-03-14 | session-021 | ~45min | Phase 5 | Demo feedback fixes (PR #16), v0.3.0 re-tag, release checklist, permission workflow |
 | 22 | 2026-03-15 | session-022 | ~1h30 | Phase 5 | Sprint 004 Vague 1: PRs #19+#20 (run models/DB + run infra), 356 tests |
+| 23 | 2026-03-15 | session-023 | ~1h30 | Phase 5 | Sprint 004 Vague 2 start: PR #22 (core.run orchestration), Python 3.12 bump, 397 tests |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 22 |
-| **Total duration** | ~31h30 |
+| **Total sessions** | 23 |
+| **Total duration** | ~33h |
 | **Avg duration/session** | ~1h26 |
 
 ## Notes
