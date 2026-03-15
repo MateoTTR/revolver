@@ -45,6 +45,7 @@ from revolver.infra.db import (
     get_solutions_for_run,
     insert_run,
     insert_solution,
+    update_run_generation_time,
     update_run_status,
     update_run_tokens,
 )
@@ -277,7 +278,7 @@ def launch_run(
             )
 
         # 7. FR-RUN-004: verify dataset integrity
-        integrity = verify_dataset_integrity(project_root, config.dataset_name)
+        integrity = verify_dataset_integrity(root, config.dataset_name)
         if not integrity.is_valid:
             raise IntegrityError(
                 f"Dataset '{ds.name}' integrity check failed: "
@@ -290,7 +291,7 @@ def launch_run(
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / config.problem_version
 
         # Resolve dataset path
-        dataset_path = resolve_dataset_path(project_root, config.dataset_name)
+        dataset_path = resolve_dataset_path(root, config.dataset_name)
 
         # Read problem.md if present (FR-PRB-015)
         problem_md_path = snapshot_dir / "problem.md"
@@ -457,13 +458,8 @@ def launch_run(
                 alias=config.alias,
             )
 
-            # Update run status to completed and generation_time_s
-            proj_conn.execute(
-                "UPDATE runs SET generation_time_s = ? WHERE id = ?",
-                (generation_time_s, run_id),
-            )
-            proj_conn.commit()
-            update_run_status(proj_conn, run_id, "completed")
+            # Atomically update generation_time_s and status
+            update_run_generation_time(proj_conn, run_id, generation_time_s)
 
             # Run _post_run_evaluation() (warn on failure)
             try:
@@ -533,7 +529,7 @@ def launch_run(
             update_run_status(proj_conn, run_id, "interrupted")
             remove_run_lock(root, run_id)
             raise
-        except ExternalError:
+        except (RevolverError, ExternalError):
             if proxy is not None:
                 proxy.stop()
             update_run_status(proj_conn, run_id, "interrupted")
@@ -593,7 +589,9 @@ def _post_run_evaluation(
         return
 
     # Enumerate instances
-    instances = sorted(p for p in dataset_path.iterdir() if not p.name.startswith("."))
+    instances = sorted(
+        p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()
+    )
     if not instances:
         sys.stderr.write("Warning: no instances found, skipping post-run evaluation.\n")
         return
@@ -675,7 +673,7 @@ def resume_run(
         parent_version = str(parent["problem_version"])
         parent_llm_name = str(parent["llm"])
         parent_dataset_name = str(parent["dataset"])
-        parent_iterations = int(parent["iterations"])  # type: ignore[arg-type]
+        parent_iterations = int(parent["iterations"])  # type: ignore[call-overload]
 
         pv = get_problem_version(proj_conn, parent_version)
         if pv is None:
@@ -709,7 +707,7 @@ def resume_run(
 
         # Resolve paths
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version
-        dataset_path = resolve_dataset_path(project_root, parent_dataset_name)
+        dataset_path = resolve_dataset_path(root, parent_dataset_name)
 
         # Read problem.md if present
         problem_md_path = snapshot_dir / "problem.md"
@@ -834,13 +832,8 @@ def resume_run(
                 best_score=best_score,
             )
 
-            # Update run
-            proj_conn.execute(
-                "UPDATE runs SET generation_time_s = ? WHERE id = ?",
-                (generation_time_s, new_run_id),
-            )
-            proj_conn.commit()
-            update_run_status(proj_conn, new_run_id, "completed")
+            # Atomically update generation_time_s and status
+            update_run_generation_time(proj_conn, new_run_id, generation_time_s)
 
             # Post-run eval
             try:
@@ -907,7 +900,7 @@ def resume_run(
             update_run_status(proj_conn, new_run_id, "interrupted")
             remove_run_lock(root, new_run_id)
             raise
-        except ExternalError:
+        except (RevolverError, ExternalError):
             if proxy is not None:
                 proxy.stop()
             update_run_status(proj_conn, new_run_id, "interrupted")
@@ -975,7 +968,7 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
                     llm=str(run_data.get("llm", "")),
                     dataset=str(run_data.get("dataset", "")),
                     iterations_total=(
-                        int(run_data["iterations"])  # type: ignore[arg-type]
+                        int(run_data["iterations"])  # type: ignore[call-overload]
                         if run_data.get("iterations")
                         else None
                     ),
@@ -1002,7 +995,7 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
             llm=str(latest.get("llm", "")),
             dataset=str(latest.get("dataset", "")),
             iterations_total=(
-                int(latest["iterations"])  # type: ignore[arg-type]
+                int(latest["iterations"])  # type: ignore[call-overload]
                 if latest.get("iterations")
                 else None
             ),
@@ -1042,8 +1035,8 @@ def list_runs(
             token_usage: PydanticTokenUsage | None = None
             if row.get("prompt_tokens") is not None:
                 token_usage = PydanticTokenUsage(
-                    prompt_tokens=int(row["prompt_tokens"]),  # type: ignore[arg-type]
-                    completion_tokens=int(row.get("completion_tokens") or 0),  # type: ignore[arg-type]
+                    prompt_tokens=int(row["prompt_tokens"]),  # type: ignore[call-overload]
+                    completion_tokens=int(row.get("completion_tokens") or 0),  # type: ignore[call-overload]
                 )
             summaries.append(
                 RunSummary(
@@ -1051,7 +1044,7 @@ def list_runs(
                     problem_version=str(row["problem_version"]),
                     llm=str(row["llm"]),
                     dataset=str(row["dataset"]),
-                    iterations=int(row["iterations"]),  # type: ignore[arg-type]
+                    iterations=int(row["iterations"]),  # type: ignore[call-overload]
                     generation_time_s=(
                         float(row["generation_time_s"])  # type: ignore[arg-type]
                         if row.get("generation_time_s") is not None
@@ -1137,8 +1130,8 @@ def get_run_info(
         token_usage: PydanticTokenUsage | None = None
         if run_data.get("prompt_tokens") is not None:
             token_usage = PydanticTokenUsage(
-                prompt_tokens=int(run_data["prompt_tokens"]),  # type: ignore[arg-type]
-                completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[arg-type]
+                prompt_tokens=int(run_data["prompt_tokens"]),  # type: ignore[call-overload]
+                completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[call-overload]
             )
 
         return RunInfo(
@@ -1149,7 +1142,7 @@ def get_run_info(
             llm_model=str(run_data["llm_model"]),
             dataset=str(run_data["dataset"]),
             dataset_hash=str(run_data["dataset_hash"]),
-            iterations=int(run_data["iterations"]),  # type: ignore[arg-type]
+            iterations=int(run_data["iterations"]),  # type: ignore[call-overload]
             generation_time_s=(
                 float(run_data["generation_time_s"])  # type: ignore[arg-type]
                 if run_data.get("generation_time_s") is not None
