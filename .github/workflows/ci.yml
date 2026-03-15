@@ -15,7 +15,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -48,8 +48,8 @@ jobs:
       - name: Run tests with coverage
         run: pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
 
-      - name: Upload coverage (Python 3.11 only)
-        if: matrix.python-version == '3.11'
+      - name: Upload coverage (Python 3.12 only)
+        if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
