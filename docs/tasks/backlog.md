@@ -118,8 +118,8 @@
 | 74 | Implement `core.run` — `launch_run()`: full orchestration (DES-005 §4-7) | [x] | S4 — session 023, PR #22 |
 | 75 | Implement `core.run` — `_post_run_evaluation()` (FR-RUN-019) | [x] | S4 — session 023, PR #22 |
 | 76 | Implement `core.run` — resume, status, list, info | [x] | S4 — session 023, PR #22 |
-| 77 | Implement `cli.run` — 5 Typer commands | [ ] | S4 |
-| 78 | Write L2 integration tests for `run` (13 scenarios) | [ ] | S4 |
+| 77 | Implement `cli.run` — 5 Typer commands | [x] | S4 — session 024, PR #24 |
+| 78 | Write L2 integration tests for `run` (13 scenarios) | [x] | S4 — session 024, PR #24 |
 
 ### Sprint 005 — Solution Management & Evaluation Loop
 

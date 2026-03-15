@@ -144,20 +144,30 @@ Peak parallelism: 2 agents simultaneously (Streams A and B after Sprint 003).
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Completed: 2026-03-15** — All 11/11 tasks done.
 
 ### Tests passing
-- 0 / 13 integration tests passing (this sprint)
-- 0 / 52 total cumulative integration tests
+- 13 / 13 integration tests passing (this sprint)
+- 52 / 52 total cumulative integration tests (4+11+10+14+13)
+- **410 total tests** (unit + integration)
+
+### PRs merged
+
+| PR | Branch | Scope | Sessions |
+|---|---|---|---|
+| #19 | `feature/s4-run-models-db` | S4-04, S4-05, S4-06 (models + DB) | 022 |
+| #20 | `feature/s4-run-infra` | S4-01, S4-02, S4-03 (infra: openevolve, proxy, wrapper) | 022 |
+| #22 | `feature/s4-core-run` | S4-07, S4-08, S4-09 (core: launch, post-eval, resume/list/info) | 023 |
+| #24 | `feature/s4-cli-run` | S4-10, S4-11 (cli: 5 commands + 13 L2 tests) | 024 |
 
 ### Demo-able features
-- [ ] `revolver run --version v1.0 --llm claude --dataset train --alias my-solution` (mocked OpenEvolve)
-- [ ] `revolver run --dry-run --version v1.0 --llm claude --dataset train` displays resolved config
-- [ ] Run completion shows token usage and cost estimate
-- [ ] `revolver run info run-20260313-120000` displays full lineage, programs, solution
-- [ ] `revolver run list` shows completed runs with status and best score
-- [ ] `revolver run resume --run run-20260313-120000` creates new run from checkpoint
-- [ ] Post-run eval on training set automatically creates eval results
+- [x] `revolver run --version v1.0 --llm claude --dataset train --alias my-solution` (mocked OpenEvolve)
+- [x] `revolver run --dry-run --version v1.0 --llm claude --dataset train` displays resolved config
+- [x] Run completion shows token usage and cost estimate
+- [x] `revolver run info run-20260313-120000` displays full lineage, programs, solution
+- [x] `revolver run list` shows completed runs with status and best score
+- [x] `revolver run resume --run run-20260313-120000` creates new run from checkpoint
+- [x] Post-run eval on training set automatically creates eval results
 
 ### Carry-over
 - `core.run._post_run_evaluation()` refactored to use `core.eval.evaluate_solution()` in Sprint 005 (S5-08)
