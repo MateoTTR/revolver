@@ -673,7 +673,7 @@ def resume_run(
         parent_version = str(parent["problem_version"])
         parent_llm_name = str(parent["llm"])
         parent_dataset_name = str(parent["dataset"])
-        parent_iterations = int(parent["iterations"])  # type: ignore[call-overload]
+        parent_iterations = int(parent["iterations"])  # type: ignore[call-overload,unused-ignore]
 
         pv = get_problem_version(proj_conn, parent_version)
         if pv is None:
@@ -968,7 +968,7 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
                     llm=str(run_data.get("llm", "")),
                     dataset=str(run_data.get("dataset", "")),
                     iterations_total=(
-                        int(run_data["iterations"])  # type: ignore[call-overload]
+                        int(run_data["iterations"])  # type: ignore[call-overload,unused-ignore]
                         if run_data.get("iterations")
                         else None
                     ),
@@ -995,7 +995,7 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
             llm=str(latest.get("llm", "")),
             dataset=str(latest.get("dataset", "")),
             iterations_total=(
-                int(latest["iterations"])  # type: ignore[call-overload]
+                int(latest["iterations"])  # type: ignore[call-overload,unused-ignore]
                 if latest.get("iterations")
                 else None
             ),
@@ -1035,8 +1035,8 @@ def list_runs(
             token_usage: PydanticTokenUsage | None = None
             if row.get("prompt_tokens") is not None:
                 token_usage = PydanticTokenUsage(
-                    prompt_tokens=int(row["prompt_tokens"]),  # type: ignore[call-overload]
-                    completion_tokens=int(row.get("completion_tokens") or 0),  # type: ignore[call-overload]
+                    prompt_tokens=int(row["prompt_tokens"]),  # type: ignore[call-overload,unused-ignore]
+                    completion_tokens=int(row.get("completion_tokens") or 0),  # type: ignore[call-overload,unused-ignore]
                 )
             summaries.append(
                 RunSummary(
@@ -1044,9 +1044,9 @@ def list_runs(
                     problem_version=str(row["problem_version"]),
                     llm=str(row["llm"]),
                     dataset=str(row["dataset"]),
-                    iterations=int(row["iterations"]),  # type: ignore[call-overload]
+                    iterations=int(row["iterations"]),  # type: ignore[call-overload,unused-ignore]
                     generation_time_s=(
-                        float(row["generation_time_s"])  # type: ignore[arg-type]
+                        float(row["generation_time_s"])  # type: ignore[arg-type,unused-ignore]
                         if row.get("generation_time_s") is not None
                         else None
                     ),
@@ -1055,7 +1055,7 @@ def list_runs(
                     resumed_from=(str(row["resumed_from"]) if row.get("resumed_from") else None),
                     created_at=datetime.fromisoformat(str(row["created_at"])),
                     best_score=(
-                        float(row["best_score"])  # type: ignore[arg-type]
+                        float(row["best_score"])  # type: ignore[arg-type,unused-ignore]
                         if row.get("best_score") is not None
                         else None
                     ),
@@ -1130,8 +1130,8 @@ def get_run_info(
         token_usage: PydanticTokenUsage | None = None
         if run_data.get("prompt_tokens") is not None:
             token_usage = PydanticTokenUsage(
-                prompt_tokens=int(run_data["prompt_tokens"]),  # type: ignore[call-overload]
-                completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[call-overload]
+                prompt_tokens=int(run_data["prompt_tokens"]),  # type: ignore[call-overload,unused-ignore]
+                completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[call-overload,unused-ignore]
             )
 
         return RunInfo(
@@ -1142,9 +1142,9 @@ def get_run_info(
             llm_model=str(run_data["llm_model"]),
             dataset=str(run_data["dataset"]),
             dataset_hash=str(run_data["dataset_hash"]),
-            iterations=int(run_data["iterations"]),  # type: ignore[call-overload]
+            iterations=int(run_data["iterations"]),  # type: ignore[call-overload,unused-ignore]
             generation_time_s=(
-                float(run_data["generation_time_s"])  # type: ignore[arg-type]
+                float(run_data["generation_time_s"])  # type: ignore[arg-type,unused-ignore]
                 if run_data.get("generation_time_s") is not None
                 else None
             ),
