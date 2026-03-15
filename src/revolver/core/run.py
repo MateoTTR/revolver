@@ -1,23 +1,87 @@
-"""Core run logic: wrapper evaluator generation.
+"""Core run logic: orchestration, wrapper generation, resume, list, info.
 
-Generates the ``_revolver_evaluator.py`` wrapper that bridges the user's
-``evaluate_instance()`` function with OpenEvolve's ``evaluate(program_path)``
-interface (ADR-006).
+Implements the full domain layer for ``revolver run`` commands:
+- ``launch_run()`` — full orchestration (DES-005 section 2.1)
+- ``resume_run()`` — resume from checkpoint (DES-005 section 2.3)
+- ``get_run_status()`` — active/latest run status (DES-005 section 2.2)
+- ``list_runs()`` — query with filters (DES-005 section 2.4)
+- ``get_run_info()`` — detailed run info (DES-005 section 2.5)
+- ``generate_wrapper()`` — wrapper evaluator generation (DES-005 section 3)
 
-Other core run functions (start_run, resume_run, etc.) will be added
-in future PRs.
-
-Traceable to: DES-005 §3 (Wrapper Evaluator Generation), ADR-006.
+Traceable to: DES-005, ADR-006, FR-RUN-001..030.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
+import sys
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
-from revolver.core.exceptions import EvaluatorLoadError
+import yaml
+
+from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
+from revolver.core.exceptions import (
+    EvaluatorLoadError,
+    ExternalError,
+    IntegrityError,
+    RevolverError,
+)
+from revolver.infra.db import (
+    get_dataset,
+    get_dataset_compat,
+    get_global_db,
+    get_latest_run,
+    get_llm,
+    get_problem_version,
+    get_project_db,
+    get_resume_chain,
+    get_run,
+    get_solutions_for_run,
+    insert_run,
+    insert_solution,
+    update_run_status,
+    update_run_tokens,
+)
+from revolver.infra.db import (
+    list_runs as db_list_runs,
+)
+from revolver.infra.openevolve import OpenEvolveRunner, build_config, revolver_env
+from revolver.infra.store import (
+    PROBLEM_DIR,
+    REVOLVER_DIR,
+    copy_run_file,
+    create_run_dir,
+    find_project_root,
+    get_active_locks,
+    get_run_dir,
+    read_run_manifest,
+    remove_run_lock,
+    write_run_lock,
+    write_run_manifest,
+)
+from revolver.infra.store import (
+    ProjectNotFoundError as StoreProjectNotFoundError,
+)
+from revolver.infra.token_proxy import TokenCountingProxy, estimate_cost
+from revolver.models.run import (
+    ProgramEntry,
+    RunConfig,
+    RunInfo,
+    RunManifest,
+    RunResult,
+    RunStatus,
+    RunSummary,
+    SolutionResult,
+)
+from revolver.models.run import (
+    TokenUsage as PydanticTokenUsage,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -105,7 +169,1005 @@ def _log_instance(instance_id: str, metrics: dict[str, float]) -> None:
 '''
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── ID generation (FR-RUN-007) ────────────────────────────────────────────────
+
+
+def generate_run_id() -> str:
+    """Generate a unique run ID in format ``run-YYYYMMDD-HHMMSS``.
+
+    Returns:
+        A run ID string like ``"run-20260310-143000"``.
+    """
+    now = datetime.now(UTC)
+    return f"run-{now.strftime('%Y%m%d-%H%M%S')}"
+
+
+def generate_solution_id() -> str:
+    """Generate a unique solution ID in format ``sol-YYYYMMDD-HHMMSS``.
+
+    Returns:
+        A solution ID string like ``"sol-20260310-143000"``.
+    """
+    now = datetime.now(UTC)
+    return f"sol-{now.strftime('%Y%m%d-%H%M%S')}"
+
+
+# ── Project root resolution ──────────────────────────────────────────────────
+
+
+def _resolve_project_root(project_root: Path | None) -> Path:
+    """Resolve and return the project root directory.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        The resolved project root path.
+
+    Raises:
+        RevolverError: If no project is found.
+    """
+    try:
+        return find_project_root(project_root or Path.cwd())
+    except StoreProjectNotFoundError as exc:
+        raise RevolverError(str(exc)) from exc
+
+
+# ── launch_run (DES-005 §2.1) ────────────────────────────────────────────────
+
+
+def launch_run(
+    config: RunConfig,
+    project_root: Path | None = None,
+) -> RunResult:
+    """Launch a full OpenEvolve evolution run.
+
+    Orchestrates the entire run lifecycle per DES-005 section 2.1:
+    validate inputs, generate wrapper, configure OpenEvolve, launch,
+    collect results, create solution, write manifest.
+
+    Args:
+        config: Run configuration with problem version, LLM, dataset, etc.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A :class:`RunResult` with run ID, solution, programs, and token usage.
+
+    Raises:
+        RevolverError: On validation failures (unknown LLM, missing version).
+        IntegrityError: On dataset integrity mismatch (exit code 2).
+        ExternalError: On OpenEvolve failure (exit code 4).
+    """
+    # 1. Resolve project root
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+
+    proj_conn = get_project_db(db_path)
+    global_conn = get_global_db()
+    try:
+        # 2. Validate problem version exists
+        pv = get_problem_version(proj_conn, config.problem_version)
+        if pv is None:
+            raise RevolverError(f"Problem version '{config.problem_version}' not found.")
+
+        # 3. Validate LLM exists (global DB)
+        llm = get_llm(global_conn, config.llm_name)
+        if llm is None:
+            raise RevolverError(f"LLM '{config.llm_name}' not found.")
+
+        # 4. Validate dataset exists
+        ds = get_dataset(proj_conn, config.dataset_name)
+        if ds is None:
+            raise RevolverError(f"Dataset '{config.dataset_name}' not found.")
+
+        # 5. FR-RUN-002: warn if dataset split != train
+        if ds.split and ds.split != "train":
+            sys.stderr.write(
+                f"Warning: dataset '{ds.name}' has split='{ds.split}' "
+                f"(expected 'train'). Proceeding anyway.\n"
+            )
+
+        # 6. FR-RUN-003: warn if dataset not compatible with problem version
+        compat_versions = get_dataset_compat(proj_conn, config.dataset_name)
+        if compat_versions and config.problem_version not in compat_versions:
+            sys.stderr.write(
+                f"Warning: dataset '{ds.name}' is not marked as compatible "
+                f"with problem version '{config.problem_version}'. "
+                f"Proceeding anyway.\n"
+            )
+
+        # 7. FR-RUN-004: verify dataset integrity
+        integrity = verify_dataset_integrity(project_root, config.dataset_name)
+        if not integrity.is_valid:
+            raise IntegrityError(
+                f"Dataset '{ds.name}' integrity check failed: "
+                f"{len(integrity.mismatches)} mismatches, "
+                f"{len(integrity.missing)} missing, "
+                f"{len(integrity.extra)} extra files."
+            )
+
+        # Resolve snapshot dir and dataset path
+        snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / config.problem_version
+
+        # Resolve dataset path
+        dataset_path = resolve_dataset_path(project_root, config.dataset_name)
+
+        # Read problem.md if present (FR-PRB-015)
+        problem_md_path = snapshot_dir / "problem.md"
+        problem_description: str | None = None
+        if problem_md_path.exists():
+            problem_description = problem_md_path.read_text(encoding="utf-8")
+
+        # Build OpenEvolve config
+        problem_config_path = snapshot_dir / "config.yaml"
+        oe_config = build_config(
+            problem_config=problem_config_path,
+            llm=llm,
+            iterations=config.iterations,
+            config_overrides=config.config_overrides or None,
+            problem_description=problem_description,
+        )
+
+        # 8. If dry_run: return early with config, no side effects
+        if config.dry_run:
+            return RunResult(
+                run_id="dry-run",
+                solution=SolutionResult(
+                    solution_id="dry-run",
+                    run_id="dry-run",
+                    rank=1,
+                    best_score=None,
+                ),
+                programs_stored=0,
+                problem_version=config.problem_version,
+                llm=config.llm_name,
+                dataset=config.dataset_name,
+                iterations=config.iterations or oe_config.get("iterations", 0),
+                generation_time_s=0.0,
+                token_usage=None,
+            )
+
+        # 9. Generate run_id, create run dir
+        run_id = generate_run_id()
+        run_dir = create_run_dir(root, run_id)
+
+        # 10. Generate wrapper evaluator
+        wrapper_path = generate_wrapper(snapshot_dir, run_dir)
+
+        # Set output dir in config
+        oe_output_dir = run_dir / "oe-output"
+        oe_output_dir.mkdir(exist_ok=True)
+        oe_config["output_dir"] = str(oe_output_dir)
+
+        # Determine iterations
+        iterations = config.iterations or oe_config.get("iterations", 10)
+
+        # 13. FR-RUN-014/015: check concurrency (lock files for local LLM)
+        if llm.source == "local":
+            active_locks = get_active_locks(root)
+            for lock_data in active_locks:
+                if lock_data.get("llm_source") == "local":
+                    lock_pid = lock_data.get("pid")
+                    if lock_pid and _is_pid_alive(int(lock_pid)):
+                        raise RevolverError(
+                            f"A local LLM run is already active "
+                            f"(run={lock_data.get('run_id')}, PID={lock_pid}). "
+                            f"Local LLM runs must execute sequentially (FR-RUN-014)."
+                        )
+
+        # 14. Insert run record in DB (status="running")
+        now = datetime.now(UTC)
+        config_snapshot_str = yaml.dump(oe_config, default_flow_style=False)
+        insert_run(
+            proj_conn,
+            run_id=run_id,
+            problem_version=config.problem_version,
+            llm=config.llm_name,
+            dataset=config.dataset_name,
+            iterations=iterations,
+            problem_hash=pv.hash,
+            dataset_hash=ds.global_hash,
+            llm_model=llm.model,
+            created_at=now,
+            status="running",
+            config_snapshot=config_snapshot_str,
+        )
+
+        # 15. Write lock file
+        lock_data = {
+            "run_id": run_id,
+            "pid": os.getpid(),
+            "llm_source": llm.source,
+            "llm_name": config.llm_name,
+            "started_at": now.isoformat(),
+        }
+        write_run_lock(root, run_id, lock_data)
+
+        # Start token proxy (if LLM has base_url)
+        proxy: TokenCountingProxy | None = None
+        if llm.base_url:
+            proxy = TokenCountingProxy(llm.base_url)
+            proxy_url = proxy.start()
+            # Rewrite config's llm.base_url to proxy
+            if "llm" not in oe_config:
+                oe_config["llm"] = {}
+            oe_config["llm"]["base_url"] = proxy_url
+
+        try:
+            # Set env vars via revolver_env()
+            env_vars = {
+                "REVOLVER_DATASET_DIR": str(dataset_path),
+                "REVOLVER_INSTANCE_LOG": str(run_dir / "instance_log.db"),
+                "REVOLVER_EVAL_LOG": str(run_dir / "eval_log.db"),
+            }
+
+            with revolver_env(env_vars):
+                # Record start time
+                start_time = time.monotonic()
+
+                # Launch OpenEvolve
+                initial_program = snapshot_dir / "initial_program.py"
+                runner = OpenEvolveRunner(
+                    initial_program=initial_program,
+                    evaluator=wrapper_path,
+                    config=oe_config,
+                    output_dir=oe_output_dir,
+                )
+                run_output = runner.run(iterations=iterations)
+
+                # Record end time
+                end_time = time.monotonic()
+                generation_time_s = end_time - start_time
+
+            # Stop token proxy, get token usage
+            token_usage_model: PydanticTokenUsage | None = None
+            if proxy is not None:
+                proxy_usage = proxy.stop()
+                estimated = estimate_cost(
+                    proxy_usage.prompt_tokens,
+                    proxy_usage.completion_tokens,
+                    llm.input_cost_per_mtok,
+                    llm.output_cost_per_mtok,
+                )
+                token_usage_model = PydanticTokenUsage(
+                    prompt_tokens=proxy_usage.prompt_tokens,
+                    completion_tokens=proxy_usage.completion_tokens,
+                    estimated_cost_usd=estimated,
+                )
+                # Update run with tokens
+                update_run_tokens(
+                    proj_conn,
+                    run_id,
+                    proxy_usage.prompt_tokens,
+                    proxy_usage.completion_tokens,
+                )
+
+            # Collect programs from OpenEvolve output dir
+            programs = _collect_programs(oe_output_dir, run_dir / "programs")
+
+            # Generate solution_id, insert solution (rank=1) in DB
+            solution_id = generate_solution_id()
+            best_score = run_output.best_score
+            insert_solution(
+                proj_conn,
+                solution_id=solution_id,
+                run_id=run_id,
+                rank=1,
+                best_score=best_score,
+                alias=config.alias,
+            )
+
+            # Update run status to completed and generation_time_s
+            proj_conn.execute(
+                "UPDATE runs SET generation_time_s = ? WHERE id = ?",
+                (generation_time_s, run_id),
+            )
+            proj_conn.commit()
+            update_run_status(proj_conn, run_id, "completed")
+
+            # Run _post_run_evaluation() (warn on failure)
+            try:
+                _post_run_evaluation(
+                    proj_conn=proj_conn,
+                    run_id=run_id,
+                    solution_id=solution_id,
+                    snapshot_dir=snapshot_dir,
+                    dataset_path=dataset_path,
+                    program_path=(
+                        run_dir / "programs" / "rank-1.py"
+                        if (run_dir / "programs" / "rank-1.py").exists()
+                        else initial_program
+                    ),
+                )
+            except Exception as exc:
+                sys.stderr.write(f"Warning: post-run evaluation failed: {exc}\n")
+
+            # Build solution result
+            solution_result = SolutionResult(
+                solution_id=solution_id,
+                run_id=run_id,
+                alias=config.alias,
+                rank=1,
+                best_score=best_score,
+            )
+
+            # Write run manifest
+            manifest_data = RunManifest(
+                run_id=run_id,
+                created_at=now,
+                generation_time_s=generation_time_s,
+                iterations=iterations,
+                status="completed",
+                problem_version=config.problem_version,
+                problem_hash=pv.hash,
+                dataset=config.dataset_name,
+                dataset_hash=ds.global_hash,
+                llm=config.llm_name,
+                llm_model=llm.model,
+                token_usage=token_usage_model,
+                solution=solution_result,
+                programs=programs,
+            ).model_dump(mode="json")
+            write_run_manifest(root, run_id, manifest_data)
+
+            # Remove lock file
+            remove_run_lock(root, run_id)
+
+            # Return RunResult
+            return RunResult(
+                run_id=run_id,
+                solution=solution_result,
+                programs_stored=len(programs),
+                problem_version=config.problem_version,
+                llm=config.llm_name,
+                dataset=config.dataset_name,
+                iterations=iterations,
+                generation_time_s=generation_time_s,
+                token_usage=token_usage_model,
+            )
+
+        except KeyboardInterrupt:
+            # Stop proxy on interrupt
+            if proxy is not None:
+                proxy.stop()
+            update_run_status(proj_conn, run_id, "interrupted")
+            remove_run_lock(root, run_id)
+            raise
+        except ExternalError:
+            if proxy is not None:
+                proxy.stop()
+            update_run_status(proj_conn, run_id, "interrupted")
+            remove_run_lock(root, run_id)
+            raise
+        except Exception as exc:
+            if proxy is not None:
+                proxy.stop()
+            update_run_status(proj_conn, run_id, "interrupted")
+            remove_run_lock(root, run_id)
+            raise ExternalError(f"Run failed: {exc}") from exc
+
+    finally:
+        proj_conn.close()
+        global_conn.close()
+
+
+# ── _post_run_evaluation (FR-RUN-019/020) ────────────────────────────────────
+
+
+def _post_run_evaluation(
+    proj_conn: Any,
+    run_id: str,
+    solution_id: str,
+    snapshot_dir: Path,
+    dataset_path: Path,
+    program_path: Path,
+) -> None:
+    """Evaluate the rank-1 program on all training instances.
+
+    This is an inline implementation for Sprint 004. Sprint 005 will
+    refactor this to use ``core.eval.evaluate_solution()``.
+
+    Results are logged to stderr for now. No eval DB tables are created.
+
+    Args:
+        proj_conn: Open project database connection (unused in inline impl).
+        run_id: ID of the completed run.
+        solution_id: ID of the rank-1 solution.
+        snapshot_dir: Path to the problem version snapshot.
+        dataset_path: Path to the dataset directory.
+        program_path: Path to the rank-1 program file.
+    """
+    from revolver.infra.evaluator_runner import run_instance
+
+    evaluator_path = snapshot_dir / EVALUATOR_FILENAME
+    if not evaluator_path.exists():
+        sys.stderr.write(
+            f"Warning: evaluator not found at {evaluator_path}, skipping post-run evaluation.\n"
+        )
+        return
+
+    if not program_path.exists():
+        sys.stderr.write(
+            f"Warning: program not found at {program_path}, skipping post-run evaluation.\n"
+        )
+        return
+
+    # Enumerate instances
+    instances = sorted(p for p in dataset_path.iterdir() if not p.name.startswith("."))
+    if not instances:
+        sys.stderr.write("Warning: no instances found, skipping post-run evaluation.\n")
+        return
+
+    sys.stderr.write(
+        f"Post-run evaluation: evaluating {len(instances)} instances "
+        f"(run={run_id}, solution={solution_id})...\n"
+    )
+
+    passed = 0
+    failed = 0
+    for inst in instances:
+        result = run_instance(
+            evaluator_path=evaluator_path,
+            program_path=program_path,
+            instance_path=inst,
+            timeout_s=300.0,
+        )
+        if result.status == "pass":
+            passed += 1
+        else:
+            failed += 1
+            sys.stderr.write(
+                f"  Instance {result.instance_id}: {result.status}"
+                + (f" — {result.error}" if result.error else "")
+                + "\n"
+            )
+
+    sys.stderr.write(
+        f"Post-run evaluation complete: {passed}/{len(instances)} passed, {failed} failed.\n"
+    )
+
+
+# ── resume_run (DES-005 §2.3) ────────────────────────────────────────────────
+
+
+def resume_run(
+    run_id: str,
+    iterations: int | None = None,
+    project_root: Path | None = None,
+) -> RunResult:
+    """Resume a run from its checkpoint, creating a new run.
+
+    Creates a new run with ``resumed_from`` pointing to the parent.
+    Copies the wrapper evaluator and checkpoint from the parent run.
+
+    Args:
+        run_id: ID of the parent run to resume from.
+        iterations: Override iteration count for the resumed run.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A :class:`RunResult` for the new resumed run.
+
+    Raises:
+        RevolverError: If the parent run is not found or has invalid status.
+        ExternalError: If OpenEvolve fails.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+
+    proj_conn = get_project_db(db_path)
+    global_conn = get_global_db()
+    try:
+        # 1. Get parent run from DB
+        parent = get_run(proj_conn, run_id)
+        if parent is None:
+            raise RevolverError(f"Run '{run_id}' not found.")
+
+        # 2. Validate status
+        parent_status = parent["status"]
+        if parent_status not in ("completed", "interrupted"):
+            raise RevolverError(
+                f"Cannot resume run '{run_id}' with status '{parent_status}'. "
+                f"Only 'completed' or 'interrupted' runs can be resumed."
+            )
+
+        # 3. Load parent's problem version, LLM, dataset
+        parent_version = str(parent["problem_version"])
+        parent_llm_name = str(parent["llm"])
+        parent_dataset_name = str(parent["dataset"])
+        parent_iterations = int(parent["iterations"])  # type: ignore[arg-type]
+
+        pv = get_problem_version(proj_conn, parent_version)
+        if pv is None:
+            raise RevolverError(f"Problem version '{parent_version}' not found.")
+
+        llm = get_llm(global_conn, parent_llm_name)
+        if llm is None:
+            raise RevolverError(f"LLM '{parent_llm_name}' not found.")
+
+        ds = get_dataset(proj_conn, parent_dataset_name)
+        if ds is None:
+            raise RevolverError(f"Dataset '{parent_dataset_name}' not found.")
+
+        # 4. Create new run with resumed_from
+        new_run_id = generate_run_id()
+        new_run_dir = create_run_dir(root, new_run_id)
+
+        parent_run_dir = get_run_dir(root, run_id)
+
+        # 5. Copy wrapper from parent run dir (FR-RUN-024)
+        parent_wrapper = parent_run_dir / WRAPPER_FILENAME
+        if parent_wrapper.exists():
+            copy_run_file(parent_wrapper, new_run_dir / WRAPPER_FILENAME)
+
+        # 6. Copy checkpoint from parent run dir
+        parent_checkpoint = parent_run_dir / "oe-checkpoint"
+        new_checkpoint: Path | None = None
+        if parent_checkpoint.exists():
+            new_checkpoint = new_run_dir / "oe-checkpoint"
+            copy_run_file(parent_checkpoint, new_checkpoint)
+
+        # Resolve paths
+        snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version
+        dataset_path = resolve_dataset_path(project_root, parent_dataset_name)
+
+        # Read problem.md if present
+        problem_md_path = snapshot_dir / "problem.md"
+        problem_description: str | None = None
+        if problem_md_path.exists():
+            problem_description = problem_md_path.read_text(encoding="utf-8")
+
+        # Determine iterations
+        actual_iterations = iterations or parent_iterations
+
+        # Build OpenEvolve config
+        problem_config_path = snapshot_dir / "config.yaml"
+        oe_config = build_config(
+            problem_config=problem_config_path,
+            llm=llm,
+            iterations=actual_iterations,
+            problem_description=problem_description,
+        )
+
+        # Set output dir
+        oe_output_dir = new_run_dir / "oe-output"
+        oe_output_dir.mkdir(exist_ok=True)
+        oe_config["output_dir"] = str(oe_output_dir)
+
+        # Insert run record
+        now = datetime.now(UTC)
+        config_snapshot_str = yaml.dump(oe_config, default_flow_style=False)
+        insert_run(
+            proj_conn,
+            run_id=new_run_id,
+            problem_version=parent_version,
+            llm=parent_llm_name,
+            dataset=parent_dataset_name,
+            iterations=actual_iterations,
+            problem_hash=pv.hash,
+            dataset_hash=ds.global_hash,
+            llm_model=llm.model,
+            created_at=now,
+            resumed_from=run_id,
+            status="running",
+            config_snapshot=config_snapshot_str,
+        )
+
+        # Write lock file
+        lock_data_dict = {
+            "run_id": new_run_id,
+            "pid": os.getpid(),
+            "llm_source": llm.source,
+            "llm_name": parent_llm_name,
+            "started_at": now.isoformat(),
+        }
+        write_run_lock(root, new_run_id, lock_data_dict)
+
+        # Start token proxy if LLM has base_url
+        proxy: TokenCountingProxy | None = None
+        if llm.base_url:
+            proxy = TokenCountingProxy(llm.base_url)
+            proxy_url = proxy.start()
+            if "llm" not in oe_config:
+                oe_config["llm"] = {}
+            oe_config["llm"]["base_url"] = proxy_url
+
+        try:
+            env_vars = {
+                "REVOLVER_DATASET_DIR": str(dataset_path),
+                "REVOLVER_INSTANCE_LOG": str(new_run_dir / "instance_log.db"),
+                "REVOLVER_EVAL_LOG": str(new_run_dir / "eval_log.db"),
+            }
+
+            with revolver_env(env_vars):
+                start_time = time.monotonic()
+
+                wrapper_path = new_run_dir / WRAPPER_FILENAME
+                initial_program = snapshot_dir / "initial_program.py"
+                runner = OpenEvolveRunner(
+                    initial_program=initial_program,
+                    evaluator=wrapper_path,
+                    config=oe_config,
+                    output_dir=oe_output_dir,
+                )
+                run_output = runner.run(
+                    iterations=actual_iterations,
+                    checkpoint=new_checkpoint,
+                )
+
+                end_time = time.monotonic()
+                generation_time_s = end_time - start_time
+
+            # Stop token proxy
+            token_usage_model: PydanticTokenUsage | None = None
+            if proxy is not None:
+                proxy_usage = proxy.stop()
+                estimated = estimate_cost(
+                    proxy_usage.prompt_tokens,
+                    proxy_usage.completion_tokens,
+                    llm.input_cost_per_mtok,
+                    llm.output_cost_per_mtok,
+                )
+                token_usage_model = PydanticTokenUsage(
+                    prompt_tokens=proxy_usage.prompt_tokens,
+                    completion_tokens=proxy_usage.completion_tokens,
+                    estimated_cost_usd=estimated,
+                )
+                update_run_tokens(
+                    proj_conn,
+                    new_run_id,
+                    proxy_usage.prompt_tokens,
+                    proxy_usage.completion_tokens,
+                )
+
+            # Collect programs
+            programs = _collect_programs(oe_output_dir, new_run_dir / "programs")
+
+            # Create solution
+            solution_id = generate_solution_id()
+            best_score = run_output.best_score
+            insert_solution(
+                proj_conn,
+                solution_id=solution_id,
+                run_id=new_run_id,
+                rank=1,
+                best_score=best_score,
+            )
+
+            # Update run
+            proj_conn.execute(
+                "UPDATE runs SET generation_time_s = ? WHERE id = ?",
+                (generation_time_s, new_run_id),
+            )
+            proj_conn.commit()
+            update_run_status(proj_conn, new_run_id, "completed")
+
+            # Post-run eval
+            try:
+                _post_run_evaluation(
+                    proj_conn=proj_conn,
+                    run_id=new_run_id,
+                    solution_id=solution_id,
+                    snapshot_dir=snapshot_dir,
+                    dataset_path=dataset_path,
+                    program_path=(
+                        new_run_dir / "programs" / "rank-1.py"
+                        if (new_run_dir / "programs" / "rank-1.py").exists()
+                        else initial_program
+                    ),
+                )
+            except Exception as exc:
+                sys.stderr.write(f"Warning: post-run evaluation failed: {exc}\n")
+
+            solution_result = SolutionResult(
+                solution_id=solution_id,
+                run_id=new_run_id,
+                rank=1,
+                best_score=best_score,
+            )
+
+            # Write manifest
+            manifest_data = RunManifest(
+                run_id=new_run_id,
+                created_at=now,
+                generation_time_s=generation_time_s,
+                iterations=actual_iterations,
+                status="completed",
+                problem_version=parent_version,
+                problem_hash=pv.hash,
+                dataset=parent_dataset_name,
+                dataset_hash=ds.global_hash,
+                llm=parent_llm_name,
+                llm_model=llm.model,
+                resumed_from=run_id,
+                token_usage=token_usage_model,
+                solution=solution_result,
+                programs=programs,
+            ).model_dump(mode="json")
+            write_run_manifest(root, new_run_id, manifest_data)
+
+            remove_run_lock(root, new_run_id)
+
+            return RunResult(
+                run_id=new_run_id,
+                solution=solution_result,
+                programs_stored=len(programs),
+                problem_version=parent_version,
+                llm=parent_llm_name,
+                dataset=parent_dataset_name,
+                iterations=actual_iterations,
+                generation_time_s=generation_time_s,
+                token_usage=token_usage_model,
+                resumed_from=run_id,
+            )
+
+        except KeyboardInterrupt:
+            if proxy is not None:
+                proxy.stop()
+            update_run_status(proj_conn, new_run_id, "interrupted")
+            remove_run_lock(root, new_run_id)
+            raise
+        except ExternalError:
+            if proxy is not None:
+                proxy.stop()
+            update_run_status(proj_conn, new_run_id, "interrupted")
+            remove_run_lock(root, new_run_id)
+            raise
+        except Exception as exc:
+            if proxy is not None:
+                proxy.stop()
+            update_run_status(proj_conn, new_run_id, "interrupted")
+            remove_run_lock(root, new_run_id)
+            raise ExternalError(f"Resumed run failed: {exc}") from exc
+
+    finally:
+        proj_conn.close()
+        global_conn.close()
+
+
+# ── get_run_status (DES-005 §2.2) ────────────────────────────────────────────
+
+
+def get_run_status(project_root: Path | None = None) -> RunStatus:
+    """Get status of active runs or the most recent run.
+
+    Scans lock files for active runs, validates PIDs, removes stale locks.
+    Falls back to the latest run from DB if no active runs.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A :class:`RunStatus` with active run info or latest run info.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+
+    # Scan lock files
+    active_locks = get_active_locks(root)
+    active_run_ids: list[str] = []
+
+    for lock_data in active_locks:
+        lock_pid = lock_data.get("pid")
+        lock_run_id = lock_data.get("run_id", "")
+        if lock_pid and _is_pid_alive(int(lock_pid)):
+            active_run_ids.append(lock_run_id)
+        else:
+            # Stale lock — remove it
+            if lock_run_id:
+                remove_run_lock(root, lock_run_id)
+
+    if active_run_ids:
+        # Return status for active runs
+        proj_conn = get_project_db(db_path)
+        try:
+            # Use first active run for details
+            run_data = get_run(proj_conn, active_run_ids[0])
+            if run_data:
+                started_at_str = str(run_data.get("created_at", ""))
+                started_at = datetime.fromisoformat(started_at_str) if started_at_str else None
+                elapsed = (datetime.now(UTC) - started_at).total_seconds() if started_at else None
+                return RunStatus(
+                    active=True,
+                    run_ids=active_run_ids,
+                    run_id=active_run_ids[0],
+                    problem_version=str(run_data.get("problem_version", "")),
+                    llm=str(run_data.get("llm", "")),
+                    dataset=str(run_data.get("dataset", "")),
+                    iterations_total=(
+                        int(run_data["iterations"])  # type: ignore[arg-type]
+                        if run_data.get("iterations")
+                        else None
+                    ),
+                    started_at=started_at,
+                    elapsed_s=elapsed,
+                )
+            return RunStatus(active=True, run_ids=active_run_ids)
+        finally:
+            proj_conn.close()
+
+    # No active runs — return latest run
+    proj_conn = get_project_db(db_path)
+    try:
+        latest = get_latest_run(proj_conn)
+        if latest is None:
+            return RunStatus(active=False)
+
+        started_at_str = str(latest.get("created_at", ""))
+        started_at = datetime.fromisoformat(started_at_str) if started_at_str else None
+        return RunStatus(
+            active=False,
+            run_id=str(latest.get("id", "")),
+            problem_version=str(latest.get("problem_version", "")),
+            llm=str(latest.get("llm", "")),
+            dataset=str(latest.get("dataset", "")),
+            iterations_total=(
+                int(latest["iterations"])  # type: ignore[arg-type]
+                if latest.get("iterations")
+                else None
+            ),
+            started_at=started_at,
+        )
+    finally:
+        proj_conn.close()
+
+
+# ── list_runs (DES-005 §2.4) ─────────────────────────────────────────────────
+
+
+def list_runs(
+    project_root: Path | None = None,
+    version: str | None = None,
+    llm: str | None = None,
+    status: str | None = None,
+) -> list[RunSummary]:
+    """List runs with optional filters.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+        version: Filter by problem version tag.
+        llm: Filter by LLM registry name.
+        status: Filter by run status.
+
+    Returns:
+        A list of :class:`RunSummary` instances ordered by creation time (desc).
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = db_list_runs(conn, version=version, llm=llm, status=status)
+        summaries: list[RunSummary] = []
+        for row in rows:
+            token_usage: PydanticTokenUsage | None = None
+            if row.get("prompt_tokens") is not None:
+                token_usage = PydanticTokenUsage(
+                    prompt_tokens=int(row["prompt_tokens"]),  # type: ignore[arg-type]
+                    completion_tokens=int(row.get("completion_tokens") or 0),  # type: ignore[arg-type]
+                )
+            summaries.append(
+                RunSummary(
+                    run_id=str(row["id"]),
+                    problem_version=str(row["problem_version"]),
+                    llm=str(row["llm"]),
+                    dataset=str(row["dataset"]),
+                    iterations=int(row["iterations"]),  # type: ignore[arg-type]
+                    generation_time_s=(
+                        float(row["generation_time_s"])  # type: ignore[arg-type]
+                        if row.get("generation_time_s") is not None
+                        else None
+                    ),
+                    token_usage=token_usage,
+                    status=str(row["status"]),
+                    resumed_from=(str(row["resumed_from"]) if row.get("resumed_from") else None),
+                    created_at=datetime.fromisoformat(str(row["created_at"])),
+                    best_score=(
+                        float(row["best_score"])  # type: ignore[arg-type]
+                        if row.get("best_score") is not None
+                        else None
+                    ),
+                )
+            )
+        return summaries
+    finally:
+        conn.close()
+
+
+# ── get_run_info (DES-005 §2.5) ──────────────────────────────────────────────
+
+
+def get_run_info(
+    run_id: str,
+    project_root: Path | None = None,
+) -> RunInfo:
+    """Get detailed run information.
+
+    Args:
+        run_id: ID of the run to query.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A :class:`RunInfo` with full details, solutions, programs, and resume chain.
+
+    Raises:
+        RevolverError: If the run is not found.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        # 1. Get run from DB
+        run_data = get_run(conn, run_id)
+        if run_data is None:
+            raise RevolverError(f"Run '{run_id}' not found.")
+
+        # 2. Get solutions for run
+        solutions = get_solutions_for_run(conn, run_id)
+        solution_results = [
+            SolutionResult(
+                solution_id=s.id,
+                run_id=s.run_id,
+                alias=s.alias,
+                rank=s.rank,
+                best_score=s.best_score,
+            )
+            for s in solutions
+        ]
+
+        # 3. Read programs from manifest (if exists)
+        programs: list[ProgramEntry] = []
+        try:
+            manifest = read_run_manifest(root, run_id)
+            if "programs" in manifest:
+                for p in manifest["programs"]:
+                    programs.append(
+                        ProgramEntry(
+                            rank=p["rank"],
+                            score=p.get("score"),
+                            file=p["file"],
+                        )
+                    )
+        except FileNotFoundError:
+            pass
+
+        # 4. Get resume chain
+        chain = get_resume_chain(conn, run_id)
+
+        # 5. Build token usage
+        token_usage: PydanticTokenUsage | None = None
+        if run_data.get("prompt_tokens") is not None:
+            token_usage = PydanticTokenUsage(
+                prompt_tokens=int(run_data["prompt_tokens"]),  # type: ignore[arg-type]
+                completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[arg-type]
+            )
+
+        return RunInfo(
+            run_id=str(run_data["id"]),
+            problem_version=str(run_data["problem_version"]),
+            problem_hash=str(run_data["problem_hash"]),
+            llm=str(run_data["llm"]),
+            llm_model=str(run_data["llm_model"]),
+            dataset=str(run_data["dataset"]),
+            dataset_hash=str(run_data["dataset_hash"]),
+            iterations=int(run_data["iterations"]),  # type: ignore[arg-type]
+            generation_time_s=(
+                float(run_data["generation_time_s"])  # type: ignore[arg-type]
+                if run_data.get("generation_time_s") is not None
+                else None
+            ),
+            token_usage=token_usage,
+            status=str(run_data["status"]),
+            resumed_from=(str(run_data["resumed_from"]) if run_data.get("resumed_from") else None),
+            created_at=datetime.fromisoformat(str(run_data["created_at"])),
+            solutions=solution_results,
+            programs=programs,
+            resume_chain=chain,
+        )
+    finally:
+        conn.close()
+
+
+# ── Wrapper evaluator generation (DES-005 §3) ────────────────────────────────
 
 
 def generate_wrapper(
@@ -198,3 +1260,63 @@ def _load_evaluator_module(path: Path) -> ModuleType:
         raise EvaluatorLoadError(f"Failed to import evaluator: {exc}") from exc
 
     return module
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """Check if a process with the given PID is alive.
+
+    Args:
+        pid: Process ID to check.
+
+    Returns:
+        ``True`` if the process exists, ``False`` otherwise.
+    """
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _collect_programs(oe_output_dir: Path, programs_dir: Path) -> list[ProgramEntry]:
+    """Collect programs from OpenEvolve output directory.
+
+    Looks for Python files in the output directory and copies them
+    to the run's ``programs/`` directory as ``rank-1.py``, ``rank-2.py``, etc.
+
+    Args:
+        oe_output_dir: OpenEvolve output directory.
+        programs_dir: Destination programs directory in the run dir.
+
+    Returns:
+        List of :class:`ProgramEntry` for the collected programs.
+    """
+    programs: list[ProgramEntry] = []
+    programs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Look for top_programs/ or best_programs/ or just .py files
+    source_dirs = [
+        oe_output_dir / "top_programs",
+        oe_output_dir / "best_programs",
+        oe_output_dir,
+    ]
+
+    py_files: list[Path] = []
+    for source in source_dirs:
+        if source.exists():
+            found = sorted(source.glob("*.py"))
+            if found:
+                py_files = found
+                break
+
+    for rank, py_file in enumerate(py_files, start=1):
+        dest = programs_dir / f"rank-{rank}.py"
+        shutil.copy2(py_file, dest)
+        programs.append(
+            ProgramEntry(
+                rank=rank,
+                file=f"programs/rank-{rank}.py",
+            )
+        )
+
+    return programs

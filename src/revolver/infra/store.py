@@ -1,13 +1,15 @@
 """Project store — directory structure management and manifest I/O.
 
 Handles the ``.revolver/`` directory tree: creation, discovery, and
-YAML manifest read/write. Includes dataset manifest and snapshot operations.
+YAML manifest read/write. Includes dataset manifest/snapshot operations
+and run directory/manifest/lock file operations.
 
-Traceable to: NFR-010, NFR-012, NFR-051 (permissions 700), DES-004 §6.
+Traceable to: NFR-010, NFR-012, NFR-051 (permissions 700), DES-004 §6, DES-005 §4.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -231,3 +233,170 @@ def get_snapshot_path(project_root: Path, name: str) -> Path:
         Path to ``<project_root>/.revolver/datasets/<name>/snapshot/``.
     """
     return _dataset_dir(project_root, name) / "snapshot"
+
+
+# ── Run store operations ──────────────────────────────────────────────────
+
+LOCKS_DIR = "locks"
+
+
+def _run_dir(project_root: Path, run_id: str) -> Path:
+    """Return the run directory path: ``<project_root>/.revolver/runs/<run_id>/``."""
+    return project_root / REVOLVER_DIR / RUNS_DIR / run_id
+
+
+def _locks_dir(project_root: Path) -> Path:
+    """Return the locks directory path: ``<project_root>/.revolver/runs/locks/``."""
+    return project_root / REVOLVER_DIR / RUNS_DIR / LOCKS_DIR
+
+
+def create_run_dir(project_root: Path, run_id: str) -> Path:
+    """Create the run directory with a ``programs/`` subdirectory.
+
+    Creates::
+
+        <project_root>/.revolver/runs/<run_id>/
+        <project_root>/.revolver/runs/<run_id>/programs/
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+
+    Returns:
+        Path to the created run directory.
+    """
+    run_path = _run_dir(project_root, run_id)
+    run_path.mkdir(parents=True, exist_ok=False)
+    (run_path / "programs").mkdir()
+    return run_path
+
+
+def write_run_manifest(
+    project_root: Path,
+    run_id: str,
+    data: dict[str, Any],
+) -> None:
+    """Write a run manifest YAML file.
+
+    Creates ``<project_root>/.revolver/runs/<run_id>/manifest.yaml``.
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+        data: Dictionary to serialize as YAML.
+    """
+    manifest_path = _run_dir(project_root, run_id) / "manifest.yaml"
+    write_manifest(manifest_path, data)
+
+
+def read_run_manifest(
+    project_root: Path,
+    run_id: str,
+) -> dict[str, Any]:
+    """Read a run manifest YAML file.
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+
+    Returns:
+        Parsed dictionary.
+
+    Raises:
+        FileNotFoundError: If the manifest does not exist.
+    """
+    manifest_path = _run_dir(project_root, run_id) / "manifest.yaml"
+    return read_manifest(manifest_path)
+
+
+def write_run_lock(
+    project_root: Path,
+    run_id: str,
+    lock_data: dict[str, Any],
+) -> None:
+    """Write a run lock file.
+
+    Creates ``<project_root>/.revolver/runs/locks/<run_id>.lock``
+    containing JSON-serialized lock data (PID, LLM source, start time, etc.).
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+        lock_data: Dictionary to serialize as JSON.
+    """
+    locks_path = _locks_dir(project_root)
+    locks_path.mkdir(parents=True, exist_ok=True)
+    lock_file = locks_path / f"{run_id}.lock"
+    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
+
+
+def remove_run_lock(project_root: Path, run_id: str) -> None:
+    """Remove a run lock file.
+
+    Silently ignores if the lock file does not exist.
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+    """
+    lock_file = _locks_dir(project_root) / f"{run_id}.lock"
+    if lock_file.exists():
+        lock_file.unlink()
+
+
+def get_active_locks(project_root: Path) -> list[dict[str, Any]]:
+    """List all active lock files and return their parsed data.
+
+    Scans ``<project_root>/.revolver/runs/locks/`` for ``.lock`` files
+    and parses each as JSON.
+
+    Args:
+        project_root: Project root directory.
+
+    Returns:
+        A list of parsed lock data dicts. Each dict includes an extra
+        ``"_lock_file"`` key with the lock file name (e.g. ``"run-123.lock"``).
+    """
+    locks_path = _locks_dir(project_root)
+    if not locks_path.exists():
+        return []
+
+    result: list[dict[str, Any]] = []
+    for lock_file in sorted(locks_path.glob("*.lock")):
+        try:
+            data: dict[str, Any] = json.loads(lock_file.read_text(encoding="utf-8"))
+            data["_lock_file"] = lock_file.name
+            result.append(data)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return result
+
+
+def copy_run_file(src: Path, dst: Path) -> None:
+    """Copy a file from one run directory to another.
+
+    Utility for copying wrapper evaluators, checkpoints, etc.
+    Creates parent directories if needed.
+
+    Args:
+        src: Source file path.
+        dst: Destination file path.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dst)
+    else:
+        shutil.copy2(src, dst)
+
+
+def get_run_dir(project_root: Path, run_id: str) -> Path:
+    """Return the run directory path.
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+
+    Returns:
+        Path to ``<project_root>/.revolver/runs/<run_id>/``.
+    """
+    return _run_dir(project_root, run_id)
