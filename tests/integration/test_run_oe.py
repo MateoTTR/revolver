@@ -15,14 +15,14 @@ from pathlib import Path
 
 import pytest
 
-oe_config_mod = pytest.importorskip("openevolve.config", reason="openevolve not installed")
-oe_controller_mod = pytest.importorskip("openevolve.controller", reason="openevolve not installed")
+pytest.importorskip("openevolve.config", reason="openevolve not installed")
+pytest.importorskip("openevolve.controller", reason="openevolve not installed")
 
-from openevolve.config import Config as OEConfig  # noqa: E402
-from openevolve.controller import OpenEvolve as OEController  # noqa: E402
+from openevolve.config import Config as OEConfig
+from openevolve.controller import OpenEvolve as OEController
 
-from revolver.infra.openevolve import OpenEvolveRunner, build_config  # noqa: E402
-from revolver.models.llm import LLMEntry  # noqa: E402
+from revolver.infra.openevolve import OpenEvolveRunner, build_config
+from revolver.models.llm import LLMEntry
 
 # Path to test fixtures
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"

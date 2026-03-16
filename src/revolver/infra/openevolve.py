@@ -190,7 +190,7 @@ def build_config(
 
     Merge order (last wins):
         1. Problem version's config.yaml (base)
-        2. LLM endpoint configuration (base_url, model, api_key)
+        2. LLM endpoint configuration (api_base, primary_model, api_key)
         3. Problem description injection into prompt.system_message
         4. --iterations override
         5. --config-override key=value pairs

@@ -59,7 +59,7 @@ class TestOpenEvolveRunner:
         runner = OpenEvolveRunner(
             initial_program=tmp_path / "prog.py",
             evaluator=tmp_path / "eval.py",
-            config={"iterations": 10},
+            config={"max_iterations": 10},
             output_dir=tmp_path / "output",
         )
 
@@ -140,9 +140,9 @@ class TestBuildConfig:
         config_file.write_text(
             yaml.dump(
                 {
-                    "iterations": 10,
+                    "max_iterations": 10,
                     "population_size": 5,
-                    "llm": {"model": "base-model", "temperature": 0.8},
+                    "llm": {"primary_model": "base-model", "temperature": 0.8},
                 }
             )
         )
@@ -171,6 +171,10 @@ class TestBuildConfig:
         assert result["llm"]["temperature"] == 0.5
         # Output dir set
         assert result["output_dir"] == str(tmp_path / "output")
+        # Negative assertions: no stale legacy keys
+        assert "iterations" not in result
+        assert "model" not in result.get("llm", {})
+        assert "base_url" not in result.get("llm", {})
 
     def test_problem_description_injection(self, tmp_path: Path) -> None:
         """System prompt includes problem.md content when provided."""

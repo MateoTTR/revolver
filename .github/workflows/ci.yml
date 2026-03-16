@@ -54,7 +54,7 @@ jobs:
         if: matrix.python-version == '3.12'
         continue-on-error: true
         run: |
-          pip install openevolve
+          pip install "openevolve>=0.2.26"
           pytest tests/integration/test_run_oe.py -v --no-header
 
       - name: Upload coverage (Python 3.12 only)
