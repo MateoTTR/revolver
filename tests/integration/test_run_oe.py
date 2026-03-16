@@ -124,6 +124,10 @@ class TestBuildConfigRoundtrip:
         assert config_dict["max_iterations"] == 3
         assert "num_generations" not in config_dict
 
+        # Round-trip through Config.from_dict()
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.max_iterations == 3
+
 
 @pytest.mark.integration
 @pytest.mark.openevolve

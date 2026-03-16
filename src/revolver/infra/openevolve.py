@@ -220,7 +220,8 @@ def build_config(
     for key in ("evaluator", "initial_program"):
         config.pop(key, None)
 
-    # Map num_generations → max_iterations (OpenEvolve uses max_iterations)
+    # Map num_generations → max_iterations (OpenEvolve uses max_iterations).
+    # If both keys are present, max_iterations wins and num_generations is dropped.
     if "num_generations" in config and "max_iterations" not in config:
         config["max_iterations"] = config.pop("num_generations")
     else:

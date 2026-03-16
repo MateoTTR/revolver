@@ -312,6 +312,17 @@ class TestBuildConfig:
         assert "num_generations" not in result
         assert result["max_iterations"] == 3
 
+    def test_max_iterations_wins_over_num_generations(self, tmp_path: Path) -> None:
+        """When both num_generations and max_iterations are present, max_iterations wins."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump({"num_generations": 50, "max_iterations": 100}))
+
+        llm = _make_llm()
+        result = build_config(problem_config=config_file, llm=llm)
+
+        assert "num_generations" not in result
+        assert result["max_iterations"] == 100
+
     def test_malformed_override_raises(self) -> None:
         """Malformed config override (missing =) raises ValidationError."""
         llm = _make_llm()
