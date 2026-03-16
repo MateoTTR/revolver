@@ -15,6 +15,12 @@ Each `revolver <command> <subcommand>` gets at least one integration test valida
 
 **28 commands** across 8 command groups + 2 top-level commands (`doctor`, `setup`).
 
+### L2-OE: OpenEvolve Contract Tests
+
+A separate sub-level (L2-OE) validates the contract between Revolver and the real OpenEvolve package. These tests import and exercise real OpenEvolve classes (`Config`, `Controller`) with test fixtures -- no LLM server or GPU required. They are skipped automatically when `openevolve` is not installed (via `pytest.importorskip`) and run as a **non-blocking** CI step.
+
+L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are silently swallowed by `dacite.from_dict()` when the dict keys don't match OpenEvolve's dataclass fields.
+
 ---
 
 ## 2. Command Test Matrix
@@ -152,7 +158,17 @@ Each `revolver <command> <subcommand>` gets at least one integration test valida
 | `setup` | Conda available, Ollama missing | Proposes `conda install conda-forge::ollama` | FR-SET-015, 016 |
 | `setup` | No conda, Ollama missing | Manual instructions, suggests conda activation | FR-SET-017 |
 
-### 2.10 Cross-Cutting
+### 2.10 L2-OE: `revolver run` — OpenEvolve Contract
+
+These tests use real OpenEvolve classes (`Config`, `Controller`) and are located in `tests/integration/test_run_oe.py`. They are marked with `@pytest.mark.openevolve` and skipped when `openevolve` is not installed.
+
+| Test | Scenario | Validates | FRs |
+|---|---|---|---|
+| `test_build_config_roundtrip_to_oe_config` | `build_config()` dict round-trips through `OEConfig.from_dict()` | Field mapping: `api_base`, `primary_model`, `max_iterations`, `system_message` | FR-RUN-005, FR-RUN-006 |
+| `test_oe_controller_instantiation` | Real `OpenEvolve(program, evaluator, config, output_dir)` with fixtures | Controller accepts our config and fixture files without crash | FR-RUN-001 |
+| `test_openevolve_runner_init_controller` | `OpenEvolveRunner._init_controller()` with real OpenEvolve | The exact code path that crashed in v0.4.0 works end-to-end | FR-RUN-005, FR-RUN-006 |
+
+### 2.11 Cross-Cutting
 
 | Scenario | Validates | FRs / NFRs |
 |---|---|---|
@@ -212,3 +228,4 @@ tests/fixtures/
 - **Markers**: `@pytest.mark.integration` — allows running unit-only or integration-only via `-m`
 - **Speed**: full integration suite must run in under 2 minutes
 - **No network**: all HTTP calls (Ollama, LLM APIs) are mocked via `mock_ollama` / `mock_openevolve` fixtures
+- **L2-OE tests**: use `pytest.importorskip("openevolve.config")` at module level for auto-skip when `openevolve` is not installed. Marked with `@pytest.mark.openevolve` in addition to `@pytest.mark.integration`. A dummy `OPENAI_API_KEY` is set via `monkeypatch` for tests that instantiate the OpenEvolve controller (it requires an API key even though no LLM call is made).

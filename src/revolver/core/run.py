@@ -323,11 +323,7 @@ def launch_run(
                 problem_version=config.problem_version,
                 llm=config.llm_name,
                 dataset=config.dataset_name,
-                iterations=(
-                    config.iterations
-                    or oe_config.get("iterations")
-                    or oe_config.get("max_iterations", 10)
-                ),
+                iterations=config.iterations or oe_config.get("max_iterations", 10),
                 generation_time_s=0.0,
                 token_usage=None,
             )
@@ -345,9 +341,7 @@ def launch_run(
         oe_config["output_dir"] = str(oe_output_dir)
 
         # Determine iterations
-        iterations = (
-            config.iterations or oe_config.get("iterations") or oe_config.get("max_iterations", 10)
-        )
+        iterations = config.iterations or oe_config.get("max_iterations", 10)
 
         # 13. FR-RUN-014/015: check concurrency (lock files for local LLM)
         if llm.source == "local":
@@ -395,10 +389,10 @@ def launch_run(
         if llm.base_url:
             proxy = TokenCountingProxy(llm.base_url)
             proxy_url = proxy.start()
-            # Rewrite config's llm.base_url to proxy
+            # Rewrite config's llm.api_base to proxy
             if "llm" not in oe_config:
                 oe_config["llm"] = {}
-            oe_config["llm"]["base_url"] = proxy_url
+            oe_config["llm"]["api_base"] = proxy_url
 
         try:
             # Set env vars via revolver_env()
@@ -774,7 +768,7 @@ def resume_run(
             proxy_url = proxy.start()
             if "llm" not in oe_config:
                 oe_config["llm"] = {}
-            oe_config["llm"]["base_url"] = proxy_url
+            oe_config["llm"]["api_base"] = proxy_url
 
         try:
             env_vars = {

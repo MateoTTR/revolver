@@ -13,6 +13,20 @@ E2E tests validate complete user workflows from CLI input to final output. Unlik
 
 ---
 
+## 1.1 Test Level Comparison
+
+| Aspect | L2 (Integration) | L2-OE (OpenEvolve Contract) | L3 (E2E) |
+|---|---|---|---|
+| **OpenEvolve** | Mocked at `infra` boundary | Real classes (`Config`, `Controller`) | Real + running LLM |
+| **LLM** | Mocked | Not called (dummy API key) | Fake server or real Ollama |
+| **GPU** | Not needed | Not needed | Optional (Ollama) |
+| **External deps** | SQLite, filesystem | openevolve (pip) | Ollama, network |
+| **CI trigger** | Every push + PR | Every PR (non-blocking) | Nightly / manual |
+| **Speed** | ~seconds | ~seconds | ~minutes to hours |
+| **What it catches** | CLI command logic, DB state | Field mapping bugs (dacite), constructor crashes | Full workflow regressions |
+
+---
+
 ## 2. LLM Mocking Strategy
 
 A key challenge for CI is that real LLM inference requires either a GPU (for Ollama) or API costs (for remote LLMs). The strategy differs by test level.

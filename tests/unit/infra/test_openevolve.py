@@ -162,11 +162,11 @@ class TestBuildConfig:
 
         # Base values preserved
         assert result["population_size"] == 10  # overridden
-        # LLM endpoint injected
-        assert result["llm"]["base_url"] == "http://myhost:1234/v1"
-        assert result["llm"]["model"] == "override-model"
-        # Iterations overridden
-        assert result["iterations"] == 20
+        # LLM endpoint injected (OpenEvolve field names)
+        assert result["llm"]["api_base"] == "http://myhost:1234/v1"
+        assert result["llm"]["primary_model"] == "override-model"
+        # Iterations overridden (OpenEvolve field name)
+        assert result["max_iterations"] == 20
         # Config overrides applied
         assert result["llm"]["temperature"] == 0.5
         # Output dir set
@@ -243,7 +243,7 @@ class TestBuildConfig:
         )
         # LLM config should still be present
         assert "llm" in result
-        assert result["llm"]["model"] == "test-model"
+        assert result["llm"]["primary_model"] == "test-model"
 
     def test_build_config_null_llm_key(self, tmp_path: Path) -> None:
         """build_config works when base config has ``llm: null``."""
@@ -258,7 +258,7 @@ class TestBuildConfig:
         )
 
         assert isinstance(result["llm"], dict)
-        assert result["llm"]["model"] == "test-model"
+        assert result["llm"]["primary_model"] == "test-model"
         assert isinstance(result["prompt"], dict)
         assert "system_message" in result["prompt"]
 
