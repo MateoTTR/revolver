@@ -230,7 +230,7 @@ class RunSummary(BaseModel):
     llm: str
     dataset: str
     iterations: int
-    generation_time_s: float | None = None
+    generation_time_s: float = 0.0
     token_usage: TokenUsage | None = None
     status: str
     resumed_from: str | None = None
@@ -268,7 +268,7 @@ class RunInfo(BaseModel):
     dataset: str
     dataset_hash: str
     iterations: int
-    generation_time_s: float | None = None
+    generation_time_s: float = 0.0
     token_usage: TokenUsage | None = None
     status: str
     resumed_from: str | None = None

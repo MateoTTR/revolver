@@ -345,7 +345,9 @@ def launch_run(
         oe_config["output_dir"] = str(oe_output_dir)
 
         # Determine iterations
-        iterations = config.iterations or oe_config.get("iterations", 10)
+        iterations = (
+            config.iterations or oe_config.get("iterations") or oe_config.get("max_iterations", 10)
+        )
 
         # 13. FR-RUN-014/015: check concurrency (lock files for local LLM)
         if llm.source == "local":

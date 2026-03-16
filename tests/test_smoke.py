@@ -1,5 +1,8 @@
 """Smoke test — verify package imports and CLI entrypoint."""
 
+import re
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -8,12 +11,22 @@ from revolver.cli import app
 
 runner = CliRunner()
 
+# Read version from pyproject.toml as ground truth
+_PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+
+
+def _pyproject_version() -> str:
+    """Extract version string from pyproject.toml."""
+    for line in _PYPROJECT.read_text().splitlines():
+        m = re.match(r'^version\s*=\s*"([^"]+)"', line)
+        if m:
+            return m.group(1)
+    raise RuntimeError("version not found in pyproject.toml")
+
 
 @pytest.mark.unit
-def test_import_revolver() -> None:
-    import revolver
-
-    assert revolver.__version__ == __version__
+def test_version_matches_pyproject() -> None:
+    assert __version__ == _pyproject_version()
 
 
 @pytest.mark.unit
