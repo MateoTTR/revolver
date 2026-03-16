@@ -126,11 +126,23 @@ Before starting any work in a session:
 
 Before tagging a release (`vX.Y.Z`):
 
-1. **Version bump** — Update `version` in `pyproject.toml` to match the tag
+1. **Version bump** — Update `version` in **both** `pyproject.toml` and `src/revolver/__init__.py`
 2. **Merge completeness** — Ensure ALL sprint PRs are merged into `develop`
-3. **Merge `develop` → `main`** — `git checkout main && git merge develop`
-4. **Tag on `main`** — `git tag vX.Y.Z && git push origin main --tags`
-5. **Verify install** — `pip install "revolver @ git+file:///home/mathi/revolver@vX.Y.Z"` then `revolver --version`
+3. **Commit + push** — Commit the version bump on `develop`, push
+4. **Merge `develop` → `main`** — `git checkout main && git merge develop`
+5. **Tag on `main`** — `git tag vX.Y.Z && git push origin main --tags`
+6. **Verify install** — `pip install "revolver @ git+file:///home/mathi/revolver@vX.Y.Z"` then `revolver --version`
+
+### Hotfix Process
+
+For critical bugs discovered after a release:
+
+1. **Branch** — `git checkout -b hotfix/vX.Y.Z develop`
+2. **Fix + tests** — Apply fix, run full test suite, lint
+3. **Draft PR** — `gh pr create --draft --base develop`
+4. **Code review** — Run code-review agent, address findings
+5. **Ready + merge** — `gh pr ready`, user merges on GitHub
+6. **Release** — Follow the Release Checklist above (bump, merge to main, tag)
 
 ### PR Development Workflow
 
@@ -138,9 +150,10 @@ Each PR follows a standardized 5-step process:
 
 1. **GitHub Issue** — `gh issue create` with: scope (sprint tasks), files to create/modify, acceptance criteria, test scenarios, DES/spec references. The issue is the single source of truth for the feature.
 2. **Dev Agent (worktree)** — Launch a worktree-isolated agent. The agent reads the issue via `gh issue view <number>`, plus project docs (DES, specs, existing code). It implements, tests, and commits.
-3. **PR Creation** — Push branch, `gh pr create` linking the issue (`Closes #N`). PR body summarizes changes and test plan.
-4. **Code Review Agent** — Automatically triggered after `gh pr create` (PostToolUse hook). Reviews the diff, posts structured findings as a PR comment (CRITICAL/WARNING/SUGGESTION/GOOD).
-5. **Fix & Merge** — Address review findings, push fixes, user merges on GitHub.
+3. **Draft PR** — Push branch, `gh pr create --draft` linking the issue (`Closes #N`). Draft prevents CI from running prematurely.
+4. **Code Review Agent** — Triggered after PR creation. Reviews the diff, posts structured findings as a PR comment (CRITICAL/WARNING/SUGGESTION/GOOD).
+5. **Fix & Ready** — Address review findings, push fixes, then `gh pr ready` to mark as ready (triggers CI).
+6. **Merge** — User merges on GitHub after CI passes.
 
 Independent PRs are developed in parallel using separate worktree agents. Dependent PRs wait for their prerequisites to be merged into `develop`.
 
