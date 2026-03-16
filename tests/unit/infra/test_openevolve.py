@@ -266,6 +266,52 @@ class TestBuildConfig:
         assert isinstance(result["prompt"], dict)
         assert "system_message" in result["prompt"]
 
+    def test_strips_revolver_specific_keys(self, tmp_path: Path) -> None:
+        """Revolver keys (evaluator, initial_program) are stripped from config dict.
+
+        Regression test for v0.4.2: these strings clash with OpenEvolve's
+        Config.evaluator (type EvaluatorConfig).
+        """
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "initial_program": "initial_program.py",
+                    "evaluator": "evaluator.py",
+                    "max_iterations": 100,
+                }
+            )
+        )
+
+        llm = _make_llm()
+        result = build_config(problem_config=config_file, llm=llm)
+
+        assert "evaluator" not in result
+        assert "initial_program" not in result
+        assert result["max_iterations"] == 100
+
+    def test_maps_num_generations_to_max_iterations(self, tmp_path: Path) -> None:
+        """num_generations in config.yaml is mapped to max_iterations."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump({"num_generations": 50}))
+
+        llm = _make_llm()
+        result = build_config(problem_config=config_file, llm=llm)
+
+        assert "num_generations" not in result
+        assert result["max_iterations"] == 50
+
+    def test_iterations_override_wins_over_num_generations(self, tmp_path: Path) -> None:
+        """--iterations override takes precedence over num_generations."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump({"num_generations": 50}))
+
+        llm = _make_llm()
+        result = build_config(problem_config=config_file, llm=llm, iterations=3)
+
+        assert "num_generations" not in result
+        assert result["max_iterations"] == 3
+
     def test_malformed_override_raises(self) -> None:
         """Malformed config override (missing =) raises ValidationError."""
         llm = _make_llm()

@@ -215,6 +215,17 @@ def build_config(
             if isinstance(loaded, dict):
                 config = loaded
 
+    # Strip Revolver-specific keys that clash with OpenEvolve Config fields.
+    # These are passed separately to the OEController constructor, not via Config.
+    for key in ("evaluator", "initial_program"):
+        config.pop(key, None)
+
+    # Map num_generations → max_iterations (OpenEvolve uses max_iterations)
+    if "num_generations" in config and "max_iterations" not in config:
+        config["max_iterations"] = config.pop("num_generations")
+    else:
+        config.pop("num_generations", None)
+
     # 2. LLM endpoint injection (DES-005 §4.3)
     llm_config: dict[str, Any] = {}
     if llm.base_url:

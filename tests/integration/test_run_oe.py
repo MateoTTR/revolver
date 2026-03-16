@@ -72,6 +72,58 @@ class TestBuildConfigRoundtrip:
         # Verify log_dir access doesn't crash (the v0.4.0 regression)
         _ = config_obj.log_dir
 
+    def test_build_config_strips_revolver_keys(self, tmp_path: Path) -> None:
+        """Revolver-specific keys (evaluator, initial_program) are stripped.
+
+        Regression test for v0.4.2 bug: config.yaml with evaluator/initial_program
+        strings caused Config.from_dict() to crash because 'evaluator' clashes
+        with Config.evaluator (type EvaluatorConfig).
+        """
+        # Write a realistic config.yaml matching the TSP template
+        config_yaml = tmp_path / "config.yaml"
+        config_yaml.write_text(
+            "initial_program: initial_program.py\n"
+            "evaluator: evaluator.py\n"
+            "population_size: 20\n"
+            "num_islands: 2\n"
+            "num_generations: 50\n"
+        )
+
+        llm = _make_llm_entry()
+        config_dict = build_config(
+            problem_config=config_yaml,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        # Revolver-specific keys must be absent from the dict
+        assert "evaluator" not in config_dict
+        assert "initial_program" not in config_dict
+
+        # num_generations must be mapped to max_iterations
+        assert "num_generations" not in config_dict
+        assert config_dict["max_iterations"] == 50
+
+        # Round-trip through Config.from_dict() -- the v0.4.2 crash
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.max_iterations == 50
+
+    def test_build_config_num_generations_override(self, tmp_path: Path) -> None:
+        """--iterations override wins over num_generations from config.yaml."""
+        config_yaml = tmp_path / "config.yaml"
+        config_yaml.write_text("num_generations: 50\n")
+
+        llm = _make_llm_entry()
+        config_dict = build_config(
+            problem_config=config_yaml,
+            llm=llm,
+            iterations=3,
+        )
+
+        # --iterations sets max_iterations, which takes precedence
+        assert config_dict["max_iterations"] == 3
+        assert "num_generations" not in config_dict
+
 
 @pytest.mark.integration
 @pytest.mark.openevolve
