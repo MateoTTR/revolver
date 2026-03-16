@@ -4,12 +4,14 @@ on:
   push:
     branches: [main, develop]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, develop]
 
 jobs:
   lint:
     name: Lint (ruff + mypy)
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false || github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +34,7 @@ jobs:
   test:
     name: Test (pytest + coverage)
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false || github.event_name == 'push'
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
@@ -47,6 +50,13 @@ jobs:
 
       - name: Run tests with coverage
         run: pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
+
+      - name: Run L2-OE tests (OpenEvolve contract)
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: |
+          pip install "openevolve>=0.2.26"
+          pytest tests/integration/test_run_oe.py -v --no-header
 
       - name: Upload coverage (Python 3.12 only)
         if: matrix.python-version == '3.12'

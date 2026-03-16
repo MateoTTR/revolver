@@ -65,6 +65,7 @@ testpaths = ["tests"]
 markers = [
     "unit: L1 unit tests",
     "integration: L2 integration tests",
+    "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
     "e2e: L3 end-to-end tests",
 ]
 

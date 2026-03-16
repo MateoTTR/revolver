@@ -123,12 +123,12 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 
 | FR ID | Pri | DES Ref | Level | Test ID | Status |
 |---|---|---|---|---|---|
-| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_run_validates_inputs` | Planned |
+| FR-RUN-001 | MUST | DES-005 §pre-run | L2, L2-OE | `integration/test_run::test_run_validates_inputs`, `integration/test_run_oe::test_oe_controller_instantiation` | Planned |
 | FR-RUN-002 | MUST | DES-005 §pre-run | L1 | `unit/core/test_run::test_warns_non_train_split` | Planned |
 | FR-RUN-003 | MUST | DES-005 §pre-run | L1 | `unit/core/test_run::test_warns_incompatible_dataset` | Planned |
 | FR-RUN-004 | MUST | DES-005 §pre-run | L1 | `unit/core/test_run::test_integrity_check_before_run` | Planned |
-| FR-RUN-005 | MUST | DES-005 §env, ADR-006 | L1 | `unit/core/test_run::test_sets_dataset_dir_env` | Planned |
-| FR-RUN-006 | MUST | DES-005 §config | L1 | `unit/core/test_run::test_configures_openevolve_llm` | Planned |
+| FR-RUN-005 | MUST | DES-005 §env, ADR-006 | L1, L2-OE | `unit/core/test_run::test_sets_dataset_dir_env`, `integration/test_run_oe::test_build_config_roundtrip_to_oe_config`, `integration/test_run_oe::test_openevolve_runner_init_controller` | Planned |
+| FR-RUN-006 | MUST | DES-005 §config | L1, L2-OE | `unit/core/test_run::test_configures_openevolve_llm`, `integration/test_run_oe::test_build_config_roundtrip_to_oe_config`, `integration/test_run_oe::test_openevolve_runner_init_controller` | Planned |
 | FR-RUN-007 | MUST | DES-005 §id | L1 | `unit/core/test_run::test_unique_run_id_format` | Planned |
 | FR-RUN-008 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_run_stores_programs_and_solution` | Planned |
 | FR-RUN-009 | MUST | DES-005 §manifest | L2 | `integration/test_run::test_run_records_lineage` | Planned |

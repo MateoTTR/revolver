@@ -109,10 +109,10 @@ class OpenEvolveRunner:
     def _init_controller(self) -> None:
         """Lazily import and instantiate the OpenEvolve controller."""
         try:
-            from openevolve.config import (  # type: ignore[import-not-found]
+            from openevolve.config import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
                 Config as OEConfig,
             )
-            from openevolve.controller import (  # type: ignore[import-not-found]
+            from openevolve.controller import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
                 OpenEvolve as OEController,
             )
         except ImportError as exc:
@@ -190,7 +190,7 @@ def build_config(
 
     Merge order (last wins):
         1. Problem version's config.yaml (base)
-        2. LLM endpoint configuration (base_url, model, api_key)
+        2. LLM endpoint configuration (api_base, primary_model, api_key)
         3. Problem description injection into prompt.system_message
         4. --iterations override
         5. --config-override key=value pairs
@@ -218,8 +218,8 @@ def build_config(
     # 2. LLM endpoint injection (DES-005 §4.3)
     llm_config: dict[str, Any] = {}
     if llm.base_url:
-        llm_config["base_url"] = llm.base_url
-    llm_config["model"] = llm.model
+        llm_config["api_base"] = llm.base_url
+    llm_config["primary_model"] = llm.model
     if llm.api_key_env:
         api_key = os.environ.get(llm.api_key_env, "")
         if api_key:
@@ -238,7 +238,7 @@ def build_config(
 
     # 4. Iterations override
     if iterations is not None:
-        config["iterations"] = iterations
+        config["max_iterations"] = iterations
 
     # 5. Config overrides (key=value pairs, dotted keys supported)
     if config_overrides:

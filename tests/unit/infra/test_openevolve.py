@@ -59,7 +59,7 @@ class TestOpenEvolveRunner:
         runner = OpenEvolveRunner(
             initial_program=tmp_path / "prog.py",
             evaluator=tmp_path / "eval.py",
-            config={"iterations": 10},
+            config={"max_iterations": 10},
             output_dir=tmp_path / "output",
         )
 
@@ -140,9 +140,9 @@ class TestBuildConfig:
         config_file.write_text(
             yaml.dump(
                 {
-                    "iterations": 10,
+                    "max_iterations": 10,
                     "population_size": 5,
-                    "llm": {"model": "base-model", "temperature": 0.8},
+                    "llm": {"primary_model": "base-model", "temperature": 0.8},
                 }
             )
         )
@@ -162,15 +162,19 @@ class TestBuildConfig:
 
         # Base values preserved
         assert result["population_size"] == 10  # overridden
-        # LLM endpoint injected
-        assert result["llm"]["base_url"] == "http://myhost:1234/v1"
-        assert result["llm"]["model"] == "override-model"
-        # Iterations overridden
-        assert result["iterations"] == 20
+        # LLM endpoint injected (OpenEvolve field names)
+        assert result["llm"]["api_base"] == "http://myhost:1234/v1"
+        assert result["llm"]["primary_model"] == "override-model"
+        # Iterations overridden (OpenEvolve field name)
+        assert result["max_iterations"] == 20
         # Config overrides applied
         assert result["llm"]["temperature"] == 0.5
         # Output dir set
         assert result["output_dir"] == str(tmp_path / "output")
+        # Negative assertions: no stale legacy keys
+        assert "iterations" not in result
+        assert "model" not in result.get("llm", {})
+        assert "base_url" not in result.get("llm", {})
 
     def test_problem_description_injection(self, tmp_path: Path) -> None:
         """System prompt includes problem.md content when provided."""
@@ -243,7 +247,7 @@ class TestBuildConfig:
         )
         # LLM config should still be present
         assert "llm" in result
-        assert result["llm"]["model"] == "test-model"
+        assert result["llm"]["primary_model"] == "test-model"
 
     def test_build_config_null_llm_key(self, tmp_path: Path) -> None:
         """build_config works when base config has ``llm: null``."""
@@ -258,7 +262,7 @@ class TestBuildConfig:
         )
 
         assert isinstance(result["llm"], dict)
-        assert result["llm"]["model"] == "test-model"
+        assert result["llm"]["primary_model"] == "test-model"
         assert isinstance(result["prompt"], dict)
         assert "system_message" in result["prompt"]
 

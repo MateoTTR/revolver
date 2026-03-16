@@ -38,6 +38,8 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 ├─────────────────────────────────────────────────────┤
 │  Level 2 — Integration Tests (pytest + CliRunner)   │  every commit / PR
 ├─────────────────────────────────────────────────────┤
+│  Level 2-OE — OpenEvolve Contract Tests (pytest)    │  every PR (non-blocking)
+├─────────────────────────────────────────────────────┤
 │  Level 3 — E2E Tests (pytest or bash)               │  nightly / manual
 └─────────────────────────────────────────────────────┘
 ```
@@ -47,6 +49,7 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 | 0 — Static | Code style, types | ~seconds | None | Every push | This file (§4) |
 | 1 — Unit | Functions, classes | ~seconds | None (mocked) | Every push | This file (§5) |
 | 2 — Integration | CLI commands, DB, filesystem | ~seconds to minutes | SQLite (real), filesystem (tmpdir) | Every push + PR | [val-integration-tests.md](val-integration-tests.md) |
+| 2-OE — OpenEvolve | Config roundtrip, controller init | ~seconds | openevolve (pip), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
 | 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Nightly / manual | [val-e2e-tests.md](val-e2e-tests.md) |
 
 ---
@@ -179,7 +182,9 @@ Unit tests cover individual functions and classes in the **domain layer** (`revo
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "integration: CLI integration tests (real DB + filesystem, mocked externals)",
+    "unit: L1 unit tests",
+    "integration: L2 integration tests (real DB + filesystem, mocked externals)",
+    "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
     "e2e: end-to-end tests with fake LLM server (no GPU required)",
     "e2e_gpu: end-to-end tests requiring Ollama + GPU",
     "slow: tests that take more than 10 seconds",
@@ -209,7 +214,8 @@ push / PR:
   ├── ruff check + ruff format --check
   ├── mypy --strict
   ├── pytest tests/unit/ --cov --cov-fail-under=80
-  └── pytest tests/integration/ -m integration
+  ├── pytest tests/integration/ -m integration
+  └── pip install openevolve && pytest tests/integration/test_run_oe.py  (non-blocking)
 
 nightly (standard runner):
   └── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
@@ -218,7 +224,9 @@ manual (self-hosted + GPU):
   └── pytest tests/e2e/ -m e2e_gpu  (Ollama + real model)
 ```
 
-**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge. E2E failures are reported but do not block.
+**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge. L2-OE and E2E failures are reported but do not block.
+
+**Draft PRs**: lint and test jobs are skipped for draft PRs to save CI minutes.
 
 ---
 
