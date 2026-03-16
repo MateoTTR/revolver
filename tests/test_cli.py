@@ -15,6 +15,7 @@ from typing import ClassVar
 import pytest
 from typer.testing import CliRunner
 
+from revolver import __version__
 from revolver.cli import app
 
 runner = CliRunner()
@@ -43,12 +44,12 @@ class TestCliGlobalOptions:
     def test_version_flag(self) -> None:
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.stdout
+        assert __version__ in result.stdout
 
     def test_version_short_flag(self) -> None:
         result = runner.invoke(app, ["-V"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.stdout
+        assert __version__ in result.stdout
 
 
 @pytest.mark.unit

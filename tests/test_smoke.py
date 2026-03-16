@@ -3,6 +3,7 @@
 import pytest
 from typer.testing import CliRunner
 
+from revolver import __version__
 from revolver.cli import app
 
 runner = CliRunner()
@@ -12,7 +13,7 @@ runner = CliRunner()
 def test_import_revolver() -> None:
     import revolver
 
-    assert revolver.__version__ == "0.1.0"
+    assert revolver.__version__ == __version__
 
 
 @pytest.mark.unit
@@ -31,4 +32,4 @@ def test_cli_help() -> None:
 def test_cli_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "0.1.0" in result.stdout
+    assert __version__ in result.stdout

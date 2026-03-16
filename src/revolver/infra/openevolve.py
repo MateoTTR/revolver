@@ -109,6 +109,9 @@ class OpenEvolveRunner:
     def _init_controller(self) -> None:
         """Lazily import and instantiate the OpenEvolve controller."""
         try:
+            from openevolve.config import (  # type: ignore[import-not-found]
+                Config as OEConfig,
+            )
             from openevolve.controller import (  # type: ignore[import-not-found]
                 OpenEvolve as OEController,
             )
@@ -117,10 +120,13 @@ class OpenEvolveRunner:
                 "OpenEvolve is not installed. Install it with: pip install 'revolver[openevolve]'"
             ) from exc
 
+        # Convert dict to Config dataclass (OpenEvolve expects Config, not dict)
+        config_obj = OEConfig.from_dict(self.config)
+
         self._controller = OEController(
             str(self.initial_program),
             str(self.evaluator),
-            self.config,
+            config_obj,
             str(self.output_dir),
         )
 

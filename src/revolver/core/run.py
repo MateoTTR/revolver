@@ -323,7 +323,11 @@ def launch_run(
                 problem_version=config.problem_version,
                 llm=config.llm_name,
                 dataset=config.dataset_name,
-                iterations=config.iterations or oe_config.get("iterations", 0),
+                iterations=(
+                    config.iterations
+                    or oe_config.get("iterations")
+                    or oe_config.get("max_iterations", 10)
+                ),
                 generation_time_s=0.0,
                 token_usage=None,
             )
@@ -1048,7 +1052,7 @@ def list_runs(
                     generation_time_s=(
                         float(row["generation_time_s"])  # type: ignore[arg-type]
                         if row.get("generation_time_s") is not None
-                        else None
+                        else 0.0
                     ),
                     token_usage=token_usage,
                     status=str(row["status"]),
@@ -1146,7 +1150,7 @@ def get_run_info(
             generation_time_s=(
                 float(run_data["generation_time_s"])  # type: ignore[arg-type]
                 if run_data.get("generation_time_s") is not None
-                else None
+                else 0.0
             ),
             token_usage=token_usage,
             status=str(run_data["status"]),
