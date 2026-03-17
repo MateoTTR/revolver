@@ -91,6 +91,7 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `run` | Valid config, mocked OpenEvolve | Run dir created, DB entries (run + solution), lineage, env vars set | FR-RUN-001, 005..010 |
 | `run --alias` | User-friendly name | Solution alias set | FR-RUN-012 |
 | `run --dry-run` | Valid config | Config displayed, no run launched | FR-RUN-023 |
+| `run --dry-run` | Pre-flight skipped | No pre-flight check executed | FR-RUN-023 |
 | `run` | Unknown LLM name | Exit code 1 | FR-RUN-001 |
 | `run` | Dataset integrity failure (tampered file) | Exit code 2, warning message | FR-RUN-004 |
 | `run` | Dataset split=eval | Warning on stderr, run proceeds | FR-RUN-002 |
@@ -102,7 +103,6 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `run` (pre-flight) | Evaluator raises exception | Run aborts with RevolverError | FR-RUN-001 |
 | `run` (pre-flight) | Evaluator hangs | Run aborts after 60s timeout | FR-RUN-001 |
 | `run` (pre-flight) | Evaluator returns 0.0 | Warning emitted, run proceeds | FR-RUN-001 |
-| `run --dry-run` | Dry run mode | No pre-flight check executed | FR-RUN-023 |
 | `run` (collect) | Programs in `oe-output/best/` dir | `best_program.py` collected as rank-1.py | FR-RUN-008 |
 | `run list` | After 2 runs | Both listed with status, filterable | FR-RUN-021 |
 | `run info` | Existing run | Full details: lineage, tokens, solution, stored programs | FR-RUN-022 |
@@ -124,7 +124,7 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `eval` | Legacy evaluator (`evaluate()`) | Global aggregation call, `user_aggregates` stored | FR-EVL-019, 020 |
 | `eval` | Evaluator with only `evaluate_instance()` | Per-instance function called correctly | FR-EVL-001, 002 |
 | `eval` | Evaluator with only `evaluate()` (legacy) | Legacy global function called correctly | FR-EVL-019 |
-| `eval` | Evaluator with both functions | Warning emitted, `evaluate_instance()` preferred | FR-EVL-001 |
+| `eval` | Evaluator with both functions | Warning emitted, `evaluate()` used (legacy mode) | FR-EVL-019 |
 
 ### 2.7 `revolver solution`
 
@@ -209,6 +209,9 @@ tests/fixtures/
 │   ├── instance_001.json       # {"jobs": [[1,2],[3,4]], "machines": 2}
 │   ├── instance_002.json       # {"jobs": [[5,6]], "machines": 1}
 │   └── instance_003.json       # {"jobs": [[1],[2],[3]], "machines": 3}
+├── evaluator_instance.py       # Evaluator with only evaluate_instance() function
+├── evaluator_both.py           # Evaluator with both evaluate() and evaluate_instance()
+├── evaluator_neither.py        # Evaluator with neither function (triggers error)
 └── instance_bad.json           # Malformed: missing "jobs" key → triggers KeyError
 ```
 

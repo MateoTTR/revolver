@@ -22,6 +22,8 @@ This document maps every functional requirement (FR) and testable non-functional
 | **Test ID** | Planned test name (placeholder until Phase 5) |
 | **Status** | `Planned` → `Written` → `Passing` |
 
+> **Note:** A single FR may appear on multiple rows when covered by tests at different levels (L1, L2) or by distinct test scenarios.
+
 ---
 
 ## 2. Project — `revolver project`
@@ -123,10 +125,10 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 
 | FR ID | Pri | DES Ref | Level | Test ID | Status |
 |---|---|---|---|---|---|
-| FR-RUN-001 | MUST | DES-005 §pre-run | L2, L2-OE | `integration/test_run::test_run_validates_inputs`, `integration/test_run_oe::test_oe_controller_instantiation` | Planned |
-| FR-RUN-002 | MUST | DES-005 §pre-run | L1 | `unit/core/test_run::test_warns_non_train_split` | Planned |
-| FR-RUN-003 | MUST | DES-005 §pre-run | L1 | `unit/core/test_run::test_warns_incompatible_dataset` | Planned |
-| FR-RUN-004 | MUST | DES-005 §pre-run | L1 | `unit/core/test_run::test_integrity_check_before_run` | Planned |
+| FR-RUN-001 | MUST | DES-005 §2.1 | L2, L2-OE | `integration/test_run::test_run_validates_inputs`, `integration/test_run_oe::test_oe_controller_instantiation` | Planned |
+| FR-RUN-002 | MUST | DES-005 §2.1 | L1 | `unit/core/test_run::test_warns_non_train_split` | Planned |
+| FR-RUN-003 | MUST | DES-005 §2.1 | L1 | `unit/core/test_run::test_warns_incompatible_dataset` | Planned |
+| FR-RUN-004 | MUST | DES-005 §2.1 | L1 | `unit/core/test_run::test_integrity_check_before_run` | Planned |
 | FR-RUN-005 | MUST | DES-005 §env, ADR-006 | L1, L2-OE | `unit/core/test_run::test_sets_dataset_dir_env`, `integration/test_run_oe::test_build_config_roundtrip_to_oe_config`, `integration/test_run_oe::test_openevolve_runner_init_controller` | Planned |
 | FR-RUN-006 | MUST | DES-005 §config | L1, L2-OE | `unit/core/test_run::test_configures_openevolve_llm`, `integration/test_run_oe::test_build_config_roundtrip_to_oe_config`, `integration/test_run_oe::test_openevolve_runner_init_controller` | Planned |
 | FR-RUN-007 | MUST | DES-005 §id | L1 | `unit/core/test_run::test_unique_run_id_format` | Planned |
@@ -145,7 +147,7 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-020 | MUST | DES-005, DES-006 | L2 | `integration/test_run::test_train_results_accessible_via_eval` | Planned |
 | FR-RUN-021 | MUST | DES-005 | L2 | `integration/test_run::test_run_list_with_filters` | Planned |
 | FR-RUN-022 | MUST | DES-005 | L2 | `integration/test_run::test_run_info_full_details` | Planned |
-| FR-RUN-023 | MUST | DES-005 §dry-run | L2 | `integration/test_run::test_dry_run_no_launch` | Planned |
+| FR-RUN-023 | MUST | DES-005 §2.1 | L2 | `integration/test_run::test_dry_run_no_launch` | Planned |
 | FR-RUN-024 | MUST | DES-005 §resume | L1 | `unit/core/test_run::test_resume_copies_wrapper` | Planned |
 | FR-RUN-025 | SHOULD | DES-005 §locks | L1 | `unit/core/test_run::test_lock_file_management` | Planned |
 | FR-RUN-026 | SHOULD | DES-005, ADR-006 | L1 | `unit/core/test_run::test_sets_instance_log_env` | Planned |
@@ -153,11 +155,11 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-028 | SHOULD | DES-005 §4.5, DD-14 | L1 | `unit/infra/test_token_proxy::test_token_extraction` | Planned |
 | FR-RUN-029 | SHOULD | DES-005 §4.5 | L2 | `integration/test_run::test_run_displays_tokens` | Planned |
 | FR-RUN-030 | SHOULD | DES-005 §4.5 | L1 | `unit/core/test_run::test_cost_estimation` | Planned |
-| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_passes` | Planned |
-| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_crash_aborts` | Planned |
-| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_timeout_aborts` | Planned |
-| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_zero_score_warns` | Planned |
-| FR-RUN-023 | MUST | DES-005 §dry-run | L2 | `integration/test_run::test_dry_run_skips_preflight` | Planned |
+| FR-RUN-001 | MUST | DES-005 §2.1 | L2 | `integration/test_run::test_preflight_passes` | Planned |
+| FR-RUN-001 | MUST | DES-005 §2.1 | L2 | `integration/test_run::test_preflight_crash_aborts` | Planned |
+| FR-RUN-001 | MUST | DES-005 §2.1 | L2 | `integration/test_run::test_preflight_timeout_aborts` | Planned |
+| FR-RUN-001 | MUST | DES-005 §2.1 | L2 | `integration/test_run::test_preflight_zero_score_warns` | Planned |
+| FR-RUN-023 | MUST | DES-005 §2.1 | L2 | `integration/test_run::test_dry_run_skips_preflight` | Planned |
 | FR-RUN-008 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_collect_programs_from_best_dir` | Planned |
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_local_llm_api_key` | Planned |
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_default` | Planned |
