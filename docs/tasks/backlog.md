@@ -153,18 +153,18 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 79 | Implement `models.eval` — Eval Pydantic models (DES-006 §6) | [ ] | S5 |
-| 80 | Add eval CRUD queries to `infra.db` | [ ] | S5 |
-| 81 | Add solution extended queries to `infra.db` (alias, run-based) | [ ] | S5 |
-| 82 | Implement `core.eval` — `evaluate_solution()`, `get_eval_results()`, `compute_aggregates()` (DES-006 §8) | [ ] | S5 |
-| 83 | Implement `core.eval` — legacy evaluator support + global aggregation (D-006-g) | [ ] | S5 |
-| 84 | Implement `core.eval` — re-evaluation handling with confirmation (D-006-a) | [ ] | S5 |
-| 85 | Implement `core.solution` — list, info, alias, extract | [ ] | S5 |
-| 86 | Refactor `core.run._post_run_evaluation()` to reuse `core.eval` | [ ] | S5 |
-| 87 | Implement `cli.solution` — 4 Typer commands | [ ] | S5 |
-| 88 | Implement `cli.eval` — 2 Typer commands (DES-006 §9) | [ ] | S5 |
-| 89 | Write L2 integration tests for `solution` (9 scenarios) | [ ] | S5 |
-| 90 | Write L2 integration tests for `eval` (10 scenarios) | [ ] | S5 |
+| 79 | Implement `models.eval` — Eval Pydantic models (DES-006 §6) | [x] | S5 — session 028, PR #47 |
+| 80 | Add eval CRUD queries to `infra.db` | [x] | S5 — session 028, PR #47 |
+| 81 | Add solution extended queries to `infra.db` (alias, run-based) | [x] | S5 — session 028, PR #46 |
+| 82 | Implement `core.eval` — `evaluate_solution()`, `get_eval_results()`, `compute_aggregates()` (DES-006 §8) | [x] | S5 — session 028, PR #51 |
+| 83 | Implement `core.eval` — legacy evaluator support + global aggregation (D-006-g) | [x] | S5 — session 028, PR #51 |
+| 84 | Implement `core.eval` — re-evaluation handling with confirmation (D-006-a) | [x] | S5 — session 028, PR #51 |
+| 85 | Implement `core.solution` — list, info, alias, extract | [x] | S5 — session 028, PR #50 |
+| 86 | Refactor `core.run._post_run_evaluation()` to reuse `core.eval` | [~] | S5 — session 028, PR #50 (prepared, TODO for final wiring) |
+| 87 | Implement `cli.solution` — 4 Typer commands | [x] | S5 — session 028, PR #50 |
+| 88 | Implement `cli.eval` — 2 Typer commands (DES-006 §9) | [x] | S5 — session 028, PR #51 |
+| 89 | Write L2 integration tests for `solution` (9 scenarios) | [x] | S5 — session 028, PR #50 |
+| 90 | Write L2 integration tests for `eval` (10 scenarios) | [x] | S5 — session 028, PR #51 |
 
 ### Sprint 006 — Benchmark: Multi-Solution Comparison & Export
 
@@ -208,3 +208,7 @@
 | 120 | POC — LLM thinking mode vs diff parser: capture raw responses from Flash vs Flash-Lite, analyze structure, test regex strip, test thinking disable via API. Validate intuition that thinking bavardage (not model capability) causes 0% valid diffs. | [ ] | TBD |
 | 121 | LLM response post-processing: strip thinking/reasoning before OpenEvolve diff parser. Niveau 3 (disable thinking via provider API in `build_config()`) + Niveau 2 (optional response filter in proxy). Blocked by: POC #120 validation. | [ ] | TBD |
 | 122 | `revolver problem test --wrapper` — validate OE wrapper evaluator interface before run | [ ] | TBD |
+| 132 | Multi-language support: make program filename and extension configurable (`solver.cpp`, `main.rs`, etc.) instead of hardcoded `initial_program.py`. Propagate to OE `file_suffix`, snapshot, solution collection. | [ ] | TBD |
+| 133 | Program support files: allow a `program_dir/` with auxiliary files (headers, local modules, data) copied alongside the program temp file during OE evaluation. Solves local `import`/`#include` breakage. | [ ] | TBD |
+| 134 | Dependency traceability: optional `requirements.txt` (or `dependencies` section in `config.yaml`) versioned in problem snapshot for reproducibility. Documentation only — no auto-install. | [ ] | TBD |
+| 135 | Document multi-language evaluator patterns: examples of `evaluate()` that compiles C++/Rust/Julia before scoring. Extend initial-program-structure guide. | [ ] | TBD |
