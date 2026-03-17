@@ -124,8 +124,8 @@ def evaluate(program_path: str) -> dict[str, float]:
             metrics = evaluate_instance(program_path, str(inst))
             all_metrics.append(metrics)
             _log_instance(inst.name, metrics)
-        except Exception:
-            pass  # Skip failed instances during training
+        except Exception as _e:
+            print(f"[revolver] evaluation failed for {{inst.name}}: {{_e}}", file=sys.stderr)
 
     if not all_metrics:
         return {{"combined_score": 0.0}}
@@ -1203,6 +1203,14 @@ def generate_wrapper(
     )
 
     if has_evaluate:
+        if has_evaluate_instance:
+            print(
+                "Warning: evaluator defines both evaluate() and evaluate_instance(). "
+                "Using evaluate() (legacy mode). If evaluate() depends on "
+                "REVOLVER_INSTANCE_PATH, it will fail during OpenEvolve runs. "
+                "Consider removing evaluate().",
+                file=sys.stderr,
+            )
         # Legacy mode: copy evaluator as-is
         shutil.copy2(evaluator_path, output_path)
         return output_path
@@ -1287,10 +1295,11 @@ def _collect_programs(oe_output_dir: Path, programs_dir: Path) -> list[ProgramEn
     programs: list[ProgramEntry] = []
     programs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Look for top_programs/ or best_programs/ or just .py files
+    # Look for top_programs/ or best_programs/ or best/ or just .py files
     source_dirs = [
         oe_output_dir / "top_programs",
         oe_output_dir / "best_programs",
+        oe_output_dir / "best",
         oe_output_dir,
     ]
 

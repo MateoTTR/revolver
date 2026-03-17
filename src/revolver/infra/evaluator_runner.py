@@ -29,7 +29,9 @@ def _run_in_subprocess(
     """Worker function executed in a child process.
 
     Sets environment variables and dynamically loads the evaluator module,
-    then calls its ``evaluate(program_path)`` function.
+    then calls ``evaluate(program_path)`` or
+    ``evaluate_instance(program_path, instance_path)`` depending on which
+    function the evaluator defines.
     """
     os.environ["REVOLVER_INSTANCE_PATH"] = instance_path
     os.environ["REVOLVER_INSTANCE_ID"] = instance_id
@@ -41,7 +43,22 @@ def _run_in_subprocess(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    result: dict[str, float] = module.evaluate(program_path)
+    if hasattr(module, "evaluate") and callable(module.evaluate):
+        if hasattr(module, "evaluate_instance") and callable(module.evaluate_instance):
+            import sys
+
+            print(
+                "[revolver] Warning: evaluator defines both evaluate() and evaluate_instance(). "
+                "Using evaluate() (legacy mode).",
+                file=sys.stderr,
+            )
+        result: dict[str, float] = module.evaluate(program_path)
+    elif hasattr(module, "evaluate_instance") and callable(module.evaluate_instance):
+        result = module.evaluate_instance(program_path, instance_path)
+    else:
+        raise RuntimeError(
+            f"Evaluator {evaluator_path} defines neither evaluate() nor evaluate_instance()"
+        )
     return result
 
 
