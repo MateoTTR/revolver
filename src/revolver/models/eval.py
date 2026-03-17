@@ -17,6 +17,7 @@ Traceable to: DES-006 (Eval Loop) section 6, DES-001 section 3.7-3.8.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -36,7 +37,7 @@ class InstanceResult(BaseModel):
     """
 
     instance_id: str
-    status: str  # "solved" | "failed" | "timeout"
+    status: Literal["solved", "failed", "timeout"]
     metrics: dict[str, float] = {}
     error: str | None = None
     compute_time_s: float | None = None

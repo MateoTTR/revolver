@@ -1253,6 +1253,8 @@ def insert_eval_instance(
     status: str,
     error_message: str | None,
     compute_time_s: float | None,
+    *,
+    commit: bool = True,
 ) -> None:
     """Insert a single eval instance result row.
 
@@ -1268,6 +1270,8 @@ def insert_eval_instance(
         status: Instance status (``"solved"``, ``"failed"``, or ``"timeout"``).
         error_message: Error message when ``status != "solved"``.
         compute_time_s: Wall-clock time for this instance in seconds.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
     """
     conn.execute(
         """\
@@ -1278,7 +1282,8 @@ def insert_eval_instance(
         """,
         (eval_id, instance_id, metric_name, value, status, error_message, compute_time_s),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def get_eval_metadata(
@@ -1298,33 +1303,38 @@ def get_eval_metadata(
     Returns:
         The :class:`EvalMetadata` if found, otherwise ``None``.
     """
-    cursor = conn.execute(
-        """\
-        SELECT eval_id, solution_id, dataset_name,
-               instance_count, instances_solved, eval_time_s,
-               user_aggregates, evaluated_at
-        FROM eval_metadata
-        WHERE solution_id = ? AND dataset_name = ?
-        """,
-        (solution_id, dataset_name),
-    )
-    row = cursor.fetchone()
+    conn.row_factory = sqlite3.Row
+    try:
+        cursor = conn.execute(
+            """\
+            SELECT eval_id, solution_id, dataset_name,
+                   instance_count, instances_solved, eval_time_s,
+                   user_aggregates, evaluated_at
+            FROM eval_metadata
+            WHERE solution_id = ? AND dataset_name = ?
+            """,
+            (solution_id, dataset_name),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
+
     if row is None:
         return None
 
     user_agg: dict[str, float] | None = None
-    if row[6] is not None:
-        user_agg = json.loads(row[6])
+    if row["user_aggregates"] is not None:
+        user_agg = json.loads(row["user_aggregates"])
 
     return EvalMetadata(
-        eval_id=row[0],
-        solution_id=row[1],
-        dataset_name=row[2],
-        instance_count=row[3],
-        instances_solved=row[4],
-        eval_time_s=row[5],
+        eval_id=row["eval_id"],
+        solution_id=row["solution_id"],
+        dataset_name=row["dataset_name"],
+        instance_count=row["instance_count"],
+        instances_solved=row["instances_solved"],
+        eval_time_s=row["eval_time_s"],
         user_aggregates=user_agg,
-        evaluated_at=datetime.fromisoformat(row[7]),
+        evaluated_at=datetime.fromisoformat(row["evaluated_at"]),
     )
 
 
@@ -1353,19 +1363,19 @@ def get_eval_instances(
         """,
         (eval_id,),
     )
-    return cursor.fetchall()
+    return [tuple(row) for row in cursor.fetchall()]
 
 
 def delete_eval(conn: sqlite3.Connection, eval_id: str) -> None:
     """Delete an evaluation and all its instance results.
 
-    Deletes from ``eval_instances`` first (child rows), then from
-    ``eval_metadata`` (parent row), ensuring referential integrity.
+    Both DELETEs run inside an explicit transaction so that the
+    operation is atomic: either both tables are cleaned or neither is.
 
     Args:
         conn: An open project database connection.
         eval_id: The evaluation ID to delete.
     """
-    conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
-    conn.execute("DELETE FROM eval_metadata WHERE eval_id = ?", (eval_id,))
-    conn.commit()
+    with conn:
+        conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
+        conn.execute("DELETE FROM eval_metadata WHERE eval_id = ?", (eval_id,))

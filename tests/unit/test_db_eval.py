@@ -453,3 +453,20 @@ class TestEvalEdgeCases:
         assert result1.eval_id == "eval-1"
         assert result2 is not None
         assert result2.eval_id == "eval-2"
+
+    @pytest.mark.unit
+    def test_fk_violation_on_unknown_eval_id(self, db_conn: sqlite3.Connection) -> None:
+        """Inserting an instance with an unknown eval_id raises IntegrityError."""
+        _seed_prerequisites(db_conn)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            insert_eval_instance(
+                db_conn,
+                eval_id="nonexistent-eval",
+                instance_id="inst-001",
+                metric_name="score",
+                value=0.5,
+                status="solved",
+                error_message=None,
+                compute_time_s=1.0,
+            )
