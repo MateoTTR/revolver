@@ -54,6 +54,12 @@ At the start of each session, read this file entirely, then follow the "Session 
 | E2E tests | [docs/validation/val-e2e-tests.md](docs/validation/val-e2e-tests.md) | L3 scenarios, LLM mocking, fake server |
 | Traceability matrix | [docs/validation/traceability-matrix.md](docs/validation/traceability-matrix.md) | FR/NFR → DES → test mapping |
 
+### Guides
+
+| Document | Path | Purpose |
+|---|---|---|
+| Initial program guide | [docs/guides/initial-program-structure.md](docs/guides/initial-program-structure.md) | Best practices for OpenEvolve initial programs |
+
 ### Claude Agents
 
 | Agent | Path | Trigger |
