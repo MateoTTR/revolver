@@ -248,6 +248,17 @@ def build_config(
         config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
         config["llm"].update(llm_config)
 
+    # Google provider detection (FB-02): Google's Generative Language API
+    # rejects the ``seed`` parameter with HTTP 400.  Disable random_seed
+    # BEFORE config overrides so that an explicit --config-override can
+    # still force a value if the user knows what they're doing.
+    if llm.base_url and (
+        "generativelanguage.googleapis.com" in llm.base_url or "googleapis.com" in llm.base_url
+    ):
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["random_seed"] = None
+
     # Force cascade_evaluation: false unless user explicitly set it.
     # OpenEvolve defaults to true, but Revolver evaluators don't define
     # evaluate_stage1/2/3 methods so cascade must be disabled.

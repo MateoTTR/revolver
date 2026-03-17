@@ -13,11 +13,26 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+# Hop-by-hop headers that must not be forwarded by proxies (RFC 2616 §13.5.1).
+_HOP_BY_HOP = frozenset(
+    {
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
+    }
+)
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
@@ -78,10 +93,14 @@ class TokenCountingProxy:
 
     Args:
         target_url: The real LLM endpoint URL (e.g., ``http://localhost:11434/v1``).
+        backoff_on_429: When ``True``, the proxy sleeps for the duration
+            indicated by the upstream ``Retry-After`` header on 429 responses
+            before forwarding the response to the client (capped at 60 s).
     """
 
-    def __init__(self, target_url: str) -> None:
+    def __init__(self, target_url: str, *, backoff_on_429: bool = False) -> None:
         self.target_url = target_url.rstrip("/")
+        self.backoff_on_429 = backoff_on_429
         self._lock = threading.Lock()
         self._prompt_tokens = 0
         self._completion_tokens = 0
@@ -122,7 +141,39 @@ class TokenCountingProxy:
                         resp_body = resp.read()
                         status = resp.status
                         resp_headers: list[tuple[str, str]] = list(resp.getheaders())
+                except HTTPError as exc:
+                    # Upstream returned an HTTP error — forward status,
+                    # body, and headers so the client sees the real error
+                    # (e.g. 400, 429, 500) instead of a generic 502.
+                    resp_body = exc.read()
+                    status = exc.code
+                    resp_headers = [
+                        (k, v) for k, v in exc.headers.items() if k.lower() not in _HOP_BY_HOP
+                    ]
+
+                    # Still extract token usage if present (some providers
+                    # include billing info even in error responses).
+                    proxy._extract_usage(resp_body)
+
+                    # Optional backoff on 429 (FB-04)
+                    if proxy.backoff_on_429 and status == 429:
+                        retry_after = exc.headers.get("Retry-After")
+                        if retry_after is not None:
+                            try:
+                                wait = min(float(retry_after), 60.0)
+                                time.sleep(wait)
+                            except ValueError:
+                                pass  # Non-numeric Retry-After — skip
+
+                    self.send_response(status)
+                    for name, value in resp_headers:
+                        self.send_header(name, value)
+                    self.send_header("Content-Length", str(len(resp_body)))
+                    self.end_headers()
+                    self.wfile.write(resp_body)
+                    return
                 except URLError as exc:
+                    # Non-HTTP errors (DNS failure, connection refused, etc.)
                     error_msg = json.dumps({"error": str(exc)}).encode()
                     self.send_response(502)
                     self.send_header("Content-Type", "application/json")
@@ -138,11 +189,7 @@ class TokenCountingProxy:
                 self.send_response(status)
                 for name, value in resp_headers:
                     # Skip hop-by-hop headers
-                    if name.lower() in (
-                        "transfer-encoding",
-                        "connection",
-                        "keep-alive",
-                    ):
+                    if name.lower() in _HOP_BY_HOP:
                         continue
                     self.send_header(name, value)
                 self.send_header("Content-Length", str(len(resp_body)))
@@ -163,7 +210,23 @@ class TokenCountingProxy:
                         resp_body = resp.read()
                         status = resp.status
                         resp_headers = list(resp.getheaders())
+                except HTTPError as exc:
+                    # Forward upstream HTTP error status, body, and headers.
+                    resp_body = exc.read()
+                    status = exc.code
+                    resp_headers = [
+                        (k, v) for k, v in exc.headers.items() if k.lower() not in _HOP_BY_HOP
+                    ]
+
+                    self.send_response(status)
+                    for name, value in resp_headers:
+                        self.send_header(name, value)
+                    self.send_header("Content-Length", str(len(resp_body)))
+                    self.end_headers()
+                    self.wfile.write(resp_body)
+                    return
                 except URLError as exc:
+                    # Non-HTTP errors (DNS failure, connection refused, etc.)
                     error_msg = json.dumps({"error": str(exc)}).encode()
                     self.send_response(502)
                     self.send_header("Content-Type", "application/json")
@@ -174,11 +237,7 @@ class TokenCountingProxy:
 
                 self.send_response(status)
                 for name, value in resp_headers:
-                    if name.lower() in (
-                        "transfer-encoding",
-                        "connection",
-                        "keep-alive",
-                    ):
+                    if name.lower() in _HOP_BY_HOP:
                         continue
                     self.send_header(name, value)
                 self.send_header("Content-Length", str(len(resp_body)))
