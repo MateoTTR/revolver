@@ -121,6 +121,34 @@
 | 77 | Implement `cli.run` — 5 Typer commands | [x] | S4 — session 024, PR #24 |
 | 78 | Write L2 integration tests for `run` (13 scenarios) | [x] | S4 — session 024, PR #24 |
 
+### Sprint 004a — Demo Feedback Fixes (v0.4.1 → v0.4.4)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 111 | Fix dict→Config conversion in `OpenEvolveRunner._init_controller()` (CRITICAL) | [x] | S4a — session 025, PR #25 |
+| 112 | Fix `dry-run iterations=0` fallback + `generation_time_s` null default | [x] | S4a — session 025, PR #25 |
+| 113 | Add L2-OE integration tests (real OpenEvolve) + fix config field mapping | [x] | S4a — session 025/025b, PR #26 |
+| 114 | Strip Revolver-specific keys in `build_config()` + map `num_generations` | [x] | S4a — session 025b, PR #27 |
+| 115 | Inject `api_key` for local LLMs, force `cascade_evaluation: false`, extract `best_score` | [x] | S4a — session 026, PR #31 |
+| 116 | Fix program collection, post-run eval `evaluate_instance()` mode, wrapper error logging | [x] | S4a — session 026, PR #32 |
+| 117 | Add pre-flight evaluation check before OpenEvolve launch | [x] | S4a — session 026, PR #33 |
+| 118 | Fix evaluator template: correct `evaluate_instance` signature | [x] | S4a — session 026, PR #35 |
+| 119 | Update DES-005 + specs/validation docs for v0.4.4 features | [x] | S4a — session 026, PR #36/#37 |
+
+### Sprint 004b — Proxy Robustness & UX Fixes (v0.4.5)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 123 | FB-01 — Forward upstream HTTP status code + body in proxy (NF7) | [x] | S4b — session 027, PR #42 |
+| 124 | FB-02 — Detect Google provider in `build_config()`, set `random_seed=None` (NF5) | [x] | S4b — session 027, PR #42 |
+| 125 | FB-03 — Forward `Retry-After` header from upstream responses (NF8 partial) | [x] | S4b — session 027, PR #42 |
+| 126 | FB-04 — Optional proxy-level backoff on 429 with Retry-After (stretch) | [x] | S4b — session 027, PR #42 |
+| 127 | FB-05 — Add `null`/`none` → `None` support in `_parse_value()` (NF6) | [x] | S4b — session 027, PR #43 |
+| 128 | FB-06 — Suppress false-positive dual-function warning on generated wrapper (NF1) | [x] | S4b — session 027, PR #43 |
+| 129 | FB-07 — Include alias (rank-1 solution) in `run list` and `run list --json` (NF2) | [x] | S4b — session 027, PR #43 |
+| 130 | FB-08 — `problem version` duplicate content → friendly error message (bonus) | [x] | S4b — already implemented (prior sprint) |
+| 131 | FB-09 — Write guide on initial program structure best practices (NF4) | [x] | S4b — session 027, PR #41 |
+
 ### Sprint 005 — Solution Management & Evaluation Loop
 
 | # | Task | Status | Sprint |
@@ -172,3 +200,11 @@
 | # | Task | Status | Sprint |
 |---|---|---|---|
 | 110 | CI guard: version-tag consistency check on `v*` tag push (compare pyproject.toml version vs tag) | [ ] | TBD |
+
+### Unscheduled — v2 Improvements
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 120 | POC — LLM thinking mode vs diff parser: capture raw responses from Flash vs Flash-Lite, analyze structure, test regex strip, test thinking disable via API. Validate intuition that thinking bavardage (not model capability) causes 0% valid diffs. | [ ] | TBD |
+| 121 | LLM response post-processing: strip thinking/reasoning before OpenEvolve diff parser. Niveau 3 (disable thinking via provider API in `build_config()`) + Niveau 2 (optional response filter in proxy). Blocked by: POC #120 validation. | [ ] | TBD |
+| 122 | `revolver problem test --wrapper` — validate OE wrapper evaluator interface before run | [ ] | TBD |
