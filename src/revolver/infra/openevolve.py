@@ -235,9 +235,7 @@ def build_config(
         llm_config["api_base"] = llm.base_url
     llm_config["primary_model"] = llm.model
     if llm.api_key_env:
-        api_key = os.environ.get(llm.api_key_env, "")
-        if api_key:
-            llm_config["api_key"] = api_key
+        llm_config["api_key_env"] = llm.api_key_env
 
     # Local LLMs (Ollama) require an api_key for the OpenAI SDK
     # but don't have a real key — inject a placeholder.
@@ -254,6 +252,7 @@ def build_config(
     # and before config overrides (step 5) so --config-override can still win.
     # Only Gemini (generativelanguage) is a known Google LLM provider
     if llm.base_url and "generativelanguage.googleapis.com" in llm.base_url:
+        config["random_seed"] = None  # Top-level: this is what OE sends to the API
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
             config["llm"]["random_seed"] = None
@@ -372,4 +371,34 @@ def revolver_env(env_vars: dict[str, str]) -> Iterator[None]:
                 os.environ[key] = prev
 
 
-__all__ = ["OpenEvolveRunner", "ProgressInfo", "RunOutput", "build_config", "revolver_env"]
+def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve api_key_env references in a config dict to actual API keys.
+
+    Replaces ``llm.api_key_env`` with ``llm.api_key`` by reading the
+    environment variable at call time.  This keeps secrets out of stored
+    config snapshots while allowing runtime resolution.
+
+    Args:
+        config: OpenEvolve config dict (mutated in place and returned).
+
+    Returns:
+        The same config dict with api_key resolved.
+    """
+    llm_section = config.get("llm")
+    if isinstance(llm_section, dict):
+        env_name = llm_section.pop("api_key_env", None)
+        if env_name:
+            key = os.environ.get(env_name, "")
+            if key:
+                llm_section["api_key"] = key
+    return config
+
+
+__all__ = [
+    "OpenEvolveRunner",
+    "ProgressInfo",
+    "RunOutput",
+    "build_config",
+    "resolve_api_keys",
+    "revolver_env",
+]
