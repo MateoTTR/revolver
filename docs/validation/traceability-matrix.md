@@ -346,7 +346,7 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 
 ## 13. Coverage Summary
 
-| Spec File | Total FRs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
+| Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
 | spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
 | spec-llm | 18 | 11 | 6 | 0 | 8 | 10 | via Sc.1 | 0 |
