@@ -1200,3 +1200,88 @@ def list_solutions(
     rows = [dict(row) for row in cursor.fetchall()]
     conn.row_factory = None
     return rows
+
+
+def update_solution_alias(
+    conn: sqlite3.Connection,
+    solution_id: str,
+    alias: str,
+) -> None:
+    """Set the alias on a solution.
+
+    Args:
+        conn: An open project database connection.
+        solution_id: The solution ID to update.
+        alias: The alias to set (must be unique across all solutions).
+
+    Raises:
+        DuplicateNameError: If the alias is already used by another solution.
+    """
+    try:
+        conn.execute(
+            "UPDATE solutions SET alias = ? WHERE id = ?",
+            (alias, solution_id),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"Alias '{alias}' is already in use") from exc
+
+
+def get_solution_by_alias(conn: sqlite3.Connection, alias: str) -> Solution | None:
+    """Retrieve a solution by alias.
+
+    Args:
+        conn: An open project database connection.
+        alias: The alias to look up.
+
+    Returns:
+        The :class:`Solution` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        "SELECT id, run_id, rank, best_score, alias FROM solutions WHERE alias = ?",
+        (alias,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return Solution(
+        id=row[0],
+        run_id=row[1],
+        rank=row[2],
+        best_score=row[3],
+        alias=row[4],
+    )
+
+
+def get_solution_detail(
+    conn: sqlite3.Connection,
+    id_or_alias: str,
+) -> dict[str, object] | None:
+    """Retrieve full solution detail with run lineage via JOIN.
+
+    Returns a dict with solution fields plus run fields (problem_version,
+    llm, dataset, etc.) for display in ``revolver solution info``.
+
+    Args:
+        conn: An open project database connection.
+        id_or_alias: Solution ID or alias to look up.
+
+    Returns:
+        A dict with merged solution and run columns, or ``None`` if not found.
+    """
+    query = """\
+        SELECT s.id, s.run_id, s.rank, s.best_score, s.alias,
+               r.problem_version, r.llm, r.dataset, r.llm_model,
+               r.problem_hash, r.dataset_hash, r.iterations,
+               r.generation_time_s, r.status AS run_status, r.created_at
+        FROM solutions s
+        JOIN runs r ON s.run_id = r.id
+        WHERE s.id = ? OR s.alias = ?
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(query, (id_or_alias, id_or_alias))
+    row = cursor.fetchone()
+    conn.row_factory = None
+    if row is None:
+        return None
+    return dict(row)

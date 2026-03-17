@@ -596,42 +596,36 @@ def launch_run(
 # ── _post_run_evaluation (FR-RUN-019/020) ────────────────────────────────────
 
 
-def _post_run_evaluation(
-    proj_conn: Any,
+def _run_post_eval(
+    evaluator_path: Path,
+    program_path: Path,
+    dataset_path: Path,
     run_id: str,
     solution_id: str,
-    snapshot_dir: Path,
-    dataset_path: Path,
-    program_path: Path,
 ) -> None:
-    """Evaluate the rank-1 program on all training instances.
+    """Run the inline post-run evaluation on training instances.
 
-    This is an inline implementation for Sprint 004. Sprint 005 will
-    refactor this to use ``core.eval.evaluate_solution()``.
+    This is the extracted evaluation logic from Sprint 004.
+    It iterates over all instances, evaluates each via
+    ``evaluator_runner.run_instance()``, and logs results to stderr.
 
-    Results are logged to stderr for now. No eval DB tables are created.
+    # TODO(S5-08): Replace with core.eval.evaluate_solution() after PR C merge.
+    # The signature should become:
+    #   core.eval.evaluate_solution(
+    #       solution_id_or_alias=solution_id,
+    #       dataset_name=<dataset>,
+    #       force=True,
+    #       on_progress=None,
+    #   )
+    # This function can then be removed entirely.
 
     Args:
-        proj_conn: Open project database connection (unused in inline impl).
-        run_id: ID of the completed run.
-        solution_id: ID of the rank-1 solution.
-        snapshot_dir: Path to the problem version snapshot.
-        dataset_path: Path to the dataset directory.
+        evaluator_path: Path to the evaluator ``.py`` file.
         program_path: Path to the rank-1 program file.
+        dataset_path: Path to the dataset directory.
+        run_id: ID of the completed run (for logging).
+        solution_id: ID of the rank-1 solution (for logging).
     """
-    evaluator_path = snapshot_dir / EVALUATOR_FILENAME
-    if not evaluator_path.exists():
-        sys.stderr.write(
-            f"Warning: evaluator not found at {evaluator_path}, skipping post-run evaluation.\n"
-        )
-        return
-
-    if not program_path.exists():
-        sys.stderr.write(
-            f"Warning: program not found at {program_path}, skipping post-run evaluation.\n"
-        )
-        return
-
     # Enumerate instances
     instances = sorted(
         p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()
@@ -666,6 +660,50 @@ def _post_run_evaluation(
 
     sys.stderr.write(
         f"Post-run evaluation complete: {passed}/{len(instances)} passed, {failed} failed.\n"
+    )
+
+
+def _post_run_evaluation(
+    proj_conn: Any,
+    run_id: str,
+    solution_id: str,
+    snapshot_dir: Path,
+    dataset_path: Path,
+    program_path: Path,
+) -> None:
+    """Evaluate the rank-1 program on all training instances.
+
+    Thin wrapper that validates paths and delegates to ``_run_post_eval()``.
+    Once ``core.eval`` is available (PR C merge), this will delegate to
+    ``core.eval.evaluate_solution()`` instead.
+
+    Args:
+        proj_conn: Open project database connection (unused in current impl).
+        run_id: ID of the completed run.
+        solution_id: ID of the rank-1 solution.
+        snapshot_dir: Path to the problem version snapshot.
+        dataset_path: Path to the dataset directory.
+        program_path: Path to the rank-1 program file.
+    """
+    evaluator_path = snapshot_dir / EVALUATOR_FILENAME
+    if not evaluator_path.exists():
+        sys.stderr.write(
+            f"Warning: evaluator not found at {evaluator_path}, skipping post-run evaluation.\n"
+        )
+        return
+
+    if not program_path.exists():
+        sys.stderr.write(
+            f"Warning: program not found at {program_path}, skipping post-run evaluation.\n"
+        )
+        return
+
+    _run_post_eval(
+        evaluator_path=evaluator_path,
+        program_path=program_path,
+        dataset_path=dataset_path,
+        run_id=run_id,
+        solution_id=solution_id,
     )
 
 
