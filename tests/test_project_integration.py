@@ -86,12 +86,12 @@ def test_init_creates_structure(tmp_path: pytest.TempPathFactory) -> None:
     assert "EVOLVE-BLOCK-START" in initial_program
     assert "EVOLVE-BLOCK-END" in initial_program
 
-    # evaluator.py contains dual-mode functions and env vars (FR-PRJ-004)
+    # evaluator.py contains evaluate_instance with correct signature (FR-PRJ-004)
     evaluator = (tmp_path / "evaluator.py").read_text(encoding="utf-8")
-    assert "evaluate_instance" in evaluator
-    assert "evaluate" in evaluator
-    assert "REVOLVER_INSTANCE_PATH" in evaluator
-    assert "REVOLVER_DATASET_DIR" in evaluator
+    assert "def evaluate_instance(program_path: str, instance_path: str)" in evaluator
+    assert "combined_score" in evaluator
+    # No legacy evaluate() — users must opt in explicitly
+    assert "def evaluate(" not in evaluator
 
     # Output message contains project name
     output = _strip_ansi(result.stdout)
