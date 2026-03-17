@@ -1,7 +1,7 @@
 # DES-005 — `revolver run` — OpenEvolve Orchestration
 
-**Version**: 0.3 — Extract on demand refactor
-**Date**: 2026-03-13
+**Version**: 0.4.4 — Pre-flight check, cascade_evaluation, api_key, collect_programs, best_score
+**Date**: 2026-03-17
 **Status**: Draft
 **Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
 
@@ -64,13 +64,25 @@ Core (core/run.py) → start_run()
   │     (paths point to .revolver/runs/<id>/)
   │ 11. Configure OpenEvolve programmatically       ──► Infra: openevolve.build_config()
   │     Includes: problem.md injection if present   (§4.4, DD-13)
-  │ 12. Start token-counting proxy (§4.5, DD-14)   ──► Infra: token_proxy.start()
+  │ 12. Pre-flight evaluation check (FR-RUN-0XX)
+  │     Before launching OpenEvolve, evaluate the initial program on the
+  │     first dataset instance using the generated wrapper. This catches
+  │     evaluator errors (crashes, timeouts, misconfigured arguments) before
+  │     wasting LLM tokens on a full evolution run.
+  │     - Calls evaluator_runner.run_instance(wrapper_path, initial_program,
+  │       first_instance, timeout_s=60)
+  │     - If evaluation fails (crash or timeout) → abort with clear error,
+  │       set run status to "interrupted"
+  │     - If evaluation passes with combined_score == 0.0 → warning on stderr,
+  │       proceed (some programs legitimately score zero initially)
+  │     - If evaluation passes with score > 0 → log score on stderr, proceed
+  │ 13. Start token-counting proxy (§4.5, DD-14)   ──► Infra: token_proxy.start()
   │     Rewrite llm.base_url → proxy local URL
-  │ 13. Write run lock file                         ──► Infra: store.write_run_lock(id)
+  │ 14. Write run lock file                         ──► Infra: store.write_run_lock(id)
   │     .revolver/runs/locks/<id>.lock
-  │ 14. Launch OpenEvolve                           ──► Infra: openevolve.run()
-  │ 15. Monitor progress                            ──► callback to CLI for display
-  │ 16. On completion:
+  │ 15. Launch OpenEvolve                           ──► Infra: openevolve.run()
+  │ 16. Monitor progress                            ──► callback to CLI for display
+  │ 17. On completion:
   │     a. Stop token proxy, read token counts      ──► Infra: token_proxy.stop()
   │     b. Collect all top-ranked programs           ──► Infra: openevolve.collect_results()
   │        Save as rank-1.py, rank-2.py, ...
@@ -86,7 +98,7 @@ Core (core/run.py) → start_run()
   │     g. Update run status to 'completed'         ──► Infra: db.update_run_status()
   │     h. Write run manifest (incl. token_usage)   ──► Infra: store.write_run_manifest()
   │     i. Remove run lock                          ──► Infra: store.remove_run_lock(id)
-  │ 17. Return RunResult (containing 1 SolutionResult + programs_stored + token_usage)
+  │ 18. Return RunResult (containing 1 SolutionResult + programs_stored + token_usage)
   ▼
 Infra
   ├── store: run dirs, manifests, lock files
@@ -421,6 +433,21 @@ class OpenEvolveRunner:
         return self._collect_output(best)
 ```
 
+#### Program Collection
+
+`_collect_programs()` searches OpenEvolve's output directory in priority order:
+
+1. `top_programs/` — ranked programs (if OpenEvolve produces them)
+2. `best_programs/` — alternative naming
+3. `best/` — OpenEvolve writes `best_program.py` here
+4. Root output directory — fallback
+
+Programs are copied to `<run_dir>/programs/rank-1.py`, `rank-2.py`, etc.
+
+#### Best Score Extraction
+
+OpenEvolve's `controller.run()` returns a `Program` object (not a numeric score). Revolver extracts the score via `best.metrics.get("combined_score")`. If the returned value is directly numeric (int/float), it is used as-is.
+
 ### 4.2 OpenEvolve Configuration
 
 OpenEvolve is configured programmatically by merging the problem version's `config.yaml` with Revolver's overrides:
@@ -440,10 +467,14 @@ def build_config(
     Merge order (last wins):
         1. Problem version's config.yaml (base)
         2. LLM endpoint configuration (base_url, model, api_key)
-        3. Problem description injection into prompt.system_message (if provided)
-        4. --iterations override
-        5. --config-override key=value pairs
-        6. Output directory (always Revolver-controlled)
+        3. Evaluator defaults — Force evaluator.cascade_evaluation: false
+           unless explicitly set in the problem's config.yaml. OpenEvolve
+           defaults to cascade_evaluation: true which requires
+           evaluate_stage1/2/3 functions that Revolver does not support.
+        4. Problem description injection into prompt.system_message (if provided)
+        5. --iterations override
+        6. --config-override key=value pairs
+        7. Output directory (always Revolver-controlled)
     """
 ```
 
@@ -457,7 +488,7 @@ OpenEvolve expects LLM configuration in its config. Revolver injects it based on
 | `model` | `llm.model` | LLM registry (`llms.model`) |
 | `api_key` | `llm.api_key` | Read from env var named in `llms.api_key_env` |
 
-For local LLMs (Ollama), `base_url` is typically `http://localhost:11434/v1` and no API key is needed.
+For local LLMs (Ollama), `base_url` is typically `http://localhost:11434/v1` and no API key is needed. However, for local LLMs (`source == "local"`) without an `api_key_env`, Revolver injects `api_key: "ollama"` as a placeholder. The OpenAI SDK used by OpenEvolve requires a non-empty `api_key` even for local endpoints.
 
 ### 4.4 Problem Description Injection
 
