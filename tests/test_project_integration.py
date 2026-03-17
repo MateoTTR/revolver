@@ -91,7 +91,7 @@ def test_init_creates_structure(tmp_path: pytest.TempPathFactory) -> None:
     assert "def evaluate_instance(program_path: str, instance_path: str)" in evaluator
     assert "combined_score" in evaluator
     # No legacy evaluate() — users must opt in explicitly
-    assert "\ndef evaluate(" not in evaluator
+    assert "def evaluate(" not in evaluator
 
     # Output message contains project name
     output = _strip_ansi(result.stdout)

@@ -64,7 +64,8 @@ Advanced — legacy aggregated mode:
     If you need custom aggregation (e.g., min instead of mean), replace
     ``evaluate_instance`` with ``evaluate(program_path)`` and handle
     iteration yourself. Revolver sets ``REVOLVER_DATASET_DIR`` to the
-    dataset directory. See DES-005 for details.
+    dataset directory. Do NOT read ``REVOLVER_INSTANCE_PATH`` in this
+    mode — it is not set during OpenEvolve runs. See DES-005 for details.
 """
 
 from __future__ import annotations
