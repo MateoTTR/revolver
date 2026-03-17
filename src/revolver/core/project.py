@@ -47,63 +47,43 @@ def solve(data: list[int]) -> int:
 '''
 
 _EVALUATOR_TEMPLATE = '''\
-"""Evaluator template — dual-mode pattern (single-instance + aggregated).
+"""Evaluator — scores the evolved program on a single instance.
 
-Revolver supports two evaluation modes:
+Revolver calls ``evaluate_instance(program_path, instance_path)`` once per
+dataset instance. It handles aggregation (mean) automatically during
+OpenEvolve training runs.
 
-1. **Per-instance** (preferred): implement ``evaluate_instance(program_path)``
-   - Revolver sets ``REVOLVER_INSTANCE_PATH`` to the current instance file
-   - Returns ``dict[str, float]`` with metric names and values
-   - Revolver handles aggregation (mean, min, max, percentiles)
+Arguments:
+    program_path:  Path to the Python file being evaluated.
+    instance_path: Path to the instance data file (JSON, CSV, etc.).
 
-2. **Aggregated** (legacy): implement ``evaluate(program_path)``
-   - Revolver sets ``REVOLVER_DATASET_DIR`` to the dataset directory
-   - You iterate over instances and compute aggregate metrics yourself
-   - Returns ``dict[str, float]`` with your custom aggregation
+Returns:
+    ``dict[str, float]`` — must include ``combined_score`` as primary metric.
 
-Environment variables set by Revolver:
-    REVOLVER_INSTANCE_PATH — path to the current instance (per-instance mode)
-    REVOLVER_DATASET_DIR   — path to the dataset directory (aggregated mode)
+Advanced — legacy aggregated mode:
+    If you need custom aggregation (e.g., min instead of mean), replace
+    ``evaluate_instance`` with ``evaluate(program_path)`` and handle
+    iteration yourself. Revolver sets ``REVOLVER_DATASET_DIR`` to the
+    dataset directory. See DES-005 for details.
 """
 
 from __future__ import annotations
 
-import os
 
-
-def evaluate_instance(program_path: str) -> dict[str, float]:
+def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
     """Evaluate the program on a single instance.
 
     Args:
         program_path: Path to the evolved program file.
+        instance_path: Path to the instance data file.
 
     Returns:
         Dictionary of metric names to float values.
         Must include ``combined_score`` as the primary metric.
     """
-    instance_path = os.environ.get("REVOLVER_INSTANCE_PATH", "")
-
     # TODO: Load the instance data from instance_path
-    # TODO: Run the program on the instance
+    # TODO: Run/import the program from program_path
     # TODO: Compute metrics
-
-    return {"combined_score": 0.0}
-
-
-def evaluate(program_path: str) -> dict[str, float]:
-    """Evaluate the program on the full dataset (legacy aggregated mode).
-
-    Args:
-        program_path: Path to the evolved program file.
-
-    Returns:
-        Dictionary of aggregated metric names to float values.
-    """
-    dataset_dir = os.environ.get("REVOLVER_DATASET_DIR", "")
-
-    # TODO: Iterate over instances in dataset_dir
-    # TODO: Run the program on each instance
-    # TODO: Aggregate results
 
     return {"combined_score": 0.0}
 '''
