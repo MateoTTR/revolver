@@ -60,16 +60,22 @@ def solve(data):
     n = len(data)
     if n <= 1:
         return list(range(n))
-    tour = build_tour(data)
-    tour = improve_tour(data, tour)
+    distances = precompute_distances(data)
+    tour = build_tour(data, distances)
+    tour = improve_tour(data, distances, tour)
     return tour
 
-def build_tour(data):
+def precompute_distances(data):
+    """Compute pairwise distance matrix."""
+    # 10 lines — one clear purpose
+    ...
+
+def build_tour(data, distances):
     """Construct an initial tour using nearest-neighbor heuristic."""
     # 15 lines — one clear purpose
     ...
 
-def improve_tour(data, tour):
+def improve_tour(data, distances, tour):
     """Improve the tour using local search."""
     # 15 lines — one clear purpose
     ...
@@ -82,8 +88,10 @@ independently. A diff that replaces `improve_tour` doesn't need to touch
 ## EVOLVE-BLOCK placement
 
 OpenEvolve uses `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END` markers
-(with `---` delimiters) to identify which parts of the code the LLM should
-modify. Only code inside these markers is shown as modifiable to the LLM.
+to identify which parts of the code the LLM should modify. Only code inside
+these markers is shown as modifiable to the LLM. The full marker is
+`# --- EVOLVE-BLOCK-START ---` (the dashes are part of the marker comment
+itself, not a separate construct).
 
 ### Syntax
 
