@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +22,7 @@ from revolver.infra.openevolve import (
     _extract_best_score,
     _parse_value,
     build_config,
+    resolve_api_keys,
     revolver_env,
 )
 from revolver.models.llm import LLMEntry
@@ -204,22 +206,25 @@ class TestBuildConfig:
         )
         assert "prompt" not in result
 
-    def test_api_key_from_env(self, tmp_path: Path) -> None:
-        """API key is read from the env var named in api_key_env."""
+    def test_api_key_env_stored_not_resolved(self, tmp_path: Path) -> None:
+        """build_config stores api_key_env name, NOT the resolved secret."""
         llm = _make_llm(api_key_env="MY_API_KEY")
         with patch.dict(os.environ, {"MY_API_KEY": "sk-test-12345"}):
             result = build_config(problem_config=None, llm=llm)
 
-        assert result["llm"]["api_key"] == "sk-test-12345"
+        # The env var NAME is stored, not the resolved value
+        assert result["llm"]["api_key_env"] == "MY_API_KEY"
+        assert "api_key" not in result["llm"]
 
-    def test_api_key_env_not_set(self, tmp_path: Path) -> None:
-        """Missing env var means no api_key in config."""
+    def test_api_key_env_stored_even_when_unset(self, tmp_path: Path) -> None:
+        """api_key_env is stored even if the env var is not currently set."""
         llm = _make_llm(api_key_env="NONEXISTENT_KEY")
-        # Ensure the env var is not set
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NONEXISTENT_KEY", None)
             result = build_config(problem_config=None, llm=llm)
 
+        # The env var name is always stored when api_key_env is set on the LLM
+        assert result["llm"]["api_key_env"] == "NONEXISTENT_KEY"
         assert "api_key" not in result.get("llm", {})
 
     def test_config_override_types(self) -> None:
@@ -350,12 +355,15 @@ class TestBuildConfig:
     # ── FB-02: Google provider detection ─────────────────────────────────
 
     def test_build_config_google_disables_seed(self) -> None:
-        """Google provider detected by base_url sets random_seed to None."""
+        """Google provider sets both top-level and llm random_seed to None."""
         llm = _make_llm(
             base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         )
         result = build_config(problem_config=None, llm=llm)
 
+        # Top-level random_seed is what OpenEvolve sends to the API
+        assert result["random_seed"] is None
+        # llm-level random_seed also set for completeness
         assert result["llm"]["random_seed"] is None
 
     def test_build_config_google_generic_url_no_seed_disable(self) -> None:
@@ -379,23 +387,81 @@ class TestBuildConfig:
         )
         result = build_config(problem_config=None, llm=llm)
 
-        # random_seed should NOT be in the config at all
+        # random_seed should NOT be in the config at all (neither top-level nor llm)
+        assert "random_seed" not in result
         llm_cfg = result.get("llm", {})
         assert "random_seed" not in llm_cfg
 
     def test_build_config_google_seed_override_preserved(self) -> None:
-        """Explicit --config-override llm.random_seed=42 wins over Google detection."""
+        """Explicit --config-override random_seed=42 wins over Google detection."""
         llm = _make_llm(
             base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         )
         result = build_config(
             problem_config=None,
             llm=llm,
-            config_overrides=["llm.random_seed=42"],
+            config_overrides=["random_seed=42", "llm.random_seed=42"],
         )
 
         # User override (step 5) should win over Google detection (step 2.5)
+        assert result["random_seed"] == 42
         assert result["llm"]["random_seed"] == 42
+
+
+# ── resolve_api_keys tests ────────────────────────────────────────────────────
+
+
+class TestResolveApiKeys:
+    """Tests for resolve_api_keys()."""
+
+    def test_resolves_env_var_to_api_key(self) -> None:
+        """api_key_env is resolved to api_key and removed from config."""
+        config: dict[str, Any] = {"llm": {"api_key_env": "MY_KEY", "primary_model": "m"}}
+        with patch.dict(os.environ, {"MY_KEY": "secret123"}):
+            result = resolve_api_keys(config)
+
+        assert result["llm"]["api_key"] == "secret123"
+        assert "api_key_env" not in result["llm"]
+        # Other keys preserved
+        assert result["llm"]["primary_model"] == "m"
+
+    def test_no_api_key_when_env_var_unset(self) -> None:
+        """api_key_env is removed but api_key not set when env var is missing."""
+        config: dict[str, Any] = {"llm": {"api_key_env": "MISSING_KEY"}}
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MISSING_KEY", None)
+            result = resolve_api_keys(config)
+
+        assert "api_key_env" not in result["llm"]
+        assert "api_key" not in result["llm"]
+
+    def test_no_api_key_when_env_var_empty(self) -> None:
+        """api_key_env is removed but api_key not set when env var is empty."""
+        config: dict[str, Any] = {"llm": {"api_key_env": "EMPTY_KEY"}}
+        with patch.dict(os.environ, {"EMPTY_KEY": ""}):
+            result = resolve_api_keys(config)
+
+        assert "api_key_env" not in result["llm"]
+        assert "api_key" not in result["llm"]
+
+    def test_no_llm_section(self) -> None:
+        """Config without llm section is returned unchanged."""
+        config: dict[str, Any] = {"max_iterations": 10}
+        result = resolve_api_keys(config)
+        assert result == {"max_iterations": 10}
+
+    def test_llm_without_api_key_env(self) -> None:
+        """Config with llm section but no api_key_env is returned unchanged."""
+        config: dict[str, Any] = {"llm": {"api_key": "ollama"}}
+        result = resolve_api_keys(config)
+        assert result["llm"]["api_key"] == "ollama"
+
+    def test_mutates_in_place(self) -> None:
+        """resolve_api_keys mutates the config dict in place."""
+        config: dict[str, Any] = {"llm": {"api_key_env": "MY_KEY"}}
+        with patch.dict(os.environ, {"MY_KEY": "secret"}):
+            result = resolve_api_keys(config)
+        assert result is config
 
 
 # ── revolver_env tests ────────────────────────────────────────────────────────

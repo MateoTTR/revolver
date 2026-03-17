@@ -13,6 +13,7 @@ Traceable to: DES-005, ADR-006, FR-RUN-001..030.
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import os
 import shutil
@@ -53,7 +54,12 @@ from revolver.infra.db import (
     list_runs as db_list_runs,
 )
 from revolver.infra.evaluator_runner import run_instance as eval_run_instance
-from revolver.infra.openevolve import OpenEvolveRunner, build_config, revolver_env
+from revolver.infra.openevolve import (
+    OpenEvolveRunner,
+    build_config,
+    resolve_api_keys,
+    revolver_env,
+)
 from revolver.infra.store import (
     PROBLEM_DIR,
     REVOLVER_DIR,
@@ -358,6 +364,8 @@ def launch_run(
                         )
 
         # 14. Insert run record in DB (status="running")
+        # Store the UNRESOLVED config in the snapshot — api_key_env names
+        # are safe to persist; resolved secrets are not.
         now = datetime.now(UTC)
         config_snapshot_str = yaml.dump(oe_config, default_flow_style=False)
         insert_run(
@@ -375,6 +383,9 @@ def launch_run(
             config_snapshot=config_snapshot_str,
         )
 
+        # Resolve api_key_env → api_key on a deep copy for runtime use only.
+        oe_config_resolved = resolve_api_keys(copy.deepcopy(oe_config))
+
         # 15. Write lock file
         lock_data = {
             "run_id": run_id,
@@ -391,9 +402,9 @@ def launch_run(
             proxy = TokenCountingProxy(llm.base_url)
             proxy_url = proxy.start()
             # Rewrite config's llm.api_base to proxy
-            if "llm" not in oe_config:
-                oe_config["llm"] = {}
-            oe_config["llm"]["api_base"] = proxy_url
+            if "llm" not in oe_config_resolved:
+                oe_config_resolved["llm"] = {}
+            oe_config_resolved["llm"]["api_base"] = proxy_url
 
         try:
             # Set env vars via revolver_env()
@@ -453,11 +464,11 @@ def launch_run(
                         f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
                     )
 
-                # Launch OpenEvolve
+                # Launch OpenEvolve with resolved config (secrets resolved at runtime)
                 runner = OpenEvolveRunner(
                     initial_program=initial_program,
                     evaluator=wrapper_path,
-                    config=oe_config,
+                    config=oe_config_resolved,
                     output_dir=oe_output_dir,
                 )
                 run_output = runner.run(iterations=iterations)
@@ -814,7 +825,7 @@ def resume_run(
         oe_output_dir.mkdir(exist_ok=True)
         oe_config["output_dir"] = str(oe_output_dir)
 
-        # Insert run record
+        # Insert run record — store UNRESOLVED config (no secrets in snapshot)
         now = datetime.now(UTC)
         config_snapshot_str = yaml.dump(oe_config, default_flow_style=False)
         insert_run(
@@ -833,6 +844,9 @@ def resume_run(
             config_snapshot=config_snapshot_str,
         )
 
+        # Resolve api_key_env → api_key on a deep copy for runtime use only.
+        oe_config_resolved = resolve_api_keys(copy.deepcopy(oe_config))
+
         # Write lock file
         lock_data_dict = {
             "run_id": new_run_id,
@@ -848,9 +862,9 @@ def resume_run(
         if llm.base_url:
             proxy = TokenCountingProxy(llm.base_url)
             proxy_url = proxy.start()
-            if "llm" not in oe_config:
-                oe_config["llm"] = {}
-            oe_config["llm"]["api_base"] = proxy_url
+            if "llm" not in oe_config_resolved:
+                oe_config_resolved["llm"] = {}
+            oe_config_resolved["llm"]["api_base"] = proxy_url
 
         try:
             env_vars = {
@@ -912,7 +926,7 @@ def resume_run(
                 runner = OpenEvolveRunner(
                     initial_program=initial_program,
                     evaluator=wrapper_path,
-                    config=oe_config,
+                    config=oe_config_resolved,
                     output_dir=oe_output_dir,
                 )
                 run_output = runner.run(
