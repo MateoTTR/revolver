@@ -18,6 +18,7 @@ from revolver.infra.openevolve import (
     SYSTEM_PROMPT_TEMPLATE,
     OpenEvolveRunner,
     RunOutput,
+    _extract_best_score,
     build_config,
     revolver_env,
 )
@@ -74,6 +75,7 @@ class TestOpenEvolveRunner:
         mock_init.assert_called_once()
         mock_controller.run.assert_called_once()
         assert isinstance(result, RunOutput)
+        assert result.best_score == pytest.approx(0.95)
 
     def test_run_with_checkpoint(self, tmp_path: Path) -> None:
         """Run with checkpoint path passes it to controller."""
@@ -95,6 +97,7 @@ class TestOpenEvolveRunner:
         assert call_kwargs is not None
         assert call_kwargs[1]["checkpoint_path"] == str(checkpoint)
         assert isinstance(result, RunOutput)
+        assert result.best_score == pytest.approx(0.8)
 
     def test_run_openevolve_not_installed(self, tmp_path: Path) -> None:
         """ExternalError raised when openevolve is not importable."""
@@ -286,7 +289,10 @@ class TestBuildConfig:
         llm = _make_llm()
         result = build_config(problem_config=config_file, llm=llm)
 
-        assert "evaluator" not in result
+        # String-valued evaluator/initial_program are stripped;
+        # evaluator is re-injected as a dict with cascade_evaluation.
+        assert result.get("evaluator") != "evaluator.py"
+        assert isinstance(result.get("evaluator"), dict)
         assert "initial_program" not in result
         assert result["max_iterations"] == 100
 
@@ -394,3 +400,43 @@ class TestRevolverEnv:
 
         for k in keys:
             assert k not in os.environ
+
+
+# ── _extract_best_score tests ────────────────────────────────────────────────
+
+
+class TestExtractBestScore:
+    """Tests for _extract_best_score() helper.
+
+    These tests don't require OpenEvolve to be installed — they use local
+    fake objects to exercise the extraction logic.
+    """
+
+    def test_best_score_from_program_object(self) -> None:
+        """Extract score from a Program-like object with .metrics dict."""
+
+        class FakeProgram:
+            def __init__(self) -> None:
+                self.metrics: dict[str, float] = {"combined_score": 1.065}
+
+        result = _extract_best_score(FakeProgram())
+        assert result == 1.065
+
+    def test_best_score_from_number(self) -> None:
+        """Extract score from a raw numeric return value."""
+        assert _extract_best_score(42) == 42.0
+        assert _extract_best_score(3.14) == 3.14
+
+    def test_best_score_none_when_not_extractable(self) -> None:
+        """Return None when best is neither a number nor a Program."""
+        assert _extract_best_score("some_string") is None
+        assert _extract_best_score(None) is None
+
+    def test_best_score_none_when_metrics_missing_key(self) -> None:
+        """Return None when metrics dict exists but lacks combined_score."""
+
+        class FakeProgram:
+            def __init__(self) -> None:
+                self.metrics: dict[str, float] = {"other_metric": 0.5}
+
+        assert _extract_best_score(FakeProgram()) is None

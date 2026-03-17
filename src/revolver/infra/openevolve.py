@@ -22,7 +22,6 @@ from typing import Any
 import yaml
 
 from revolver.core.exceptions import ExternalError, ValidationError
-from revolver.infra.token_proxy import TokenUsage
 from revolver.models.llm import LLMEntry
 
 # ── System prompt template (DES-005 §4.4) ────────────────────────────────────
@@ -166,8 +165,9 @@ class OpenEvolveRunner:
                     checkpoint_path=checkpoint_str,
                 )
             )
+            best_score = _extract_best_score(best)
             return RunOutput(
-                best_score=float(best) if isinstance(best, (int, float)) else None,
+                best_score=best_score,
                 best_program=best,
                 output_dir=self.output_dir,
             )
@@ -217,8 +217,10 @@ def build_config(
 
     # Strip Revolver-specific keys that clash with OpenEvolve Config fields.
     # These are passed separately to the OEController constructor, not via Config.
+    # Only strip string values (Revolver paths); dicts are valid OpenEvolve sub-configs.
     for key in ("evaluator", "initial_program"):
-        config.pop(key, None)
+        if isinstance(config.get(key), str):
+            config.pop(key, None)
 
     # Map num_generations → max_iterations (OpenEvolve uses max_iterations).
     # If both keys are present, max_iterations wins and num_generations is dropped.
@@ -237,9 +239,21 @@ def build_config(
         if api_key:
             llm_config["api_key"] = api_key
 
+    # Local LLMs (Ollama) require an api_key for the OpenAI SDK
+    # but don't have a real key — inject a placeholder.
+    if llm.source == "local" and "api_key" not in llm_config:
+        llm_config["api_key"] = "ollama"
+
     if llm_config:
         config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
         config["llm"].update(llm_config)
+
+    # Force cascade_evaluation: false unless user explicitly set it.
+    # OpenEvolve defaults to true, but Revolver evaluators don't define
+    # evaluate_stage1/2/3 methods so cascade must be disabled.
+    config.setdefault("evaluator", {})
+    if isinstance(config.get("evaluator"), dict):
+        config["evaluator"].setdefault("cascade_evaluation", False)
 
     # 3. Problem description injection (DES-005 §4.4)
     if problem_description:
@@ -267,6 +281,21 @@ def build_config(
         config["output_dir"] = str(output_dir)
 
     return config
+
+
+def _extract_best_score(best: Any) -> float | None:
+    """Extract a numeric score from the OpenEvolve best result.
+
+    OpenEvolve may return a raw number or a ``Program`` object with a
+    ``.metrics`` dict containing ``"combined_score"``.
+    """
+    if isinstance(best, (int, float)):
+        return float(best)
+    if hasattr(best, "metrics") and isinstance(best.metrics, dict):
+        score = best.metrics.get("combined_score")
+        if isinstance(score, (int, float)):
+            return float(score)
+    return None
 
 
 def _set_nested(d: dict[str, Any], key: str, value: Any) -> None:
@@ -331,4 +360,4 @@ def revolver_env(env_vars: dict[str, str]) -> Iterator[None]:
                 os.environ[key] = prev
 
 
-__all__ = ["TokenUsage"]
+__all__ = ["OpenEvolveRunner", "ProgressInfo", "RunOutput", "build_config", "revolver_env"]

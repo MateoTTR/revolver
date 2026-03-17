@@ -28,14 +28,27 @@ from revolver.models.llm import LLMEntry
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
 
-def _make_llm_entry() -> LLMEntry:
-    """Create a minimal LLMEntry for testing."""
+def _make_llm_entry(*, source: str = "local") -> LLMEntry:
+    """Create a minimal LLMEntry for testing.
+
+    Args:
+        source: ``"local"`` for Ollama or ``"remote"`` for API-based.
+    """
+    if source == "local":
+        return LLMEntry(
+            name="test-llm",
+            source="local",
+            model="test-model",
+            base_url="http://localhost:11434/v1",
+            api_key_env=None,
+            registered_at=datetime.now(UTC),
+        )
     return LLMEntry(
-        name="test-llm",
-        source="local",
-        model="test-model",
-        base_url="http://localhost:11434/v1",
-        api_key_env=None,
+        name="test-llm-remote",
+        source="remote",
+        model="claude-sonnet-4-20250514",
+        base_url="https://api.anthropic.com/v1",
+        api_key_env="ANTHROPIC_API_KEY",
         registered_at=datetime.now(UTC),
     )
 
@@ -96,8 +109,10 @@ class TestBuildConfigRoundtrip:
             output_dir=tmp_path / "output",
         )
 
-        # Revolver-specific keys must be absent from the dict
-        assert "evaluator" not in config_dict
+        # Revolver-specific string values must be stripped from the dict
+        # (evaluator is now a dict with cascade_evaluation, not the original string)
+        assert config_dict.get("evaluator") != "evaluator.py"
+        assert isinstance(config_dict.get("evaluator"), dict)
         assert "initial_program" not in config_dict
 
         # num_generations must be mapped to max_iterations
@@ -107,6 +122,65 @@ class TestBuildConfigRoundtrip:
         # Round-trip through Config.from_dict() -- the v0.4.2 crash
         config_obj = OEConfig.from_dict(config_dict)
         assert config_obj.max_iterations == 50
+
+    def test_build_config_local_llm_api_key(self, tmp_path: Path) -> None:
+        """Local LLM without api_key_env gets api_key='ollama' injected."""
+        llm = _make_llm_entry(source="local")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["llm"]["api_key"] == "ollama"
+
+        # Round-trip through Config.from_dict()
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.llm.api_key == "ollama"
+
+    def test_build_config_remote_llm_no_dummy_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote LLM with api_key_env does not get the 'ollama' placeholder."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real-key-for-test")
+        llm = _make_llm_entry(source="remote")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["llm"]["api_key"] == "sk-ant-real-key-for-test"
+        assert config_dict["llm"]["api_key"] != "ollama"
+
+    def test_build_config_cascade_evaluation_default(self, tmp_path: Path) -> None:
+        """cascade_evaluation is forced to False when not set by user."""
+        llm = _make_llm_entry()
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["evaluator"]["cascade_evaluation"] is False
+
+        # Round-trip through Config.from_dict()
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.evaluator.cascade_evaluation is False
+
+    def test_build_config_cascade_evaluation_user_override(self, tmp_path: Path) -> None:
+        """User-set cascade_evaluation: true is preserved."""
+        config_yaml = tmp_path / "config.yaml"
+        config_yaml.write_text("evaluator:\n  cascade_evaluation: true\n")
+
+        llm = _make_llm_entry()
+        config_dict = build_config(
+            problem_config=config_yaml,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["evaluator"]["cascade_evaluation"] is True
 
     def test_build_config_num_generations_override(self, tmp_path: Path) -> None:
         """--iterations override wins over num_generations from config.yaml."""
