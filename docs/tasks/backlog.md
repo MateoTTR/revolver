@@ -166,6 +166,16 @@
 | 89 | Write L2 integration tests for `solution` (9 scenarios) | [x] | S5 — session 028, PR #50 |
 | 90 | Write L2 integration tests for `eval` (10 scenarios) | [x] | S5 — session 028, PR #51 |
 
+### Sprint 005a — Demo v0.5.0 Feedback Fixes
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 136 | F1-fix — Store `api_key_env` in `build_config()` + `resolve_api_keys()` helper (SECURITY) | [x] | S5a — session 029, PR #56 |
+| 137 | F2-fix — Set top-level `random_seed=None` for Google providers (BLOCKING) | [x] | S5a — session 029, PR #56 |
+| 138 | F3-fix — `completed_with_errors` status + `run-error.log` + schema migration v2 (MAJOR) | [x] | S5a — session 029, PR #57 |
+| 139 | F3-extract — Relax `extract_solution()` for `completed_with_errors` runs | [x] | S5a — session 029, PR #57 |
+| 140 | F4-delete — `solution delete` with confirmation, `--force`, cascade eval (MEDIUM) | [x] | S5a — session 029, PR #55 |
+
 ### Sprint 006 — Benchmark: Multi-Solution Comparison & Export
 
 | # | Task | Status | Sprint |
@@ -205,8 +215,8 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 120 | POC — LLM thinking mode vs diff parser: capture raw responses from Flash vs Flash-Lite, analyze structure, test regex strip, test thinking disable via API. Validate intuition that thinking bavardage (not model capability) causes 0% valid diffs. | [ ] | TBD |
-| 121 | LLM response post-processing: strip thinking/reasoning before OpenEvolve diff parser. Niveau 3 (disable thinking via provider API in `build_config()`) + Niveau 2 (optional response filter in proxy). Blocked by: POC #120 validation. | [ ] | TBD |
+| 120 | Gemini thinking mode auto-config: detect thinking-enabled models in `build_config()`, auto-set `reasoning_effort: "none"` and/or increase `max_tokens` to prevent silent token budget exhaustion. Root cause validated (session 029): thinking tokens consume `max_tokens` silently, not bavardage in response. | [ ] | TBD |
+| 121 | ~~LLM response post-processing~~ — **Deprioritized**: thinking tokens are invisible in response content, proxy-level filtering would not help. Keep as low-priority defense-in-depth only. | [~] | — |
 | 122 | `revolver problem test --wrapper` — validate OE wrapper evaluator interface before run | [ ] | TBD |
 | 132 | Multi-language support: make program filename and extension configurable (`solver.cpp`, `main.rs`, etc.) instead of hardcoded `initial_program.py`. Propagate to OE `file_suffix`, snapshot, solution collection. | [ ] | TBD |
 | 133 | Program support files: allow a `program_dir/` with auxiliary files (headers, local modules, data) copied alongside the program temp file during OE evaluation. Solves local `import`/`#include` breakage. | [ ] | TBD |

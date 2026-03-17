@@ -168,7 +168,7 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-031 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_run_postprocessing_failure_status` | Planned |
 | FR-RUN-032 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_run_postprocessing_failure_status` | Planned |
 | FR-RUN-033 | MUST | DES-005 §extract | L2 | `integration/test_solution::test_extract_accepts_completed_with_errors` | Planned |
-| FR-RUN-034 | SHOULD | DES-005 §resume | L2 | (covered by resume tests) | Planned |
+| FR-RUN-034 | MUST | DES-005 §resume | L2 | (covered by resume tests) | Planned |
 
 ---
 
@@ -352,14 +352,14 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-llm | 18 | 11 | 6 | 0 | 8 | 10 | via Sc.1 | 0 |
 | spec-problem | 15 | 10 | 4 | 1 | 4 | 10 | via Sc.1 | 0 |
 | spec-dataset | 16 | 12 | 2 | 0 | 6 | 10 | via Sc.1 | 0 |
-| spec-run | 34 | 23 | 11 | 0 | 16 | 18 | via Sc.1 | 0 |
+| spec-run | 34 | 25 | 9 | 0 | 16 | 18 | via Sc.1 | 0 |
 | spec-eval | 20 | 15 | 3 | 1 | 10 | 9 | via Sc.1 | 1 (FR-EVL-014, deferred) |
-| spec-solution | 17 | 15 | 1 | 0 | 3 | 14 | via Sc.1 | 0 |
+| spec-solution | 17 | 16 | 1 | 0 | 3 | 14 | via Sc.1 | 0 |
 | spec-benchmark | 17 | 12 | 4 | 0 | 7 | 10 | via Sc.1 | 0 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
 | NFR (direct) | 27 | 19 | 8 | 0 | 8 | 11 | — | 3 (perf, manual) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **202** | **138** | **51** | **2** | **66** | **113** | **2 scenarios** | **4** |
+| **Total** | **202** | **141** | **49** | **2** | **66** | **113** | **2 scenarios** | **4** |
 
 Notes:
 - 55 FR-SOL, FR-RUN, FR-EVL requirements share test coverage across unit and integration tests. The total counts distinct test assignments (some FRs have both L1 and L2 tests).
