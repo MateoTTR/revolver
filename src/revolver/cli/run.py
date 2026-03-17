@@ -323,6 +323,7 @@ def run_list(
                         "status": s.status,
                         "iterations": s.iterations,
                         "best_score": (f"{s.best_score:.4f}" if s.best_score is not None else "-"),
+                        "alias": s.alias or "",
                         "created_at": str(s.created_at),
                     }
                     for s in summaries

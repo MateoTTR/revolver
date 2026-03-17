@@ -89,7 +89,7 @@ class TestRunInstance:
 class TestDualFunctionWarning:
     """Tests for FB-06: dual-function warning suppression on wrapper."""
 
-    def test_wrapper_no_dual_function_warning(self, tmp_path: Path, capsys: object) -> None:
+    def test_wrapper_no_dual_function_warning(self, tmp_path: Path) -> None:
         """Auto-generated wrapper (_revolver_evaluator.py) should not emit warning."""
         import io
         import sys

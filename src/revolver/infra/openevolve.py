@@ -314,7 +314,7 @@ def _set_nested(d: dict[str, Any], key: str, value: Any) -> None:
 def _parse_value(value: str) -> Any:
     """Parse a string value into the appropriate Python type.
 
-    Supports: None (null/none), bool, int, float, and string fallback.
+    Supports: None (null/none), int, float, bool, and string fallback.
     """
     if value.lower() in ("null", "none"):
         return None

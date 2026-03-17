@@ -45,6 +45,7 @@ def _run_in_subprocess(
 
     if hasattr(module, "evaluate") and callable(module.evaluate):
         has_both = hasattr(module, "evaluate_instance") and callable(module.evaluate_instance)
+        # Skip warning for auto-generated wrapper (has both functions by design)
         is_wrapper = Path(evaluator_path).name == "_revolver_evaluator.py"
         if has_both and not is_wrapper:
             import sys
