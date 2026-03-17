@@ -1,4 +1,4 @@
-"""Tests for the token counting proxy (S4-02).
+"""Tests for the token counting proxy (S4-02 + S4b FB-01/03/04).
 
 Uses actual HTTP requests to verify the proxy works end-to-end.
 """
@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
-from typing import Any
+from typing import Any, ClassVar
+from unittest.mock import patch
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
@@ -273,3 +275,305 @@ class TestEstimateCost:
         assert cost is not None
         # 100 * 3.0 / 1M + 50 * 15.0 / 1M = 0.0003 + 0.00075 = 0.00105
         assert cost == pytest.approx(0.00105)
+
+
+# ── Fake error LLM backend ──────────────────────────────────────────────────
+
+
+class _FakeErrorHandler(BaseHTTPRequestHandler):
+    """Fake LLM server that returns a configurable HTTP error status."""
+
+    # Class-level overrides
+    error_code: int = 400
+    error_body: bytes = b'{"error":"bad request"}'
+    extra_headers: ClassVar[dict[str, str]] = {}
+
+    def do_POST(self) -> None:
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+
+        self.send_response(self.error_code)
+        self.send_header("Content-Type", "application/json")
+        for name, value in self.extra_headers.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(self.error_body)))
+        self.end_headers()
+        self.wfile.write(self.error_body)
+
+    def do_GET(self) -> None:
+        self.send_response(self.error_code)
+        self.send_header("Content-Type", "application/json")
+        for name, value in self.extra_headers.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(self.error_body)))
+        self.end_headers()
+        self.wfile.write(self.error_body)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+def _start_fake_error_llm(
+    error_code: int = 400,
+    error_body: bytes = b'{"error":"bad request"}',
+    extra_headers: dict[str, str] | None = None,
+) -> tuple[HTTPServer, int]:
+    """Start a fake LLM server that always returns an HTTP error."""
+    handler_cls = type(
+        "_ErrorHandler",
+        (_FakeErrorHandler,),
+        {
+            "error_code": error_code,
+            "error_body": error_body,
+            "extra_headers": extra_headers or {},
+        },
+    )
+    server = HTTPServer(("127.0.0.1", 0), handler_cls)
+    port = server.server_address[1]
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, port
+
+
+# ── FB-01: Forward upstream HTTP status codes ────────────────────────────────
+
+
+class TestProxyErrorForwarding:
+    """Tests for HTTP error forwarding (FB-01)."""
+
+    def test_proxy_forwards_400_status(self) -> None:
+        """Proxy forwards 400 status and body from upstream."""
+        error_body = b'{"error":"bad request","message":"invalid model"}'
+        fake_server, fake_port = _start_fake_error_llm(error_code=400, error_body=error_body)
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with pytest.raises(HTTPError) as exc_info:
+                urlopen(req, timeout=5)
+
+            assert exc_info.value.code == 400
+            body = exc_info.value.read()
+            assert b"bad request" in body
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
+    def test_proxy_forwards_429_with_body(self) -> None:
+        """Proxy forwards 429 status and body from upstream."""
+        error_body = b'{"error":"rate limited"}'
+        fake_server, fake_port = _start_fake_error_llm(error_code=429, error_body=error_body)
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with pytest.raises(HTTPError) as exc_info:
+                urlopen(req, timeout=5)
+
+            assert exc_info.value.code == 429
+            body = exc_info.value.read()
+            assert b"rate limited" in body
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
+    def test_proxy_returns_502_on_connection_error(self) -> None:
+        """Proxy returns 502 for non-HTTP errors (connection refused)."""
+        # Point at a port that is not listening
+        proxy = TokenCountingProxy("http://127.0.0.1:1")
+        proxy_url = proxy.start()
+
+        req = Request(
+            f"{proxy_url}/v1/chat/completions",
+            data=json.dumps({"model": "test"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(req, timeout=5)
+
+        assert exc_info.value.code == 502
+        body = json.loads(exc_info.value.read())
+        assert "error" in body
+
+        proxy.stop()
+
+    def test_proxy_token_counting_unchanged(self) -> None:
+        """Normal 200 responses still count tokens after changes."""
+        fake_server, fake_port = _start_fake_llm()
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+
+            assert data["usage"]["prompt_tokens"] == 10
+            usage = proxy.stop()
+            assert usage.prompt_tokens == 10
+            assert usage.completion_tokens == 20
+        finally:
+            fake_server.shutdown()
+
+    def test_proxy_forwards_500_on_get(self) -> None:
+        """Proxy forwards 500 error on GET request."""
+        error_body = b'{"error":"internal server error"}'
+        fake_server, fake_port = _start_fake_error_llm(error_code=500, error_body=error_body)
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(f"{proxy_url}/v1/models", method="GET")
+            with pytest.raises(HTTPError) as exc_info:
+                urlopen(req, timeout=5)
+
+            assert exc_info.value.code == 500
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
+
+# ── FB-03: Forward Retry-After header ────────────────────────────────────────
+
+
+class TestProxyRetryAfterForwarding:
+    """Tests for Retry-After header forwarding (FB-03)."""
+
+    def test_proxy_forwards_retry_after_header(self) -> None:
+        """Proxy forwards Retry-After header from 429 responses."""
+        fake_server, fake_port = _start_fake_error_llm(
+            error_code=429,
+            error_body=b'{"error":"rate limited"}',
+            extra_headers={"Retry-After": "30"},
+        )
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with pytest.raises(HTTPError) as exc_info:
+                urlopen(req, timeout=5)
+
+            assert exc_info.value.code == 429
+            retry_after = exc_info.value.headers.get("Retry-After")
+            assert retry_after == "30"
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
+
+# ── FB-04: Optional backoff on 429 ──────────────────────────────────────────
+
+
+class TestProxyBackoffOn429:
+    """Tests for optional proxy-level backoff on 429 (FB-04)."""
+
+    def test_proxy_backoff_waits_on_429(self) -> None:
+        """With backoff_on_429=True, proxy sleeps for Retry-After duration."""
+        fake_server, fake_port = _start_fake_error_llm(
+            error_code=429,
+            error_body=b'{"error":"rate limited"}',
+            extra_headers={"Retry-After": "2"},
+        )
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}", backoff_on_429=True)
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with patch("revolver.infra.token_proxy.time.sleep") as mock_sleep:
+                with pytest.raises(HTTPError) as exc_info:
+                    urlopen(req, timeout=10)
+
+                assert exc_info.value.code == 429
+                mock_sleep.assert_called_once_with(2.0)
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
+    def test_proxy_no_backoff_by_default(self) -> None:
+        """Default backoff_on_429=False means no sleep on 429."""
+        fake_server, fake_port = _start_fake_error_llm(
+            error_code=429,
+            error_body=b'{"error":"rate limited"}',
+            extra_headers={"Retry-After": "2"},
+        )
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with patch("revolver.infra.token_proxy.time.sleep") as mock_sleep:
+                with pytest.raises(HTTPError):
+                    urlopen(req, timeout=5)
+
+                mock_sleep.assert_not_called()
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
+    def test_proxy_backoff_capped_at_60s(self) -> None:
+        """Backoff is capped at 60 seconds even if Retry-After is larger."""
+        fake_server, fake_port = _start_fake_error_llm(
+            error_code=429,
+            error_body=b'{"error":"rate limited"}',
+            extra_headers={"Retry-After": "300"},
+        )
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}", backoff_on_429=True)
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with patch("revolver.infra.token_proxy.time.sleep") as mock_sleep:
+                with pytest.raises(HTTPError):
+                    urlopen(req, timeout=10)
+
+                mock_sleep.assert_called_once_with(60.0)
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
