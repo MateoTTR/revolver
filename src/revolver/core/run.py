@@ -13,6 +13,7 @@ Traceable to: DES-005, ADR-006, FR-RUN-001..030.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import os
 import shutil
@@ -53,7 +54,7 @@ from revolver.infra.db import (
     list_runs as db_list_runs,
 )
 from revolver.infra.evaluator_runner import run_instance as eval_run_instance
-from revolver.infra.openevolve import OpenEvolveRunner, build_config, revolver_env
+from revolver.infra.openevolve import OpenEvolveRunner, RunOutput, build_config, revolver_env
 from revolver.infra.store import (
     PROBLEM_DIR,
     REVOLVER_DIR,
@@ -213,6 +214,53 @@ def _resolve_project_root(project_root: Path | None) -> Path:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
         raise RevolverError(str(exc)) from exc
+
+
+# ── Post-run failure handler ──────────────────────────────────────────────────
+
+
+def _handle_post_run_failure(
+    proj_conn: Any,
+    root: Path,
+    run_id: str,
+    run_dir: Path,
+    generation_time_s: float,
+    exc: BaseException | None,
+) -> None:
+    """Handle a post-processing failure after OE completed successfully.
+
+    Sets the run status to ``completed_with_errors``, writes an error log
+    to ``run-error.log`` in the run directory, and removes the lock file.
+    All steps are best-effort to avoid masking the original exception.
+
+    Args:
+        proj_conn: An open project database connection.
+        root: Project root directory.
+        run_id: The run ID to update.
+        run_dir: The run's output directory.
+        generation_time_s: Measured OE generation time in seconds.
+        exc: The exception that caused the post-processing failure.
+    """
+    # 1. Write error log (best-effort)
+    error_log_path = run_dir / "run-error.log"
+    with contextlib.suppress(Exception):
+        error_log_path.write_text(
+            f"Post-run processing error at {datetime.now(UTC).isoformat()}:\n"
+            f"{type(exc).__name__}: {exc}\n"
+        )
+
+    # 2. Update status to completed_with_errors (best-effort)
+    try:
+        update_run_generation_time(
+            proj_conn, run_id, generation_time_s, status="completed_with_errors"
+        )
+    except Exception:
+        with contextlib.suppress(Exception):
+            update_run_status(proj_conn, run_id, "completed_with_errors")
+
+    # 3. Remove lock file (best-effort)
+    with contextlib.suppress(Exception):
+        remove_run_lock(root, run_id)
 
 
 # ── launch_run (DES-005 §2.1) ────────────────────────────────────────────────
@@ -395,6 +443,10 @@ def launch_run(
                 oe_config["llm"] = {}
             oe_config["llm"]["api_base"] = proxy_url
 
+        oe_completed = False
+        generation_time_s = 0.0
+        run_output: RunOutput | None = None
+
         try:
             # Set env vars via revolver_env()
             env_vars = {
@@ -465,6 +517,10 @@ def launch_run(
                 # Record end time
                 end_time = time.monotonic()
                 generation_time_s = end_time - start_time
+
+            # OE completed successfully — any exception below is
+            # a post-processing failure, not an OE interruption.
+            oe_completed = True
 
             # Stop token proxy, get token usage
             token_usage_model: PydanticTokenUsage | None = None
@@ -571,22 +627,62 @@ def launch_run(
         except KeyboardInterrupt:
             # Stop proxy on interrupt
             if proxy is not None:
-                proxy.stop()
-            update_run_status(proj_conn, run_id, "interrupted")
-            remove_run_lock(root, run_id)
+                with contextlib.suppress(Exception):
+                    proxy.stop()
+            if oe_completed:
+                _handle_post_run_failure(
+                    proj_conn,
+                    root,
+                    run_id,
+                    run_dir,
+                    generation_time_s,
+                    KeyboardInterrupt("Interrupted during post-processing"),
+                )
+            else:
+                update_run_status(proj_conn, run_id, "interrupted")
+                remove_run_lock(root, run_id)
             raise
-        except (RevolverError, ExternalError):
+        except (RevolverError, ExternalError) as re_exc:
             if proxy is not None:
-                proxy.stop()
-            update_run_status(proj_conn, run_id, "interrupted")
-            remove_run_lock(root, run_id)
+                with contextlib.suppress(Exception):
+                    proxy.stop()
+            if oe_completed:
+                _handle_post_run_failure(
+                    proj_conn,
+                    root,
+                    run_id,
+                    run_dir,
+                    generation_time_s,
+                    re_exc,
+                )
+            else:
+                update_run_status(proj_conn, run_id, "interrupted")
+                remove_run_lock(root, run_id)
             raise
         except Exception as exc:
             if proxy is not None:
-                proxy.stop()
-            update_run_status(proj_conn, run_id, "interrupted")
-            remove_run_lock(root, run_id)
-            raise ExternalError(f"Run failed: {exc}") from exc
+                with contextlib.suppress(Exception):
+                    proxy.stop()
+            if oe_completed:
+                _handle_post_run_failure(
+                    proj_conn,
+                    root,
+                    run_id,
+                    run_dir,
+                    generation_time_s,
+                    exc,
+                )
+                best = run_output.best_score if run_output else "unknown"
+                raise ExternalError(
+                    f"OpenEvolve completed (best_score={best}) "
+                    f"but post-run processing failed: {exc}. "
+                    f"Run status set to 'completed_with_errors'. "
+                    f"Error details in: {run_dir / 'run-error.log'}"
+                ) from exc
+            else:
+                update_run_status(proj_conn, run_id, "interrupted")
+                remove_run_lock(root, run_id)
+                raise ExternalError(f"Run failed: {exc}") from exc
 
     finally:
         proj_conn.close()
@@ -745,10 +841,11 @@ def resume_run(
 
         # 2. Validate status
         parent_status = parent["status"]
-        if parent_status not in ("completed", "interrupted"):
+        if parent_status not in ("completed", "interrupted", "completed_with_errors"):
             raise RevolverError(
                 f"Cannot resume run '{run_id}' with status '{parent_status}'. "
-                f"Only 'completed' or 'interrupted' runs can be resumed."
+                f"Only 'completed', 'interrupted', or 'completed_with_errors' "
+                f"runs can be resumed."
             )
 
         # 3. Load parent's problem version, LLM, dataset
@@ -852,6 +949,10 @@ def resume_run(
                 oe_config["llm"] = {}
             oe_config["llm"]["api_base"] = proxy_url
 
+        oe_completed = False
+        generation_time_s = 0.0
+        run_output_resume: RunOutput | None = None
+
         try:
             env_vars = {
                 "REVOLVER_DATASET_DIR": str(dataset_path),
@@ -915,13 +1016,17 @@ def resume_run(
                     config=oe_config,
                     output_dir=oe_output_dir,
                 )
-                run_output = runner.run(
+                run_output_resume = runner.run(
                     iterations=actual_iterations,
                     checkpoint=new_checkpoint,
                 )
 
                 end_time = time.monotonic()
                 generation_time_s = end_time - start_time
+
+            # OE completed successfully — any exception below is
+            # a post-processing failure, not an OE interruption.
+            oe_completed = True
 
             # Stop token proxy
             token_usage_model: PydanticTokenUsage | None = None
@@ -950,7 +1055,7 @@ def resume_run(
 
             # Create solution
             solution_id = generate_solution_id()
-            best_score = run_output.best_score
+            best_score = run_output_resume.best_score
             insert_solution(
                 proj_conn,
                 solution_id=solution_id,
@@ -1023,22 +1128,62 @@ def resume_run(
 
         except KeyboardInterrupt:
             if proxy is not None:
-                proxy.stop()
-            update_run_status(proj_conn, new_run_id, "interrupted")
-            remove_run_lock(root, new_run_id)
+                with contextlib.suppress(Exception):
+                    proxy.stop()
+            if oe_completed:
+                _handle_post_run_failure(
+                    proj_conn,
+                    root,
+                    new_run_id,
+                    new_run_dir,
+                    generation_time_s,
+                    KeyboardInterrupt("Interrupted during post-processing"),
+                )
+            else:
+                update_run_status(proj_conn, new_run_id, "interrupted")
+                remove_run_lock(root, new_run_id)
             raise
-        except (RevolverError, ExternalError):
+        except (RevolverError, ExternalError) as re_exc:
             if proxy is not None:
-                proxy.stop()
-            update_run_status(proj_conn, new_run_id, "interrupted")
-            remove_run_lock(root, new_run_id)
+                with contextlib.suppress(Exception):
+                    proxy.stop()
+            if oe_completed:
+                _handle_post_run_failure(
+                    proj_conn,
+                    root,
+                    new_run_id,
+                    new_run_dir,
+                    generation_time_s,
+                    re_exc,
+                )
+            else:
+                update_run_status(proj_conn, new_run_id, "interrupted")
+                remove_run_lock(root, new_run_id)
             raise
         except Exception as exc:
             if proxy is not None:
-                proxy.stop()
-            update_run_status(proj_conn, new_run_id, "interrupted")
-            remove_run_lock(root, new_run_id)
-            raise ExternalError(f"Resumed run failed: {exc}") from exc
+                with contextlib.suppress(Exception):
+                    proxy.stop()
+            if oe_completed:
+                _handle_post_run_failure(
+                    proj_conn,
+                    root,
+                    new_run_id,
+                    new_run_dir,
+                    generation_time_s,
+                    exc,
+                )
+                best = run_output_resume.best_score if run_output_resume else "unknown"
+                raise ExternalError(
+                    f"OpenEvolve completed (best_score={best}) "
+                    f"but post-run processing failed: {exc}. "
+                    f"Run status set to 'completed_with_errors'. "
+                    f"Error details in: {new_run_dir / 'run-error.log'}"
+                ) from exc
+            else:
+                update_run_status(proj_conn, new_run_id, "interrupted")
+                remove_run_lock(root, new_run_id)
+                raise ExternalError(f"Resumed run failed: {exc}") from exc
 
     finally:
         proj_conn.close()

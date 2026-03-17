@@ -27,7 +27,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS runs (
     llm_model         TEXT NOT NULL,
     resumed_from      TEXT REFERENCES runs(id),
     status            TEXT NOT NULL DEFAULT 'running'
-                      CHECK (status IN ('running', 'completed', 'interrupted')),
+                      CHECK (status IN ('running', 'completed',
+                             'interrupted', 'completed_with_errors')),
     created_at        TEXT NOT NULL
 );
 
@@ -169,7 +170,38 @@ CREATE TABLE IF NOT EXISTS llms (
 
 # Forward-only migrations. Key = target version, value = SQL to apply.
 # Version 1 is the initial schema (handled by _apply_schema above).
-MIGRATIONS: dict[int, str] = {}
+MIGRATIONS: dict[int, str] = {
+    2: """\
+-- Migration v2: Add 'completed_with_errors' to runs.status CHECK constraint.
+-- SQLite does not support ALTER CHECK, so we recreate the table.
+CREATE TABLE IF NOT EXISTS runs_new (
+    id                TEXT PRIMARY KEY,
+    problem_version   TEXT NOT NULL REFERENCES problem_versions(tag),
+    llm               TEXT NOT NULL,
+    dataset           TEXT NOT NULL REFERENCES datasets(name),
+    iterations        INTEGER NOT NULL,
+    generation_time_s REAL,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    config_snapshot   TEXT,
+    problem_hash      TEXT NOT NULL,
+    dataset_hash      TEXT NOT NULL,
+    llm_model         TEXT NOT NULL,
+    resumed_from      TEXT REFERENCES runs_new(id),
+    status            TEXT NOT NULL DEFAULT 'running'
+                      CHECK (status IN ('running', 'completed',
+                             'interrupted', 'completed_with_errors')),
+    created_at        TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO runs_new SELECT * FROM runs;
+DROP TABLE runs;
+ALTER TABLE runs_new RENAME TO runs;
+
+CREATE INDEX IF NOT EXISTS idx_runs_version ON runs(problem_version);
+CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+""",
+}
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
@@ -874,14 +906,15 @@ def insert_run(
 def update_run_status(
     conn: sqlite3.Connection,
     run_id: str,
-    status: Literal["running", "completed", "interrupted"],
+    status: Literal["running", "completed", "interrupted", "completed_with_errors"],
 ) -> None:
     """Update the status of a run.
 
     Args:
         conn: An open project database connection.
         run_id: The run ID to update.
-        status: New status (``"running"``, ``"completed"``, or ``"interrupted"``).
+        status: New status (``"running"``, ``"completed"``, ``"interrupted"``,
+            or ``"completed_with_errors"``).
     """
     conn.execute(
         "UPDATE runs SET status = ? WHERE id = ?",
@@ -915,7 +948,7 @@ def update_run_generation_time(
     conn: sqlite3.Connection,
     run_id: str,
     generation_time_s: float,
-    status: Literal["running", "completed", "interrupted"] = "completed",
+    status: Literal["running", "completed", "interrupted", "completed_with_errors"] = "completed",
 ) -> None:
     """Atomically update generation time and status for a run.
 

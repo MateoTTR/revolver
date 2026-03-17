@@ -190,7 +190,7 @@ def extract_solution(
         run = get_run(conn, run_id)
         if run is None:
             raise RevolverError(f"Run not found: {run_id}")
-        if run.get("status") != "completed":
+        if run.get("status") not in ("completed", "completed_with_errors"):
             raise ValidationError(
                 f"Run '{run_id}' is not completed (status: '{run.get('status')}')"
             )
