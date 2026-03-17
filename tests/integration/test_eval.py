@@ -34,6 +34,8 @@ from revolver.infra.store import PROBLEM_DIR, REVOLVER_DIR, RUNS_DIR
 from revolver.models.dataset import DatasetInstance, DatasetRegistration
 from revolver.models.problem import InstanceTestResult, ProblemVersion
 
+pytestmark = pytest.mark.integration
+
 runner = CliRunner()
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
