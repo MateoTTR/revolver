@@ -223,6 +223,7 @@ class RunSummary(BaseModel):
         resumed_from: Parent run ID if this is a resumed run.
         created_at: Timestamp of run creation.
         best_score: Best score achieved (from rank-1 solution).
+        alias: Alias of the rank-1 solution (if set).
     """
 
     run_id: str
@@ -236,6 +237,7 @@ class RunSummary(BaseModel):
     resumed_from: str | None = None
     created_at: datetime
     best_score: float | None = None
+    alias: str | None = None
 
 
 class RunInfo(BaseModel):

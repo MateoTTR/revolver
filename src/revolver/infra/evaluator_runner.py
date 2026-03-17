@@ -44,12 +44,14 @@ def _run_in_subprocess(
     spec.loader.exec_module(module)
 
     if hasattr(module, "evaluate") and callable(module.evaluate):
-        if hasattr(module, "evaluate_instance") and callable(module.evaluate_instance):
+        has_both = hasattr(module, "evaluate_instance") and callable(module.evaluate_instance)
+        is_wrapper = Path(evaluator_path).name == "_revolver_evaluator.py"
+        if has_both and not is_wrapper:
             import sys
 
             print(
-                "[revolver] Warning: evaluator defines both evaluate() and evaluate_instance(). "
-                "Using evaluate() (legacy mode).",
+                "[revolver] Warning: evaluator defines both evaluate() "
+                "and evaluate_instance(). Using evaluate() (legacy mode).",
                 file=sys.stderr,
             )
         result: dict[str, float] = module.evaluate(program_path)

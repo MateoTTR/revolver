@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from revolver.infra.evaluator_runner import run_instance
+from revolver.infra.evaluator_runner import _run_in_subprocess, run_instance
 from revolver.models.problem import InstanceTestResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -84,3 +84,71 @@ class TestRunInstance:
         assert result.metrics is not None
         assert result.metrics["path_len"] > 0
         assert result.metrics["id_len"] > 0
+
+
+class TestDualFunctionWarning:
+    """Tests for FB-06: dual-function warning suppression on wrapper."""
+
+    def test_wrapper_no_dual_function_warning(self, tmp_path: Path, capsys: object) -> None:
+        """Auto-generated wrapper (_revolver_evaluator.py) should not emit warning."""
+        import io
+        import sys
+
+        wrapper = tmp_path / "_revolver_evaluator.py"
+        wrapper.write_text(
+            "def evaluate(program_path):\n"
+            "    return {'combined_score': 1.0}\n"
+            "def evaluate_instance(program_path, instance_path):\n"
+            "    return {'combined_score': 1.0}\n"
+        )
+        program = tmp_path / "prog.py"
+        program.write_text("# dummy program\n")
+
+        captured_stderr = io.StringIO()
+        old_stderr = sys.stderr
+        sys.stderr = captured_stderr
+        try:
+            result = _run_in_subprocess(
+                str(wrapper),
+                str(program),
+                str(tmp_path),
+                "test-instance",
+            )
+        finally:
+            sys.stderr = old_stderr
+
+        assert result == {"combined_score": 1.0}
+        assert "Warning" not in captured_stderr.getvalue()
+
+    def test_user_evaluator_dual_function_warning(self, tmp_path: Path) -> None:
+        """User evaluator with both functions should emit warning."""
+        import io
+        import sys
+
+        user_eval = tmp_path / "my_evaluator.py"
+        user_eval.write_text(
+            "def evaluate(program_path):\n"
+            "    return {'combined_score': 1.0}\n"
+            "def evaluate_instance(program_path, instance_path):\n"
+            "    return {'combined_score': 1.0}\n"
+        )
+        program = tmp_path / "prog.py"
+        program.write_text("# dummy program\n")
+
+        captured_stderr = io.StringIO()
+        old_stderr = sys.stderr
+        sys.stderr = captured_stderr
+        try:
+            result = _run_in_subprocess(
+                str(user_eval),
+                str(program),
+                str(tmp_path),
+                "test-instance",
+            )
+        finally:
+            sys.stderr = old_stderr
+
+        assert result == {"combined_score": 1.0}
+        assert "Warning" in captured_stderr.getvalue()
+        assert "evaluate()" in captured_stderr.getvalue()
+        assert "evaluate_instance()" in captured_stderr.getvalue()

@@ -1008,7 +1008,9 @@ def list_runs(
         where = "WHERE " + " AND ".join(clauses)
 
     query = f"""\
-        SELECT r.*, MAX(s.best_score) AS best_score
+        SELECT r.*, MAX(s.best_score) AS best_score,
+               (SELECT s2.alias FROM solutions s2
+                WHERE s2.run_id = r.id AND s2.rank = 1 LIMIT 1) AS alias
         FROM runs r
         LEFT JOIN solutions s ON s.run_id = r.id
         {where}
