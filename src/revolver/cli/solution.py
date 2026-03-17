@@ -112,7 +112,7 @@ def solution_info(
                 list(raw_siblings) if isinstance(raw_siblings, list) else []
             )
             if siblings_list:
-                sys.stderr.write("\nSibling solutions from same run:\n")
+                typer.echo("\nSibling solutions from same run:")
                 sibling_rows: list[dict[str, object]] = [
                     {
                         "id": str(s.get("id", "")),

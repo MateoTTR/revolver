@@ -20,6 +20,7 @@ from revolver.infra.db import (
     get_project_db,
     get_run,
     get_solution,
+    get_solution_by_alias,
     get_solution_detail,
     get_solutions_for_run,
     insert_solution,
@@ -134,6 +135,9 @@ def set_alias(
         RevolverError: If the solution is not found.
         DuplicateNameError: If the alias is already in use.
     """
+    if not alias or not alias.strip():
+        raise ValidationError("Alias must not be empty")
+
     root = project_root or find_project_root(Path.cwd())
     db_path = root / REVOLVER_DIR / "revolver.db"
     conn = get_project_db(db_path)
@@ -175,14 +179,21 @@ def extract_solution(
         RevolverError: If the run is not found or the program file does not exist.
         DuplicateNameError: If (run_id, rank) already extracted or alias is duplicate.
     """
+    if rank <= 0:
+        raise ValidationError(f"Rank must be > 0, got {rank}")
+
     root = project_root or find_project_root(Path.cwd())
     db_path = root / REVOLVER_DIR / "revolver.db"
     conn = get_project_db(db_path)
     try:
-        # 1. Verify run exists
+        # 1. Verify run exists and is completed
         run = get_run(conn, run_id)
         if run is None:
             raise RevolverError(f"Run not found: {run_id}")
+        if run.get("status") != "completed":
+            raise ValidationError(
+                f"Run '{run_id}' is not completed (status: '{run.get('status')}')"
+            )
 
         # 2. Verify program file exists
         program_path = root / REVOLVER_DIR / RUNS_DIR / run_id / "programs" / f"rank-{rank}.py"
@@ -195,25 +206,27 @@ def extract_solution(
         # 4. best_score: not available from file, set None
         best_score: float | None = None
 
-        # 5. Insert via db.insert_solution()
-        try:
-            insert_solution(
-                conn,
-                solution_id=solution_id,
-                run_id=run_id,
-                rank=rank,
-                best_score=best_score,
-                alias=alias,
-            )
-        except sqlite3.IntegrityError as exc:
-            error_msg = str(exc).lower()
-            if "alias" in error_msg:
-                raise DuplicateNameError(f"Alias '{alias}' is already in use") from exc
-            raise DuplicateNameError(
-                f"Solution already exists for run={run_id}, rank={rank}"
-            ) from exc
+        # 5. Pre-insert validation: check duplicates before INSERT
+        existing = get_solutions_for_run(conn, run_id)
+        for s in existing:
+            if s.rank == rank:
+                raise DuplicateNameError(f"Solution already exists for run={run_id}, rank={rank}")
+        if alias:
+            existing_alias = get_solution_by_alias(conn, alias)
+            if existing_alias is not None:
+                raise DuplicateNameError(f"Alias '{alias}' is already in use")
 
-        # 6. Return the new Solution
+        # 6. Insert via db.insert_solution()
+        insert_solution(
+            conn,
+            solution_id=solution_id,
+            run_id=run_id,
+            rank=rank,
+            best_score=best_score,
+            alias=alias,
+        )
+
+        # 7. Return the new Solution
         return Solution(
             id=solution_id,
             run_id=run_id,

@@ -609,6 +609,13 @@ def _run_post_eval(
     It iterates over all instances, evaluates each via
     ``evaluator_runner.run_instance()``, and logs results to stderr.
 
+    Args:
+        evaluator_path: Path to the evaluator ``.py`` file.
+        program_path: Path to the rank-1 program file.
+        dataset_path: Path to the dataset directory.
+        run_id: ID of the completed run (for logging).
+        solution_id: ID of the rank-1 solution (for logging).
+    """
     # TODO(S5-08): Replace with core.eval.evaluate_solution() after PR C merge.
     # The signature should become:
     #   core.eval.evaluate_solution(
@@ -619,13 +626,6 @@ def _run_post_eval(
     #   )
     # This function can then be removed entirely.
 
-    Args:
-        evaluator_path: Path to the evaluator ``.py`` file.
-        program_path: Path to the rank-1 program file.
-        dataset_path: Path to the dataset directory.
-        run_id: ID of the completed run (for logging).
-        solution_id: ID of the rank-1 solution (for logging).
-    """
     # Enumerate instances
     instances = sorted(
         p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()

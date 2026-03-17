@@ -477,3 +477,74 @@ def test_extract_duplicate_blocked(project_with_solutions: Path) -> None:
         project_with_solutions,
     )
     assert result.exit_code == 1  # type: ignore[union-attr]
+
+
+@pytest.mark.integration
+def test_extract_rejects_non_completed_run(tmp_project: Path) -> None:
+    """``solution extract`` rejects a run that is not completed.
+
+    Validates: CRITICAL-1 review finding — run status must be 'completed'.
+    """
+    _create_problem_version_in_db(tmp_project, "v1.0")
+    _create_dataset_in_db(tmp_project, "train-small")
+
+    # Create a run with status='running' (not completed)
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id="run-running",
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train-small",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="running",
+        )
+    finally:
+        conn.close()
+
+    # Create program file so that the file-existence check passes
+    programs_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / "run-running" / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-running", "--rank", "1"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "not completed" in output.lower()
+
+
+@pytest.mark.integration
+def test_extract_rejects_rank_zero(project_with_solutions: Path) -> None:
+    """``solution extract --rank 0`` is rejected with validation error.
+
+    Validates: WARNING-4 review finding — rank must be > 0.
+    """
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-20260301-100000", "--rank", "0"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "rank" in output.lower()
+
+
+@pytest.mark.integration
+def test_alias_rejects_empty_string(project_with_solutions: Path) -> None:
+    """``solution alias <id> ""`` is rejected with validation error.
+
+    Validates: WARNING-4 review finding — alias must not be empty.
+    """
+    result = _invoke_with_cwd(
+        ["solution", "alias", "sol-20260301-100000", ""],
+        project_with_solutions,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]

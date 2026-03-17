@@ -1218,10 +1218,12 @@ def update_solution_alias(
         DuplicateNameError: If the alias is already used by another solution.
     """
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE solutions SET alias = ? WHERE id = ?",
             (alias, solution_id),
         )
+        if cursor.rowcount == 0:
+            raise KeyError(f"Solution not found: {solution_id}")
         conn.commit()
     except sqlite3.IntegrityError as exc:
         raise DuplicateNameError(f"Alias '{alias}' is already in use") from exc
