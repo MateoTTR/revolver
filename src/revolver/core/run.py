@@ -52,6 +52,7 @@ from revolver.infra.db import (
 from revolver.infra.db import (
     list_runs as db_list_runs,
 )
+from revolver.infra.evaluator_runner import run_instance as eval_run_instance
 from revolver.infra.openevolve import OpenEvolveRunner, build_config, revolver_env
 from revolver.infra.store import (
     PROBLEM_DIR,
@@ -406,8 +407,53 @@ def launch_run(
                 # Record start time
                 start_time = time.monotonic()
 
-                # Launch OpenEvolve
+                # Pre-flight check: evaluate initial program on first instance
                 initial_program = snapshot_dir / "initial_program.py"
+                preflight_instances = sorted(
+                    (
+                        p
+                        for p in dataset_path.iterdir()
+                        if not p.name.startswith(".") and p.is_file()
+                    ),
+                    key=lambda p: p.name,
+                )
+                if preflight_instances:
+                    first_instance = preflight_instances[0]
+                    preflight_result = eval_run_instance(
+                        evaluator_path=wrapper_path,
+                        program_path=initial_program,
+                        instance_path=first_instance,
+                        timeout_s=60.0,
+                    )
+                    if preflight_result.status != "pass":
+                        raise RevolverError(
+                            f"Pre-flight check failed: initial program evaluation "
+                            f"{preflight_result.status} on {first_instance.name}."
+                            + (
+                                f" Error: {preflight_result.error}"
+                                if preflight_result.error
+                                else ""
+                            )
+                            + " Fix the evaluator or initial program before "
+                            "running evolution."
+                        )
+                    # Log success
+                    score_info = ""
+                    if preflight_result.metrics:
+                        cs = preflight_result.metrics.get("combined_score")
+                        if cs is not None:
+                            score_info = f", score={cs:.4f}"
+                        if cs == 0.0:
+                            sys.stderr.write(
+                                f"Warning: pre-flight check passed but score=0.0 "
+                                f"on {first_instance.name}. Evolution may not "
+                                f"produce improvements.\n"
+                            )
+                    sys.stderr.write(
+                        f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
+                    )
+
+                # Launch OpenEvolve
                 runner = OpenEvolveRunner(
                     initial_program=initial_program,
                     evaluator=wrapper_path,
@@ -573,8 +619,6 @@ def _post_run_evaluation(
         dataset_path: Path to the dataset directory.
         program_path: Path to the rank-1 program file.
     """
-    from revolver.infra.evaluator_runner import run_instance
-
     evaluator_path = snapshot_dir / EVALUATOR_FILENAME
     if not evaluator_path.exists():
         sys.stderr.write(
@@ -604,7 +648,7 @@ def _post_run_evaluation(
     passed = 0
     failed = 0
     for inst in instances:
-        result = run_instance(
+        result = eval_run_instance(
             evaluator_path=evaluator_path,
             program_path=program_path,
             instance_path=inst,
@@ -780,8 +824,53 @@ def resume_run(
             with revolver_env(env_vars):
                 start_time = time.monotonic()
 
+                # Pre-flight check: evaluate initial program on first instance
                 wrapper_path = new_run_dir / WRAPPER_FILENAME
                 initial_program = snapshot_dir / "initial_program.py"
+                preflight_instances = sorted(
+                    (
+                        p
+                        for p in dataset_path.iterdir()
+                        if not p.name.startswith(".") and p.is_file()
+                    ),
+                    key=lambda p: p.name,
+                )
+                if preflight_instances:
+                    first_instance = preflight_instances[0]
+                    preflight_result = eval_run_instance(
+                        evaluator_path=wrapper_path,
+                        program_path=initial_program,
+                        instance_path=first_instance,
+                        timeout_s=60.0,
+                    )
+                    if preflight_result.status != "pass":
+                        raise RevolverError(
+                            f"Pre-flight check failed: initial program evaluation "
+                            f"{preflight_result.status} on {first_instance.name}."
+                            + (
+                                f" Error: {preflight_result.error}"
+                                if preflight_result.error
+                                else ""
+                            )
+                            + " Fix the evaluator or initial program before "
+                            "running evolution."
+                        )
+                    # Log success
+                    score_info = ""
+                    if preflight_result.metrics:
+                        cs = preflight_result.metrics.get("combined_score")
+                        if cs is not None:
+                            score_info = f", score={cs:.4f}"
+                        if cs == 0.0:
+                            sys.stderr.write(
+                                f"Warning: pre-flight check passed but score=0.0 "
+                                f"on {first_instance.name}. Evolution may not "
+                                f"produce improvements.\n"
+                            )
+                    sys.stderr.write(
+                        f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
+                    )
+
                 runner = OpenEvolveRunner(
                     initial_program=initial_program,
                     evaluator=wrapper_path,
