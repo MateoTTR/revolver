@@ -1148,6 +1148,7 @@ def list_runs(
                         if row.get("best_score") is not None
                         else None
                     ),
+                    alias=(str(row["alias"]) if row.get("alias") else None),
                 )
             )
         return summaries

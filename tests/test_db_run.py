@@ -326,6 +326,48 @@ class TestListRuns:
         assert len(result) == 1
         assert result[0]["best_score"] == 0.95
 
+    @pytest.mark.unit
+    def test_list_includes_alias(self, db_conn: sqlite3.Connection) -> None:
+        """list_runs includes alias from rank-1 solution (FB-07)."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn, status="completed")
+        insert_solution(
+            db_conn,
+            solution_id="sol-1",
+            run_id="run-20260314-120000",
+            rank=1,
+            best_score=0.95,
+            alias="best-v1",
+        )
+        result = list_runs(db_conn)
+        assert len(result) == 1
+        assert result[0]["alias"] == "best-v1"
+
+    @pytest.mark.unit
+    def test_list_alias_none_when_no_alias(self, db_conn: sqlite3.Connection) -> None:
+        """list_runs returns None alias when rank-1 solution has no alias."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn, status="completed")
+        insert_solution(
+            db_conn,
+            solution_id="sol-1",
+            run_id="run-20260314-120000",
+            rank=1,
+            best_score=0.95,
+        )
+        result = list_runs(db_conn)
+        assert len(result) == 1
+        assert result[0]["alias"] is None
+
+    @pytest.mark.unit
+    def test_list_alias_none_when_no_solutions(self, db_conn: sqlite3.Connection) -> None:
+        """list_runs returns None alias when run has no solutions."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn, status="running")
+        result = list_runs(db_conn)
+        assert len(result) == 1
+        assert result[0]["alias"] is None
+
 
 class TestGetLatestRun:
     """Tests for get_latest_run."""

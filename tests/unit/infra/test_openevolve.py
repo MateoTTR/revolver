@@ -19,6 +19,7 @@ from revolver.infra.openevolve import (
     OpenEvolveRunner,
     RunOutput,
     _extract_best_score,
+    _parse_value,
     build_config,
     revolver_env,
 )
@@ -490,3 +491,40 @@ class TestExtractBestScore:
                 self.metrics: dict[str, float] = {"other_metric": 0.5}
 
         assert _extract_best_score(FakeProgram()) is None
+
+
+# ── _parse_value tests ─────────────────────────────────────────────────────
+
+
+class TestParseValue:
+    """Tests for _parse_value() helper (FB-05: null/none support)."""
+
+    def test_parse_value_null(self) -> None:
+        """_parse_value('null') returns None."""
+        assert _parse_value("null") is None
+
+    def test_parse_value_none(self) -> None:
+        """_parse_value('None') returns None."""
+        assert _parse_value("None") is None
+
+    def test_parse_value_none_upper(self) -> None:
+        """_parse_value('NULL') returns None."""
+        assert _parse_value("NULL") is None
+
+    def test_parse_value_existing_types_unaffected(self) -> None:
+        """Existing int, float, bool, and string parsing is unaffected."""
+        # Integers
+        assert _parse_value("42") == 42
+        assert _parse_value("-1") == -1
+        # Floats
+        assert _parse_value("3.14") == pytest.approx(3.14)
+        # Booleans
+        assert _parse_value("true") is True
+        assert _parse_value("false") is False
+        assert _parse_value("yes") is True
+        assert _parse_value("no") is False
+        assert _parse_value("TRUE") is True
+        assert _parse_value("FALSE") is False
+        # Strings
+        assert _parse_value("hello") == "hello"
+        assert _parse_value("some value") == "some value"
