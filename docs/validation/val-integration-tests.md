@@ -107,6 +107,8 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `run list` | After 2 runs | Both listed with status, filterable | FR-RUN-021 |
 | `run info` | Existing run | Full details: lineage, tokens, solution, stored programs | FR-RUN-022 |
 | `run resume` | Existing checkpoint | New run from parent, wrapper copied | FR-RUN-013, 024 |
+| `run` (internal) | Post-processing failure | Status set to `completed_with_errors`, `run-error.log` written | FR-RUN-031, 032 |
+| `run` (internal) | OE failure (regression) | Status set to `interrupted` | FR-RUN-031 |
 
 ### 2.6 `revolver eval`
 
@@ -139,6 +141,14 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `solution list` | Reference by alias | Alias works in filters | FR-SOL-008 |
 | `solution extract` | Promote rank #2 from run | New solution entry in DB, unique ID | FR-SOL-011, 013 |
 | `solution extract` | Same (run_id, rank) already extracted | Exit code 1, blocked | FR-SOL-012 |
+| `solution delete` | Delete by alias | Removed from DB | FR-SOL-014 |
+| `solution delete` | Delete by ID with `--force` | No confirmation prompt, removed | FR-SOL-015 |
+| `solution delete` | Non-existent alias | Exit code 1 | — |
+| `solution delete` | JSON mode without `--force` | Exit code 1 (interactive prompt forbidden) | FR-SOL-017 |
+| `solution delete` | User cancels at prompt | No deletion | — |
+| `solution delete` | Cascade-deletes eval data | Eval entries removed with solution | FR-SOL-016 |
+| `solution extract` | `completed_with_errors` run with program | Extraction succeeds | FR-RUN-033 |
+| `solution extract` | `interrupted` run | Extraction rejected | FR-RUN-033 |
 
 ### 2.8 `revolver benchmark`
 

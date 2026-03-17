@@ -165,6 +165,10 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_default` | Planned |
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_override` | Planned |
 | FR-RUN-008 | MUST | DES-005 §post-run | L2-OE | `integration/test_run_oe::test_best_score_from_program` | Planned |
+| FR-RUN-031 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_run_postprocessing_failure_status` | Planned |
+| FR-RUN-032 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_run_postprocessing_failure_status` | Planned |
+| FR-RUN-033 | MUST | DES-005 §extract | L2 | `integration/test_solution::test_extract_accepts_completed_with_errors` | Planned |
+| FR-RUN-034 | SHOULD | DES-005 §resume | L2 | (covered by resume tests) | Planned |
 
 ---
 
@@ -219,6 +223,10 @@ Design: [DES-005 §post-run](../architecture/design/DES-005-run-orchestration.md
 | FR-SOL-011 | MUST | DES-005 §extract | L2 | `integration/test_solution::test_extract_promotes_program` | Planned |
 | FR-SOL-012 | MUST | DES-005 §extract | L2 | `integration/test_solution::test_extract_duplicate_blocked` | Planned |
 | FR-SOL-013 | MUST | DES-001 | L1 | `unit/core/test_solution::test_extract_generates_id` | Planned |
+| FR-SOL-014 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_delete_by_alias` | Planned |
+| FR-SOL-015 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_delete_by_id_force` | Planned |
+| FR-SOL-016 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_delete_cascades_eval` | Planned |
+| FR-SOL-017 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_delete_json_requires_force` | Planned |
 
 ---
 
@@ -344,14 +352,14 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-llm | 18 | 11 | 6 | 0 | 8 | 10 | via Sc.1 | 0 |
 | spec-problem | 15 | 10 | 4 | 1 | 4 | 10 | via Sc.1 | 0 |
 | spec-dataset | 16 | 12 | 2 | 0 | 6 | 10 | via Sc.1 | 0 |
-| spec-run | 30 | 20 | 10 | 0 | 16 | 14 | via Sc.1 | 0 |
+| spec-run | 34 | 23 | 11 | 0 | 16 | 18 | via Sc.1 | 0 |
 | spec-eval | 20 | 15 | 3 | 1 | 10 | 9 | via Sc.1 | 1 (FR-EVL-014, deferred) |
-| spec-solution | 13 | 11 | 1 | 0 | 3 | 10 | via Sc.1 | 0 |
+| spec-solution | 17 | 15 | 1 | 0 | 3 | 14 | via Sc.1 | 0 |
 | spec-benchmark | 17 | 12 | 4 | 0 | 7 | 10 | via Sc.1 | 0 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
 | NFR (direct) | 27 | 19 | 8 | 0 | 8 | 11 | — | 3 (perf, manual) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **194** | **131** | **50** | **2** | **66** | **105** | **2 scenarios** | **4** |
+| **Total** | **202** | **138** | **51** | **2** | **66** | **113** | **2 scenarios** | **4** |
 
 Notes:
 - 55 FR-SOL, FR-RUN, FR-EVL requirements share test coverage across unit and integration tests. The total counts distinct test assignments (some FRs have both L1 and L2 tests).
