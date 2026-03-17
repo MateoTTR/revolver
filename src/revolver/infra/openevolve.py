@@ -22,7 +22,6 @@ from typing import Any
 import yaml
 
 from revolver.core.exceptions import ExternalError, ValidationError
-from revolver.infra.token_proxy import TokenUsage
 from revolver.models.llm import LLMEntry
 
 # ── System prompt template (DES-005 §4.4) ────────────────────────────────────
@@ -252,11 +251,9 @@ def build_config(
     # Force cascade_evaluation: false unless user explicitly set it.
     # OpenEvolve defaults to true, but Revolver evaluators don't define
     # evaluate_stage1/2/3 methods so cascade must be disabled.
-    evaluator_cfg = config.get("evaluator")
-    if not isinstance(evaluator_cfg, dict) or "cascade_evaluation" not in evaluator_cfg:
-        config.setdefault("evaluator", {})
-        if isinstance(config["evaluator"], dict):
-            config["evaluator"].setdefault("cascade_evaluation", False)
+    config.setdefault("evaluator", {})
+    if isinstance(config.get("evaluator"), dict):
+        config["evaluator"].setdefault("cascade_evaluation", False)
 
     # 3. Problem description injection (DES-005 §4.4)
     if problem_description:
@@ -363,4 +360,4 @@ def revolver_env(env_vars: dict[str, str]) -> Iterator[None]:
                 os.environ[key] = prev
 
 
-__all__ = ["TokenUsage"]
+__all__ = ["OpenEvolveRunner", "ProgressInfo", "RunOutput", "build_config", "revolver_env"]

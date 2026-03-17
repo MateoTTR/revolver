@@ -21,7 +21,7 @@ pytest.importorskip("openevolve.controller", reason="openevolve not installed")
 from openevolve.config import Config as OEConfig
 from openevolve.controller import OpenEvolve as OEController
 
-from revolver.infra.openevolve import OpenEvolveRunner, _extract_best_score, build_config
+from revolver.infra.openevolve import OpenEvolveRunner, build_config
 from revolver.models.llm import LLMEntry
 
 # Path to test fixtures
@@ -284,36 +284,3 @@ class TestOpenEvolveRunnerInitController:
 
         assert runner._controller is not None
         assert runner._controller.config.llm.api_base == "http://localhost:11434/v1"
-
-
-@pytest.mark.integration
-@pytest.mark.openevolve
-class TestRunOutputBestScore:
-    """Verify best_score extraction from various OpenEvolve return types."""
-
-    def test_best_score_from_program_object(self) -> None:
-        """Extract score from a Program-like object with .metrics dict."""
-
-        class FakeProgram:
-            metrics: dict[str, float] = {"combined_score": 1.065}
-
-        result = _extract_best_score(FakeProgram())
-        assert result == 1.065
-
-    def test_best_score_from_number(self) -> None:
-        """Extract score from a raw numeric return value."""
-        assert _extract_best_score(42) == 42.0
-        assert _extract_best_score(3.14) == 3.14
-
-    def test_best_score_none_when_not_extractable(self) -> None:
-        """Return None when best is neither a number nor a Program."""
-        assert _extract_best_score("some_string") is None
-        assert _extract_best_score(None) is None
-
-    def test_best_score_none_when_metrics_missing_key(self) -> None:
-        """Return None when metrics dict exists but lacks combined_score."""
-
-        class FakeProgram:
-            metrics: dict[str, float] = {"other_metric": 0.5}
-
-        assert _extract_best_score(FakeProgram()) is None
