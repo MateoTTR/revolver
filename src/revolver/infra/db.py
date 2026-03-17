@@ -1200,3 +1200,107 @@ def list_solutions(
     rows = [dict(row) for row in cursor.fetchall()]
     conn.row_factory = None
     return rows
+
+
+def update_solution_alias(
+    conn: sqlite3.Connection,
+    solution_id: str,
+    alias: str,
+) -> None:
+    """Set or update the alias of an existing solution.
+
+    Args:
+        conn: An open project database connection.
+        solution_id: The solution ID whose alias to set.
+        alias: The new alias (must be unique across all solutions).
+
+    Raises:
+        KeyError: If no solution with the given *solution_id* exists.
+        DuplicateNameError: If *alias* is already used by another solution.
+    """
+    try:
+        cursor = conn.execute(
+            "UPDATE solutions SET alias = ? WHERE id = ?",
+            (alias, solution_id),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"Alias already in use: {alias!r}") from exc
+    if cursor.rowcount == 0:
+        raise KeyError(f"Solution not found: {solution_id}")
+    conn.commit()
+
+
+def get_solution_by_alias(
+    conn: sqlite3.Connection,
+    alias: str,
+) -> Solution | None:
+    """Retrieve a solution by its alias.
+
+    Unlike :func:`get_solution`, this performs a direct alias lookup
+    without falling back to ID matching.
+
+    Args:
+        conn: An open project database connection.
+        alias: The alias to look up.
+
+    Returns:
+        The :class:`Solution` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        "SELECT id, run_id, rank, best_score, alias FROM solutions WHERE alias = ?",
+        (alias,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return Solution(
+        id=row[0],
+        run_id=row[1],
+        rank=row[2],
+        best_score=row[3],
+        alias=row[4],
+    )
+
+
+def get_solution_detail(
+    conn: sqlite3.Connection,
+    id_or_alias: str,
+) -> dict[str, object] | None:
+    """Retrieve full solution lineage via JOIN on runs and eval_metadata.
+
+    Returns solution data enriched with run lineage (problem_version,
+    llm, dataset, status, config) and optional evaluation metadata
+    (eval_id, instances_solved, instance_count).
+
+    Args:
+        conn: An open project database connection.
+        id_or_alias: Solution ID or alias to look up.
+
+    Returns:
+        A dict with solution, run, and eval columns, or ``None`` if not found.
+    """
+    query = """\
+        SELECT s.id, s.run_id, s.rank, s.best_score, s.alias,
+               r.problem_version, r.llm, r.dataset, r.status AS run_status,
+               r.config_snapshot, r.llm_model, r.problem_hash, r.dataset_hash,
+               r.created_at, r.iterations, r.generation_time_s,
+               r.prompt_tokens, r.completion_tokens,
+               em.eval_id, em.instances_solved, em.instance_count
+        FROM solutions s
+        JOIN runs r ON s.run_id = r.id
+        LEFT JOIN eval_metadata em ON s.id = em.solution_id
+        WHERE {where_clause}
+    """
+    conn.row_factory = sqlite3.Row
+    try:
+        # Look up by ID first, then fall back to alias (same pattern as get_solution).
+        cursor = conn.execute(query.format(where_clause="s.id = ?"), (id_or_alias,))
+        row = cursor.fetchone()
+        if row is None:
+            cursor = conn.execute(query.format(where_clause="s.alias = ?"), (id_or_alias,))
+            row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
+    if row is None:
+        return None
+    return dict(row)
