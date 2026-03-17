@@ -9,6 +9,7 @@ Traceable to: DES-001 (SQLite Data Model), NFR-013, NFR-016.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from revolver.models.dataset import (
     DatasetRegistration,
     DatasetSummary,
 )
+from revolver.models.eval import EvalMetadata
 from revolver.models.llm import LLMEntry
 from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
@@ -1200,6 +1202,186 @@ def list_solutions(
     rows = [dict(row) for row in cursor.fetchall()]
     conn.row_factory = None
     return rows
+
+
+# ── Eval CRUD operations ─────────────────────────────────────────────────────
+
+
+def insert_eval_metadata(conn: sqlite3.Connection, metadata: EvalMetadata) -> None:
+    """Insert an evaluation metadata record into the project database.
+
+    Args:
+        conn: An open project database connection.
+        metadata: The :class:`EvalMetadata` to insert.
+
+    Raises:
+        sqlite3.IntegrityError: If the ``(solution_id, dataset_name)``
+            unique constraint is violated.
+    """
+    user_agg_json: str | None = None
+    if metadata.user_aggregates is not None:
+        user_agg_json = json.dumps(metadata.user_aggregates)
+
+    conn.execute(
+        """\
+        INSERT INTO eval_metadata (
+            eval_id, solution_id, dataset_name,
+            instance_count, instances_solved, eval_time_s,
+            user_aggregates, evaluated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            metadata.eval_id,
+            metadata.solution_id,
+            metadata.dataset_name,
+            metadata.instance_count,
+            metadata.instances_solved,
+            metadata.eval_time_s,
+            user_agg_json,
+            metadata.evaluated_at.isoformat(),
+        ),
+    )
+    conn.commit()
+
+
+def insert_eval_instance(
+    conn: sqlite3.Connection,
+    eval_id: str,
+    instance_id: str,
+    metric_name: str,
+    value: float | None,
+    status: str,
+    error_message: str | None,
+    compute_time_s: float | None,
+    *,
+    commit: bool = True,
+) -> None:
+    """Insert a single eval instance result row.
+
+    Each row represents one (instance, metric) pair. An instance with
+    multiple metrics results in multiple rows.
+
+    Args:
+        conn: An open project database connection.
+        eval_id: Evaluation ID (foreign key to ``eval_metadata``).
+        instance_id: Instance identifier (filename or directory name).
+        metric_name: Name of the metric.
+        value: Metric value (``None`` if failed/timeout).
+        status: Instance status (``"solved"``, ``"failed"``, or ``"timeout"``).
+        error_message: Error message when ``status != "solved"``.
+        compute_time_s: Wall-clock time for this instance in seconds.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
+    """
+    conn.execute(
+        """\
+        INSERT INTO eval_instances (
+            eval_id, instance_id, metric_name, value,
+            status, error_message, compute_time_s
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (eval_id, instance_id, metric_name, value, status, error_message, compute_time_s),
+    )
+    if commit:
+        conn.commit()
+
+
+def get_eval_metadata(
+    conn: sqlite3.Connection,
+    solution_id: str,
+    dataset_name: str,
+) -> EvalMetadata | None:
+    """Retrieve evaluation metadata for a (solution, dataset) pair.
+
+    Uses the ``idx_eval_unique`` index for efficient lookup.
+
+    Args:
+        conn: An open project database connection.
+        solution_id: The solution ID.
+        dataset_name: The dataset name.
+
+    Returns:
+        The :class:`EvalMetadata` if found, otherwise ``None``.
+    """
+    conn.row_factory = sqlite3.Row
+    try:
+        cursor = conn.execute(
+            """\
+            SELECT eval_id, solution_id, dataset_name,
+                   instance_count, instances_solved, eval_time_s,
+                   user_aggregates, evaluated_at
+            FROM eval_metadata
+            WHERE solution_id = ? AND dataset_name = ?
+            """,
+            (solution_id, dataset_name),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
+
+    if row is None:
+        return None
+
+    user_agg: dict[str, float] | None = None
+    if row["user_aggregates"] is not None:
+        user_agg = json.loads(row["user_aggregates"])
+
+    return EvalMetadata(
+        eval_id=row["eval_id"],
+        solution_id=row["solution_id"],
+        dataset_name=row["dataset_name"],
+        instance_count=row["instance_count"],
+        instances_solved=row["instances_solved"],
+        eval_time_s=row["eval_time_s"],
+        user_aggregates=user_agg,
+        evaluated_at=datetime.fromisoformat(row["evaluated_at"]),
+    )
+
+
+def get_eval_instances(
+    conn: sqlite3.Connection,
+    eval_id: str,
+) -> list[tuple[str, str, float | None, str, str | None, float | None]]:
+    """Retrieve all instance results for an evaluation.
+
+    Args:
+        conn: An open project database connection.
+        eval_id: The evaluation ID.
+
+    Returns:
+        A list of tuples ``(instance_id, metric_name, value, status,
+        error_message, compute_time_s)`` ordered by ``instance_id``
+        then ``metric_name``.
+    """
+    cursor = conn.execute(
+        """\
+        SELECT instance_id, metric_name, value, status,
+               error_message, compute_time_s
+        FROM eval_instances
+        WHERE eval_id = ?
+        ORDER BY instance_id, metric_name
+        """,
+        (eval_id,),
+    )
+    return [tuple(row) for row in cursor.fetchall()]
+
+
+def delete_eval(conn: sqlite3.Connection, eval_id: str) -> None:
+    """Delete an evaluation and all its instance results.
+
+    Both DELETEs run inside an explicit transaction so that the
+    operation is atomic: either both tables are cleaned or neither is.
+
+    Args:
+        conn: An open project database connection.
+        eval_id: The evaluation ID to delete.
+    """
+    with conn:
+        conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
+        conn.execute("DELETE FROM eval_metadata WHERE eval_id = ?", (eval_id,))
+
+
+# ── Solution extended queries ────────────────────────────────────────────────
 
 
 def update_solution_alias(
