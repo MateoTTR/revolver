@@ -7,7 +7,7 @@
 
 ## 1. Scope
 
-This spec covers solution browsing, metadata management, and on-demand extraction. Solutions are lightweight DB references to (`run_id`, `rank`) — they do NOT own filesystem directories. The program file for a solution is located at `.revolver/runs/<run_id>/programs/rank-<N>.py`. The rank-1 solution is auto-created by `revolver run` ([spec-run.md](spec-run.md)). Additional solutions can be extracted from a run's stored programs via `solution extract`.
+This spec covers solution browsing, metadata management, on-demand extraction, and deletion. Solutions are lightweight DB references to (`run_id`, `rank`) — they do NOT own filesystem directories. The program file for a solution is located at `.revolver/runs/<run_id>/programs/rank-<N>.py`. The rank-1 solution is auto-created by `revolver run` ([spec-run.md](spec-run.md)). Additional solutions can be extracted from a run's stored programs via `solution extract`.
 
 ---
 
@@ -157,6 +157,47 @@ Solution extracted: sol-20260311-091500
 
 **Exit codes**: 0 success, 1 if run not found, 1 if rank not found, 1 if solution already exists for this (run, rank)
 
+### 2.5 `revolver solution delete <id-or-alias>`
+
+Delete a solution and its associated evaluation data.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `id-or-alias` | Yes | Solution ID or alias to delete |
+
+**Options**:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--force` / `-f` | flag | false | Skip interactive confirmation prompt |
+
+**Behavior**:
+1. Resolve the solution by ID or alias
+2. If `--json` is active and `--force` is not set, return an error (no interactive prompt possible in JSON mode)
+3. If `--force` is not set, display solution details and ask for confirmation
+4. Delete associated evaluation data (`eval_instances` then `eval_metadata`) within a transaction
+5. Delete the solution row from the `solutions` table
+6. The run and its program files are NOT deleted — only the DB reference and eval data are removed
+
+**Output** (human):
+```
+Deleted solution "sol-20260310-143000" (alias: claude-small-v1.1)
+  Cascade-deleted 1 evaluation(s)
+```
+
+**Output** (JSON):
+```json
+{
+  "deleted": true,
+  "solution_id": "sol-20260310-143000",
+  "alias": "claude-small-v1.1"
+}
+```
+
+**Exit codes**: 0 success, 1 if not found or confirmation declined
+
 ---
 
 ## 3. Functional Requirements
@@ -176,6 +217,10 @@ Solution extracted: sol-20260311-091500
 | FR-SOL-011 | MUST | `extract` promotes a stored program from a completed run into a solution with post-extraction training eval | — |
 | FR-SOL-012 | MUST | `extract` prevents duplicate solutions for the same `(run_id, rank)` | — |
 | FR-SOL-013 | MUST | `extract` generates a unique solution ID and inserts a solution DB row | — |
+| FR-SOL-014 | MUST | `delete` removes a solution by ID or alias with interactive confirmation prompt | §4.6 |
+| FR-SOL-015 | MUST | `delete --force` bypasses the interactive confirmation prompt | — |
+| FR-SOL-016 | MUST | Deleting a solution cascade-deletes associated evaluation data (`eval_metadata` + `eval_instances`) | — |
+| FR-SOL-017 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error (no interactive prompt possible) | NFR-003 |
 
 ---
 
@@ -191,6 +236,9 @@ Solution extracted: sol-20260311-091500
 | `extract` with run not completed | Error: "Run '<run-id>' is not completed (status: '<status>')" | 1 |
 | `extract` with non-existent rank file | Error: "No program found at rank <N> for run '<run-id>'" | 1 |
 | `extract` with already extracted rank | Error: "Solution already exists for run '<run-id>' rank <N>: '<sol-id>'" | 1 |
+| `delete` with non-existent solution | Error: "Solution '<id>' not found" | 1 |
+| `delete` in JSON mode without `--force` | Error: "Use --force to delete in JSON mode (no interactive prompt)" | 1 |
+| `delete` confirmation declined by user | No deletion, exit silently | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
 
 ---

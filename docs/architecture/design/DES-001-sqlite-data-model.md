@@ -1,7 +1,7 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.2 — Run/Solution refactor
-**Date**: 2026-03-12
+**Version**: 0.3 — completed_with_errors status, solution delete cascade
+**Date**: 2026-03-17
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
@@ -163,7 +163,7 @@ CREATE TABLE runs (
     llm_model         TEXT NOT NULL,          -- full model ID (e.g., "claude-opus-4-6")
     resumed_from      TEXT REFERENCES runs(id), -- NULL if fresh run, parent run_id if resumed
     status            TEXT NOT NULL DEFAULT 'running'
-                      CHECK (status IN ('running', 'completed', 'interrupted')),
+                      CHECK (status IN ('running', 'completed', 'interrupted', 'completed_with_errors')),
     created_at        TEXT NOT NULL           -- ISO 8601
 );
 
@@ -173,6 +173,8 @@ CREATE INDEX idx_runs_resumed ON runs(resumed_from);
 ```
 
 **Constraints**: Fully immutable once completed. A completed run never changes — its programs, lineage, and files are frozen. `resumed_from` links to the parent run whose checkpoint was used to seed this run (resume = new run, not mutation of the old one).
+
+**Status values**: `running` (in progress), `completed` (success), `interrupted` (OE failure or user cancellation), `completed_with_errors` (OE completed but post-processing failed — e.g., program collection, solution creation, or training eval). The `completed_with_errors` status was added in schema version 2 (see §8).
 
 ### 3.6 `solutions`
 
@@ -304,6 +306,26 @@ VALUES (1, datetime('now'));
 ```
 
 The `schema_version` table enables future schema migrations. On startup, Revolver checks the current version and applies any pending migrations sequentially.
+
+### 5.1 Migration: v1 → v2 (Sprint 005a)
+
+Schema version 2 adds `completed_with_errors` to the `runs.status` CHECK constraint. Because SQLite does not support `ALTER TABLE ... ALTER COLUMN`, the migration recreates the `runs` table with the updated constraint:
+
+```sql
+-- Migration v2: Add 'completed_with_errors' to runs.status CHECK constraint.
+-- SQLite cannot ALTER a CHECK constraint, so we recreate the table.
+ALTER TABLE runs RENAME TO _runs_old;
+CREATE TABLE runs (
+    -- same columns as v1, with updated CHECK:
+    status TEXT NOT NULL DEFAULT 'running'
+           CHECK (status IN ('running', 'completed', 'interrupted', 'completed_with_errors')),
+    -- ... (all other columns unchanged)
+);
+INSERT INTO runs SELECT * FROM _runs_old;
+DROP TABLE _runs_old;
+-- Recreate indexes
+UPDATE schema_version SET version = 2, applied_at = datetime('now');
+```
 
 ---
 
@@ -448,7 +470,7 @@ Migrations are **forward-only** (no rollback). Each migration is a Python functi
 ```python
 MIGRATIONS = {
     1: "initial_schema.sql",    # V1 tables
-    2: "add_eval_tags.sql",     # hypothetical future change
+    2: "add_completed_with_errors_status.sql",  # Add 'completed_with_errors' to runs.status CHECK
 }
 ```
 

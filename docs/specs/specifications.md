@@ -188,7 +188,7 @@ Configuration is resolved in this order (last wins):
 | [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume,list,info}` | §4.6, §5.5 | OpenEvolve orchestration, solution generation |
 | [spec-eval.md](spec-eval.md) | `revolver eval {<default>,results}` | §5.6 | Single solution evaluation |
 | [spec-benchmark.md](spec-benchmark.md) | `revolver benchmark {<default>,results,export}` | §4.7, §5.7, §8 | Multi-solution comparison and export |
-| [spec-solution.md](spec-solution.md) | `revolver solution {list,info,alias}` | §4.6 | Solution browsing and metadata |
+| [spec-solution.md](spec-solution.md) | `revolver solution {list,info,alias,extract,delete}` | §4.6 | Solution browsing, extraction, and deletion |
 | [spec-setup.md](spec-setup.md) | `revolver doctor`, `revolver setup` | NFR-060–068 | Dependency verification and assisted installation |
 | [user-story-e2e.md](user-story-e2e.md) | All (end-to-end walkthrough) | §5.1–§5.7 | Concrete scenario validating the full CLI workflow |
 

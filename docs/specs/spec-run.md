@@ -151,7 +151,7 @@ List all runs in the current project.
 |---|---|---|---|
 | `--version <tag>` | string | — | Filter by problem version |
 | `--llm <name>` | string | — | Filter by LLM used |
-| `--status <status>` | string | — | Filter by status: `running`, `completed`, `interrupted` |
+| `--status <status>` | string | — | Filter by status: `running`, `completed`, `completed_with_errors`, `interrupted` |
 | `--sort <field>` | string | `created_at` | Sort by: `created_at`, `score`, `iterations` |
 
 **Output** (human):
@@ -237,6 +237,10 @@ Resume chain: (none)
 | FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run by intercepting LLM API responses | §4.6, POC #13 |
 | FR-RUN-029 | SHOULD | Display token usage in run completion output and `run info` | §4.6 |
 | FR-RUN-030 | SHOULD | Estimate cost from token usage and optional LLM pricing (if configured). Display in run output when pricing is available. | §4.6, POC #13 |
+| FR-RUN-031 | MUST | If OpenEvolve completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
+| FR-RUN-032 | MUST | Post-processing errors are logged to `run-error.log` in the run directory | — |
+| FR-RUN-033 | MUST | `solution extract` accepts runs with status `completed_with_errors` if the program file exists | — |
+| FR-RUN-034 | MUST | `resume` accepts `completed_with_errors` as a valid parent run status | — |
 
 ---
 

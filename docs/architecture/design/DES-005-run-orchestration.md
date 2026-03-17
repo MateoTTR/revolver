@@ -1,6 +1,6 @@
 # DES-005 — `revolver run` — OpenEvolve Orchestration
 
-**Version**: 0.4.4 — Pre-flight check, cascade_evaluation, api_key, collect_programs, best_score
+**Version**: 0.5.0 — completed_with_errors status, api_key_env security, Google seed fix
 **Date**: 2026-03-17
 **Status**: Draft
 **Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
@@ -144,7 +144,7 @@ Core (core/run.py) → resume_run()
   │ 2. Load run metadata                            (problem_version, llm, dataset, config)
   │ 3. Locate checkpoint dir                        ──► store: .revolver/runs/<run_id>/oe-checkpoint/
   │ 4. Validate checkpoint exists and is non-empty
-  │ 5. Validate run status is 'completed' or 'interrupted'
+  │ 5. Validate run status is 'completed', 'interrupted', or 'completed_with_errors'
   │    (cannot resume a 'running' run)
   │ 6. Load original problem version                ──► Infra: db.get_problem_version(tag)
   │ 7. Load original LLM config                     ──► Infra: db.get_llm(name)
@@ -474,7 +474,7 @@ def build_config(
 
     Merge order (last wins):
         1. Problem version's config.yaml (base)
-        2. LLM endpoint configuration (base_url, model, api_key)
+        2. LLM endpoint configuration (api_base, primary_model, api_key_env)
         3. Evaluator defaults — Force evaluator.cascade_evaluation: false
            unless explicitly set in the problem's config.yaml. OpenEvolve
            defaults to cascade_evaluation: true which requires
@@ -483,6 +483,13 @@ def build_config(
         5. --iterations override
         6. --config-override key=value pairs
         7. Output directory (always Revolver-controlled)
+
+    Security (F1): The config stores ``api_key_env`` (the env var name,
+    e.g. "ANTHROPIC_API_KEY") instead of the resolved API key value.
+    This keeps secrets out of config_snapshot in SQLite and manifest.yaml.
+    The separate ``resolve_api_keys()`` function resolves the env var
+    to the actual key at runtime, just before passing the config to
+    OpenEvolve.
     """
 ```
 
@@ -492,11 +499,22 @@ OpenEvolve expects LLM configuration in its config. Revolver injects it based on
 
 | LLM field | OpenEvolve config key | Source |
 |---|---|---|
-| `base_url` | `llm.base_url` | LLM registry (`llms.base_url`) |
+| `base_url` | `llm.api_base` | LLM registry (`llms.base_url`) |
 | `model` | `llm.primary_model` | LLM registry (`llms.model`) |
-| `api_key` | `llm.api_key` | Read from env var named in `llms.api_key_env` |
+| `api_key_env` | `llm.api_key_env` | LLM registry (`llms.api_key_env`) — env var **name**, not the resolved value |
+
+**Security (F1)**: `build_config()` stores the env var name (`api_key_env: "ANTHROPIC_API_KEY"`) in the config dict, not the resolved API key. This means the `config_snapshot` stored in SQLite (NFR-023) and `manifest.yaml` never contain secrets. A separate `resolve_api_keys()` function is called at runtime to create a deep copy of the config with `llm.api_key_env` replaced by `llm.api_key` (the actual key read from the environment). This resolved copy is passed to OpenEvolve but never persisted.
 
 For local LLMs (Ollama), `base_url` is typically `http://localhost:11434/v1` and no API key is needed. However, for local LLMs (`source == "local"`) without an `api_key_env`, Revolver injects `api_key: "ollama"` as a placeholder. The OpenAI SDK used by OpenEvolve requires a non-empty `api_key` even for local endpoints.
+
+#### Google Provider Seed Handling (F2)
+
+Google's Generative Language API (`generativelanguage.googleapis.com`) rejects the `seed` parameter with HTTP 400. When a Google LLM is detected via `base_url`, `build_config()` disables random seed at **both** levels:
+
+- `config["random_seed"] = None` — top-level config key that OpenEvolve sends to the API
+- `config["llm"]["random_seed"] = None` — nested LLM-specific key
+
+This runs after LLM injection (step 2) but before config overrides (step 5), so `--config-override` can still re-enable seed if desired.
 
 ### 4.4 Problem Description Injection
 
@@ -693,9 +711,28 @@ def _post_run_evaluation(
     """
 ```
 
-This step is **synchronous** — it runs after OpenEvolve completes but before the run is marked as finished. If evaluation fails, a warning is emitted. The run is still considered successful regardless of post-run evaluation failures (the run and solution are already stored).
+This step is **synchronous** — it runs after OpenEvolve completes but before the run is marked as finished.
 
-**On-demand extraction**: When a user later calls `revolver solution extract --run <id> --rank N`, the same evaluation is performed on the newly extracted solution. This ensures every solution has training eval results, whether auto-created or extracted.
+### 7.1 Error Handling: `oe_completed` Flag and `completed_with_errors` (F3)
+
+Post-processing (program collection, solution creation, training eval) can fail even after OpenEvolve completes successfully. To distinguish this from an OpenEvolve failure, `launch_run()` uses an `oe_completed` flag:
+
+1. `oe_completed = False` before calling `openevolve.run()`
+2. After `openevolve.run()` returns successfully, set `oe_completed = True`
+3. If an exception occurs during post-processing:
+   - If `oe_completed is True` → call `_handle_post_run_failure()`:
+     - Write error details to `run-error.log` in the run directory (best-effort)
+     - Set run status to `completed_with_errors` (not `interrupted`)
+     - Remove lock file
+     - Raise `RunError` with a message pointing to the error log
+   - If `oe_completed is False` → set status to `interrupted` (OpenEvolve itself failed)
+
+This ensures the run directory and its checkpoint are preserved for recovery. The user can:
+- Inspect the error via `run-error.log`
+- Use `solution extract` on the run if programs were already collected (FR-RUN-033)
+- Use `run resume` to retry from the checkpoint (FR-RUN-034)
+
+**On-demand extraction**: When a user later calls `revolver solution extract --run <id> --rank N`, the same evaluation is performed on the newly extracted solution. This ensures every solution has training eval results, whether auto-created or extracted. `extract` accepts runs with status `completed` or `completed_with_errors` (FR-RUN-033).
 
 ---
 
@@ -731,7 +768,7 @@ class RunManifest(BaseModel):
     created_at: datetime
     generation_time_s: float | None = None
     iterations: int
-    status: str = "running"  # running | completed | interrupted
+    status: str = "running"  # running | completed | interrupted | completed_with_errors
 
     # Lineage
     problem_version: str
@@ -850,6 +887,7 @@ Each run has its own directory under `.revolver/runs/`. Solutions do not have th
 │   │   ├── _revolver_evaluator.py     # Generated wrapper (or copied evaluator)
 │   │   ├── oe-checkpoint/             # OpenEvolve checkpoint for resume
 │   │   │   └── ...                    # OpenEvolve internal files
+│   │   ├── run-error.log              # Post-processing error details (only if completed_with_errors, FR-RUN-032)
 │   │   ├── instance_log.db            # SQLite side-channel (optional, FR-RUN-026)
 │   │   ├── eval_log.db                # Evaluator log (optional, FR-RUN-027)
 │   │   └── programs/
@@ -972,7 +1010,7 @@ def resume(
 def list(
     version: str | None = typer.Option(None, "--version", help="Filter by problem version"),
     llm: str | None = typer.Option(None, "--llm", help="Filter by LLM name"),
-    status: str | None = typer.Option(None, "--status", help="Filter by status (running, completed, interrupted)"),
+    status: str | None = typer.Option(None, "--status", help="Filter by status (running, completed, completed_with_errors, interrupted)"),
     sort: str = typer.Option("created_at", "--sort", help="Sort by field (created_at, score, iterations)"),
 ): ...
 
@@ -1211,6 +1249,29 @@ OpenEvolve does not expose token usage data (POC #13 finding). Revolver solves t
 **Lifecycle**: The proxy is started before `openevolve.run()` and stopped after it returns. It lives within the same process as `revolver run`, managed by `TokenCountingProxy`. On resume, a new proxy is started for the new run (token counts are per-run).
 
 **Note on `config_snapshot`**: The `config_snapshot` stored in SQLite (NFR-023) will contain the proxy URL (`http://127.0.0.1:<port>/v1`) instead of the real LLM endpoint. This is acceptable because: (1) the proxy is ephemeral and only exists during the run, (2) the real LLM endpoint is always recoverable from the `llms` registry via `runs.llm`, (3) `run info` displays the LLM name and model from the run metadata, not from the config snapshot.
+
+### DD-15: `api_key_env` in config instead of resolved API key (F1, NFR-050/052)
+
+`build_config()` stores the environment variable **name** (`api_key_env: "ANTHROPIC_API_KEY"`) in the config dict, not the resolved secret value. This ensures:
+
+- **No secrets in `config_snapshot`**: The SQLite column and `manifest.yaml` never contain API keys
+- **No secrets in lineage**: NFR-052 is satisfied — benchmark exports and solution lineage are clean
+- **Runtime resolution**: A separate `resolve_api_keys()` function creates a deep copy with `llm.api_key_env` replaced by `llm.api_key` just before passing to OpenEvolve. The resolved copy is never persisted.
+
+### DD-16: `completed_with_errors` run status (F3, FR-RUN-031)
+
+A new run status `completed_with_errors` distinguishes post-processing failures from OpenEvolve failures. The previous design used `interrupted` for both cases, which was misleading — an interrupted run implies OE did not finish, while `completed_with_errors` means OE succeeded but post-processing (program collection, solution creation, or training eval) failed.
+
+**Key properties**:
+- `completed_with_errors` runs have a valid checkpoint and possibly valid programs in their directory
+- `resume` accepts `completed_with_errors` as a valid parent status (FR-RUN-034)
+- `solution extract` accepts `completed_with_errors` if the requested program file exists (FR-RUN-033)
+- Error details are logged to `run-error.log` in the run directory (FR-RUN-032)
+- The `oe_completed` flag pattern (§7.1) ensures correct status assignment in exception handlers
+
+### DD-17: Google Generative Language API seed rejection (F2)
+
+Google's `generativelanguage.googleapis.com` endpoint rejects the `seed` parameter with HTTP 400. `build_config()` detects Google providers via `base_url` and sets both `config["random_seed"]` (top-level) and `config["llm"]["random_seed"]` (nested) to `None`. Both levels are needed because OpenEvolve reads seed from the top-level config key, but the nested key can override it.
 
 ---
 
