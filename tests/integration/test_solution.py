@@ -635,3 +635,172 @@ def test_alias_rejects_empty_string(project_with_solutions: Path) -> None:
         project_with_solutions,
     )
     assert result.exit_code == 1  # type: ignore[union-attr]
+
+
+# ── solution delete tests (F4 — Sprint 005a) ──────────────────────────────────
+
+
+@pytest.mark.integration
+def test_solution_delete_by_alias(project_with_solutions: Path) -> None:
+    """Create solution with alias, delete by alias, verify gone.
+
+    Validates: F4 acceptance — delete by alias with confirmation.
+    """
+    # Set alias on a solution
+    _invoke_with_cwd(
+        ["solution", "alias", "sol-20260301-100000", "to-delete"],
+        project_with_solutions,
+    )
+
+    # Delete by alias with --force (skip interactive confirmation)
+    result = _invoke_with_cwd(
+        ["solution", "delete", "to-delete", "--force"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "sol-20260301-100000" in output
+    assert "deleted" in output.lower()
+
+    # Verify solution is gone from DB
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is None
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_solution_delete_by_id_force(project_with_solutions: Path) -> None:
+    """Delete solution by ID with --force, verify gone.
+
+    Validates: F4 acceptance — delete by ID, --force skips confirmation.
+    """
+    result = _invoke_with_cwd(
+        ["solution", "delete", "sol-20260301-100000", "--force"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "deleted" in output.lower()
+
+    # Verify solution is gone
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is None
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_solution_delete_nonexistent(project_with_solutions: Path) -> None:
+    """Delete nonexistent solution → exit code 1.
+
+    Validates: F4 acceptance — nonexistent alias.
+    """
+    result = _invoke_with_cwd(
+        ["solution", "delete", "ghost-solution", "--force"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+
+
+@pytest.mark.integration
+def test_solution_delete_json_mode_requires_force(project_with_solutions: Path) -> None:
+    """JSON mode without --force → exit code 1.
+
+    Validates: F4 acceptance — JSON mode rejects without --force.
+    """
+    result = _invoke_with_cwd(
+        ["--json", "solution", "delete", "sol-20260301-100000"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "--force" in output
+
+
+@pytest.mark.integration
+def test_solution_delete_json_mode_with_force(project_with_solutions: Path) -> None:
+    """JSON mode with --force → JSON output with deleted status.
+
+    Validates: F4 acceptance — JSON mode + --force works.
+    """
+    result = _invoke_with_cwd(
+        ["--json", "solution", "delete", "sol-20260301-100000", "--force"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    assert data["solution_id"] == "sol-20260301-100000"
+    assert data["status"] == "deleted"
+
+
+@pytest.mark.integration
+def test_solution_delete_user_cancels(project_with_solutions: Path) -> None:
+    """User declines confirmation prompt → solution is NOT deleted.
+
+    Validates: F4 acceptance — interactive cancellation aborts delete.
+    """
+    interactive_runner = CliRunner()
+    with patch("pathlib.Path.cwd", return_value=project_with_solutions):
+        result = interactive_runner.invoke(
+            app,
+            ["solution", "delete", "sol-20260301-100000"],
+            input="n\n",
+        )
+
+    # typer.confirm with abort=True raises Abort → exit code 1
+    assert result.exit_code == 1  # type: ignore[union-attr]
+
+    # Verify solution is still in DB
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_solution_delete_user_confirms(project_with_solutions: Path) -> None:
+    """User accepts confirmation prompt → solution is deleted.
+
+    Validates: F4 acceptance — interactive confirmation proceeds with delete.
+    """
+    interactive_runner = CliRunner()
+    with patch("pathlib.Path.cwd", return_value=project_with_solutions):
+        result = interactive_runner.invoke(
+            app,
+            ["solution", "delete", "sol-20260301-100000"],
+            input="y\n",
+        )
+
+    assert result.exit_code == 0  # type: ignore[union-attr]
+
+    # Verify solution is gone from DB
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is None
+    finally:
+        conn.close()

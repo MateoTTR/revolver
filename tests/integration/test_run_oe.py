@@ -9,6 +9,7 @@ Skipped automatically when openevolve is not installed.
 
 from __future__ import annotations
 
+import copy
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ pytest.importorskip("openevolve.controller", reason="openevolve not installed")
 from openevolve.config import Config as OEConfig
 from openevolve.controller import OpenEvolve as OEController
 
-from revolver.infra.openevolve import OpenEvolveRunner, build_config
+from revolver.infra.openevolve import OpenEvolveRunner, build_config, resolve_api_keys
 from revolver.models.llm import LLMEntry
 
 # Path to test fixtures
@@ -141,7 +142,7 @@ class TestBuildConfigRoundtrip:
     def test_build_config_remote_llm_no_dummy_key(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Remote LLM with api_key_env does not get the 'ollama' placeholder."""
+        """Remote LLM with api_key_env stores env var name, not resolved secret."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real-key-for-test")
         llm = _make_llm_entry(source="remote")
         config_dict = build_config(
@@ -150,8 +151,14 @@ class TestBuildConfigRoundtrip:
             output_dir=tmp_path / "output",
         )
 
-        assert config_dict["llm"]["api_key"] == "sk-ant-real-key-for-test"
-        assert config_dict["llm"]["api_key"] != "ollama"
+        # build_config stores the env var NAME, not the resolved secret
+        assert config_dict["llm"]["api_key_env"] == "ANTHROPIC_API_KEY"
+        assert "api_key" not in config_dict["llm"]
+
+        # resolve_api_keys resolves it at runtime
+        resolved = resolve_api_keys(copy.deepcopy(config_dict))
+        assert resolved["llm"]["api_key"] == "sk-ant-real-key-for-test"
+        assert resolved["llm"]["api_key"] != "ollama"
 
     def test_build_config_cascade_evaluation_default(self, tmp_path: Path) -> None:
         """cascade_evaluation is forced to False when not set by user."""

@@ -17,6 +17,9 @@ from pathlib import Path
 
 from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
 from revolver.infra.db import (
+    delete_solution as db_delete_solution,
+)
+from revolver.infra.db import (
     get_project_db,
     get_run,
     get_solution,
@@ -234,6 +237,47 @@ def extract_solution(
             best_score=best_score,
             alias=alias,
         )
+    finally:
+        conn.close()
+
+
+def delete_solution(
+    solution_id_or_alias: str,
+    *,
+    project_root: Path | None = None,
+) -> str:
+    """Delete a solution and its associated eval data.
+
+    This is a pure domain function — confirmation prompts belong in the CLI
+    layer.  It resolves alias → ID, deletes the solution, and returns the
+    deleted ID.
+
+    Args:
+        solution_id_or_alias: Solution ID or alias to delete.
+        project_root: Project root directory (auto-detected if None).
+
+    Returns:
+        The solution ID that was deleted.
+
+    Raises:
+        RevolverError: If solution not found.
+    """
+    root = project_root or find_project_root(Path.cwd())
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        # Resolve alias-or-id using the same pattern as set_alias / get_solution_info
+        sol = get_solution(conn, solution_id_or_alias)
+        if sol is None:
+            raise RevolverError(f"Solution not found: {solution_id_or_alias}")
+
+        solution_id = sol.id
+
+        deleted = db_delete_solution(conn, solution_id)
+        if not deleted:
+            raise RevolverError(f"Solution not found: {solution_id}")  # pragma: no cover
+
+        return solution_id
     finally:
         conn.close()
 
