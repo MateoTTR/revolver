@@ -1204,11 +1204,12 @@ def generate_wrapper(
 
     if has_evaluate:
         if has_evaluate_instance:
-            sys.stderr.write(
+            print(
                 "Warning: evaluator defines both evaluate() and evaluate_instance(). "
                 "Using evaluate() (legacy mode). If evaluate() depends on "
                 "REVOLVER_INSTANCE_PATH, it will fail during OpenEvolve runs. "
-                "Consider removing evaluate().\n"
+                "Consider removing evaluate().",
+                file=sys.stderr,
             )
         # Legacy mode: copy evaluator as-is
         shutil.copy2(evaluator_path, output_path)

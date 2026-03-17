@@ -44,6 +44,14 @@ def _run_in_subprocess(
     spec.loader.exec_module(module)
 
     if hasattr(module, "evaluate") and callable(module.evaluate):
+        if hasattr(module, "evaluate_instance") and callable(module.evaluate_instance):
+            import sys
+
+            print(
+                "[revolver] Warning: evaluator defines both evaluate() and evaluate_instance(). "
+                "Using evaluate() (legacy mode).",
+                file=sys.stderr,
+            )
         result: dict[str, float] = module.evaluate(program_path)
     elif hasattr(module, "evaluate_instance") and callable(module.evaluate_instance):
         result = module.evaluate_instance(program_path, instance_path)
