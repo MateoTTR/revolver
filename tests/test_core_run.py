@@ -525,6 +525,15 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
 
     mock_proxy_usage = ProxyTokenUsage(prompt_tokens=1000, completion_tokens=500)
 
+    from revolver.models.problem import InstanceTestResult
+
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
         patch("revolver.core.run.get_llm", return_value=llm),
@@ -539,6 +548,10 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
         patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_ok,
+        ),
     ):
         mock_global_db.return_value = MagicMock()
 
@@ -685,6 +698,15 @@ def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
 
     good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
 
+    from revolver.models.problem import InstanceTestResult
+
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
         patch("revolver.core.run.get_llm", return_value=llm),
@@ -698,6 +720,10 @@ def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
         ),
         patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_ok,
+        ),
     ):
         mock_global_db.return_value = MagicMock()
 
@@ -806,6 +832,352 @@ def test_post_run_evaluation_warns_on_missing_program(
     assert "program not found" in captured.err
 
 
+# ── pre-flight check tests ────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_preflight_check_pass(project_with_prereqs: dict, capsys: pytest.CaptureFixture) -> None:
+    """Pre-flight check with passing evaluator must log success and proceed."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+
+    mock_run_output = RunOutput(best_score=0.95, output_dir=None)
+    mock_proxy_usage = ProxyTokenUsage(prompt_tokens=100, completion_tokens=50)
+
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.75},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_ok,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = mock_proxy_usage
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        result = launch_run(config, project_root=root)
+
+    assert result.run_id.startswith("run-")
+    captured = capsys.readouterr()
+    assert "Pre-flight check passed" in captured.err
+    assert "score=0.7500" in captured.err
+
+
+@pytest.mark.unit
+def test_preflight_check_evaluator_crash(project_with_prereqs: dict) -> None:
+    """Pre-flight check must abort with RevolverError when evaluator crashes."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+
+    preflight_fail = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="fail",
+        time_s=0.1,
+        error="ValueError: intentional failure",
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_fail,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy_cls.return_value = mock_proxy
+
+        with pytest.raises(RevolverError, match="Pre-flight check failed"):
+            launch_run(config, project_root=root)
+
+    # Verify run was set to failed
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status FROM runs")
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "interrupted"
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_preflight_check_timeout(project_with_prereqs: dict) -> None:
+    """Pre-flight check must abort with RevolverError on timeout."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+
+    preflight_timeout = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="timeout",
+        time_s=60.0,
+        error="Evaluation timed out after 60.0s",
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_timeout,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy_cls.return_value = mock_proxy
+
+        with pytest.raises(RevolverError, match=r"Pre-flight check failed.*timeout"):
+            launch_run(config, project_root=root)
+
+    # Verify run was set to failed
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status FROM runs")
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "interrupted"
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_preflight_check_score_zero(
+    project_with_prereqs: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """Pre-flight check with score=0 must warn but not abort."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+
+    mock_run_output = RunOutput(best_score=0.0, output_dir=None)
+    mock_proxy_usage = ProxyTokenUsage(prompt_tokens=100, completion_tokens=50)
+
+    preflight_zero = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.0},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_zero,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = mock_proxy_usage
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        result = launch_run(config, project_root=root)
+
+    # Run should proceed (not abort)
+    assert result.run_id.startswith("run-")
+    captured = capsys.readouterr()
+    assert "score=0.0" in captured.err
+    assert "Evolution may not produce improvements" in captured.err
+    assert "Pre-flight check passed" in captured.err
+
+
+@pytest.mark.unit
+def test_dry_run_skips_preflight(project_with_prereqs: dict) -> None:
+    """launch_run with dry_run=True must not run pre-flight check."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        dry_run=True,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(
+        is_valid=True,
+        checked_at=datetime.now(UTC),
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+        ) as mock_run_instance,
+    ):
+        mock_global_db.return_value = MagicMock()
+        result = launch_run(config, project_root=root)
+
+    assert result.run_id == "dry-run"
+    mock_run_instance.assert_not_called()
+
+
 # ── resume_run tests ─────────────────────────────────────────────────────────
 
 
@@ -859,6 +1231,15 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
     mock_run_output = RunOutput(best_score=0.98, output_dir=None)
     mock_proxy_usage = ProxyTokenUsage(prompt_tokens=500, completion_tokens=200)
 
+    from revolver.models.problem import InstanceTestResult
+
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
         patch("revolver.core.run.get_llm", return_value=llm),
@@ -869,6 +1250,10 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
         patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
+        patch(
+            "revolver.infra.evaluator_runner.run_instance",
+            return_value=preflight_ok,
+        ),
     ):
         mock_global_db.return_value = MagicMock()
 
