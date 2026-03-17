@@ -22,6 +22,7 @@ import pytest
 from revolver.core.exceptions import ExternalError, IntegrityError, RevolverError
 from revolver.core.run import (
     _collect_programs,
+    _handle_post_run_failure,
     _is_pid_alive,
     _post_run_evaluation,
     generate_run_id,
@@ -34,6 +35,7 @@ from revolver.core.run import (
 )
 from revolver.infra.db import (
     get_project_db,
+    get_run,
     insert_run,
     insert_solution,
 )
@@ -1738,3 +1740,240 @@ def test_is_pid_alive_current_process() -> None:
 def test_is_pid_alive_dead_process() -> None:
     """_is_pid_alive must return False for a nonexistent PID."""
     assert _is_pid_alive(999999999) is False
+
+
+# ── Post-run error handling tests (F3 fix) ───────────────────────────────────
+
+
+@pytest.mark.unit
+def test_handle_post_run_failure_sets_completed_with_errors(
+    project_with_prereqs: dict,
+) -> None:
+    """_handle_post_run_failure must set status to completed_with_errors."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    conn = get_project_db(db_path)
+    try:
+        run_id = "run-post-err"
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="running",
+        )
+
+        # Create run dir
+        run_dir = root / REVOLVER_DIR / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Call handler with an exception
+        exc = RuntimeError("DB insert failed")
+        _handle_post_run_failure(conn, root, run_id, run_dir, 42.5, exc)
+
+        # Verify status is completed_with_errors
+        row = get_run(conn, run_id)
+        assert row is not None
+        assert row["status"] == "completed_with_errors"
+        assert row["generation_time_s"] == 42.5
+
+        # Verify error log was written
+        error_log = run_dir / "run-error.log"
+        assert error_log.exists()
+        content = error_log.read_text()
+        assert "RuntimeError" in content
+        assert "DB insert failed" in content
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_launch_run_post_processing_failure_sets_completed_with_errors(
+    project_with_prereqs: dict,
+) -> None:
+    """launch_run must set status to completed_with_errors when post-processing fails."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+
+    mock_run_output = RunOutput(
+        best_score=0.95,
+        best_program="some_program",
+        output_dir=None,
+    )
+
+    mock_proxy_usage = ProxyTokenUsage(prompt_tokens=1000, completion_tokens=500)
+
+    from revolver.models.problem import InstanceTestResult
+
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch(
+            "revolver.core.run.eval_run_instance",
+            return_value=preflight_ok,
+        ),
+        patch(
+            "revolver.core.run.insert_solution",
+            side_effect=RuntimeError("DB constraint error"),
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = mock_proxy_usage
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        with pytest.raises(ExternalError, match="completed_with_errors"):
+            launch_run(config, project_root=root)
+
+    # Verify run was set to completed_with_errors (not interrupted)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status, generation_time_s FROM runs")
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "completed_with_errors"
+        # generation_time_s should be set (OE completed)
+        assert rows[0][1] is not None
+        assert rows[0][1] > 0
+    finally:
+        conn.close()
+
+    # Verify error log was written
+    runs_dir = root / REVOLVER_DIR / "runs"
+    run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run-")]
+    assert len(run_dirs) == 1
+    error_log = run_dirs[0] / "run-error.log"
+    assert error_log.exists()
+    content = error_log.read_text()
+    assert "RuntimeError" in content
+
+
+@pytest.mark.unit
+def test_launch_run_oe_failure_still_sets_interrupted(
+    project_with_prereqs: dict,
+) -> None:
+    """launch_run must still set status to interrupted when OE itself fails (regression)."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+
+    from revolver.models.problem import InstanceTestResult
+
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.core.run.eval_run_instance",
+            return_value=preflight_ok,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage()
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.side_effect = RuntimeError("OE crashed")
+        mock_oe_cls.return_value = mock_runner
+
+        with pytest.raises(ExternalError):
+            launch_run(config, project_root=root)
+
+    # Verify run was set to interrupted (OE didn't complete)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status FROM runs")
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "interrupted"
+    finally:
+        conn.close()

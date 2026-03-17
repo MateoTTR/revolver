@@ -21,6 +21,7 @@ from revolver.infra.db import (
     insert_solution,
     list_runs,
     list_solutions,
+    update_run_generation_time,
     update_run_status,
     update_run_tokens,
 )
@@ -168,6 +169,16 @@ class TestUpdateRunStatus:
         result = get_run(db_conn, "run-20260314-120000")
         assert result is not None
         assert result["status"] == "interrupted"
+
+    @pytest.mark.unit
+    def test_status_to_completed_with_errors(self, db_conn: sqlite3.Connection) -> None:
+        """Update run status to completed_with_errors."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn)
+        update_run_status(db_conn, "run-20260314-120000", "completed_with_errors")
+        result = get_run(db_conn, "run-20260314-120000")
+        assert result is not None
+        assert result["status"] == "completed_with_errors"
 
 
 class TestUpdateRunTokens:
@@ -459,6 +470,23 @@ class TestGetResumeChain:
         """get_resume_chain returns empty list for a non-existent run ID."""
         chain = get_resume_chain(db_conn, "nonexistent-run")
         assert chain == []
+
+
+class TestUpdateRunGenerationTime:
+    """Tests for update_run_generation_time with completed_with_errors status."""
+
+    @pytest.mark.unit
+    def test_generation_time_with_completed_with_errors(self, db_conn: sqlite3.Connection) -> None:
+        """update_run_generation_time sets both time and completed_with_errors status."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn)
+        update_run_generation_time(
+            db_conn, "run-20260314-120000", 42.5, status="completed_with_errors"
+        )
+        result = get_run(db_conn, "run-20260314-120000")
+        assert result is not None
+        assert result["status"] == "completed_with_errors"
+        assert result["generation_time_s"] == 42.5
 
 
 class TestUpdateRunTokensEdgeCases:

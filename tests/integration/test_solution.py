@@ -525,6 +525,91 @@ def test_extract_rejects_non_completed_run(tmp_project: Path) -> None:
 
 
 @pytest.mark.integration
+def test_extract_accepts_completed_with_errors(tmp_project: Path) -> None:
+    """``solution extract`` succeeds on a run with status='completed_with_errors'.
+
+    Validates: F3 fix — completed_with_errors runs should be extractable.
+    """
+    _create_problem_version_in_db(tmp_project, "v1.0")
+    _create_dataset_in_db(tmp_project, "train-small")
+
+    # Create a run with status='completed_with_errors'
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id="run-cwe",
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train-small",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed_with_errors",
+            generation_time_s=30.0,
+        )
+    finally:
+        conn.close()
+
+    # Create program file
+    programs_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / "run-cwe" / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-cwe", "--rank", "1"],
+        tmp_project,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "sol-" in output
+
+
+@pytest.mark.integration
+def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
+    """``solution extract`` rejects a run with status='interrupted'.
+
+    Validates: F3 fix — interrupted runs should NOT be extractable.
+    """
+    _create_problem_version_in_db(tmp_project, "v1.0")
+    _create_dataset_in_db(tmp_project, "train-small")
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id="run-interrupted",
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train-small",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="interrupted",
+        )
+    finally:
+        conn.close()
+
+    programs_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / "run-interrupted" / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-interrupted", "--rank", "1"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "not completed" in output.lower()
+
+
+@pytest.mark.integration
 def test_extract_rejects_rank_zero(project_with_solutions: Path) -> None:
     """``solution extract --rank 0`` is rejected with validation error.
 
