@@ -24,12 +24,17 @@ import pytest
 
 from revolver.core.exceptions import DuplicateNameError
 from revolver.infra.db import (
+    delete_solution,
+    get_eval_instances,
+    get_eval_metadata,
     get_project_db,
     get_solution,
     get_solution_by_alias,
     get_solution_detail,
     get_solutions_for_run,
     insert_dataset,
+    insert_eval_instance,
+    insert_eval_metadata,
     insert_problem_version,
     insert_run,
     insert_solution,
@@ -416,3 +421,100 @@ class TestGetSolutionDetail:
         """get_solution_detail returns None when solution doesn't exist."""
         result = get_solution_detail(db_conn, "nonexistent")
         assert result is None
+
+
+# ── delete_solution tests ────────────────────────────────────────────────────
+
+
+class TestDeleteSolution:
+    """Tests for delete_solution."""
+
+    @pytest.mark.unit
+    def test_delete_solution(self, db_conn: sqlite3.Connection) -> None:
+        """Insert a solution, delete it, verify it's gone."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn)
+        insert_solution(
+            db_conn,
+            solution_id="sol-to-delete",
+            run_id="run-20260314-120000",
+            rank=1,
+            best_score=0.95,
+        )
+
+        # Verify it exists
+        assert get_solution(db_conn, "sol-to-delete") is not None
+
+        # Delete
+        result = delete_solution(db_conn, "sol-to-delete")
+        assert result is True
+
+        # Verify it's gone
+        assert get_solution(db_conn, "sol-to-delete") is None
+
+    @pytest.mark.unit
+    def test_delete_solution_cascades_eval(self, db_conn: sqlite3.Connection) -> None:
+        """Insert solution + eval data, delete solution, verify eval data also gone."""
+        _seed_problem_and_dataset(db_conn)
+        _insert_test_run(db_conn)
+        insert_solution(
+            db_conn,
+            solution_id="sol-cascade",
+            run_id="run-20260314-120000",
+            rank=1,
+            best_score=0.95,
+        )
+
+        # Insert eval metadata and instances
+        insert_eval_metadata(
+            db_conn,
+            eval_id="eval-cascade",
+            solution_id="sol-cascade",
+            dataset_name="train-small",
+            instance_count=3,
+            instances_solved=2,
+            eval_time_s=5.0,
+            user_aggregates=None,
+            evaluated_at=datetime(2026, 3, 15, 10, 0, 0, tzinfo=UTC),
+        )
+        insert_eval_instance(
+            db_conn,
+            eval_id="eval-cascade",
+            instance_id="inst-001",
+            metric_name="score",
+            value=0.9,
+            status="solved",
+            error_message=None,
+            compute_time_s=1.0,
+        )
+        insert_eval_instance(
+            db_conn,
+            eval_id="eval-cascade",
+            instance_id="inst-002",
+            metric_name="score",
+            value=0.8,
+            status="solved",
+            error_message=None,
+            compute_time_s=1.5,
+        )
+
+        # Verify eval data exists
+        assert get_eval_metadata(db_conn, "sol-cascade", "train-small") is not None
+        assert len(get_eval_instances(db_conn, "eval-cascade")) == 2
+
+        # Delete solution
+        result = delete_solution(db_conn, "sol-cascade")
+        assert result is True
+
+        # Verify solution is gone
+        assert get_solution(db_conn, "sol-cascade") is None
+
+        # Verify eval data is also gone
+        assert get_eval_metadata(db_conn, "sol-cascade", "train-small") is None
+        assert get_eval_instances(db_conn, "eval-cascade") == []
+
+    @pytest.mark.unit
+    def test_delete_solution_not_found(self, db_conn: sqlite3.Connection) -> None:
+        """delete_solution returns False for nonexistent ID."""
+        result = delete_solution(db_conn, "nonexistent-sol")
+        assert result is False

@@ -209,3 +209,44 @@ def solution_extract(
             if solution.alias:
                 data["alias"] = solution.alias
             render(data, json_mode=False)
+
+
+# ── solution delete (F4 — Sprint 005a) ──────────────────────────────────────
+
+
+@solution_app.command("delete")
+def solution_delete(
+    ctx: typer.Context,
+    solution: Annotated[
+        str,
+        typer.Argument(help="Solution ID or alias to delete."),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """Delete a solution and its associated evaluation data."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        # Confirmation logic lives in the CLI layer, not in core
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
+            typer.confirm(f"Delete solution '{solution}'?", abort=True)
+
+        deleted_id = core_solution.delete_solution(solution)
+
+        if json_mode:
+            render(
+                {"solution_id": deleted_id, "status": "deleted"},
+                json_mode=True,
+            )
+        else:
+            render(
+                {"solution_id": deleted_id, "status": "deleted"},
+                json_mode=False,
+            )
