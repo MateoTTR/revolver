@@ -27,6 +27,8 @@ from revolver.infra.db import (
 )
 from revolver.infra.store import REVOLVER_DIR, RUNS_DIR
 
+pytestmark = pytest.mark.integration
+
 runner = CliRunner()
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
