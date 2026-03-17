@@ -66,6 +66,24 @@ class EvaluatorLoadError(RevolverError):
     exit_code: int = 1
 
 
+class EvalError(RevolverError):
+    """Raised when an evaluation operation fails."""
+
+    exit_code: int = 1
+
+
+class EvalAborted(RevolverError):
+    """Raised when an evaluation is cancelled by the user."""
+
+    exit_code: int = 1
+
+
+class EvalNotFoundError(RevolverError):
+    """Raised when no evaluation results are found for a query."""
+
+    exit_code: int = 1
+
+
 # ── Ollama / LLM exceptions ─────────────────────────────────────────────────
 
 
