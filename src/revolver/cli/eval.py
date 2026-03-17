@@ -9,6 +9,7 @@ Traceable to: DES-006 section 9, FR-EVL-001..020.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -16,7 +17,9 @@ import typer
 from revolver.cli import eval_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import eval as core_eval
+from revolver.infra.db import get_eval_metadata, get_project_db, get_solution
 from revolver.infra.output import render
+from revolver.infra.store import REVOLVER_DIR, find_project_root
 from revolver.models.eval import EvalDetailResult, EvalResult
 
 # ── Default callback: run evaluation (DES-006 §9) ────────────────────────────
@@ -62,6 +65,37 @@ def eval_default(
             sys.stderr.write("Error: --dataset is required.\n")
             raise typer.Exit(code=1)
 
+        # Check for existing eval and prompt for re-evaluation (S5-06)
+        # This keeps CLI-specific confirmation logic out of core layer.
+        if not force:
+            try:
+                root = find_project_root(Path.cwd())
+                conn = get_project_db(root / REVOLVER_DIR / "revolver.db")
+                try:
+                    sol = get_solution(conn, solution)
+                    if sol is not None:
+                        existing = get_eval_metadata(conn, sol.id, dataset)
+                        if existing is not None:
+                            if json_mode:
+                                sys.stderr.write(
+                                    "Error: Evaluation already exists. "
+                                    "Use --force to re-evaluate.\n"
+                                )
+                                raise typer.Exit(code=1)
+                            if not typer.confirm(
+                                f"Evaluation exists for '{solution}' on '{dataset}'. Re-evaluate?",
+                                default=False,
+                            ):
+                                raise typer.Exit(code=0)
+                            # User confirmed — pass force=True to core
+                            force = True
+                finally:
+                    conn.close()
+            except typer.Exit:
+                raise
+            except Exception:
+                pass  # If check fails, let core handle it
+
         # Progress bar setup
         if not json_mode:
             from rich.console import Console
@@ -96,7 +130,6 @@ def eval_default(
                     dataset_name=dataset,
                     timeout_s=timeout,
                     force=force,
-                    json_mode=json_mode,
                     on_progress=on_progress,
                 )
             finally:
@@ -107,7 +140,6 @@ def eval_default(
                 dataset_name=dataset,
                 timeout_s=timeout,
                 force=force,
-                json_mode=json_mode,
                 on_progress=None,
             )
 

@@ -13,7 +13,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from revolver.core.exceptions import DuplicateNameError
 from revolver.models.dataset import (
@@ -1400,7 +1400,8 @@ def get_eval_instances(
         iid = row[0]
         metric_name = row[1]
         value = row[2]
-        status = row[3]
+        # SQLite CHECK constraint guarantees valid status values
+        status = cast(Literal["solved", "failed", "timeout"], row[3])
         error_msg = row[4]
         compute_time = row[5]
 

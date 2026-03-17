@@ -16,12 +16,10 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-
-import typer
+from typing import Literal
 
 from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
 from revolver.core.exceptions import (
-    EvalAborted,
     EvalError,
     EvalNotFoundError,
     RevolverError,
@@ -69,9 +67,6 @@ def _resolve_project_root(project_root: Path | None = None) -> Path:
 
 def generate_eval_id() -> str:
     """Generate a unique evaluation ID in the format ``eval-YYYYMMDD-HHMMSS``.
-
-    Appends a counter suffix (``-2``, ``-3``, ...) if called multiple times
-    within the same second (collision avoidance).
 
     Returns:
         A unique evaluation ID string.
@@ -256,7 +251,6 @@ def evaluate_solution(
     dataset_name: str,
     timeout_s: int = 300,
     force: bool = False,
-    json_mode: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
     project_root: Path | None = None,
 ) -> EvalResult:
@@ -271,8 +265,7 @@ def evaluate_solution(
         solution_id_or_alias: Solution ID or alias to evaluate.
         dataset_name: Registered dataset name.
         timeout_s: Per-instance timeout in seconds.
-        force: If ``True``, skip confirmation for re-evaluation.
-        json_mode: If ``True``, raise error instead of prompting for re-eval.
+        force: If ``True``, delete existing evaluation before re-evaluating.
         on_progress: Callback ``(completed, total)`` for progress reporting.
         project_root: Explicit project root, or ``None`` to auto-detect.
 
@@ -280,8 +273,8 @@ def evaluate_solution(
         An :class:`EvalResult` with metadata, aggregates, and compute time.
 
     Raises:
-        EvalError: If the solution or dataset is not found.
-        EvalAborted: If re-evaluation is cancelled by the user.
+        EvalError: If the solution or dataset is not found, or if an
+            evaluation already exists and ``force`` is ``False``.
     """
     root = _resolve_project_root(project_root)
     db_path = root / REVOLVER_DIR / "revolver.db"
@@ -333,19 +326,15 @@ def evaluate_solution(
             )
 
         # 7. Check for existing eval results — re-eval handling (S5-06)
+        #    The CLI layer is responsible for user confirmation before calling
+        #    this function. If force=False and results exist, raise an error.
         existing = get_eval_metadata(conn, solution.id, dataset_name)
         if existing is not None:
-            if json_mode and not force:
-                raise EvalError("Evaluation already exists. Use --force to re-evaluate.")
             if not force:
-                # Interactive confirmation
-                confirmed = typer.confirm(
+                raise EvalError(
                     f"Evaluation already exists for solution '{solution.id}' "
-                    f"on dataset '{dataset_name}'. Re-evaluate?",
-                    default=False,
+                    f"on dataset '{dataset_name}'. Use --force to re-evaluate."
                 )
-                if not confirmed:
-                    raise EvalAborted("Re-evaluation cancelled by user.")
             delete_eval(conn, existing.eval_id)
 
         # 8. Resolve program path
@@ -409,6 +398,7 @@ def evaluate_solution(
             )
 
             # Map InstanceTestResult to InstanceResult
+            status: Literal["solved", "failed", "timeout"]
             if test_result.status == "pass":
                 status = "solved"
                 metrics = test_result.metrics or {}
