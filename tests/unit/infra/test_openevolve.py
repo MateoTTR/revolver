@@ -286,7 +286,10 @@ class TestBuildConfig:
         llm = _make_llm()
         result = build_config(problem_config=config_file, llm=llm)
 
-        assert "evaluator" not in result
+        # String-valued evaluator/initial_program are stripped;
+        # evaluator is re-injected as a dict with cascade_evaluation.
+        assert result.get("evaluator") != "evaluator.py"
+        assert isinstance(result.get("evaluator"), dict)
         assert "initial_program" not in result
         assert result["max_iterations"] == 100
 

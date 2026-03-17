@@ -21,21 +21,34 @@ pytest.importorskip("openevolve.controller", reason="openevolve not installed")
 from openevolve.config import Config as OEConfig
 from openevolve.controller import OpenEvolve as OEController
 
-from revolver.infra.openevolve import OpenEvolveRunner, build_config
+from revolver.infra.openevolve import OpenEvolveRunner, _extract_best_score, build_config
 from revolver.models.llm import LLMEntry
 
 # Path to test fixtures
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
 
-def _make_llm_entry() -> LLMEntry:
-    """Create a minimal LLMEntry for testing."""
+def _make_llm_entry(*, source: str = "local") -> LLMEntry:
+    """Create a minimal LLMEntry for testing.
+
+    Args:
+        source: ``"local"`` for Ollama or ``"remote"`` for API-based.
+    """
+    if source == "local":
+        return LLMEntry(
+            name="test-llm",
+            source="local",
+            model="test-model",
+            base_url="http://localhost:11434/v1",
+            api_key_env=None,
+            registered_at=datetime.now(UTC),
+        )
     return LLMEntry(
-        name="test-llm",
-        source="local",
-        model="test-model",
-        base_url="http://localhost:11434/v1",
-        api_key_env=None,
+        name="test-llm-remote",
+        source="remote",
+        model="claude-sonnet-4-20250514",
+        base_url="https://api.anthropic.com/v1",
+        api_key_env="ANTHROPIC_API_KEY",
         registered_at=datetime.now(UTC),
     )
 
@@ -96,8 +109,10 @@ class TestBuildConfigRoundtrip:
             output_dir=tmp_path / "output",
         )
 
-        # Revolver-specific keys must be absent from the dict
-        assert "evaluator" not in config_dict
+        # Revolver-specific string values must be stripped from the dict
+        # (evaluator is now a dict with cascade_evaluation, not the original string)
+        assert config_dict.get("evaluator") != "evaluator.py"
+        assert isinstance(config_dict.get("evaluator"), dict)
         assert "initial_program" not in config_dict
 
         # num_generations must be mapped to max_iterations
@@ -107,6 +122,65 @@ class TestBuildConfigRoundtrip:
         # Round-trip through Config.from_dict() -- the v0.4.2 crash
         config_obj = OEConfig.from_dict(config_dict)
         assert config_obj.max_iterations == 50
+
+    def test_build_config_local_llm_api_key(self, tmp_path: Path) -> None:
+        """Local LLM without api_key_env gets api_key='ollama' injected."""
+        llm = _make_llm_entry(source="local")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["llm"]["api_key"] == "ollama"
+
+        # Round-trip through Config.from_dict()
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.llm.api_key == "ollama"
+
+    def test_build_config_remote_llm_no_dummy_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote LLM with api_key_env does not get the 'ollama' placeholder."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real-key-for-test")
+        llm = _make_llm_entry(source="remote")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["llm"]["api_key"] == "sk-ant-real-key-for-test"
+        assert config_dict["llm"]["api_key"] != "ollama"
+
+    def test_build_config_cascade_evaluation_default(self, tmp_path: Path) -> None:
+        """cascade_evaluation is forced to False when not set by user."""
+        llm = _make_llm_entry()
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["evaluator"]["cascade_evaluation"] is False
+
+        # Round-trip through Config.from_dict()
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.evaluator.cascade_evaluation is False
+
+    def test_build_config_cascade_evaluation_user_override(self, tmp_path: Path) -> None:
+        """User-set cascade_evaluation: true is preserved."""
+        config_yaml = tmp_path / "config.yaml"
+        config_yaml.write_text("evaluator:\n  cascade_evaluation: true\n")
+
+        llm = _make_llm_entry()
+        config_dict = build_config(
+            problem_config=config_yaml,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["evaluator"]["cascade_evaluation"] is True
 
     def test_build_config_num_generations_override(self, tmp_path: Path) -> None:
         """--iterations override wins over num_generations from config.yaml."""
@@ -210,3 +284,36 @@ class TestOpenEvolveRunnerInitController:
 
         assert runner._controller is not None
         assert runner._controller.config.llm.api_base == "http://localhost:11434/v1"
+
+
+@pytest.mark.integration
+@pytest.mark.openevolve
+class TestRunOutputBestScore:
+    """Verify best_score extraction from various OpenEvolve return types."""
+
+    def test_best_score_from_program_object(self) -> None:
+        """Extract score from a Program-like object with .metrics dict."""
+
+        class FakeProgram:
+            metrics: dict[str, float] = {"combined_score": 1.065}
+
+        result = _extract_best_score(FakeProgram())
+        assert result == 1.065
+
+    def test_best_score_from_number(self) -> None:
+        """Extract score from a raw numeric return value."""
+        assert _extract_best_score(42) == 42.0
+        assert _extract_best_score(3.14) == 3.14
+
+    def test_best_score_none_when_not_extractable(self) -> None:
+        """Return None when best is neither a number nor a Program."""
+        assert _extract_best_score("some_string") is None
+        assert _extract_best_score(None) is None
+
+    def test_best_score_none_when_metrics_missing_key(self) -> None:
+        """Return None when metrics dict exists but lacks combined_score."""
+
+        class FakeProgram:
+            metrics: dict[str, float] = {"other_metric": 0.5}
+
+        assert _extract_best_score(FakeProgram()) is None
