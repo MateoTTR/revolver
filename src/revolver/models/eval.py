@@ -1,19 +1,23 @@
 """Pydantic models for evaluation entities.
 
-Defines the data structures for per-instance results, metric aggregates,
-evaluation metadata, and composite result types returned to the CLI layer.
+Covers the full evaluation lifecycle: per-instance results, aggregate
+statistics, evaluation metadata, and composite result types returned
+to the CLI layer.
 
 Status literals use ``"solved"/"failed"/"timeout"`` (matching the SQLite
-CHECK constraint and spec-eval output). This differs from DES-003
-``InstanceTestResult`` which uses ``"pass"/"fail"/"timeout"`` for problem
-testing — the distinction is intentional.
+CHECK constraint and spec-eval output). This is intentionally different
+from DES-003 ``InstanceTestResult`` which uses ``"pass"/"fail"/"timeout"``
+for problem testing: ``"solved/failed"`` reflects whether the evaluator
+produced a valid result, while ``"pass/fail"`` reflects whether a test
+assertion passed.
 
-Traceable to: DES-006 (Evaluation Loop) section 6, DES-001 sections 3.7-3.8.
+Traceable to: DES-006 (Eval Loop) section 6, DES-001 section 3.7-3.8.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -22,15 +26,18 @@ class InstanceResult(BaseModel):
     """Result of evaluating a single instance.
 
     Attributes:
-        instance_id: Identifier of the evaluated instance.
-        status: Outcome — ``"solved"``, ``"failed"``, or ``"timeout"``.
-        metrics: Metric name/value pairs (empty dict if failed/timeout).
-        error: Error message if the evaluation failed.
-        compute_time_s: Wall-clock time in seconds for this instance.
+        instance_id: Identifier of the evaluated instance (filename or dir name).
+        status: Outcome of the evaluation. One of ``"solved"``, ``"failed"``,
+            or ``"timeout"``.
+        metrics: Mapping of metric names to float values. Empty when the
+            instance is failed or timed out.
+        error: Error message when ``status != "solved"``, ``None`` otherwise.
+        compute_time_s: Wall-clock time in seconds for this instance evaluation.
+            ``None`` if timing is unavailable.
     """
 
     instance_id: str
-    status: str  # "solved" | "failed" | "timeout"
+    status: Literal["solved", "failed", "timeout"]
     metrics: dict[str, float] = {}
     error: str | None = None
     compute_time_s: float | None = None
@@ -39,15 +46,17 @@ class InstanceResult(BaseModel):
 class MetricAggregate(BaseModel):
     """Aggregate statistics for a single metric across solved instances.
 
+    Frozen: aggregate values are immutable once computed.
+
     Attributes:
-        mean: Arithmetic mean.
+        mean: Arithmetic mean of the metric values.
         min: Minimum value.
         max: Maximum value.
-        p10: 10th percentile (linear interpolation).
-        p50: 50th percentile (median, linear interpolation).
-        p90: 90th percentile (linear interpolation).
-        std: Sample standard deviation (0.0 if n=1).
-        count: Number of solved instances with this metric.
+        p10: 10th percentile.
+        p50: 50th percentile (median).
+        p90: 90th percentile.
+        std: Sample standard deviation (0.0 when count is 1).
+        count: Number of solved instances contributing to the aggregate.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -65,16 +74,19 @@ class MetricAggregate(BaseModel):
 class EvalMetadata(BaseModel):
     """Evaluation session metadata stored in ``eval_metadata`` table.
 
+    Frozen: metadata is immutable once an evaluation completes.
+
     Attributes:
-        eval_id: Unique evaluation identifier (``"eval-YYYYMMDD-HHMMSS"``).
+        eval_id: Unique evaluation identifier (e.g. ``"eval-20260310-160000"``).
         solution_id: ID of the evaluated solution.
         dataset_name: Name of the evaluation dataset.
         instance_count: Total number of instances evaluated.
         instances_solved: Number of instances with ``status="solved"``.
-        eval_time_s: Total wall-clock evaluation time in seconds.
-        evaluated_at: Timestamp of evaluation completion.
-        user_aggregates: Legacy ``evaluate()`` global aggregation result (D-006-g).
-            ``None`` for ``evaluate_instance()`` mode.
+        eval_time_s: Total wall-clock time for the evaluation in seconds.
+            ``None`` if timing is unavailable.
+        evaluated_at: Timestamp when the evaluation was performed (ISO 8601).
+        user_aggregates: Custom aggregates from legacy ``evaluate()`` global call
+            (DES-006 D-006-g). ``None`` when using ``evaluate_instance()`` mode.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -90,12 +102,14 @@ class EvalMetadata(BaseModel):
 
 
 class ComputeTimeSummary(BaseModel):
-    """Compute time statistics across all instances.
+    """Compute time statistics across all evaluated instances.
+
+    Frozen: summary values are immutable once computed.
 
     Attributes:
-        mean_s: Mean wall-clock time per instance.
-        max_s: Maximum wall-clock time across instances.
-        total_s: Sum of all instance compute times.
+        mean_s: Mean compute time in seconds.
+        max_s: Maximum compute time in seconds.
+        total_s: Total (sum) compute time in seconds.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -106,17 +120,20 @@ class ComputeTimeSummary(BaseModel):
 
 
 class EvalResult(BaseModel):
-    """Full evaluation result returned to CLI.
+    """Full evaluation result returned to the CLI layer.
 
-    JSON serialization produces nested ``compute_time`` matching spec-eval section 2.1.
-    When ``user_aggregates`` is present (legacy ``evaluate()`` mode), the CLI displays
-    both "Revolver aggregates" and "User aggregates" sections.
+    JSON serialization produces nested ``compute_time`` matching spec-eval
+    section 2.1. When ``user_aggregates`` is present (legacy ``evaluate()`` mode),
+    the CLI displays both "Revolver aggregates" and "User aggregates" sections.
 
     Attributes:
         metadata: Evaluation session metadata.
-        aggregates: Revolver-computed per-metric statistics from raw per-instance data.
-        user_aggregates: Raw result from legacy ``evaluate()`` global call (D-006-g).
-        compute_time: Summary of per-instance compute times.
+        aggregates: Revolver-computed per-metric aggregates from raw
+            per-instance data. Keys are metric names.
+        user_aggregates: Custom aggregates from legacy ``evaluate()`` global
+            call (DES-006 D-006-g). ``None`` for ``evaluate_instance()`` mode.
+        compute_time: Compute time summary across all instances.
+            ``None`` if no timing data is available.
     """
 
     metadata: EvalMetadata
@@ -130,7 +147,7 @@ class EvalDetailResult(BaseModel):
 
     Attributes:
         metadata: Evaluation session metadata.
-        instances: All per-instance results.
+        instances: List of per-instance results.
     """
 
     metadata: EvalMetadata

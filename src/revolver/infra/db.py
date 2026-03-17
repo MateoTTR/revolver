@@ -9,6 +9,7 @@ Traceable to: DES-001 (SQLite Data Model), NFR-013, NFR-016.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1218,7 +1219,7 @@ def insert_eval_metadata(
     user_aggregates: str | None = None,
     evaluated_at: datetime,
 ) -> None:
-    """Insert an evaluation metadata record.
+    """Insert an evaluation metadata record into the project database.
 
     Args:
         conn: An open project database connection.
@@ -1230,6 +1231,10 @@ def insert_eval_metadata(
         eval_time_s: Total wall-clock evaluation time in seconds.
         user_aggregates: JSON string of user-defined aggregates (legacy mode).
         evaluated_at: Timestamp of evaluation completion.
+
+    Raises:
+        sqlite3.IntegrityError: If the ``(solution_id, dataset_name)``
+            unique constraint is violated.
     """
     conn.execute(
         """\
@@ -1263,20 +1268,24 @@ def insert_eval_instance(
     status: str,
     error_message: str | None = None,
     compute_time_s: float | None = None,
+    commit: bool = True,
 ) -> None:
-    """Insert a single per-instance evaluation metric result.
+    """Insert a single eval instance result row.
 
-    Each (eval_id, instance_id, metric_name) triple is unique.
+    Each row represents one (instance, metric) pair. An instance with
+    multiple metrics results in multiple rows.
 
     Args:
         conn: An open project database connection.
-        eval_id: Evaluation identifier.
-        instance_id: Instance identifier (filename).
+        eval_id: Evaluation ID (foreign key to ``eval_metadata``).
+        instance_id: Instance identifier (filename or directory name).
         metric_name: Name of the metric.
         value: Metric value (``None`` if failed/timeout).
-        status: Instance outcome (``"solved"``, ``"failed"``, ``"timeout"``).
-        error_message: Error description if status is not ``"solved"``.
-        compute_time_s: Wall-clock time for this instance.
+        status: Instance status (``"solved"``, ``"failed"``, or ``"timeout"``).
+        error_message: Error message when ``status != "solved"``.
+        compute_time_s: Wall-clock time for this instance in seconds.
+        commit: If ``True`` (default), commit the transaction immediately.
+            Pass ``False`` when the caller manages the transaction.
     """
     conn.execute(
         """\
@@ -1285,17 +1294,10 @@ def insert_eval_instance(
             status, error_message, compute_time_s
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (
-            eval_id,
-            instance_id,
-            metric_name,
-            value,
-            status,
-            error_message,
-            compute_time_s,
-        ),
+        (eval_id, instance_id, metric_name, value, status, error_message, compute_time_s),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def get_eval_metadata(
@@ -1314,51 +1316,54 @@ def get_eval_metadata(
     Returns:
         The :class:`EvalMetadata` if found, otherwise ``None``.
     """
-    import json as _json
+    conn.row_factory = sqlite3.Row
+    try:
+        if dataset_name is not None:
+            cursor = conn.execute(
+                """\
+                SELECT eval_id, solution_id, dataset_name,
+                       instance_count, instances_solved, eval_time_s,
+                       user_aggregates, evaluated_at
+                FROM eval_metadata
+                WHERE solution_id = ? AND dataset_name = ?
+                ORDER BY evaluated_at DESC
+                LIMIT 1
+                """,
+                (solution_id, dataset_name),
+            )
+        else:
+            cursor = conn.execute(
+                """\
+                SELECT eval_id, solution_id, dataset_name,
+                       instance_count, instances_solved, eval_time_s,
+                       user_aggregates, evaluated_at
+                FROM eval_metadata
+                WHERE solution_id = ?
+                ORDER BY evaluated_at DESC
+                LIMIT 1
+                """,
+                (solution_id,),
+            )
+        row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
 
-    if dataset_name is not None:
-        cursor = conn.execute(
-            """\
-            SELECT eval_id, solution_id, dataset_name,
-                   instance_count, instances_solved, eval_time_s,
-                   user_aggregates, evaluated_at
-            FROM eval_metadata
-            WHERE solution_id = ? AND dataset_name = ?
-            ORDER BY evaluated_at DESC
-            LIMIT 1
-            """,
-            (solution_id, dataset_name),
-        )
-    else:
-        cursor = conn.execute(
-            """\
-            SELECT eval_id, solution_id, dataset_name,
-                   instance_count, instances_solved, eval_time_s,
-                   user_aggregates, evaluated_at
-            FROM eval_metadata
-            WHERE solution_id = ?
-            ORDER BY evaluated_at DESC
-            LIMIT 1
-            """,
-            (solution_id,),
-        )
-    row = cursor.fetchone()
     if row is None:
         return None
 
     user_agg: dict[str, float] | None = None
-    if row[6] is not None:
-        user_agg = _json.loads(row[6])
+    if row["user_aggregates"] is not None:
+        user_agg = json.loads(row["user_aggregates"])
 
     return EvalMetadata(
-        eval_id=row[0],
-        solution_id=row[1],
-        dataset_name=row[2],
-        instance_count=row[3],
-        instances_solved=row[4],
-        eval_time_s=row[5],
+        eval_id=row["eval_id"],
+        solution_id=row["solution_id"],
+        dataset_name=row["dataset_name"],
+        instance_count=row["instance_count"],
+        instances_solved=row["instances_solved"],
+        eval_time_s=row["eval_time_s"],
         user_aggregates=user_agg,
-        evaluated_at=datetime.fromisoformat(row[7]),
+        evaluated_at=datetime.fromisoformat(row["evaluated_at"]),
     )
 
 
@@ -1445,15 +1450,122 @@ def update_eval_metadata(
 
 
 def delete_eval(conn: sqlite3.Connection, eval_id: str) -> None:
-    """Delete an evaluation and all its per-instance results.
+    """Delete an evaluation and all its instance results.
 
-    Deletes from ``eval_instances`` first (child), then ``eval_metadata``
-    (parent) to satisfy foreign key constraints.
+    Both DELETEs run inside an explicit transaction so that the
+    operation is atomic: either both tables are cleaned or neither is.
 
     Args:
         conn: An open project database connection.
         eval_id: The evaluation ID to delete.
     """
-    conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
-    conn.execute("DELETE FROM eval_metadata WHERE eval_id = ?", (eval_id,))
+    with conn:
+        conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
+        conn.execute("DELETE FROM eval_metadata WHERE eval_id = ?", (eval_id,))
+
+
+# ── Solution extended queries ────────────────────────────────────────────────
+
+
+def update_solution_alias(
+    conn: sqlite3.Connection,
+    solution_id: str,
+    alias: str,
+) -> None:
+    """Set or update the alias of an existing solution.
+
+    Args:
+        conn: An open project database connection.
+        solution_id: The solution ID whose alias to set.
+        alias: The new alias (must be unique across all solutions).
+
+    Raises:
+        KeyError: If no solution with the given *solution_id* exists.
+        DuplicateNameError: If *alias* is already used by another solution.
+    """
+    try:
+        cursor = conn.execute(
+            "UPDATE solutions SET alias = ? WHERE id = ?",
+            (alias, solution_id),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"Alias already in use: {alias!r}") from exc
+    if cursor.rowcount == 0:
+        raise KeyError(f"Solution not found: {solution_id}")
     conn.commit()
+
+
+def get_solution_by_alias(
+    conn: sqlite3.Connection,
+    alias: str,
+) -> Solution | None:
+    """Retrieve a solution by its alias.
+
+    Unlike :func:`get_solution`, this performs a direct alias lookup
+    without falling back to ID matching.
+
+    Args:
+        conn: An open project database connection.
+        alias: The alias to look up.
+
+    Returns:
+        The :class:`Solution` if found, otherwise ``None``.
+    """
+    cursor = conn.execute(
+        "SELECT id, run_id, rank, best_score, alias FROM solutions WHERE alias = ?",
+        (alias,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return Solution(
+        id=row[0],
+        run_id=row[1],
+        rank=row[2],
+        best_score=row[3],
+        alias=row[4],
+    )
+
+
+def get_solution_detail(
+    conn: sqlite3.Connection,
+    id_or_alias: str,
+) -> dict[str, object] | None:
+    """Retrieve full solution lineage via JOIN on runs and eval_metadata.
+
+    Returns solution data enriched with run lineage (problem_version,
+    llm, dataset, status, config) and optional evaluation metadata
+    (eval_id, instances_solved, instance_count).
+
+    Args:
+        conn: An open project database connection.
+        id_or_alias: Solution ID or alias to look up.
+
+    Returns:
+        A dict with solution, run, and eval columns, or ``None`` if not found.
+    """
+    query = """\
+        SELECT s.id, s.run_id, s.rank, s.best_score, s.alias,
+               r.problem_version, r.llm, r.dataset, r.status AS run_status,
+               r.config_snapshot, r.llm_model, r.problem_hash, r.dataset_hash,
+               r.created_at, r.iterations, r.generation_time_s,
+               r.prompt_tokens, r.completion_tokens,
+               em.eval_id, em.instances_solved, em.instance_count
+        FROM solutions s
+        JOIN runs r ON s.run_id = r.id
+        LEFT JOIN eval_metadata em ON s.id = em.solution_id
+        WHERE {where_clause}
+    """
+    conn.row_factory = sqlite3.Row
+    try:
+        # Look up by ID first, then fall back to alias (same pattern as get_solution).
+        cursor = conn.execute(query.format(where_clause="s.id = ?"), (id_or_alias,))
+        row = cursor.fetchone()
+        if row is None:
+            cursor = conn.execute(query.format(where_clause="s.alias = ?"), (id_or_alias,))
+            row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
+    if row is None:
+        return None
+    return dict(row)
