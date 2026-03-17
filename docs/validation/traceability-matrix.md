@@ -153,6 +153,16 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-028 | SHOULD | DES-005 §4.5, DD-14 | L1 | `unit/infra/test_token_proxy::test_token_extraction` | Planned |
 | FR-RUN-029 | SHOULD | DES-005 §4.5 | L2 | `integration/test_run::test_run_displays_tokens` | Planned |
 | FR-RUN-030 | SHOULD | DES-005 §4.5 | L1 | `unit/core/test_run::test_cost_estimation` | Planned |
+| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_passes` | Planned |
+| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_crash_aborts` | Planned |
+| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_timeout_aborts` | Planned |
+| FR-RUN-001 | MUST | DES-005 §pre-run | L2 | `integration/test_run::test_preflight_zero_score_warns` | Planned |
+| FR-RUN-023 | MUST | DES-005 §dry-run | L2 | `integration/test_run::test_dry_run_skips_preflight` | Planned |
+| FR-RUN-008 | MUST | DES-005 §post-run | L2 | `integration/test_run::test_collect_programs_from_best_dir` | Planned |
+| FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_local_llm_api_key` | Planned |
+| FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_default` | Planned |
+| FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_override` | Planned |
+| FR-RUN-008 | MUST | DES-005 §post-run | L2-OE | `integration/test_run_oe::test_best_score_from_program` | Planned |
 
 ---
 
@@ -182,6 +192,9 @@ Design: [DES-006](../architecture/design/DES-006-eval-loop.md), [DES-001 §eval_
 | FR-EVL-018 | MUST | DES-006 §re-eval | L2 | `integration/test_eval::test_re_eval_requires_confirmation` | Planned |
 | FR-EVL-019 | MUST | DES-006 §legacy | L1 | `unit/core/test_eval::test_legacy_evaluator_global_call` | Planned |
 | FR-EVL-020 | MUST | DES-006 §results | L2 | `integration/test_eval::test_results_shows_user_aggregates` | Planned |
+| FR-EVL-001 | MUST | DES-006 §loop | L2 | `integration/test_eval::test_evaluate_instance_mode` | Planned |
+| FR-EVL-019 | MUST | DES-006 §legacy | L2 | `integration/test_eval::test_legacy_evaluate_mode` | Planned |
+| FR-EVL-001 | MUST | DES-006 §loop | L2 | `integration/test_eval::test_dual_function_warning` | Planned |
 
 ---
 

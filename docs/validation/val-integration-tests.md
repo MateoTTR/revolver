@@ -98,6 +98,12 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `run` | Completion with tokens | Token usage displayed, stored in DB | FR-RUN-028, 029 |
 | `run` | LLM has pricing set | Estimated cost displayed | FR-RUN-030 |
 | `run` | Post-run eval on train set | Rank-1 program evaluated, results in DB | FR-RUN-019, 020 |
+| `run` (pre-flight) | Evaluator returns score > 0 on first instance | Pre-flight passes, run proceeds | FR-RUN-001 |
+| `run` (pre-flight) | Evaluator raises exception | Run aborts with RevolverError | FR-RUN-001 |
+| `run` (pre-flight) | Evaluator hangs | Run aborts after 60s timeout | FR-RUN-001 |
+| `run` (pre-flight) | Evaluator returns 0.0 | Warning emitted, run proceeds | FR-RUN-001 |
+| `run --dry-run` | Dry run mode | No pre-flight check executed | FR-RUN-023 |
+| `run` (collect) | Programs in `oe-output/best/` dir | `best_program.py` collected as rank-1.py | FR-RUN-008 |
 | `run list` | After 2 runs | Both listed with status, filterable | FR-RUN-021 |
 | `run info` | Existing run | Full details: lineage, tokens, solution, stored programs | FR-RUN-022 |
 | `run resume` | Existing checkpoint | New run from parent, wrapper copied | FR-RUN-013, 024 |
@@ -116,6 +122,9 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `eval results` | After eval, human mode | Aggregates + per-instance breakdown | FR-EVL-015, 016 |
 | `eval results --json` | After eval, JSON mode | Full raw per-instance data | FR-EVL-017 |
 | `eval` | Legacy evaluator (`evaluate()`) | Global aggregation call, `user_aggregates` stored | FR-EVL-019, 020 |
+| `eval` | Evaluator with only `evaluate_instance()` | Per-instance function called correctly | FR-EVL-001, 002 |
+| `eval` | Evaluator with only `evaluate()` (legacy) | Legacy global function called correctly | FR-EVL-019 |
+| `eval` | Evaluator with both functions | Warning emitted, `evaluate_instance()` preferred | FR-EVL-001 |
 
 ### 2.7 `revolver solution`
 
@@ -167,6 +176,10 @@ These tests use real OpenEvolve classes (`Config`, `Controller`) and are located
 | `test_build_config_roundtrip_to_oe_config` | `build_config()` dict round-trips through `OEConfig.from_dict()` | Field mapping: `api_base`, `primary_model`, `max_iterations`, `system_message` | FR-RUN-005, FR-RUN-006 |
 | `test_oe_controller_instantiation` | Real `OpenEvolve(program, evaluator, config, output_dir)` with fixtures | Controller accepts our config and fixture files without crash | FR-RUN-001 |
 | `test_openevolve_runner_init_controller` | `OpenEvolveRunner._init_controller()` with real OpenEvolve | The exact code path that crashed in v0.4.0 works end-to-end | FR-RUN-005, FR-RUN-006 |
+| `test_build_config_local_llm_api_key` | `build_config()` with local LLM | `api_key="ollama"` injected in config | FR-RUN-006 |
+| `test_build_config_cascade_evaluation_default` | `build_config()` default output | `evaluator.cascade_evaluation=false` | FR-RUN-006 |
+| `test_build_config_cascade_evaluation_override` | User config.yaml has `cascade_evaluation: true` | User override preserved in merged config | FR-RUN-006 |
+| `test_best_score_from_program` | Program object with metrics | Score extracted from `Program.metrics` | FR-RUN-008 |
 
 ### 2.11 Cross-Cutting
 
