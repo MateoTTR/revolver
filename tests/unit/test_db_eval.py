@@ -98,6 +98,25 @@ def _make_eval_metadata(
     )
 
 
+def _insert_meta(conn: sqlite3.Connection, meta: EvalMetadata) -> None:
+    """Test helper: adapt EvalMetadata to keyword-arg insert_eval_metadata."""
+    import json as _json
+
+    insert_eval_metadata(
+        conn,
+        eval_id=meta.eval_id,
+        solution_id=meta.solution_id,
+        dataset_name=meta.dataset_name,
+        instance_count=meta.instance_count,
+        instances_solved=meta.instances_solved,
+        eval_time_s=meta.eval_time_s,
+        user_aggregates=None
+        if meta.user_aggregates is None
+        else _json.dumps(meta.user_aggregates),
+        evaluated_at=meta.evaluated_at,
+    )
+
+
 # ── insert_eval_metadata / get_eval_metadata ────────────────────────────────
 
 
@@ -109,7 +128,7 @@ class TestInsertAndGetEvalMetadata:
         """Insert eval metadata, then retrieve it by (solution_id, dataset_name)."""
         _seed_prerequisites(db_conn)
         meta = _make_eval_metadata()
-        insert_eval_metadata(db_conn, meta)
+        _insert_meta(db_conn, meta)
 
         result = get_eval_metadata(db_conn, "sol-20260314-120000", "eval-bench")
         assert result is not None
@@ -129,7 +148,7 @@ class TestInsertAndGetEvalMetadata:
         meta = _make_eval_metadata(
             user_aggregates={"combined_score": 0.72, "makespan": 155.3},
         )
-        insert_eval_metadata(db_conn, meta)
+        _insert_meta(db_conn, meta)
 
         result = get_eval_metadata(db_conn, "sol-20260314-120000", "eval-bench")
         assert result is not None
@@ -140,7 +159,7 @@ class TestInsertAndGetEvalMetadata:
         """Eval metadata with None eval_time_s is stored and retrieved."""
         _seed_prerequisites(db_conn)
         meta = _make_eval_metadata(eval_time_s=None)
-        insert_eval_metadata(db_conn, meta)
+        _insert_meta(db_conn, meta)
 
         result = get_eval_metadata(db_conn, "sol-20260314-120000", "eval-bench")
         assert result is not None
@@ -157,11 +176,11 @@ class TestInsertAndGetEvalMetadata:
         """Inserting duplicate (solution_id, dataset_name) raises IntegrityError."""
         _seed_prerequisites(db_conn)
         meta1 = _make_eval_metadata(eval_id="eval-1")
-        insert_eval_metadata(db_conn, meta1)
+        _insert_meta(db_conn, meta1)
 
         meta2 = _make_eval_metadata(eval_id="eval-2")
         with pytest.raises(sqlite3.IntegrityError):
-            insert_eval_metadata(db_conn, meta2)
+            _insert_meta(db_conn, meta2)
 
 
 # ── insert_eval_instance / get_eval_instances ───────────────────────────────
@@ -174,7 +193,7 @@ class TestInsertAndGetEvalInstances:
     def test_insert_and_get_solved(self, db_conn: sqlite3.Connection) -> None:
         """Insert a solved instance row and retrieve it."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         insert_eval_instance(
             db_conn,
@@ -187,21 +206,20 @@ class TestInsertAndGetEvalInstances:
             compute_time_s=1.5,
         )
 
-        rows = get_eval_instances(db_conn, "eval-20260315-100000")
-        assert len(rows) == 1
-        instance_id, metric_name, value, status, error_msg, compute_time = rows[0]
-        assert instance_id == "inst-001"
-        assert metric_name == "score"
-        assert value == 0.95
-        assert status == "solved"
-        assert error_msg is None
-        assert compute_time == 1.5
+        results = get_eval_instances(db_conn, "eval-20260315-100000")
+        assert len(results) == 1
+        inst = results[0]
+        assert inst.instance_id == "inst-001"
+        assert inst.metrics == {"score": 0.95}
+        assert inst.status == "solved"
+        assert inst.error is None
+        assert inst.compute_time_s == 1.5
 
     @pytest.mark.unit
     def test_insert_failed_instance(self, db_conn: sqlite3.Connection) -> None:
         """Insert a failed instance row with error message and null value."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         insert_eval_instance(
             db_conn,
@@ -214,18 +232,18 @@ class TestInsertAndGetEvalInstances:
             compute_time_s=0.1,
         )
 
-        rows = get_eval_instances(db_conn, "eval-20260315-100000")
-        assert len(rows) == 1
-        _, _, value, status, error_msg, _ = rows[0]
-        assert value is None
-        assert status == "failed"
-        assert error_msg == "ZeroDivisionError"
+        results = get_eval_instances(db_conn, "eval-20260315-100000")
+        assert len(results) == 1
+        inst = results[0]
+        assert inst.metrics == {}
+        assert inst.status == "failed"
+        assert inst.error == "ZeroDivisionError"
 
     @pytest.mark.unit
     def test_insert_timeout_instance(self, db_conn: sqlite3.Connection) -> None:
         """Insert a timeout instance row."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         insert_eval_instance(
             db_conn,
@@ -238,16 +256,15 @@ class TestInsertAndGetEvalInstances:
             compute_time_s=300.0,
         )
 
-        rows = get_eval_instances(db_conn, "eval-20260315-100000")
-        assert len(rows) == 1
-        _, _, _, status, _, _ = rows[0]
-        assert status == "timeout"
+        results = get_eval_instances(db_conn, "eval-20260315-100000")
+        assert len(results) == 1
+        assert results[0].status == "timeout"
 
     @pytest.mark.unit
     def test_multiple_metrics_per_instance(self, db_conn: sqlite3.Connection) -> None:
         """Multiple metrics for the same instance produce multiple rows."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         insert_eval_instance(
             db_conn,
@@ -270,17 +287,18 @@ class TestInsertAndGetEvalInstances:
             compute_time_s=1.5,
         )
 
-        rows = get_eval_instances(db_conn, "eval-20260315-100000")
-        assert len(rows) == 2
-        # Ordered by instance_id, metric_name
-        assert rows[0][1] == "makespan"
-        assert rows[1][1] == "score"
+        results = get_eval_instances(db_conn, "eval-20260315-100000")
+        # Both metrics grouped into a single InstanceResult
+        assert len(results) == 1
+        inst = results[0]
+        assert inst.instance_id == "inst-001"
+        assert inst.metrics == {"makespan": 155.0, "score": 0.95}
 
     @pytest.mark.unit
     def test_multiple_instances(self, db_conn: sqlite3.Connection) -> None:
         """Multiple instances are stored and retrieved in order."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         for i in range(3):
             insert_eval_instance(
@@ -294,11 +312,11 @@ class TestInsertAndGetEvalInstances:
                 compute_time_s=1.0,
             )
 
-        rows = get_eval_instances(db_conn, "eval-20260315-100000")
-        assert len(rows) == 3
-        assert rows[0][0] == "inst-000"
-        assert rows[1][0] == "inst-001"
-        assert rows[2][0] == "inst-002"
+        results = get_eval_instances(db_conn, "eval-20260315-100000")
+        assert len(results) == 3
+        assert results[0].instance_id == "inst-000"
+        assert results[1].instance_id == "inst-001"
+        assert results[2].instance_id == "inst-002"
 
     @pytest.mark.unit
     def test_empty_when_no_instances(self, db_conn: sqlite3.Connection) -> None:
@@ -317,7 +335,7 @@ class TestDeleteEval:
     def test_cascade_delete(self, db_conn: sqlite3.Connection) -> None:
         """delete_eval removes both metadata and all instance rows."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         # Insert some instance rows
         for i in range(3):
@@ -354,14 +372,14 @@ class TestDeleteEval:
         """After delete_eval, the same (solution_id, dataset_name) can be reinserted."""
         _seed_prerequisites(db_conn)
         meta1 = _make_eval_metadata(eval_id="eval-1")
-        insert_eval_metadata(db_conn, meta1)
+        _insert_meta(db_conn, meta1)
 
         # Delete
         delete_eval(db_conn, "eval-1")
 
         # Re-insert with a new eval_id
         meta2 = _make_eval_metadata(eval_id="eval-2")
-        insert_eval_metadata(db_conn, meta2)
+        _insert_meta(db_conn, meta2)
 
         result = get_eval_metadata(db_conn, "sol-20260314-120000", "eval-bench")
         assert result is not None
@@ -378,7 +396,7 @@ class TestEvalEdgeCases:
     def test_status_check_constraint(self, db_conn: sqlite3.Connection) -> None:
         """Inserting an instance with invalid status raises IntegrityError."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         with pytest.raises(sqlite3.IntegrityError):
             insert_eval_instance(
@@ -396,7 +414,7 @@ class TestEvalEdgeCases:
     def test_primary_key_enforced_on_instances(self, db_conn: sqlite3.Connection) -> None:
         """Inserting duplicate (eval_id, instance_id, metric_name) raises IntegrityError."""
         _seed_prerequisites(db_conn)
-        insert_eval_metadata(db_conn, _make_eval_metadata())
+        _insert_meta(db_conn, _make_eval_metadata())
 
         insert_eval_instance(
             db_conn,
@@ -440,11 +458,11 @@ class TestEvalEdgeCases:
 
         # Insert eval for first dataset
         meta1 = _make_eval_metadata(eval_id="eval-1", dataset_name="eval-bench")
-        insert_eval_metadata(db_conn, meta1)
+        _insert_meta(db_conn, meta1)
 
         # Insert eval for second dataset
         meta2 = _make_eval_metadata(eval_id="eval-2", dataset_name="eval-bench-2")
-        insert_eval_metadata(db_conn, meta2)
+        _insert_meta(db_conn, meta2)
 
         # Both should be retrievable
         result1 = get_eval_metadata(db_conn, "sol-20260314-120000", "eval-bench")

@@ -13,7 +13,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from revolver.core.exceptions import DuplicateNameError
 from revolver.models.dataset import (
@@ -21,7 +21,7 @@ from revolver.models.dataset import (
     DatasetRegistration,
     DatasetSummary,
 )
-from revolver.models.eval import EvalMetadata
+from revolver.models.eval import EvalMetadata, InstanceResult
 from revolver.models.llm import LLMEntry
 from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
@@ -1204,24 +1204,38 @@ def list_solutions(
     return rows
 
 
-# ── Eval CRUD operations ─────────────────────────────────────────────────────
+# ── Eval CRUD operations ──────────────────────────────────────────────────────
 
 
-def insert_eval_metadata(conn: sqlite3.Connection, metadata: EvalMetadata) -> None:
+def insert_eval_metadata(
+    conn: sqlite3.Connection,
+    *,
+    eval_id: str,
+    solution_id: str,
+    dataset_name: str,
+    instance_count: int,
+    instances_solved: int,
+    eval_time_s: float | None = None,
+    user_aggregates: str | None = None,
+    evaluated_at: datetime,
+) -> None:
     """Insert an evaluation metadata record into the project database.
 
     Args:
         conn: An open project database connection.
-        metadata: The :class:`EvalMetadata` to insert.
+        eval_id: Unique evaluation identifier.
+        solution_id: ID of the evaluated solution.
+        dataset_name: Name of the evaluation dataset.
+        instance_count: Total number of instances evaluated.
+        instances_solved: Number of instances that solved successfully.
+        eval_time_s: Total wall-clock evaluation time in seconds.
+        user_aggregates: JSON string of user-defined aggregates (legacy mode).
+        evaluated_at: Timestamp of evaluation completion.
 
     Raises:
         sqlite3.IntegrityError: If the ``(solution_id, dataset_name)``
             unique constraint is violated.
     """
-    user_agg_json: str | None = None
-    if metadata.user_aggregates is not None:
-        user_agg_json = json.dumps(metadata.user_aggregates)
-
     conn.execute(
         """\
         INSERT INTO eval_metadata (
@@ -1231,14 +1245,14 @@ def insert_eval_metadata(conn: sqlite3.Connection, metadata: EvalMetadata) -> No
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            metadata.eval_id,
-            metadata.solution_id,
-            metadata.dataset_name,
-            metadata.instance_count,
-            metadata.instances_solved,
-            metadata.eval_time_s,
-            user_agg_json,
-            metadata.evaluated_at.isoformat(),
+            eval_id,
+            solution_id,
+            dataset_name,
+            instance_count,
+            instances_solved,
+            eval_time_s,
+            user_aggregates,
+            evaluated_at.isoformat(),
         ),
     )
     conn.commit()
@@ -1246,14 +1260,14 @@ def insert_eval_metadata(conn: sqlite3.Connection, metadata: EvalMetadata) -> No
 
 def insert_eval_instance(
     conn: sqlite3.Connection,
+    *,
     eval_id: str,
     instance_id: str,
     metric_name: str,
     value: float | None,
     status: str,
-    error_message: str | None,
-    compute_time_s: float | None,
-    *,
+    error_message: str | None = None,
+    compute_time_s: float | None = None,
     commit: bool = True,
 ) -> None:
     """Insert a single eval instance result row.
@@ -1289,32 +1303,47 @@ def insert_eval_instance(
 def get_eval_metadata(
     conn: sqlite3.Connection,
     solution_id: str,
-    dataset_name: str,
+    dataset_name: str | None = None,
 ) -> EvalMetadata | None:
     """Retrieve evaluation metadata for a (solution, dataset) pair.
 
-    Uses the ``idx_eval_unique`` index for efficient lookup.
-
     Args:
         conn: An open project database connection.
-        solution_id: The solution ID.
-        dataset_name: The dataset name.
+        solution_id: The solution ID to look up.
+        dataset_name: Optional dataset name filter. If ``None``,
+            returns the most recent evaluation for the solution.
 
     Returns:
         The :class:`EvalMetadata` if found, otherwise ``None``.
     """
     conn.row_factory = sqlite3.Row
     try:
-        cursor = conn.execute(
-            """\
-            SELECT eval_id, solution_id, dataset_name,
-                   instance_count, instances_solved, eval_time_s,
-                   user_aggregates, evaluated_at
-            FROM eval_metadata
-            WHERE solution_id = ? AND dataset_name = ?
-            """,
-            (solution_id, dataset_name),
-        )
+        if dataset_name is not None:
+            cursor = conn.execute(
+                """\
+                SELECT eval_id, solution_id, dataset_name,
+                       instance_count, instances_solved, eval_time_s,
+                       user_aggregates, evaluated_at
+                FROM eval_metadata
+                WHERE solution_id = ? AND dataset_name = ?
+                ORDER BY evaluated_at DESC
+                LIMIT 1
+                """,
+                (solution_id, dataset_name),
+            )
+        else:
+            cursor = conn.execute(
+                """\
+                SELECT eval_id, solution_id, dataset_name,
+                       instance_count, instances_solved, eval_time_s,
+                       user_aggregates, evaluated_at
+                FROM eval_metadata
+                WHERE solution_id = ?
+                ORDER BY evaluated_at DESC
+                LIMIT 1
+                """,
+                (solution_id,),
+            )
         row = cursor.fetchone()
     finally:
         conn.row_factory = None
@@ -1341,17 +1370,18 @@ def get_eval_metadata(
 def get_eval_instances(
     conn: sqlite3.Connection,
     eval_id: str,
-) -> list[tuple[str, str, float | None, str, str | None, float | None]]:
-    """Retrieve all instance results for an evaluation.
+) -> list[InstanceResult]:
+    """Retrieve all per-instance results for an evaluation.
+
+    Groups rows by instance_id, collecting all metrics into a single
+    :class:`InstanceResult` per instance.
 
     Args:
         conn: An open project database connection.
-        eval_id: The evaluation ID.
+        eval_id: The evaluation ID to look up.
 
     Returns:
-        A list of tuples ``(instance_id, metric_name, value, status,
-        error_message, compute_time_s)`` ordered by ``instance_id``
-        then ``metric_name``.
+        A list of :class:`InstanceResult` sorted by instance_id.
     """
     cursor = conn.execute(
         """\
@@ -1363,7 +1393,61 @@ def get_eval_instances(
         """,
         (eval_id,),
     )
-    return [tuple(row) for row in cursor.fetchall()]
+
+    # Group by instance_id
+    instances: dict[str, InstanceResult] = {}
+    for row in cursor.fetchall():
+        iid = row[0]
+        metric_name = row[1]
+        value = row[2]
+        # SQLite CHECK constraint guarantees valid status values
+        status = cast(Literal["solved", "failed", "timeout"], row[3])
+        error_msg = row[4]
+        compute_time = row[5]
+
+        if iid not in instances:
+            instances[iid] = InstanceResult(
+                instance_id=iid,
+                status=status,
+                metrics={},
+                error=error_msg,
+                compute_time_s=compute_time,
+            )
+
+        if value is not None:
+            instances[iid].metrics[metric_name] = value
+
+    return sorted(instances.values(), key=lambda r: r.instance_id)
+
+
+def update_eval_metadata(
+    conn: sqlite3.Connection,
+    *,
+    eval_id: str,
+    instances_solved: int,
+    eval_time_s: float | None = None,
+    user_aggregates: str | None = None,
+) -> None:
+    """Update evaluation metadata after the evaluation loop completes.
+
+    Updates the solved count, total time, and user aggregates fields.
+
+    Args:
+        conn: An open project database connection.
+        eval_id: The evaluation ID to update.
+        instances_solved: Final count of solved instances.
+        eval_time_s: Total wall-clock evaluation time in seconds.
+        user_aggregates: JSON string of user-defined aggregates (legacy mode).
+    """
+    conn.execute(
+        """\
+        UPDATE eval_metadata
+        SET instances_solved = ?, eval_time_s = ?, user_aggregates = ?
+        WHERE eval_id = ?
+        """,
+        (instances_solved, eval_time_s, user_aggregates, eval_id),
+    )
+    conn.commit()
 
 
 def delete_eval(conn: sqlite3.Connection, eval_id: str) -> None:
