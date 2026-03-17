@@ -9,6 +9,7 @@ Skipped automatically when openevolve is not installed.
 
 from __future__ import annotations
 
+import copy
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -155,8 +156,6 @@ class TestBuildConfigRoundtrip:
         assert "api_key" not in config_dict["llm"]
 
         # resolve_api_keys resolves it at runtime
-        import copy
-
         resolved = resolve_api_keys(copy.deepcopy(config_dict))
         assert resolved["llm"]["api_key"] == "sk-ant-real-key-for-test"
         assert resolved["llm"]["api_key"] != "ollama"

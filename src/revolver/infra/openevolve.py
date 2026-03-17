@@ -190,7 +190,7 @@ def build_config(
 
     Merge order (last wins):
         1. Problem version's config.yaml (base)
-        2. LLM endpoint configuration (api_base, primary_model, api_key)
+        2. LLM endpoint configuration (api_base, primary_model, api_key_env)
         3. Problem description injection into prompt.system_message
         4. --iterations override
         5. --config-override key=value pairs
@@ -391,6 +391,12 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
             key = os.environ.get(env_name, "")
             if key:
                 llm_section["api_key"] = key
+            else:
+                import sys
+
+                sys.stderr.write(
+                    f"Warning: env var {env_name} is not set; the run will likely fail.\n"
+                )
     return config
 
 
