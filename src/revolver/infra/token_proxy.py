@@ -5,6 +5,8 @@ Intercepts OpenAI-compatible API responses and extracts
 for accumulation. Uses only stdlib (``http.server``, ``threading``,
 ``urllib.request``) per project constraints.
 
+Includes upstream error forwarding (FB-01) and optional 429 backoff (FB-04).
+
 Traceable to: DES-005 §4.5 (DD-14), FR-RUN-028/029/030.
 """
 
@@ -12,6 +14,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -91,6 +94,10 @@ class TokenCountingProxy:
     Forwards all requests to the real LLM endpoint and intercepts response
     bodies to extract token usage from the ``usage`` field.
 
+    Note: when ``backoff_on_429=True``, the proxy blocks the single server
+    thread during sleep, so all concurrent requests are queued until the
+    backoff completes.
+
     Args:
         target_url: The real LLM endpoint URL (e.g., ``http://localhost:11434/v1``).
         backoff_on_429: When ``True``, the proxy sleeps for the duration
@@ -161,9 +168,13 @@ class TokenCountingProxy:
                         if retry_after is not None:
                             try:
                                 wait = min(float(retry_after), 60.0)
+                                sys.stderr.write(
+                                    f"[proxy] 429 received, backing off {wait}s (Retry-After)\n"
+                                )
                                 time.sleep(wait)
                             except ValueError:
-                                pass  # Non-numeric Retry-After — skip
+                                # Only numeric Retry-After values supported; date format ignored
+                                pass
 
                     self.send_response(status)
                     for name, value in resp_headers:

@@ -357,14 +357,19 @@ class TestBuildConfig:
 
         assert result["llm"]["random_seed"] is None
 
-    def test_build_config_google_generic_url_disables_seed(self) -> None:
-        """Google provider detected via generic googleapis.com domain."""
+    def test_build_config_google_generic_url_no_seed_disable(self) -> None:
+        """Generic googleapis.com URL does NOT trigger seed disabling.
+
+        Only generativelanguage.googleapis.com is a known Google LLM provider.
+        """
         llm = _make_llm(
             base_url="https://some-api.googleapis.com/v1",
         )
         result = build_config(problem_config=None, llm=llm)
 
-        assert result["llm"]["random_seed"] is None
+        # random_seed should NOT be set to None for non-Gemini googleapis URLs
+        llm_cfg = result.get("llm", {})
+        assert "random_seed" not in llm_cfg
 
     def test_build_config_non_google_seed_unchanged(self) -> None:
         """Non-Google LLM does not have random_seed set to None."""
