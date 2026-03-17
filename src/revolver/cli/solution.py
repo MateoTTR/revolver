@@ -230,11 +230,15 @@ def solution_delete(
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
 
-        deleted_id = core_solution.delete_solution(
-            solution,
-            force=force,
-            is_json_mode=json_mode,
-        )
+        # Confirmation logic lives in the CLI layer, not in core
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
+            typer.confirm(f"Delete solution '{solution}'?", abort=True)
+
+        deleted_id = core_solution.delete_solution(solution)
 
         if json_mode:
             render(
@@ -242,7 +246,6 @@ def solution_delete(
                 json_mode=True,
             )
         else:
-            sys.stderr.write(f"Deleted solution {deleted_id}\n")
             render(
                 {"solution_id": deleted_id, "status": "deleted"},
                 json_mode=False,

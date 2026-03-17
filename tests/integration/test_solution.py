@@ -660,3 +660,62 @@ def test_solution_delete_json_mode_with_force(project_with_solutions: Path) -> N
     assert isinstance(data, dict)
     assert data["solution_id"] == "sol-20260301-100000"
     assert data["status"] == "deleted"
+
+
+@pytest.mark.integration
+def test_solution_delete_user_cancels(project_with_solutions: Path) -> None:
+    """User declines confirmation prompt → solution is NOT deleted.
+
+    Validates: F4 acceptance — interactive cancellation aborts delete.
+    """
+    interactive_runner = CliRunner()
+    with patch("pathlib.Path.cwd", return_value=project_with_solutions):
+        result = interactive_runner.invoke(
+            app,
+            ["solution", "delete", "sol-20260301-100000"],
+            input="n\n",
+        )
+
+    # typer.confirm with abort=True raises Abort → exit code 1
+    assert result.exit_code == 1  # type: ignore[union-attr]
+
+    # Verify solution is still in DB
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_solution_delete_user_confirms(project_with_solutions: Path) -> None:
+    """User accepts confirmation prompt → solution is deleted.
+
+    Validates: F4 acceptance — interactive confirmation proceeds with delete.
+    """
+    interactive_runner = CliRunner()
+    with patch("pathlib.Path.cwd", return_value=project_with_solutions):
+        result = interactive_runner.invoke(
+            app,
+            ["solution", "delete", "sol-20260301-100000"],
+            input="y\n",
+        )
+
+    assert result.exit_code == 0  # type: ignore[union-attr]
+
+    # Verify solution is gone from DB
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is None
+    finally:
+        conn.close()

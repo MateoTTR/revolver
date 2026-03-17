@@ -1586,16 +1586,14 @@ def delete_solution(conn: sqlite3.Connection, solution_id: str) -> bool:
         True if a solution was deleted, False if not found.
     """
     with conn:
-        # First delete eval data (eval_instances via eval_metadata.eval_id)
-        cursor = conn.execute(
-            "SELECT eval_id FROM eval_metadata WHERE solution_id = ?", (solution_id,)
+        # Delete eval instances via subquery (single statement instead of N+1 loop)
+        conn.execute(
+            "DELETE FROM eval_instances WHERE eval_id IN "
+            "(SELECT eval_id FROM eval_metadata WHERE solution_id = ?)",
+            (solution_id,),
         )
-        eval_ids = [row[0] for row in cursor.fetchall()]
-        for eval_id in eval_ids:
-            conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
         conn.execute("DELETE FROM eval_metadata WHERE solution_id = ?", (solution_id,))
 
         # Delete the solution itself
         cursor = conn.execute("DELETE FROM solutions WHERE id = ?", (solution_id,))
-        deleted: bool = cursor.rowcount > 0
-        return deleted
+        return cursor.rowcount > 0

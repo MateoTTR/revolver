@@ -244,16 +244,16 @@ def extract_solution(
 def delete_solution(
     solution_id_or_alias: str,
     *,
-    force: bool = False,
-    is_json_mode: bool = False,
     project_root: Path | None = None,
 ) -> str:
     """Delete a solution and its associated eval data.
 
+    This is a pure domain function — confirmation prompts belong in the CLI
+    layer.  It resolves alias → ID, deletes the solution, and returns the
+    deleted ID.
+
     Args:
         solution_id_or_alias: Solution ID or alias to delete.
-        force: If True, skip confirmation prompt.
-        is_json_mode: If True and not force, raise error (no interactive prompt).
         project_root: Project root directory (auto-detected if None).
 
     Returns:
@@ -261,7 +261,6 @@ def delete_solution(
 
     Raises:
         RevolverError: If solution not found.
-        ValidationError: If JSON mode without --force.
     """
     root = project_root or find_project_root(Path.cwd())
     db_path = root / REVOLVER_DIR / "revolver.db"
@@ -273,21 +272,6 @@ def delete_solution(
             raise RevolverError(f"Solution not found: {solution_id_or_alias}")
 
         solution_id = sol.id
-        display_name = sol.alias or sol.id
-
-        # JSON mode without --force → error (no interactive prompt available)
-        if is_json_mode and not force:
-            raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
-
-        # Interactive confirmation unless --force
-        if not force:
-            import sys
-
-            sys.stderr.write(f"Delete solution '{display_name}'? [y/N] ")
-            sys.stderr.flush()
-            answer = input().strip().lower()
-            if answer not in ("y", "yes"):
-                raise RevolverError("Aborted.")
 
         deleted = db_delete_solution(conn, solution_id)
         if not deleted:
