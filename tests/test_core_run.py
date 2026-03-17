@@ -549,7 +549,7 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
     ):
@@ -721,7 +721,7 @@ def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
         patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
     ):
@@ -776,7 +776,7 @@ def test_post_run_evaluation_evaluates_instances(
         time_s=0.1,
     )
 
-    with patch("revolver.infra.evaluator_runner.run_instance", return_value=mock_result):
+    with patch("revolver.core.run.eval_run_instance", return_value=mock_result):
         _post_run_evaluation(
             proj_conn=MagicMock(),
             run_id="run-test",
@@ -887,7 +887,7 @@ def test_preflight_check_pass(project_with_prereqs: dict, capsys: pytest.Capture
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
     ):
@@ -957,7 +957,7 @@ def test_preflight_check_evaluator_crash(project_with_prereqs: dict) -> None:
         ),
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_fail,
         ),
     ):
@@ -1029,7 +1029,7 @@ def test_preflight_check_timeout(project_with_prereqs: dict) -> None:
         ),
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_timeout,
         ),
     ):
@@ -1108,7 +1108,7 @@ def test_preflight_check_score_zero(
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_zero,
         ),
     ):
@@ -1128,7 +1128,7 @@ def test_preflight_check_score_zero(
     # Run should proceed (not abort)
     assert result.run_id.startswith("run-")
     captured = capsys.readouterr()
-    assert "score=0.0" in captured.err
+    assert "score=0.0000" in captured.err
     assert "Evolution may not produce improvements" in captured.err
     assert "Pre-flight check passed" in captured.err
 
@@ -1168,7 +1168,7 @@ def test_dry_run_skips_preflight(project_with_prereqs: dict) -> None:
             return_value=good_integrity,
         ),
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
         ) as mock_run_instance,
     ):
         mock_global_db.return_value = MagicMock()
@@ -1251,7 +1251,7 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
-            "revolver.infra.evaluator_runner.run_instance",
+            "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
     ):
@@ -1291,6 +1291,94 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
         assert new_run is not None
         assert new_run["resumed_from"] == parent_id
         assert new_run["status"] == "completed"
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_resume_run_preflight_crash(project_with_prereqs: dict) -> None:
+    """resume_run must abort with RevolverError when pre-flight check fails."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    # Create a parent run
+    parent_id = "run-20260310-143000"
+    parent_run_dir = create_run_dir(root, parent_id)
+    (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
+
+    # Create a checkpoint dir
+    checkpoint_dir = parent_run_dir / "oe-checkpoint"
+    checkpoint_dir.mkdir()
+    (checkpoint_dir / "state.bin").write_bytes(b"checkpoint")
+
+    # Insert parent run in DB
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    preflight_fail = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="fail",
+        time_s=0.1,
+        error="ValueError: evaluator crashed",
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.core.run.eval_run_instance",
+            return_value=preflight_fail,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy_cls.return_value = mock_proxy
+
+        with pytest.raises(RevolverError, match="Pre-flight check failed"):
+            resume_run(parent_id, project_root=root)
+
+    # Verify the new run was set to interrupted in DB
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status FROM runs WHERE id != ?", (parent_id,))
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "interrupted"
     finally:
         conn.close()
 

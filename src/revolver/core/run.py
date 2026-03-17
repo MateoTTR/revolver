@@ -52,6 +52,7 @@ from revolver.infra.db import (
 from revolver.infra.db import (
     list_runs as db_list_runs,
 )
+from revolver.infra.evaluator_runner import run_instance as eval_run_instance
 from revolver.infra.openevolve import OpenEvolveRunner, build_config, revolver_env
 from revolver.infra.store import (
     PROBLEM_DIR,
@@ -409,13 +410,14 @@ def launch_run(
                 # Pre-flight check: evaluate initial program on first instance
                 initial_program = snapshot_dir / "initial_program.py"
                 preflight_instances = sorted(
-                    p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()
+                    (
+                        p
+                        for p in dataset_path.iterdir()
+                        if not p.name.startswith(".") and p.is_file()
+                    ),
+                    key=lambda p: p.name,
                 )
                 if preflight_instances:
-                    from revolver.infra.evaluator_runner import (
-                        run_instance as eval_run_instance,
-                    )
-
                     first_instance = preflight_instances[0]
                     preflight_result = eval_run_instance(
                         evaluator_path=wrapper_path,
@@ -424,11 +426,6 @@ def launch_run(
                         timeout_s=60.0,
                     )
                     if preflight_result.status != "pass":
-                        # Clean up before aborting
-                        update_run_status(proj_conn, run_id, "interrupted")
-                        remove_run_lock(root, run_id)
-                        if proxy is not None:
-                            proxy.stop()
                         raise RevolverError(
                             f"Pre-flight check failed: initial program evaluation "
                             f"{preflight_result.status} on {first_instance.name}."
@@ -622,8 +619,6 @@ def _post_run_evaluation(
         dataset_path: Path to the dataset directory.
         program_path: Path to the rank-1 program file.
     """
-    from revolver.infra.evaluator_runner import run_instance
-
     evaluator_path = snapshot_dir / EVALUATOR_FILENAME
     if not evaluator_path.exists():
         sys.stderr.write(
@@ -653,7 +648,7 @@ def _post_run_evaluation(
     passed = 0
     failed = 0
     for inst in instances:
-        result = run_instance(
+        result = eval_run_instance(
             evaluator_path=evaluator_path,
             program_path=program_path,
             instance_path=inst,
@@ -833,13 +828,14 @@ def resume_run(
                 wrapper_path = new_run_dir / WRAPPER_FILENAME
                 initial_program = snapshot_dir / "initial_program.py"
                 preflight_instances = sorted(
-                    p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()
+                    (
+                        p
+                        for p in dataset_path.iterdir()
+                        if not p.name.startswith(".") and p.is_file()
+                    ),
+                    key=lambda p: p.name,
                 )
                 if preflight_instances:
-                    from revolver.infra.evaluator_runner import (
-                        run_instance as eval_run_instance,
-                    )
-
                     first_instance = preflight_instances[0]
                     preflight_result = eval_run_instance(
                         evaluator_path=wrapper_path,
@@ -848,11 +844,6 @@ def resume_run(
                         timeout_s=60.0,
                     )
                     if preflight_result.status != "pass":
-                        # Clean up before aborting
-                        update_run_status(proj_conn, new_run_id, "interrupted")
-                        remove_run_lock(root, new_run_id)
-                        if proxy is not None:
-                            proxy.stop()
                         raise RevolverError(
                             f"Pre-flight check failed: initial program evaluation "
                             f"{preflight_result.status} on {first_instance.name}."
