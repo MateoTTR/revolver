@@ -2,7 +2,7 @@
 
 Tests cover:
 - update_solution_alias: set alias, verify stored
-- Alias uniqueness: two solutions with same alias → IntegrityError
+- Alias uniqueness: two solutions with same alias → DuplicateNameError
 - get_solution_by_alias: resolve alias to solution
 - get_solution_by_alias not found: returns None
 - get_solutions_for_run: sibling query (2 solutions from same run)
@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from revolver.core.exceptions import DuplicateNameError
 from revolver.infra.db import (
     get_project_db,
     get_solution,
@@ -150,7 +151,7 @@ class TestUpdateSolutionAlias:
 
     @pytest.mark.unit
     def test_alias_uniqueness(self, db_conn: sqlite3.Connection) -> None:
-        """Two solutions with same alias raises IntegrityError."""
+        """Two solutions with same alias raises DuplicateNameError."""
         _seed_problem_and_dataset(db_conn)
         _insert_test_run(db_conn)
         insert_solution(
@@ -168,7 +169,7 @@ class TestUpdateSolutionAlias:
             rank=2,
             best_score=0.90,
         )
-        with pytest.raises(sqlite3.IntegrityError):
+        with pytest.raises(DuplicateNameError, match="Alias already in use"):
             update_solution_alias(db_conn, "sol-2", "taken-alias")
 
     @pytest.mark.unit

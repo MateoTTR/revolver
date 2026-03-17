@@ -1216,12 +1216,15 @@ def update_solution_alias(
 
     Raises:
         KeyError: If no solution with the given *solution_id* exists.
-        sqlite3.IntegrityError: If *alias* is already used by another solution.
+        DuplicateNameError: If *alias* is already used by another solution.
     """
-    cursor = conn.execute(
-        "UPDATE solutions SET alias = ? WHERE id = ?",
-        (alias, solution_id),
-    )
+    try:
+        cursor = conn.execute(
+            "UPDATE solutions SET alias = ? WHERE id = ?",
+            (alias, solution_id),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"Alias already in use: {alias!r}") from exc
     if cursor.rowcount == 0:
         raise KeyError(f"Solution not found: {solution_id}")
     conn.commit()
@@ -1286,12 +1289,18 @@ def get_solution_detail(
         FROM solutions s
         JOIN runs r ON s.run_id = r.id
         LEFT JOIN eval_metadata em ON s.id = em.solution_id
-        WHERE s.id = ? OR s.alias = ?
+        WHERE {where_clause}
     """
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(query, (id_or_alias, id_or_alias))
-    row = cursor.fetchone()
-    conn.row_factory = None
+    try:
+        # Look up by ID first, then fall back to alias (same pattern as get_solution).
+        cursor = conn.execute(query.format(where_clause="s.id = ?"), (id_or_alias,))
+        row = cursor.fetchone()
+        if row is None:
+            cursor = conn.execute(query.format(where_clause="s.alias = ?"), (id_or_alias,))
+            row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
     if row is None:
         return None
     return dict(row)
