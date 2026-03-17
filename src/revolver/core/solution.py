@@ -17,6 +17,9 @@ from pathlib import Path
 
 from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
 from revolver.infra.db import (
+    delete_solution as db_delete_solution,
+)
+from revolver.infra.db import (
     get_project_db,
     get_run,
     get_solution,
@@ -234,6 +237,63 @@ def extract_solution(
             best_score=best_score,
             alias=alias,
         )
+    finally:
+        conn.close()
+
+
+def delete_solution(
+    solution_id_or_alias: str,
+    *,
+    force: bool = False,
+    is_json_mode: bool = False,
+    project_root: Path | None = None,
+) -> str:
+    """Delete a solution and its associated eval data.
+
+    Args:
+        solution_id_or_alias: Solution ID or alias to delete.
+        force: If True, skip confirmation prompt.
+        is_json_mode: If True and not force, raise error (no interactive prompt).
+        project_root: Project root directory (auto-detected if None).
+
+    Returns:
+        The solution ID that was deleted.
+
+    Raises:
+        RevolverError: If solution not found.
+        ValidationError: If JSON mode without --force.
+    """
+    root = project_root or find_project_root(Path.cwd())
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        # Resolve alias-or-id using the same pattern as set_alias / get_solution_info
+        sol = get_solution(conn, solution_id_or_alias)
+        if sol is None:
+            raise RevolverError(f"Solution not found: {solution_id_or_alias}")
+
+        solution_id = sol.id
+        display_name = sol.alias or sol.id
+
+        # JSON mode without --force → error (no interactive prompt available)
+        if is_json_mode and not force:
+            raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
+
+        # Interactive confirmation unless --force
+        if not force:
+            import sys
+
+            sys.stderr.write(f"Delete solution '{display_name}'? [y/N] ")
+            sys.stderr.flush()
+            answer = input().strip().lower()
+            if answer not in ("y", "yes"):
+                raise RevolverError("Aborted.")
+
+        deleted = db_delete_solution(conn, solution_id)
+        if not deleted:
+            raise RevolverError(f"Solution not found: {solution_id}")  # pragma: no cover
+
+        return solution_id
     finally:
         conn.close()
 

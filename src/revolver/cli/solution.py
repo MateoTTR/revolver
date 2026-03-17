@@ -209,3 +209,41 @@ def solution_extract(
             if solution.alias:
                 data["alias"] = solution.alias
             render(data, json_mode=False)
+
+
+# ── solution delete (F4 — Sprint 005a) ──────────────────────────────────────
+
+
+@solution_app.command("delete")
+def solution_delete(
+    ctx: typer.Context,
+    solution: Annotated[
+        str,
+        typer.Argument(help="Solution ID or alias to delete."),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """Delete a solution and its associated evaluation data."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        deleted_id = core_solution.delete_solution(
+            solution,
+            force=force,
+            is_json_mode=json_mode,
+        )
+
+        if json_mode:
+            render(
+                {"solution_id": deleted_id, "status": "deleted"},
+                json_mode=True,
+            )
+        else:
+            sys.stderr.write(f"Deleted solution {deleted_id}\n")
+            render(
+                {"solution_id": deleted_id, "status": "deleted"},
+                json_mode=False,
+            )

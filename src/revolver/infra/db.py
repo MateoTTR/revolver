@@ -1570,3 +1570,32 @@ def get_solution_detail(
     if row is None:
         return None
     return dict(row)
+
+
+def delete_solution(conn: sqlite3.Connection, solution_id: str) -> bool:
+    """Delete a solution and its associated eval data.
+
+    Cascades: deletes eval_instances and eval_metadata for this solution.
+    All DELETEs run inside an explicit transaction so the operation is atomic.
+
+    Args:
+        conn: An open project database connection.
+        solution_id: The solution ID to delete.
+
+    Returns:
+        True if a solution was deleted, False if not found.
+    """
+    with conn:
+        # First delete eval data (eval_instances via eval_metadata.eval_id)
+        cursor = conn.execute(
+            "SELECT eval_id FROM eval_metadata WHERE solution_id = ?", (solution_id,)
+        )
+        eval_ids = [row[0] for row in cursor.fetchall()]
+        for eval_id in eval_ids:
+            conn.execute("DELETE FROM eval_instances WHERE eval_id = ?", (eval_id,))
+        conn.execute("DELETE FROM eval_metadata WHERE solution_id = ?", (solution_id,))
+
+        # Delete the solution itself
+        cursor = conn.execute("DELETE FROM solutions WHERE id = ?", (solution_id,))
+        deleted: bool = cursor.rowcount > 0
+        return deleted
