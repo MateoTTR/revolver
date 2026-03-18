@@ -36,14 +36,15 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 27 | 2026-03-17 | session-027 | ~2h | Phase 5 | Sprint 004b: planning + execution (3 PRs, 25 new tests), proxy robustness, UX fixes, doc guide, v0.4.5 |
 | 28 | 2026-03-17 | session-028 | ~3h | Phase 5 | Sprint 005 complete: solution (4 cmds) + eval (2 cmds), 19 L2 tests, v0.5.0 |
 | 29 | 2026-03-17 | session-029 | ~2h30 | Phase 5 | Sprint 005a: 4 demo fixes (3 PRs), Gemini research, doc alignment, 567 tests |
+| 30 | 2026-03-18 | session-030 | ~2h | Phase 5 | Release v0.5.1 + Sprint 006 complete: benchmark (4 PRs, 4 commands), v0.6.0, 697 tests |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 30 |
-| **Total duration** | ~45h45 |
-| **Avg duration/session** | ~1h31 |
+| **Total sessions** | 31 |
+| **Total duration** | ~47h45 |
+| **Avg duration/session** | ~1h32 |
 
 ## Notes
 

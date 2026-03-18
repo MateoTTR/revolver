@@ -180,13 +180,13 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 91 | Implement `models.benchmark` — Benchmark Pydantic models (DES-007 §7) | [ ] | S6 |
-| 92 | Add benchmark CRUD queries to `infra.db` (DES-007 §9) | [ ] | S6 |
-| 93 | Implement `core.benchmark` — `run_benchmark()` with eval reuse (DES-007 §2.1, §3) | [ ] | S6 |
-| 94 | Implement `core.benchmark` — `get_benchmark_results()` with per-instance comparison (DES-007 §2.2, §5) | [ ] | S6 |
-| 95 | Implement `core.benchmark` — `export_benchmark()` CSV/JSON + `list_benchmarks()` (DES-007 §2.3-4, §6) | [ ] | S6 |
-| 96 | Implement `cli.benchmark` — 4 Typer commands (DES-007 §11) | [ ] | S6 |
-| 97 | Write L2 integration tests for `benchmark` (9 scenarios) | [ ] | S6 |
+| 91 | Implement `models.benchmark` — Benchmark Pydantic models (DES-007 §7) | [x] | S6 — session 030, PR #60 |
+| 92 | Add benchmark CRUD queries to `infra.db` (DES-007 §9) | [x] | S6 — session 030, PR #61 |
+| 93 | Implement `core.benchmark` — `run_benchmark()` with eval reuse (DES-007 §2.1, §3) | [x] | S6 — session 030, PR #64 |
+| 94 | Implement `core.benchmark` — `get_benchmark_results()` with per-instance comparison (DES-007 §2.2, §5) | [x] | S6 — session 030, PR #64 |
+| 95 | Implement `core.benchmark` — `export_benchmark()` CSV/JSON + `list_benchmarks()` (DES-007 §2.3-4, §6) | [x] | S6 — session 030, PR #64 |
+| 96 | Implement `cli.benchmark` — 4 Typer commands (DES-007 §11) | [x] | S6 — session 030, PR #65 |
+| 97 | Write L2 integration tests for `benchmark` (9 scenarios) | [x] | S6 — session 030, PR #65 |
 
 ### Sprint 007 — Doctor, Setup & Cross-Cutting Polish
 

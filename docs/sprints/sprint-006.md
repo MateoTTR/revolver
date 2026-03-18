@@ -1,6 +1,6 @@
 # Sprint 006 — Benchmark: Multi-Solution Comparison & Export
 
-**Status**: Planning
+**Status**: Complete (v0.6.0)
 **Goal**: Deliver the `revolver benchmark` command group — comparative multi-solution benchmarking with eval reuse, aggregate computation (reusing `compute_aggregates()` from eval), per-instance comparison with best-per-instance identification, and CSV/JSON export matching ConOps §8 schemas. This is the capstone of the evaluation pipeline.
 **Demo**: Benchmark 3 solutions against an eval dataset; one already evaluated (reused), one triggers new evaluation; view comparative aggregate table; per-instance side-by-side comparison with wins summary; export to CSV and JSON without secrets.
 
@@ -36,13 +36,13 @@
 
 | # | Task | Layer | Depends on | Status | Acceptance criteria |
 |---|---|---|---|---|---|
-| S6-01 | Implement `revolver.models.benchmark` — `SolutionLineage` (frozen), `BenchmarkEntry` (frozen), `BenchmarkResult`, `BenchmarkSummary` (frozen), `InstanceComparison`, `InstanceSolutionResult` (frozen), `BenchmarkDetailResult`, `EvalStatus` Pydantic models (DES-007 §7); no secrets fields; symblolic names only (dataset names, LLM names, version tags) | models | Sprint 001 | [ ] | Models validate; `frozen=True` on value objects; `user_aggregates` field nullable; no path fields in export models |
-| S6-02 | Add benchmark CRUD to `revolver.infra.db` — `insert_benchmark()`, `insert_benchmark_solutions()` (batch), `get_benchmark(id)`, `get_latest_benchmark()`, `get_benchmark_solutions(benchmark_id)`, `list_benchmarks_with_count()` (DES-007 §9 queries) | infra | Sprint 001 | [ ] | Unit tests: all 6 CRUD operations; list query returns solution count via COUNT JOIN |
-| S6-03 | Implement `revolver.core.benchmark` — `run_benchmark()`: validate all solutions + dataset, integrity check, per-solution `_ensure_evaluated()` (reuse/trigger logic), load raw instances, `compute_aggregates()` per solution, build `SolutionLineage` per solution, generate benchmark ID, store in DB (DES-007 §2.1, §3, §10); handle partial failures (failed solutions reported, not persisted) | domain | S6-01, S6-02, Sprint 005 | [ ] | Unit tests with mocked eval: `test_reuses_existing_eval`, `test_includes_lineage`, `test_includes_run_id`; partial failure continues; all-fail → exit code 4 |
-| S6-04 | Implement `revolver.core.benchmark` — `get_benchmark_results()`: load benchmark, compute aggregates from raw eval_instances, build comparison table, identify best per instance (FR-BEN-015), compute wins dict; `_build_comparison_matrix()` for `--per-instance` (DES-007 §2.2, §5) | domain | S6-03 | [ ] | Unit tests: `test_includes_eval_time_solved`, `test_best_per_instance`, `test_sort_by_metric`; per-instance matrix built correctly; tie-breaking (both win) |
-| S6-05 | Implement `revolver.core.benchmark` — `export_benchmark()`: CSV generation (one row per solution×metric, ConOps §8.1) and JSON generation (ConOps §8.2); `--per-instance` variants; secret stripping; `list_benchmarks()` (DES-007 §2.3-4, §6) | domain | S6-03 | [ ] | Unit tests: `test_export_csv_schema`, `test_export_json_schema`, `test_no_secrets_in_export`, `test_includes_gen_time`; CSV headers match ConOps exactly; no file paths or env var names in output |
-| S6-06 | Implement `revolver.cli.benchmark` — 4 Typer commands: default (`benchmark`), `results`, `export`, `list` (DES-007 §11); `--solutions` (multi-value), `--dataset`, `--alias`, `--id`/`--latest`, `--metric`, `--per-instance`, `--sort-by`, `--format`, `--output` options | cli | S6-03, S6-04, S6-05 | [ ] | CliRunner tests for all 4 commands; exit 4 if all evals fail; `--latest` flag works |
-| S6-07 | Write L2 integration tests for `benchmark` (9 scenarios from val-integration-tests §2.8) | test | S6-06 | [ ] | All 9 benchmark scenarios pass |
+| S6-01 | Implement `revolver.models.benchmark` — 8 Pydantic models (DES-007 §7) | models | Sprint 001 | [x] | PR #60, session 030 |
+| S6-02 | Add benchmark CRUD to `revolver.infra.db` — 6 functions + migration v3 (DES-007 §9) | infra | Sprint 001 | [x] | PR #61, session 030 |
+| S6-03 | Implement `core.benchmark.run_benchmark()` — orchestration, eval reuse, partial failure (DES-007 §2.1, §3, §10) | domain | S6-01, S6-02, Sprint 005 | [x] | PR #64, session 030 |
+| S6-04 | Implement `core.benchmark.get_benchmark_results()` — aggregates + per-instance comparison (DES-007 §2.2, §5) | domain | S6-03 | [x] | PR #64, session 030 |
+| S6-05 | Implement `core.benchmark.export_benchmark()` + `list_benchmarks()` — CSV/JSON export (DES-007 §2.3-4, §6) | domain | S6-03 | [x] | PR #64, session 030 |
+| S6-06 | Implement `cli.benchmark` — 4 Typer commands (DES-007 §11) | cli | S6-03, S6-04, S6-05 | [x] | PR #65, session 030 |
+| S6-07 | Write L2 integration tests for `benchmark` (9 scenarios from val-integration-tests §2.8) | test | S6-06 | [x] | PR #65, session 030 |
 
 ---
 
@@ -111,22 +111,29 @@ Peak parallelism: 2 agents briefly on Stream A (models + infra simultaneously), 
 
 ## Sprint Review
 
-_Filled at sprint end._
-
 ### Tests passing
-- 0 / 9 integration tests passing (this sprint)
-- 0 / 80 total cumulative integration tests
+- 9 / 9 integration tests passing (this sprint)
+- 697 total tests (unit + integration)
+
+### PRs delivered
+
+| PR | Tasks | Title |
+|---|---|---|
+| #60 | S6-01 | Benchmark Pydantic models (8 models) |
+| #61 | S6-02 | Benchmark DB CRUD + migration v3 |
+| #64 | S6-03/04/05 | core.benchmark — run, results, export, list |
+| #65 | S6-06/07 | cli.benchmark + 9 L2 integration tests |
 
 ### Demo-able features
-- [ ] `revolver benchmark --solutions sol-A sol-B sol-C --dataset eval-bench`
-- [ ] Reuse of existing eval results for previously evaluated solutions (shown in output)
-- [ ] New evaluation triggered for unevaluated solutions during benchmark
-- [ ] `revolver benchmark results --latest` shows comparative aggregate table sorted by metric
-- [ ] `revolver benchmark results --latest --per-instance --metric combined_score` with wins summary
-- [ ] `revolver benchmark export --latest --format csv --output results.csv` — valid ConOps schema
-- [ ] `revolver benchmark export --latest --format json --output results.json` — valid ConOps §8.2
-- [ ] `revolver benchmark list` shows all benchmarks with metadata
-- [ ] No secrets (no file paths, no API key env names) in any export
+- [x] `revolver benchmark --solutions sol-A sol-B sol-C --dataset eval-bench`
+- [x] Reuse of existing eval results for previously evaluated solutions (shown in output)
+- [x] New evaluation triggered for unevaluated solutions during benchmark
+- [x] `revolver benchmark results --latest` shows comparative aggregate table sorted by metric
+- [x] `revolver benchmark results --latest --per-instance --metric combined_score` with wins summary
+- [x] `revolver benchmark export --latest --format csv --output results.csv` — valid ConOps schema
+- [x] `revolver benchmark export --latest --format json --output results.json` — valid ConOps §8.2
+- [x] `revolver benchmark list` shows all benchmarks with metadata
+- [x] No secrets (no file paths, no API key env names) in any export
 
 ### Carry-over
 - Parquet export format deferred indefinitely (AQ-05 resolved: CSV + JSON only in v1, per DES-007 DD-03)
