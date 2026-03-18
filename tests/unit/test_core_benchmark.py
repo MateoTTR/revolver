@@ -211,7 +211,6 @@ class TestEnsureEvaluated:
             patch("revolver.core.benchmark.get_eval_metadata") as mock_get_meta,
         ):
             mock_conn = MagicMock()
-            mock_db.return_value.__enter__ = MagicMock(return_value=mock_conn)
             mock_db.return_value = mock_conn
             mock_get_meta.return_value = existing_meta
 
@@ -580,6 +579,55 @@ class TestRunBenchmark:
         assert len(progress_calls) == 1
         assert progress_calls[0] == ("sol-001", "reused")
 
+    @pytest.mark.unit
+    def test_instance_count_mismatch_warns(self, tmp_path: Path, caplog: Any) -> None:
+        """A warning is logged when solutions have different instance counts."""
+        import logging
+
+        sol_good = _make_solution("sol-good", alias="good")
+        sol_other = _make_solution("sol-other", alias="other")
+        run = _make_run()
+        meta_good = _make_eval_metadata(solution_id="sol-good", instance_count=10)
+        meta_other = _make_eval_metadata(solution_id="sol-other", instance_count=5)
+        instances = _make_instance_results(n=5)
+
+        def _fake_get_solution(conn: object, id_or_alias: str) -> MagicMock:
+            return sol_good if id_or_alias == "sol-good" else sol_other
+
+        def _fake_get_eval_meta(
+            conn: object, sol_id: str, ds_name: str | None = None
+        ) -> EvalMetadata:
+            return meta_good if sol_id == "sol-good" else meta_other
+
+        with (
+            patch("revolver.core.benchmark.find_project_root", return_value=tmp_path),
+            patch("revolver.core.benchmark.get_project_db", return_value=MagicMock()),
+            patch("revolver.core.benchmark.get_solution", side_effect=_fake_get_solution),
+            patch("revolver.core.benchmark.get_dataset", return_value=MagicMock(split="eval")),
+            patch(
+                "revolver.core.benchmark.verify_dataset_integrity",
+                return_value=MagicMock(is_valid=True),
+            ),
+            patch(
+                "revolver.core.benchmark._ensure_evaluated",
+                return_value=EvalStatus(status="reused", eval_id="eval-001"),
+            ),
+            patch("revolver.core.benchmark.get_eval_metadata", side_effect=_fake_get_eval_meta),
+            patch("revolver.core.benchmark.get_eval_instances", return_value=instances),
+            patch("revolver.core.benchmark.get_run", return_value=run),
+            patch("revolver.core.benchmark.insert_benchmark"),
+            patch("revolver.core.benchmark.insert_benchmark_solutions"),
+            caplog.at_level(logging.WARNING, logger="revolver.core.benchmark"),
+        ):
+            result = run_benchmark(
+                solution_ids_or_aliases=["sol-good", "sol-other"],
+                dataset_name="eval-bench",
+                project_root=tmp_path,
+            )
+
+        assert result.instance_count == 10  # max of [10, 5]
+        assert any("mismatch" in record.message.lower() for record in caplog.records)
+
 
 # ── get_benchmark_results ──────────────────────────────────────────────────────
 
@@ -736,6 +784,20 @@ class TestGetBenchmarkResults:
         mock_latest.assert_called_once()
         assert isinstance(result, BenchmarkResult)
 
+    @pytest.mark.unit
+    def test_no_id_no_latest_raises(self, tmp_path: Path) -> None:
+        """Raises BenchmarkNotFoundError when neither benchmark_id nor latest is provided."""
+        with (
+            patch("revolver.core.benchmark.find_project_root", return_value=tmp_path),
+            patch("revolver.core.benchmark.get_project_db", return_value=MagicMock()),
+            patch("revolver.core.benchmark.get_benchmark", return_value=None),
+            patch("revolver.core.benchmark.get_latest_benchmark", return_value=None),
+            pytest.raises(BenchmarkNotFoundError) as exc_info,
+        ):
+            get_benchmark_results(project_root=tmp_path)
+
+        assert "No benchmark found" in str(exc_info.value)
+
 
 # ── _build_comparison_matrix ──────────────────────────────────────────────────
 
@@ -883,7 +945,7 @@ class TestExportBenchmark:
         ):
             path = export_benchmark(
                 benchmark_id="bench-001",
-                format="csv",
+                output_format="csv",
                 output_path=output,
                 per_instance=False,
                 project_root=tmp_path,
@@ -902,7 +964,6 @@ class TestExportBenchmark:
             "solution_id",
             "solution_alias",
             "run_id",
-            "problem",
             "problem_version",
             "llm",
             "llm_model",
@@ -935,7 +996,7 @@ class TestExportBenchmark:
         ):
             path = export_benchmark(
                 benchmark_id="bench-001",
-                format="json",
+                output_format="json",
                 output_path=output,
                 per_instance=False,
                 project_root=tmp_path,
@@ -1009,7 +1070,7 @@ class TestExportBenchmark:
         ):
             export_benchmark(
                 benchmark_id="bench-001",
-                format="csv",
+                output_format="csv",
                 output_path=output,
                 project_root=tmp_path,
             )
@@ -1036,7 +1097,7 @@ class TestExportBenchmark:
         ):
             export_benchmark(
                 benchmark_id="bench-001",
-                format="json",
+                output_format="json",
                 output_path=output,
                 project_root=tmp_path,
             )
@@ -1054,7 +1115,7 @@ class TestExportBenchmark:
         with pytest.raises(ExportError):
             export_benchmark(
                 benchmark_id="bench-001",
-                format="parquet",
+                output_format="parquet",
                 output_path=tmp_path / "out.parquet",
                 project_root=tmp_path,
             )
@@ -1095,7 +1156,7 @@ class TestExportBenchmark:
         ):
             export_benchmark(
                 benchmark_id="bench-001",
-                format="csv",
+                output_format="csv",
                 output_path=output,
                 per_instance=True,
                 project_root=tmp_path,

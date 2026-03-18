@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import csv
 import json
-import sys
+import logging
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,16 +52,13 @@ from revolver.models.benchmark import (
     InstanceSolutionResult,
     SolutionLineage,
 )
-from revolver.models.eval import MetricAggregate
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BenchmarkError",
     "BenchmarkNotFoundError",
     "ExportError",
-    "_build_comparison_matrix",
-    "_build_lineage",
-    "_compute_solution_aggregates",
-    "_ensure_evaluated",
     "export_benchmark",
     "generate_benchmark_id",
     "get_benchmark_results",
@@ -71,14 +69,23 @@ __all__ = [
 # ── ID generation ─────────────────────────────────────────────────────────────
 
 
-def generate_benchmark_id() -> str:
-    """Generate a unique benchmark ID in the format ``bench-YYYYMMDD-HHMMSS``.
+def generate_benchmark_id(suffix: int | None = None) -> str:
+    """Generate a benchmark ID in the format ``bench-YYYYMMDD-HHMMSS[-N]``.
+
+    If ``suffix`` is provided (a positive integer), it is appended as
+    ``-N`` to disambiguate same-second collisions.
+
+    Args:
+        suffix: Optional integer suffix for collision avoidance.
 
     Returns:
-        A unique benchmark ID string.
+        A benchmark ID string.
     """
     now = datetime.now(UTC)
-    return now.strftime("bench-%Y%m%d-%H%M%S")
+    base = now.strftime("bench-%Y%m%d-%H%M%S")
+    if suffix is not None:
+        return f"{base}-{suffix}"
+    return base
 
 
 # ── Project root helper ───────────────────────────────────────────────────────
@@ -137,82 +144,6 @@ def _ensure_evaluated(
         return EvalStatus(status="evaluated", eval_id=result.metadata.eval_id)
     except EvalError as exc:
         return EvalStatus(status="failed", error=str(exc))
-    except Exception as exc:
-        return EvalStatus(status="failed", error=str(exc))
-
-
-def _compute_solution_aggregates(
-    solution_id: str,
-    dataset_name: str,
-    project_root: Path,
-) -> dict[str, MetricAggregate]:
-    """Load raw per-instance data and compute aggregates for a solution.
-
-    Implements DES-007 §4.1.
-
-    Args:
-        solution_id: Solution ID to aggregate.
-        dataset_name: Dataset name for the eval lookup.
-        project_root: Resolved project root directory.
-
-    Returns:
-        Dict mapping metric_name to :class:`MetricAggregate`.
-    """
-    db_path = project_root / REVOLVER_DIR / "revolver.db"
-    conn = get_project_db(db_path)
-    try:
-        eval_meta = get_eval_metadata(conn, solution_id, dataset_name)
-        if eval_meta is None:
-            return {}
-        raw_instances = get_eval_instances(conn, eval_meta.eval_id)
-    finally:
-        conn.close()
-
-    return compute_aggregates(raw_instances)
-
-
-def _build_lineage(
-    solution_id: str,
-    project_root: Path,
-) -> SolutionLineage:
-    """Load lineage from the solution's parent run.
-
-    Implements DES-007 §9.3.
-
-    Args:
-        solution_id: Solution ID to build lineage for.
-        project_root: Resolved project root directory.
-
-    Returns:
-        A :class:`SolutionLineage` with run provenance.
-
-    Raises:
-        BenchmarkError: If the solution or its parent run is not found.
-    """
-    db_path = project_root / REVOLVER_DIR / "revolver.db"
-    conn = get_project_db(db_path)
-    try:
-        sol = get_solution(conn, solution_id)
-        if sol is None:
-            raise BenchmarkError(f"Solution '{solution_id}' not found.")
-        run = get_run(conn, sol.run_id)
-        if run is None:
-            raise BenchmarkError(f"Run '{sol.run_id}' not found for solution '{solution_id}'.")
-    finally:
-        conn.close()
-
-    return SolutionLineage(
-        problem_version=str(run["problem_version"]),
-        llm=str(run["llm"]),
-        llm_model=str(run["llm_model"]),
-        train_dataset=str(run["dataset"]),
-        iterations=int(str(run["iterations"])),
-        generation_time_s=(
-            float(str(run["generation_time_s"]))
-            if run.get("generation_time_s") is not None
-            else None
-        ),
-    )
 
 
 def _build_comparison_matrix(
@@ -370,8 +301,8 @@ def run_benchmark(
 
         # Warn if split != 'eval' (FR-BEN-001)
         if ds.split is not None and ds.split != "eval":
-            sys.stderr.write(
-                f"Warning: dataset '{dataset_name}' has split='{ds.split}' (expected 'eval').\n"
+            logger.warning(
+                "Dataset '%s' has split='%s' (expected 'eval').", dataset_name, ds.split
             )
     finally:
         conn.close()
@@ -380,15 +311,16 @@ def run_benchmark(
     try:
         integrity = verify_dataset_integrity(root, dataset_name)
         if not integrity.is_valid:
-            sys.stderr.write(
-                f"Warning: dataset '{dataset_name}' integrity check failed "
-                f"({len(integrity.mismatches)} mismatches, "
-                f"{len(integrity.missing)} missing, "
-                f"{len(integrity.extra)} extra). "
-                f"Proceeding with benchmark.\n"
+            logger.warning(
+                "Dataset '%s' integrity check failed (%d mismatches, %d missing, %d extra). "
+                "Proceeding with benchmark.",
+                dataset_name,
+                len(integrity.mismatches),
+                len(integrity.missing),
+                len(integrity.extra),
             )
     except Exception as exc:
-        sys.stderr.write(f"Warning: could not verify dataset integrity: {exc}\n")
+        logger.warning("Could not verify dataset integrity: %s", exc)
 
     # 4. Per-solution: ensure evaluated (reuse or trigger)
     failed_solutions: list[str] = []
@@ -402,8 +334,8 @@ def run_benchmark(
             on_progress(solution_id, status_label)
 
         if eval_status.status == "failed":
-            sys.stderr.write(
-                f"Warning: evaluation failed for solution '{solution_id}': {eval_status.error}\n"
+            logger.warning(
+                "Evaluation failed for solution '%s': %s", solution_id, eval_status.error
             )
             failed_solutions.append(solution_id)
         else:
@@ -416,6 +348,7 @@ def run_benchmark(
     # 6. Load raw instances, compute aggregates, build lineage per solution
     entries: list[BenchmarkEntry] = []
     instance_count: int = 0
+    seen_instance_counts: list[int] = []
 
     conn2 = get_project_db(db_path)
     try:
@@ -426,6 +359,7 @@ def run_benchmark(
                 failed_solutions.append(solution_id)
                 continue
 
+            seen_instance_counts.append(eval_meta.instance_count)
             if instance_count == 0:
                 instance_count = eval_meta.instance_count
 
@@ -474,19 +408,39 @@ def run_benchmark(
     if not entries:
         raise BenchmarkError("Failed to compute results for all solutions. Benchmark aborted.")
 
-    # 7. Generate benchmark ID and store
-    benchmark_id = generate_benchmark_id()
-    now = datetime.now(UTC)
+    # Warn if solutions were evaluated on datasets of different sizes (should not happen
+    # for a well-formed benchmark, but guard against inconsistency).
+    if len(set(seen_instance_counts)) > 1:
+        logger.warning(
+            "Instance count mismatch across solutions: %s. "
+            "All solutions in a benchmark should share the same dataset. "
+            "Using max instance count.",
+            seen_instance_counts,
+        )
+        instance_count = max(seen_instance_counts)
 
+    # 7. Generate benchmark ID and store (with collision-counter for same-second runs)
+    now = datetime.now(UTC)
+    benchmark_id: str = ""
     conn3 = get_project_db(db_path)
     try:
-        insert_benchmark(
-            conn3,
-            benchmark_id=benchmark_id,
-            alias=alias,
-            dataset_name=dataset_name,
-            created_at=now,
-        )
+        for attempt in range(100):
+            candidate = generate_benchmark_id(suffix=attempt if attempt > 0 else None)
+            try:
+                insert_benchmark(
+                    conn3,
+                    benchmark_id=candidate,
+                    alias=alias,
+                    dataset_name=dataset_name,
+                    created_at=now,
+                )
+                benchmark_id = candidate
+                break
+            except sqlite3.IntegrityError:
+                # ID collision (same second); try next suffix
+                continue
+        else:
+            raise BenchmarkError("Failed to generate a unique benchmark ID after 100 attempts.")
         insert_benchmark_solutions(
             conn3,
             benchmark_id=benchmark_id,
@@ -582,6 +536,7 @@ def get_benchmark_results(
     # Aggregate mode
     entries: list[BenchmarkEntry] = []
     instance_count: int = 0
+    seen_instance_counts: list[int] = []
 
     conn2 = get_project_db(db_path)
     try:
@@ -595,6 +550,8 @@ def get_benchmark_results(
             eval_time: float | None = (
                 float(str(row["eval_time_s"])) if row.get("eval_time_s") is not None else None
             )
+            # user_aggregates is stored as a JSON string in the DB row (from JOIN);
+            # decode it here (it is not a parsed dict like EvalMetadata.user_aggregates).
             user_agg_raw = row.get("user_aggregates")
             user_agg: dict[str, float] | None = None
             if user_agg_raw is not None:
@@ -603,6 +560,7 @@ def get_benchmark_results(
                 except (json.JSONDecodeError, TypeError):
                     user_agg = None
 
+            seen_instance_counts.append(inst_count)
             if instance_count == 0:
                 instance_count = inst_count
 
@@ -644,6 +602,14 @@ def get_benchmark_results(
     finally:
         conn2.close()
 
+    # Warn if solutions were evaluated on datasets of different sizes.
+    if len(set(seen_instance_counts)) > 1:
+        logger.warning(
+            "Instance count mismatch across solutions: %s. Using max instance count.",
+            seen_instance_counts,
+        )
+        instance_count = max(seen_instance_counts)
+
     return BenchmarkResult(
         benchmark_id=bench_id,
         alias=bench_alias_str,
@@ -657,8 +623,8 @@ def get_benchmark_results(
 def export_benchmark(
     benchmark_id: str | None = None,
     latest: bool = False,
-    format: str = "csv",
-    output_path: Path = Path("benchmark-results.csv"),
+    output_format: str = "csv",
+    output_path: Path | None = None,
     per_instance: bool = False,
     project_root: Path | None = None,
 ) -> Path:
@@ -673,8 +639,10 @@ def export_benchmark(
     Args:
         benchmark_id: Explicit benchmark ID to export.
         latest: If ``True``, export the most recent benchmark.
-        format: Export format — ``"csv"`` or ``"json"``.
-        output_path: Destination file path.
+        output_format: Export format — ``"csv"`` or ``"json"``.
+        output_path: Destination file path. Defaults to
+            ``benchmark-results.csv`` in the current working directory when
+            ``None``.
         per_instance: If ``True``, export raw per-instance data (FR-BEN-016).
         project_root: Explicit project root, or ``None`` to auto-detect.
 
@@ -685,8 +653,11 @@ def export_benchmark(
         BenchmarkNotFoundError: If no benchmark matches.
         ExportError: If output path not writable or invalid format.
     """
-    if format not in ("csv", "json"):
-        raise ExportError(f"Invalid export format '{format}'. Must be 'csv' or 'json'.")
+    if output_format not in ("csv", "json"):
+        raise ExportError(f"Invalid export format '{output_format}'. Must be 'csv' or 'json'.")
+
+    if output_path is None:
+        output_path = Path("benchmark-results.csv")
 
     result = get_benchmark_results(
         benchmark_id=benchmark_id,
@@ -701,7 +672,7 @@ def export_benchmark(
         raise ExportError(f"Cannot create output directory: {exc}") from exc
 
     try:
-        if format == "csv":
+        if output_format == "csv":
             _write_csv(result, output_path, per_instance=per_instance)
         else:
             _write_json(result, output_path, per_instance=per_instance)
@@ -781,7 +752,6 @@ def _write_csv_aggregate(
         "solution_id",
         "solution_alias",
         "run_id",
-        "problem",
         "problem_version",
         "llm",
         "llm_model",
@@ -804,8 +774,10 @@ def _write_csv_aggregate(
     writer.writeheader()
 
     if not isinstance(result, BenchmarkResult):
-        # Per-instance result type passed to aggregate export — no entries to write
-        return
+        raise ExportError(
+            "Aggregate CSV export requires BenchmarkResult, got BenchmarkDetailResult. "
+            "Pass per_instance=True to export per-instance data."
+        )
 
     for entry in result.entries:
         base: dict[str, object] = {
@@ -813,8 +785,7 @@ def _write_csv_aggregate(
             "solution_id": entry.solution_id,
             "solution_alias": entry.alias or "",
             "run_id": entry.run_id,
-            # problem column: symbolic problem version tag (no path — FR-BEN-013)
-            "problem": entry.lineage.problem_version,
+            # problem_version: symbolic tag only — no file paths (FR-BEN-013)
             "problem_version": entry.lineage.problem_version,
             "llm": entry.lineage.llm,
             "llm_model": entry.lineage.llm_model,
@@ -875,8 +846,10 @@ def _write_csv_per_instance(
     writer.writeheader()
 
     if not isinstance(result, BenchmarkDetailResult):
-        # Aggregate result type passed to per-instance export — nothing to write
-        return
+        raise ExportError(
+            "Per-instance CSV export requires BenchmarkDetailResult, got BenchmarkResult. "
+            "Pass per_instance=False to export aggregate data."
+        )
 
     for comp in result.instances:
         for sol_label, sol_result in comp.solutions.items():
