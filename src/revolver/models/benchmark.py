@@ -4,14 +4,15 @@ Covers the full benchmark lifecycle: solution lineage enrichment, per-solution
 aggregate results, benchmark summary for list views, per-instance comparison
 matrices, and eval reuse status.
 
-Traceable to: DES-007 (Benchmark Design) §7, FR-BEN-001..016.
+Traceable to: DES-007 (Benchmark Design) §7, FR-BEN-001..017.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from revolver.models.eval import MetricAggregate
 
@@ -81,6 +82,9 @@ class BenchmarkEntry(BaseModel):
 class BenchmarkResult(BaseModel):
     """Full benchmark result returned to the CLI layer.
 
+    Not frozen: the CLI layer may append to ``failed_solutions`` and populate
+    ``entries`` incrementally during the benchmark loop.
+
     Attributes:
         benchmark_id: Unique benchmark identifier
             (e.g. ``"bench-20260310-170000"``).
@@ -99,7 +103,7 @@ class BenchmarkResult(BaseModel):
     dataset_name: str
     instance_count: int
     entries: list[BenchmarkEntry]
-    failed_solutions: list[str] = []
+    failed_solutions: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -141,8 +145,8 @@ class InstanceSolutionResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    status: str
-    metrics: dict[str, float] = {}
+    status: Literal["solved", "failed", "timeout"]
+    metrics: dict[str, float] = Field(default_factory=dict)
     compute_time_s: float | None = None
 
 
@@ -166,6 +170,9 @@ class BenchmarkDetailResult(BaseModel):
     full comparison matrix for all instances and solutions, plus win counts
     for best-per-instance identification (FR-BEN-015).
 
+    Not frozen: the CLI layer populates ``instances`` and ``wins``
+    incrementally while iterating over instances during the benchmark loop.
+
     Attributes:
         benchmark_id: Unique benchmark identifier.
         alias: Optional user-given benchmark alias.
@@ -187,7 +194,7 @@ class BenchmarkDetailResult(BaseModel):
     instance_count: int
     solution_ids: list[str]
     instances: list[InstanceComparison]
-    wins: dict[str, int] = {}
+    wins: dict[str, int] = Field(default_factory=dict)
     metric: str | None = None
 
 
@@ -206,6 +213,6 @@ class EvalStatus(BaseModel):
         error: Error message when ``status == "failed"``. ``None`` otherwise.
     """
 
-    status: str
+    status: Literal["reused", "evaluated", "failed"]
     eval_id: str | None = None
     error: str | None = None

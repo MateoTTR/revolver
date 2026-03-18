@@ -439,6 +439,19 @@ class TestInstanceSolutionResult:
         restored = InstanceSolutionResult.model_validate(data)
         assert restored == result
 
+    @pytest.mark.unit
+    def test_invalid_status_raises(self) -> None:
+        """InstanceSolutionResult raises ValidationError for invalid status."""
+        with pytest.raises(ValidationError):
+            InstanceSolutionResult(status="unknown")  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_no_path_fields(self) -> None:
+        """InstanceSolutionResult contains no file system path fields (FR-BEN-013)."""
+        field_names = set(InstanceSolutionResult.model_fields.keys())
+        path_candidates = {f for f in field_names if "path" in f.lower()}
+        assert path_candidates == set()
+
 
 # ── InstanceComparison ───────────────────────────────────────────────────────
 
@@ -503,6 +516,13 @@ class TestInstanceComparison:
         data = comparison.model_dump()
         restored = InstanceComparison.model_validate(data)
         assert restored == comparison
+
+    @pytest.mark.unit
+    def test_no_path_fields(self) -> None:
+        """InstanceComparison contains no file system path fields (FR-BEN-013)."""
+        field_names = set(InstanceComparison.model_fields.keys())
+        path_candidates = {f for f in field_names if "path" in f.lower()}
+        assert path_candidates == set()
 
 
 # ── BenchmarkDetailResult ────────────────────────────────────────────────────
@@ -628,6 +648,26 @@ class TestBenchmarkDetailResult:
         path_candidates = {f for f in field_names if "path" in f.lower()}
         assert path_candidates == set()
 
+    @pytest.mark.unit
+    def test_nested_empty_solutions_round_trip(self) -> None:
+        """BenchmarkDetailResult with empty InstanceComparison.solutions serializes correctly."""
+        detail = BenchmarkDetailResult(
+            benchmark_id="bench-1",
+            dataset_name="ds",
+            instance_count=1,
+            solution_ids=[],
+            instances=[
+                InstanceComparison(
+                    instance_id="inst-empty",
+                    solutions={},
+                )
+            ],
+        )
+        data = detail.model_dump()
+        restored = BenchmarkDetailResult.model_validate(data)
+        assert restored == detail
+        assert restored.instances[0].solutions == {}
+
 
 # ── EvalStatus ───────────────────────────────────────────────────────────────
 
@@ -696,3 +736,16 @@ class TestEvalStatus:
         data = status.model_dump()
         restored = EvalStatus.model_validate(data)
         assert restored == status
+
+    @pytest.mark.unit
+    def test_invalid_status_raises(self) -> None:
+        """EvalStatus raises ValidationError for invalid status."""
+        with pytest.raises(ValidationError):
+            EvalStatus(status="pending")  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_no_path_fields(self) -> None:
+        """EvalStatus contains no file system path fields (FR-BEN-013)."""
+        field_names = set(EvalStatus.model_fields.keys())
+        path_candidates = {f for f in field_names if "path" in f.lower()}
+        assert path_candidates == set()
