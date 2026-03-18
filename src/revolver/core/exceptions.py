@@ -84,6 +84,27 @@ class EvalNotFoundError(RevolverError):
     exit_code: int = 1
 
 
+class BenchmarkError(RevolverError):
+    """Raised when a benchmark operation fails (e.g. all evaluations failed).
+
+    Exit code 4: treated as an external error per DES-007 §2.1.
+    """
+
+    exit_code: int = 4
+
+
+class BenchmarkNotFoundError(RevolverError):
+    """Raised when a requested benchmark is not found in the database."""
+
+    exit_code: int = 1
+
+
+class ExportError(RevolverError):
+    """Raised when an export operation fails (invalid format, unwritable path)."""
+
+    exit_code: int = 1
+
+
 # ── Ollama / LLM exceptions ─────────────────────────────────────────────────
 
 
