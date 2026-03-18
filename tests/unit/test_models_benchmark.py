@@ -462,12 +462,8 @@ class TestInstanceComparison:
     @pytest.mark.unit
     def test_creation(self) -> None:
         """InstanceComparison can be created with instance_id and solutions."""
-        sol_a = InstanceSolutionResult(
-            status="solved", metrics={"combined_score": 0.9}
-        )
-        sol_b = InstanceSolutionResult(
-            status="solved", metrics={"combined_score": 0.7}
-        )
+        sol_a = InstanceSolutionResult(status="solved", metrics={"combined_score": 0.9})
+        sol_b = InstanceSolutionResult(status="solved", metrics={"combined_score": 0.7})
         comparison = InstanceComparison(
             instance_id="instance_001.json",
             solutions={"sol-a": sol_a, "sol-b": sol_b},
@@ -507,11 +503,7 @@ class TestInstanceComparison:
         """InstanceComparison serializes to dict and back."""
         comparison = InstanceComparison(
             instance_id="inst-1",
-            solutions={
-                "sol-a": InstanceSolutionResult(
-                    status="solved", metrics={"score": 0.9}
-                )
-            },
+            solutions={"sol-a": InstanceSolutionResult(status="solved", metrics={"score": 0.9})},
         )
         data = comparison.model_dump()
         restored = InstanceComparison.model_validate(data)
@@ -537,9 +529,7 @@ class TestBenchmarkDetailResult:
         comparison = InstanceComparison(
             instance_id="inst-1",
             solutions={
-                "sol-a": InstanceSolutionResult(
-                    status="solved", metrics={"combined_score": 0.9}
-                )
+                "sol-a": InstanceSolutionResult(status="solved", metrics={"combined_score": 0.9})
             },
         )
         detail = BenchmarkDetailResult(
@@ -628,9 +618,7 @@ class TestBenchmarkDetailResult:
                 InstanceComparison(
                     instance_id="inst-1",
                     solutions={
-                        "sol-a": InstanceSolutionResult(
-                            status="solved", metrics={"score": 0.85}
-                        )
+                        "sol-a": InstanceSolutionResult(status="solved", metrics={"score": 0.85})
                     },
                 )
             ],
@@ -694,9 +682,7 @@ class TestEvalStatus:
     @pytest.mark.unit
     def test_creation_failed(self) -> None:
         """EvalStatus can be created with failed status and error."""
-        status = EvalStatus(
-            status="failed", error="EvalError: evaluator crashed"
-        )
+        status = EvalStatus(status="failed", error="EvalError: evaluator crashed")
         assert status.status == "failed"
         assert status.eval_id is None
         assert status.error == "EvalError: evaluator crashed"
