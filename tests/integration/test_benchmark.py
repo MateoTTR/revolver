@@ -301,10 +301,13 @@ def test_accepts_multiple_solutions(bench_project: dict[str, object]) -> None:
 
 
 @pytest.mark.integration
-def test_metadata_stored_in_db(bench_project: dict[str, object]) -> None:
-    """Benchmark + solution refs are stored in DB after run.
+def test_benchmark_output_contains_benchmark_id(bench_project: dict[str, object]) -> None:
+    """CLI output contains the benchmark_id after a successful run.
 
-    Validates: FR-BEN-005
+    Validates: FR-BEN-005 (output traceability)
+    Note: core.benchmark.run_benchmark is mocked, so the DB insert does not
+    actually occur. This test verifies that the CLI surfaces the benchmark_id
+    returned by core in its output.
     """
     root = bench_project["root"]
     db_path = bench_project["db_path"]
@@ -795,3 +798,196 @@ def test_list_benchmarks(bench_project: dict[str, object]) -> None:
     # Solution count should be present
     assert "2" in output
     assert "3" in output
+
+
+# ── JSON mode tests (§2.11 cross-cutting) ───────────────────────────────────
+
+
+@pytest.mark.integration
+def test_benchmark_json_mode(bench_project: dict[str, object]) -> None:
+    """benchmark --json outputs valid JSON with expected keys.
+
+    Validates: §2.11 (JSON mode), FR-BEN-001, FR-BEN-004
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    mock_result = _make_benchmark_result()
+
+    with patch("revolver.core.benchmark.run_benchmark", return_value=mock_result):
+        result = _invoke_with_cwd(
+            [
+                "--json",
+                "benchmark",
+                "--solutions",
+                "sol-001",
+                "--solutions",
+                "sol-002",
+                "--dataset",
+                "eval-bench",
+            ],
+            root,
+        )
+
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {_get_all_output(result)}"
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    assert "benchmark_id" in data
+    assert "dataset_name" in data
+    assert "entries" in data
+    assert isinstance(data["entries"], list)
+    assert len(data["entries"]) >= 1
+
+
+@pytest.mark.integration
+def test_benchmark_results_json_mode(bench_project: dict[str, object]) -> None:
+    """benchmark results --latest --json outputs valid JSON with expected keys.
+
+    Validates: §2.11 (JSON mode), FR-BEN-009
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    mock_result = _make_benchmark_result()
+
+    with patch("revolver.core.benchmark.get_benchmark_results", return_value=mock_result):
+        result = _invoke_with_cwd(
+            ["--json", "benchmark", "results", "--latest"],
+            root,
+        )
+
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {_get_all_output(result)}"
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    assert "benchmark_id" in data
+    assert "entries" in data
+
+
+@pytest.mark.integration
+def test_benchmark_list_json_mode(bench_project: dict[str, object]) -> None:
+    """benchmark list --json outputs valid JSON array of benchmark summaries.
+
+    Validates: §2.11 (JSON mode), FR-BEN-012
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    now = datetime.now(UTC)
+    mock_summaries = [
+        BenchmarkSummary(
+            benchmark_id="bench-20260310-170000",
+            alias="first-bench",
+            dataset_name="eval-bench",
+            solution_count=2,
+            created_at=now,
+        ),
+    ]
+
+    with patch("revolver.core.benchmark.list_benchmarks", return_value=mock_summaries):
+        result = _invoke_with_cwd(["--json", "benchmark", "list"], root)
+
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {_get_all_output(result)}"
+    data = _parse_json_output(result)
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["benchmark_id"] == "bench-20260310-170000"
+    assert data[0]["alias"] == "first-bench"
+
+
+# ── Error case tests (§2.11 cross-cutting) ───────────────────────────────────
+
+
+@pytest.mark.integration
+def test_benchmark_missing_solutions(bench_project: dict[str, object]) -> None:
+    """benchmark without --solutions exits with code 1 and error message on stderr.
+
+    Validates: §2.11 (error cases)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    result = _invoke_with_cwd(
+        ["benchmark", "--dataset", "eval-bench"],
+        root,
+    )
+
+    assert result.exit_code == 1, f"Expected exit 1, got {result.exit_code}"
+    output = _get_all_output(result)
+    assert "--solutions" in output or "solutions" in output.lower()
+
+
+@pytest.mark.integration
+def test_benchmark_missing_dataset(bench_project: dict[str, object]) -> None:
+    """benchmark without --dataset exits with code 1 and error message on stderr.
+
+    Validates: §2.11 (error cases)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    result = _invoke_with_cwd(
+        ["benchmark", "--solutions", "sol-001"],
+        root,
+    )
+
+    assert result.exit_code == 1, f"Expected exit 1, got {result.exit_code}"
+    output = _get_all_output(result)
+    assert "--dataset" in output or "dataset" in output.lower()
+
+
+@pytest.mark.integration
+def test_benchmark_not_found_error(bench_project: dict[str, object]) -> None:
+    """BenchmarkNotFoundError propagated by core exits with code 1.
+
+    Validates: §2.11 (error cases), FR-BEN-009
+    """
+    from revolver.core.exceptions import BenchmarkNotFoundError
+
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    with patch(
+        "revolver.core.benchmark.get_benchmark_results",
+        side_effect=BenchmarkNotFoundError("Benchmark 'bench-xyz' not found."),
+    ):
+        result = _invoke_with_cwd(
+            ["benchmark", "results", "--id", "bench-xyz"],
+            root,
+        )
+
+    assert result.exit_code == 1, f"Expected exit 1, got {result.exit_code}"
+    output = _get_all_output(result)
+    assert "not found" in output.lower() or "Error" in output
+
+
+@pytest.mark.integration
+def test_benchmark_error_all_evals_fail(bench_project: dict[str, object]) -> None:
+    """BenchmarkError (all evals fail) propagated by core exits with code 4.
+
+    Validates: §2.11 (error cases), FR-BEN-004
+    """
+    from revolver.core.exceptions import BenchmarkError
+
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    with patch(
+        "revolver.core.benchmark.run_benchmark",
+        side_effect=BenchmarkError("Evaluation failed for all solutions. Benchmark aborted."),
+    ):
+        result = _invoke_with_cwd(
+            [
+                "benchmark",
+                "--solutions",
+                "sol-001",
+                "--solutions",
+                "sol-002",
+                "--dataset",
+                "eval-bench",
+            ],
+            root,
+        )
+
+    assert result.exit_code == 4, f"Expected exit 4, got {result.exit_code}"
+    output = _get_all_output(result)
+    assert "Error" in output or "failed" in output.lower()

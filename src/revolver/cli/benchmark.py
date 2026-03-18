@@ -247,7 +247,7 @@ def export(
         bool,
         typer.Option("--latest", help="Export most recent benchmark."),
     ] = False,
-    format: Annotated[
+    output_format: Annotated[
         str,
         typer.Option("--format", help="Export format: csv or json."),
     ] = ...,  # type: ignore[assignment]
@@ -272,7 +272,7 @@ def export(
         written_path = core_benchmark.export_benchmark(
             benchmark_id=benchmark_id,
             latest=latest,
-            output_format=format,
+            output_format=output_format,
             output_path=output,
             per_instance=per_instance,
         )
@@ -284,10 +284,6 @@ def export(
             )
         else:
             sys.stderr.write(f"Exported benchmark results to: {written_path}\n")
-            render(
-                {"status": "exported", "path": str(written_path)},
-                json_mode=False,
-            )
 
 
 # ── list subcommand (DES-007 §11) ─────────────────────────────────────────────
