@@ -320,6 +320,22 @@ class TestInsertAndGetBenchmarkSolutions:
         assert rows == []
 
     @pytest.mark.unit
+    def test_empty_solution_ids_raises(self, db_conn: sqlite3.Connection) -> None:
+        """Passing an empty solution_ids list raises ValueError."""
+        _seed_prerequisites(db_conn)
+
+        insert_benchmark(
+            db_conn,
+            benchmark_id="bench-20260316-100000",
+            alias=None,
+            dataset_name="eval-bench",
+            created_at=datetime(2026, 3, 16, 10, 0, 0, tzinfo=UTC),
+        )
+
+        with pytest.raises(ValueError, match="solution_ids must not be empty"):
+            insert_benchmark_solutions(db_conn, "bench-20260316-100000", [])
+
+    @pytest.mark.unit
     def test_fk_violation_on_unknown_solution(self, db_conn: sqlite3.Connection) -> None:
         """Inserting a benchmark_solution with unknown solution_id raises IntegrityError."""
         _seed_prerequisites(db_conn)
@@ -338,6 +354,29 @@ class TestInsertAndGetBenchmarkSolutions:
                 "bench-20260316-100000",
                 ["nonexistent-solution"],
             )
+
+    @pytest.mark.unit
+    def test_dataset_name_mismatch_returns_empty(self, db_conn: sqlite3.Connection) -> None:
+        """get_benchmark_solutions returns [] when dataset_name does not match eval_metadata."""
+        _seed_prerequisites(db_conn)
+        _seed_eval_metadata(db_conn)  # eval_metadata uses "eval-bench"
+
+        insert_benchmark(
+            db_conn,
+            benchmark_id="bench-20260316-100000",
+            alias=None,
+            dataset_name="eval-bench",
+            created_at=datetime(2026, 3, 16, 10, 0, 0, tzinfo=UTC),
+        )
+        insert_benchmark_solutions(
+            db_conn,
+            "bench-20260316-100000",
+            ["sol-20260314-120000"],
+        )
+
+        # Querying with a different dataset_name: INNER JOIN filters out all rows
+        rows = get_benchmark_solutions(db_conn, "bench-20260316-100000", "other-dataset")
+        assert rows == []
 
     @pytest.mark.unit
     def test_primary_key_enforced(self, db_conn: sqlite3.Connection) -> None:
@@ -484,6 +523,107 @@ class TestListBenchmarksWithCount:
 
 # ── Schema migration ─────────────────────────────────────────────────────────
 
+# Minimal v2 project schema (no benchmarks tables) used to simulate an
+# existing database that must be upgraded to v3 by _run_migrations.
+_V2_PROJECT_SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS schema_version (
+    version     INTEGER PRIMARY KEY,
+    applied_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS problem_versions (
+    tag             TEXT PRIMARY KEY,
+    hash            TEXT NOT NULL UNIQUE,
+    message         TEXT DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS datasets (
+    name            TEXT PRIMARY KEY,
+    path            TEXT NOT NULL,
+    split           TEXT CHECK (split IN ('train', 'eval')),
+    storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
+    description     TEXT DEFAULT '',
+    global_hash     TEXT NOT NULL,
+    instance_count  INTEGER NOT NULL,
+    registered_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dataset_instances (
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    instance_id     TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    PRIMARY KEY (dataset_name, instance_id)
+);
+
+CREATE TABLE IF NOT EXISTS dataset_compat (
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    problem_version TEXT NOT NULL REFERENCES problem_versions(tag),
+    PRIMARY KEY (dataset_name, problem_version)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id                TEXT PRIMARY KEY,
+    problem_version   TEXT NOT NULL REFERENCES problem_versions(tag),
+    llm               TEXT NOT NULL,
+    dataset           TEXT NOT NULL REFERENCES datasets(name),
+    iterations        INTEGER NOT NULL,
+    generation_time_s REAL,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    config_snapshot   TEXT,
+    problem_hash      TEXT NOT NULL,
+    dataset_hash      TEXT NOT NULL,
+    llm_model         TEXT NOT NULL,
+    resumed_from      TEXT REFERENCES runs(id),
+    status            TEXT NOT NULL DEFAULT 'running'
+                      CHECK (status IN ('running', 'completed',
+                             'interrupted', 'completed_with_errors')),
+    created_at        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_runs_version ON runs(problem_version);
+CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_resumed ON runs(resumed_from);
+
+CREATE TABLE IF NOT EXISTS solutions (
+    id         TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL REFERENCES runs(id),
+    rank       INTEGER NOT NULL,
+    best_score REAL,
+    alias      TEXT UNIQUE,
+    UNIQUE(run_id, rank)
+);
+
+CREATE INDEX IF NOT EXISTS idx_solutions_run ON solutions(run_id);
+
+CREATE TABLE IF NOT EXISTS eval_metadata (
+    eval_id          TEXT PRIMARY KEY,
+    solution_id      TEXT NOT NULL REFERENCES solutions(id),
+    dataset_name     TEXT NOT NULL REFERENCES datasets(name),
+    instance_count   INTEGER NOT NULL,
+    instances_solved INTEGER NOT NULL,
+    eval_time_s      REAL,
+    user_aggregates  TEXT,
+    evaluated_at     TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_eval_unique ON eval_metadata(solution_id, dataset_name);
+
+CREATE TABLE IF NOT EXISTS eval_instances (
+    eval_id         TEXT NOT NULL REFERENCES eval_metadata(eval_id),
+    instance_id     TEXT NOT NULL,
+    metric_name     TEXT NOT NULL,
+    value           REAL,
+    status          TEXT NOT NULL CHECK (status IN ('solved', 'failed', 'timeout')),
+    error_message   TEXT,
+    compute_time_s  REAL,
+    PRIMARY KEY (eval_id, instance_id, metric_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_inst_eval ON eval_instances(eval_id);
+"""
+
 
 class TestSchemaMigrationV3:
     """Tests for schema migration v3 (benchmark tables)."""
@@ -517,3 +657,60 @@ class TestSchemaMigrationV3:
         assert row is not None
         assert row[0] == CURRENT_SCHEMA_VERSION
         assert CURRENT_SCHEMA_VERSION == 3
+
+    @pytest.mark.unit
+    def test_migration_v3_upgrades_existing_v2_db(self, tmp_path: Path) -> None:
+        """Migration v3 adds benchmark tables to an existing v2 database.
+
+        Simulates a pre-existing project DB at schema version 2 (no benchmark
+        tables) and confirms that re-opening it via get_project_db() applies
+        migration 3 and creates the expected tables and index.
+        """
+        from revolver.infra.db import _configure_connection, get_project_db
+
+        # Build a v2 database manually (schema without benchmark tables).
+        db_path = tmp_path / "old.db"
+        conn_v2 = sqlite3.connect(str(db_path))
+        _configure_connection(conn_v2)
+        conn_v2.executescript(_V2_PROJECT_SCHEMA_SQL)
+        conn_v2.execute(
+            "INSERT INTO schema_version (version, applied_at)"
+            " VALUES (2, '2026-01-01T00:00:00+00:00')"
+        )
+        conn_v2.commit()
+
+        # Verify benchmark tables are absent at v2.
+        cursor = conn_v2.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='benchmarks'"
+        )
+        assert cursor.fetchone() is None, "benchmarks table should not exist before migration"
+        conn_v2.close()
+
+        # Re-open via get_project_db — should apply migration 3.
+        conn_v3 = get_project_db(db_path)
+
+        cursor = conn_v3.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='benchmarks'"
+        )
+        assert cursor.fetchone() is not None, "benchmarks table must exist after migration v3"
+
+        cursor = conn_v3.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='benchmark_solutions'"
+        )
+        assert cursor.fetchone() is not None, (
+            "benchmark_solutions table must exist after migration v3"
+        )
+
+        cursor = conn_v3.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_benchmarks_created'"
+        )
+        assert cursor.fetchone() is not None, (
+            "idx_benchmarks_created index must exist after migration v3"
+        )
+
+        cursor = conn_v3.execute("SELECT MAX(version) FROM schema_version")
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == 3, "schema_version must be 3 after migration"
+
+        conn_v3.close()

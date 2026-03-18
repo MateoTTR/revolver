@@ -1668,6 +1668,11 @@ def insert_benchmark(
         alias: Optional user-given alias for the benchmark.
         dataset_name: Name of the evaluation dataset used.
         created_at: Timestamp of benchmark creation.
+
+    Raises:
+        sqlite3.IntegrityError: If a benchmark with the same ``benchmark_id``
+            already exists, or if ``dataset_name`` does not reference a known
+            dataset.
     """
     conn.execute(
         "INSERT INTO benchmarks (id, alias, dataset_name, created_at) VALUES (?, ?, ?, ?)",
@@ -1689,7 +1694,12 @@ def insert_benchmark_solutions(
         conn: An open project database connection.
         benchmark_id: ID of the benchmark (foreign key to ``benchmarks``).
         solution_ids: List of solution IDs to associate with the benchmark.
+
+    Raises:
+        ValueError: If ``solution_ids`` is empty.
     """
+    if not solution_ids:
+        raise ValueError("solution_ids must not be empty")
     conn.executemany(
         "INSERT INTO benchmark_solutions (benchmark_id, solution_id) VALUES (?, ?)",
         [(benchmark_id, sid) for sid in solution_ids],
@@ -1711,12 +1721,14 @@ def get_benchmark(
         A dict with benchmark column values, or ``None`` if not found.
     """
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT id, alias, dataset_name, created_at FROM benchmarks WHERE id = ?",
-        (benchmark_id,),
-    )
-    row = cursor.fetchone()
-    conn.row_factory = None
+    try:
+        cursor = conn.execute(
+            "SELECT id, alias, dataset_name, created_at FROM benchmarks WHERE id = ?",
+            (benchmark_id,),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
     if row is None:
         return None
     return dict(row)
@@ -1732,12 +1744,14 @@ def get_latest_benchmark(conn: sqlite3.Connection) -> dict[str, object] | None:
         A dict with benchmark column values, or ``None`` if no benchmarks exist.
     """
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        "SELECT id, alias, dataset_name, created_at FROM benchmarks"
-        " ORDER BY created_at DESC LIMIT 1"
-    )
-    row = cursor.fetchone()
-    conn.row_factory = None
+    try:
+        cursor = conn.execute(
+            "SELECT id, alias, dataset_name, created_at FROM benchmarks"
+            " ORDER BY created_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.row_factory = None
     if row is None:
         return None
     return dict(row)
@@ -1748,38 +1762,42 @@ def get_benchmark_solutions(
     benchmark_id: str,
     dataset_name: str,
 ) -> list[dict[str, object]]:
-    """Retrieve all solutions in a benchmark, joined with eval metadata.
+    """Retrieve benchmark solutions joined with eval metadata for a given dataset.
 
-    Returns one row per solution, enriched with alias, run_id, rank,
-    best_score, and eval_metadata fields for the given dataset.
+    Returns one row per solution that has eval_metadata for the given dataset.
+    Solutions in the benchmark without eval results for ``dataset_name`` are
+    excluded (INNER JOIN on eval_metadata).
 
     Implements DES-007 §9.2 query.
 
     Args:
         conn: An open project database connection.
         benchmark_id: The benchmark ID to look up.
-        dataset_name: Dataset name for the eval_metadata JOIN.
+        dataset_name: Dataset name for the eval_metadata JOIN. Only solutions
+            with a matching eval_metadata row for this dataset are returned.
 
     Returns:
         A list of dicts with solution and eval_metadata columns,
         ordered by solution alias then ID.
     """
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        """\
-        SELECT bs.solution_id, s.alias, s.run_id, s.rank, s.best_score,
-               em.eval_id, em.instance_count, em.instances_solved,
-               em.eval_time_s, em.user_aggregates
-        FROM benchmark_solutions bs
-        JOIN solutions s ON bs.solution_id = s.id
-        JOIN eval_metadata em ON s.id = em.solution_id AND em.dataset_name = ?
-        WHERE bs.benchmark_id = ?
-        ORDER BY s.alias, s.id
-        """,
-        (dataset_name, benchmark_id),
-    )
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.row_factory = None
+    try:
+        cursor = conn.execute(
+            """\
+            SELECT bs.solution_id, s.alias, s.run_id, s.rank, s.best_score,
+                   em.eval_id, em.instance_count, em.instances_solved,
+                   em.eval_time_s, em.user_aggregates
+            FROM benchmark_solutions bs
+            JOIN solutions s ON bs.solution_id = s.id
+            JOIN eval_metadata em ON s.id = em.solution_id AND em.dataset_name = ?
+            WHERE bs.benchmark_id = ?
+            ORDER BY s.alias, s.id
+            """,
+            (dataset_name, benchmark_id),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.row_factory = None
     return rows
 
 
@@ -1799,16 +1817,18 @@ def list_benchmarks_with_count(conn: sqlite3.Connection) -> list[dict[str, objec
         ordered by ``created_at DESC``.
     """
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(
-        """\
-        SELECT b.id, b.alias, b.dataset_name, b.created_at,
-               COUNT(bs.solution_id) AS solution_count
-        FROM benchmarks b
-        LEFT JOIN benchmark_solutions bs ON b.id = bs.benchmark_id
-        GROUP BY b.id
-        ORDER BY b.created_at DESC
-        """
-    )
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.row_factory = None
+    try:
+        cursor = conn.execute(
+            """\
+            SELECT b.id, b.alias, b.dataset_name, b.created_at,
+                   COUNT(bs.solution_id) AS solution_count
+            FROM benchmarks b
+            LEFT JOIN benchmark_solutions bs ON b.id = bs.benchmark_id
+            GROUP BY b.id
+            ORDER BY b.created_at DESC
+            """
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.row_factory = None
     return rows
