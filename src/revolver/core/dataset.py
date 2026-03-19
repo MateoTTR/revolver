@@ -8,9 +8,9 @@ Traceable to: DES-004 section 7, FR-DAT-001..016.
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 
 from revolver.core.exceptions import (
     DuplicateNameError,
@@ -31,22 +31,18 @@ from revolver.infra.db import (
     insert_dataset,
     insert_dataset_compat,
     insert_dataset_instances,
-    update_dataset_description,
-)
-from revolver.infra.db import (
     list_datasets as db_list_datasets,
+    update_dataset_description,
 )
 from revolver.infra.hashing import file_hash, global_hash, tree_hash
 from revolver.infra.store import (
     REVOLVER_DIR,
+    ProjectNotFoundError as StoreProjectNotFoundError,
     create_dataset_snapshot,
     delete_dataset_store,
     find_project_root,
     get_snapshot_path,
     write_dataset_manifest,
-)
-from revolver.infra.store import (
-    ProjectNotFoundError as StoreProjectNotFoundError,
 )
 from revolver.models.dataset import (
     DatasetInfo,

@@ -9,17 +9,17 @@ Traceable to: val-integration-tests.md section 2.6 (10 scenarios).
 
 from __future__ import annotations
 
-import json
-import re
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import re
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
-import revolver.core.eval as core_eval_module
 from revolver.cli import app
+import revolver.core.eval as core_eval_module
 from revolver.core.project import init_project
 from revolver.infra.db import (
     get_project_db,

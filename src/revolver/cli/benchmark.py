@@ -8,16 +8,15 @@ Traceable to: DES-007 section 11, FR-BEN-001..017.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 from typing import Annotated
 
 import typer
 
 from revolver.cli import benchmark_app
 from revolver.cli.error_handler import cli_error_boundary
-from revolver.core import benchmark as core_benchmark
-from revolver.core import solution as core_solution
+from revolver.core import benchmark as core_benchmark, solution as core_solution
 from revolver.infra.output import render
 from revolver.models.benchmark import BenchmarkDetailResult, BenchmarkResult
 

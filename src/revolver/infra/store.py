@@ -10,8 +10,8 @@ Traceable to: NFR-010, NFR-012, NFR-051 (permissions 700), DES-004 §6, DES-005 
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
+import shutil
 from typing import Any
 
 import yaml

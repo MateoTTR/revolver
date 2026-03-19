@@ -8,8 +8,8 @@ Traceable to: DES-002 (LLM subcommands — GPU awareness).
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
+import subprocess
 
 
 @dataclass

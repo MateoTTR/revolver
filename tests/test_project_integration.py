@@ -13,8 +13,8 @@ import sqlite3
 import stat
 
 import pytest
-import yaml
 from typer.testing import CliRunner
+import yaml
 
 from revolver.cli import app
 

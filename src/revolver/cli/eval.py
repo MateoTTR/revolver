@@ -8,8 +8,8 @@ Traceable to: DES-006 section 9, FR-EVL-001..020.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 from typing import Annotated
 
 import typer

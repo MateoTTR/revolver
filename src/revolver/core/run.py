@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
+from datetime import UTC, datetime
 import importlib.util
 import os
+from pathlib import Path
 import shutil
 import sys
 import time
-from datetime import UTC, datetime
-from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -47,12 +47,10 @@ from revolver.infra.db import (
     get_solutions_for_run,
     insert_run,
     insert_solution,
+    list_runs as db_list_runs,
     update_run_generation_time,
     update_run_status,
     update_run_tokens,
-)
-from revolver.infra.db import (
-    list_runs as db_list_runs,
 )
 from revolver.infra.evaluator_runner import run_instance as eval_run_instance
 from revolver.infra.openevolve import (
@@ -65,6 +63,7 @@ from revolver.infra.openevolve import (
 from revolver.infra.store import (
     PROBLEM_DIR,
     REVOLVER_DIR,
+    ProjectNotFoundError as StoreProjectNotFoundError,
     copy_run_file,
     create_run_dir,
     find_project_root,
@@ -74,9 +73,6 @@ from revolver.infra.store import (
     remove_run_lock,
     write_run_lock,
     write_run_manifest,
-)
-from revolver.infra.store import (
-    ProjectNotFoundError as StoreProjectNotFoundError,
 )
 from revolver.infra.token_proxy import TokenCountingProxy, estimate_cost
 from revolver.models.run import (
@@ -88,8 +84,6 @@ from revolver.models.run import (
     RunStatus,
     RunSummary,
     SolutionResult,
-)
-from revolver.models.run import (
     TokenUsage as PydanticTokenUsage,
 )
 

@@ -9,10 +9,10 @@ Traceable to: DES-001 (SQLite Data Model), NFR-013, NFR-016.
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import sqlite3
 from typing import Literal, cast
 
 from revolver.core.exceptions import DuplicateNameError

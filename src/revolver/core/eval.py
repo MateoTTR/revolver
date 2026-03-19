@@ -9,14 +9,14 @@ Traceable to: DES-006, FR-EVL-001..020.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import UTC, datetime
 import json
+from pathlib import Path
 import sqlite3
 import statistics
 import sys
 import time
-from collections.abc import Callable
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Literal
 
 from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
@@ -43,10 +43,8 @@ from revolver.infra.store import (
     PROBLEM_DIR,
     REVOLVER_DIR,
     RUNS_DIR,
-    find_project_root,
-)
-from revolver.infra.store import (
     ProjectNotFoundError as StoreProjectNotFoundError,
+    find_project_root,
 )
 from revolver.models.eval import (
     ComputeTimeSummary,
@@ -210,10 +208,9 @@ def _run_legacy_global_aggregation(
     Returns:
         Dict of aggregate metrics, or ``None`` on failure.
     """
+    from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
     import importlib.util
     import os
-    from concurrent.futures import ProcessPoolExecutor
-    from concurrent.futures import TimeoutError as FuturesTimeoutError
 
     def _global_eval_worker(
         eval_path_str: str,

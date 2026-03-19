@@ -8,9 +8,9 @@ Provides a context manager for CLI commands that:
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Generator
 from contextlib import contextmanager
+import sys
 
 import typer
 

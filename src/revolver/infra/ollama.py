@@ -8,10 +8,10 @@ Traceable to: ADR-001 (Ollama as local LLM backend), DES-002.
 
 from __future__ import annotations
 
-import json
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+import json
+import time
 from typing import Any
 
 import httpx

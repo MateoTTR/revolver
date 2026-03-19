@@ -9,13 +9,13 @@ Traceable to: DES-007, FR-BEN-001..017.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import csv
+from datetime import UTC, datetime
 import json
 import logging
-import sqlite3
-from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
+import sqlite3
 
 from revolver.core.dataset import verify_dataset_integrity
 from revolver.core.eval import compute_aggregates, evaluate_solution
@@ -28,8 +28,6 @@ from revolver.core.exceptions import (
 )
 from revolver.infra.db import (
     delete_benchmark as db_delete_benchmark,
-)
-from revolver.infra.db import (
     get_benchmark,
     get_benchmark_solutions,
     get_dataset,
@@ -43,8 +41,11 @@ from revolver.infra.db import (
     insert_benchmark_solutions,
     list_benchmarks_with_count,
 )
-from revolver.infra.store import REVOLVER_DIR, find_project_root
-from revolver.infra.store import ProjectNotFoundError as StoreProjectNotFoundError
+from revolver.infra.store import (
+    REVOLVER_DIR,
+    ProjectNotFoundError as StoreProjectNotFoundError,
+    find_project_root,
+)
 from revolver.models.benchmark import (
     BenchmarkDetailResult,
     BenchmarkEntry,

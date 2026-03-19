@@ -8,9 +8,9 @@ Traceable to: DES-002 section 5, FR-LLM-001..008.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import os
 import sqlite3
-from datetime import UTC, datetime
 from typing import Literal
 
 from revolver.core.exceptions import (

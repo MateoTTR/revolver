@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
 from pydantic import ValidationError
+import pytest
 
 from revolver.models.eval import (
     ComputeTimeSummary,

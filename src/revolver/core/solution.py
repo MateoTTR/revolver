@@ -11,15 +11,13 @@ Traceable to: DES-005 §7, DES-006, FR-SOL-001..013.
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+import sqlite3
 
 from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
 from revolver.infra.db import (
     delete_solution as db_delete_solution,
-)
-from revolver.infra.db import (
     get_project_db,
     get_run,
     get_solution,
@@ -27,10 +25,8 @@ from revolver.infra.db import (
     get_solution_detail,
     get_solutions_for_run,
     insert_solution,
-    update_solution_alias,
-)
-from revolver.infra.db import (
     list_solutions as db_list_solutions,
+    update_solution_alias,
 )
 from revolver.infra.store import REVOLVER_DIR, RUNS_DIR, find_project_root
 from revolver.models.solution import Solution
