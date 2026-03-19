@@ -991,3 +991,160 @@ def test_benchmark_error_all_evals_fail(bench_project: dict[str, object]) -> Non
     assert result.exit_code == 4, f"Expected exit 4, got {result.exit_code}"
     output = _get_all_output(result)
     assert "Error" in output or "failed" in output.lower()
+
+
+# ── Sprint 006b fix tests ────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_benchmark_all_flag(bench_project: dict[str, object]) -> None:
+    """--all resolves all project solutions and passes them to run_benchmark.
+
+    Validates: F7 (--all shortcut)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    mock_result = _make_benchmark_result()
+
+    with (
+        patch(
+            "revolver.core.solution.list_solutions",
+            return_value=[
+                {"id": "sol-001", "alias": "sol-a"},
+                {"id": "sol-002", "alias": "sol-b"},
+            ],
+        ),
+        patch("revolver.core.benchmark.run_benchmark", return_value=mock_result) as mock_run,
+    ):
+        result = _invoke_with_cwd(
+            ["benchmark", "--all", "--dataset", "eval-bench"],
+            root,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    call_args = mock_run.call_args
+    fallback = call_args.args[0] if call_args.args else []
+    sol_ids = call_args.kwargs.get("solution_ids_or_aliases", fallback)
+    assert "sol-a" in sol_ids
+
+
+@pytest.mark.integration
+def test_benchmark_comma_separated_solutions(bench_project: dict[str, object]) -> None:
+    """--solutions A,B,C expands to 3 separate solution arguments.
+
+    Validates: F7 (comma-separated shortcut)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    mock_result = _make_benchmark_result()
+
+    with patch("revolver.core.benchmark.run_benchmark", return_value=mock_result) as mock_run:
+        result = _invoke_with_cwd(
+            [
+                "benchmark",
+                "--solutions",
+                "sol-001,sol-002",
+                "--dataset",
+                "eval-bench",
+            ],
+            root,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    call_args = mock_run.call_args
+    fallback = call_args.args[0] if call_args.args else []
+    sol_list = call_args.kwargs.get("solution_ids_or_aliases", fallback)
+    assert "sol-001" in sol_list
+    assert "sol-002" in sol_list
+
+
+@pytest.mark.integration
+def test_results_defaults_to_combined_score(bench_project: dict[str, object]) -> None:
+    """benchmark results without --metric shows only combined_score columns.
+
+    Validates: F4 (default metric filtering)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    multi_metric_entry = BenchmarkEntry(
+        solution_id="sol-001",
+        alias="sol-a",
+        run_id="run-001",
+        lineage=_make_lineage(),
+        metrics={
+            "combined_score": _make_metric_aggregate(0.87),
+            "baseline_length": _make_metric_aggregate(100.0),
+            "tour_length": _make_metric_aggregate(50.0),
+        },
+        eval_time_s=10.0,
+        instances_count=3,
+        instances_solved=3,
+    )
+    mock_result = _make_benchmark_result(entries=[multi_metric_entry])
+
+    with patch("revolver.core.benchmark.get_benchmark_results", return_value=mock_result):
+        result = _invoke_with_cwd(
+            ["benchmark", "results", "--latest"],
+            root,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    assert "0.87" in output
+    assert "baseline_length" not in output
+    assert "tour_length" not in output
+
+
+@pytest.mark.integration
+def test_results_metric_all_shows_everything(bench_project: dict[str, object]) -> None:
+    """benchmark results --metric all shows more columns than default.
+
+    Validates: F4 (--metric all support)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    multi_metric_entry = BenchmarkEntry(
+        solution_id="sol-001",
+        alias="sol-a",
+        run_id="run-001",
+        lineage=_make_lineage(),
+        metrics={
+            "combined_score": _make_metric_aggregate(0.87),
+            "baseline_length": _make_metric_aggregate(100.0),
+        },
+        eval_time_s=10.0,
+        instances_count=3,
+        instances_solved=3,
+    )
+    mock_result = _make_benchmark_result(entries=[multi_metric_entry])
+
+    with patch("revolver.core.benchmark.get_benchmark_results", return_value=mock_result):
+        result_all = _invoke_with_cwd(
+            ["benchmark", "results", "--latest", "--metric", "all"],
+            root,
+        )
+
+    with patch("revolver.core.benchmark.get_benchmark_results", return_value=mock_result):
+        result_default = _invoke_with_cwd(
+            ["benchmark", "results", "--latest"],
+            root,
+        )
+
+    assert result_all.exit_code == 0
+    assert result_default.exit_code == 0
+
+    output_all = _get_all_output(result_all)
+    output_default = _get_all_output(result_default)
+
+    # --metric all has more table columns (separators) than default
+    all_cols = output_all.count("\u2503")
+    default_cols = output_default.count("\u2503")
+    assert all_cols > default_cols, (
+        f"--metric all should have more columns ({all_cols}) than default ({default_cols})"
+    )
