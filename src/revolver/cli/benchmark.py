@@ -17,8 +17,11 @@ import typer
 from revolver.cli import benchmark_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import benchmark as core_benchmark
+from revolver.core import solution as core_solution
 from revolver.infra.output import render
 from revolver.models.benchmark import BenchmarkDetailResult, BenchmarkResult
+
+_DEFAULT_METRIC = "combined_score"
 
 # ── Default callback: run benchmark (DES-007 §11) ─────────────────────────────
 
@@ -28,8 +31,12 @@ def benchmark_default(
     ctx: typer.Context,
     solutions: Annotated[
         list[str] | None,
-        typer.Option("--solutions", help="Solution IDs or aliases to compare."),
+        typer.Option("--solutions", help="Solution IDs or aliases (comma-separated ok)."),
     ] = None,
+    all_solutions: Annotated[
+        bool,
+        typer.Option("--all", help="Include all solutions in the project."),
+    ] = False,
     dataset: Annotated[
         str | None,
         typer.Option("--dataset", help="Evaluation dataset name."),
@@ -51,9 +58,29 @@ def benchmark_default(
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
 
+        # Mutual exclusion: --all and --solutions
+        if all_solutions and solutions:
+            sys.stderr.write("Error: --all and --solutions are mutually exclusive.\n")
+            raise typer.Exit(code=1)
+
+        # Resolve --all: list all project solutions
+        if all_solutions:
+            all_sols = core_solution.list_solutions()
+            if not all_sols:
+                sys.stderr.write("Error: no solutions found in the project.\n")
+                raise typer.Exit(code=1)
+            solutions = [str(s.get("alias") or s["id"]) for s in all_sols]
+
+        # Expand comma-separated values (--solutions A,B,C)
+        if solutions:
+            expanded: list[str] = []
+            for s in solutions:
+                expanded.extend(part.strip() for part in s.split(",") if part.strip())
+            solutions = expanded
+
         # Validate required options
         if not solutions:
-            sys.stderr.write("Error: --solutions is required.\n")
+            sys.stderr.write("Error: --solutions or --all is required.\n")
             raise typer.Exit(code=1)
         if not dataset:
             sys.stderr.write("Error: --dataset is required.\n")
@@ -107,8 +134,15 @@ def benchmark_default(
                     }
                     if entry.eval_time_s is not None:
                         row["eval_time_s"] = f"{entry.eval_time_s:.1f}"
-                    for metric_name, agg in entry.metrics.items():
-                        row[f"{metric_name}_mean"] = f"{agg.mean:.4f}"
+                    # Show only combined_score (default) to keep table readable
+                    if _DEFAULT_METRIC in entry.metrics:
+                        agg = entry.metrics[_DEFAULT_METRIC]
+                        row[f"{_DEFAULT_METRIC}_mean"] = f"{agg.mean:.4f}"
+                    else:
+                        # Fallback: show first metric if combined_score absent
+                        for metric_name, agg in entry.metrics.items():
+                            row[f"{metric_name}_mean"] = f"{agg.mean:.4f}"
+                            break
                     rows.append(row)
                 render(rows, json_mode=False)
 
@@ -129,7 +163,10 @@ def results(
     ] = False,
     metric: Annotated[
         str | None,
-        typer.Option("--metric", help="Filter to single metric."),
+        typer.Option(
+            "--metric",
+            help="Metric to display (default: combined_score, 'all' for everything).",
+        ),
     ] = None,
     per_instance: Annotated[
         bool,
@@ -173,22 +210,25 @@ def results(
                     f"Solutions: {len(result.solution_ids)}\n"
                 )
 
+                # Determine display metric for per-instance view
+                # --metric all → show all metrics (comma-separated)
+                # --metric <name> → show that metric
+                # (no --metric) → default to combined_score
+                pi_show_all = metric and metric.lower() == "all"
+                pi_metric = None if pi_show_all else (metric or _DEFAULT_METRIC)
+
                 inst_rows = []
                 for comp in result.instances:
                     row: dict[str, object] = {"instance_id": comp.instance_id}
                     for sol_label, sol_result in comp.solutions.items():
                         if sol_result.status == "solved" and sol_result.metrics:
-                            if metric:
-                                val = sol_result.metrics.get(metric)
+                            if pi_metric:
+                                val = sol_result.metrics.get(pi_metric)
                                 row[sol_label] = f"{val:.4f}" if val is not None else "-"
                             else:
-                                # Use first metric available
-                                first_metric_val = next(iter(sol_result.metrics.values()), None)
-                                row[sol_label] = (
-                                    f"{first_metric_val:.4f}"
-                                    if first_metric_val is not None
-                                    else "-"
-                                )
+                                # Show all metrics with names
+                                parts = [f"{k}={v:.4f}" for k, v in sol_result.metrics.items()]
+                                row[sol_label] = ", ".join(parts) if parts else "-"
                         else:
                             row[sol_label] = sol_result.status.upper()
                     inst_rows.append(row)
@@ -212,6 +252,13 @@ def results(
                 )
 
                 if result.entries:
+                    # Determine which metrics to display:
+                    # --metric all → show everything
+                    # --metric <name> → show only that metric
+                    # (no --metric) → default to combined_score
+                    show_all = metric and metric.lower() == "all"
+                    effective_metric = None if show_all else (metric or _DEFAULT_METRIC)
+
                     rows_agg = []
                     for entry in result.entries:
                         row_agg: dict[str, object] = {
@@ -221,7 +268,7 @@ def results(
                         if entry.eval_time_s is not None:
                             row_agg["eval_time_s"] = f"{entry.eval_time_s:.1f}"
                         for metric_name, agg in entry.metrics.items():
-                            if metric and metric_name != metric:
+                            if effective_metric and metric_name != effective_metric:
                                 continue
                             row_agg[f"{metric_name}_mean"] = f"{agg.mean:.4f}"
                             row_agg[f"{metric_name}_min"] = f"{agg.min:.4f}"
