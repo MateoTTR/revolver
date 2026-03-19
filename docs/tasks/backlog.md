@@ -188,6 +188,15 @@
 | 96 | Implement `cli.benchmark` — 4 Typer commands (DES-007 §11) | [x] | S6 — session 030, PR #65 |
 | 97 | Write L2 integration tests for `benchmark` (9 scenarios) | [x] | S6 — session 030, PR #65 |
 
+### Sprint 006b — Demo v0.6.0 Feedback Fixes
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 141 | F1-fix — `generate_eval_id(suffix)` + retry loop on `IntegrityError` (BLOCKING) | [x] | S6b — session 031, PR #68 |
+| 142 | F4/F5-fix — Default `benchmark` + `benchmark results` to `combined_score` only, `--metric all` | [x] | S6b — session 031, PR #69 |
+| 143 | F6-fix — Default `benchmark results --per-instance` to `combined_score` | [x] | S6b — session 031, PR #69 |
+| 144 | F7-fix — Add `--all` flag, comma-separated `--solutions`, mutual exclusion guard | [x] | S6b — session 031, PR #69 |
+
 ### Sprint 007 — Doctor, Setup & Cross-Cutting Polish
 
 | # | Task | Status | Sprint |
