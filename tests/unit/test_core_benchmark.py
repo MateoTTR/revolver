@@ -36,6 +36,7 @@ from revolver.core.benchmark import (
     list_benchmarks,
     run_benchmark,
 )
+from revolver.core.eval import generate_eval_id
 from revolver.core.exceptions import EvalError
 from revolver.models.benchmark import (
     BenchmarkDetailResult,
@@ -175,6 +176,39 @@ def _make_benchmark_result(
         entries=entries,
         created_at=datetime(2026, 3, 10, 17, 0, 0, tzinfo=UTC),
     )
+
+
+# ── generate_eval_id ───────────────────────────────────────────────────────────
+
+
+class TestGenerateEvalId:
+    """Tests for generate_eval_id() collision avoidance (F1 fix)."""
+
+    @pytest.mark.unit
+    def test_format_without_suffix(self) -> None:
+        """ID has the eval-YYYYMMDD-HHMMSS format without suffix."""
+        eid = generate_eval_id()
+        assert eid.startswith("eval-")
+        parts = eid.split("-")
+        assert len(parts) == 3
+        assert len(parts[1]) == 8  # YYYYMMDD
+        assert len(parts[2]) == 6  # HHMMSS
+
+    @pytest.mark.unit
+    def test_format_with_suffix(self) -> None:
+        """ID includes the suffix when provided."""
+        eid = generate_eval_id(suffix=3)
+        assert eid.startswith("eval-")
+        parts = eid.split("-")
+        assert len(parts) == 4
+        assert parts[3] == "3"
+
+    @pytest.mark.unit
+    def test_no_suffix_when_none(self) -> None:
+        """No suffix appended when suffix=None."""
+        eid = generate_eval_id(suffix=None)
+        parts = eid.split("-")
+        assert len(parts) == 3
 
 
 # ── generate_benchmark_id ──────────────────────────────────────────────────────
