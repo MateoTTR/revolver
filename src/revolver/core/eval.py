@@ -10,6 +10,7 @@ Traceable to: DES-006, FR-EVL-001..020.
 from __future__ import annotations
 
 import json
+import sqlite3
 import statistics
 import sys
 import time
@@ -65,14 +66,22 @@ def _resolve_project_root(project_root: Path | None = None) -> Path:
         raise RevolverError(str(exc)) from exc
 
 
-def generate_eval_id() -> str:
-    """Generate a unique evaluation ID in the format ``eval-YYYYMMDD-HHMMSS``.
+def generate_eval_id(suffix: int | None = None) -> str:
+    """Generate an evaluation ID in the format ``eval-YYYYMMDD-HHMMSS[-N]``.
+
+    If ``suffix`` is provided (a positive integer), it is appended as
+    ``-N`` to disambiguate same-second collisions.
+
+    Args:
+        suffix: Optional integer suffix for collision avoidance.
 
     Returns:
-        A unique evaluation ID string.
+        An evaluation ID string.
     """
     now = datetime.now(UTC)
     base = now.strftime("eval-%Y%m%d-%H%M%S")
+    if suffix is not None:
+        return f"{base}-{suffix}"
     return base
 
 
@@ -363,25 +372,33 @@ def evaluate_solution(
         if not instances:
             raise EvalError(f"No instances found in dataset '{dataset_name}' at {dataset_path}.")
 
-        # 12. Generate eval ID
-        eval_id = generate_eval_id()
-
-        # 13. Insert eval metadata first (FK parent for eval_instances)
+        # 12. Generate eval ID and insert metadata (with collision-counter)
         results: list[InstanceResult] = []
         total = len(instances)
         now = datetime.now(UTC)
 
-        insert_eval_metadata(
-            conn,
-            eval_id=eval_id,
-            solution_id=solution.id,
-            dataset_name=dataset_name,
-            instance_count=total,
-            instances_solved=0,
-            eval_time_s=None,
-            user_aggregates=None,
-            evaluated_at=now,
-        )
+        eval_id: str = ""
+        for attempt in range(100):
+            candidate = generate_eval_id(suffix=attempt if attempt > 0 else None)
+            try:
+                insert_eval_metadata(
+                    conn,
+                    eval_id=candidate,
+                    solution_id=solution.id,
+                    dataset_name=dataset_name,
+                    instance_count=total,
+                    instances_solved=0,
+                    eval_time_s=None,
+                    user_aggregates=None,
+                    evaluated_at=now,
+                )
+                eval_id = candidate
+                break
+            except sqlite3.IntegrityError:
+                # ID collision (same second); try next suffix
+                continue
+        else:
+            raise EvalError("Failed to generate a unique eval ID after 100 attempts.")
 
         # 14. Evaluation loop
         eval_start = time.monotonic()
