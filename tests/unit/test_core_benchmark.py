@@ -210,6 +210,14 @@ class TestGenerateEvalId:
         parts = eid.split("-")
         assert len(parts) == 3
 
+    @pytest.mark.unit
+    def test_suffix_produces_distinct_ids(self) -> None:
+        """Different suffixes produce distinct IDs for collision avoidance."""
+        base = generate_eval_id(suffix=None)
+        suffixed = generate_eval_id(suffix=2)
+        assert base != suffixed
+        assert suffixed.endswith("-2")
+
 
 # ── generate_benchmark_id ──────────────────────────────────────────────────────
 
