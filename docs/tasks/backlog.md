@@ -188,14 +188,23 @@
 | 96 | Implement `cli.benchmark` — 4 Typer commands (DES-007 §11) | [x] | S6 — session 030, PR #65 |
 | 97 | Write L2 integration tests for `benchmark` (9 scenarios) | [x] | S6 — session 030, PR #65 |
 
-### Sprint 006b — Demo v0.6.0 Feedback Fixes
+### Sprint 006a — Demo v0.6.0 Feedback Fixes
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 141 | F1-fix — `generate_eval_id(suffix)` + retry loop on `IntegrityError` (BLOCKING) | [x] | S6b — session 031, PR #68 |
-| 142 | F4/F5-fix — Default `benchmark` + `benchmark results` to `combined_score` only, `--metric all` | [x] | S6b — session 031, PR #69 |
-| 143 | F6-fix — Default `benchmark results --per-instance` to `combined_score` | [x] | S6b — session 031, PR #69 |
-| 144 | F7-fix — Add `--all` flag, comma-separated `--solutions`, mutual exclusion guard | [x] | S6b — session 031, PR #69 |
+| 141 | F1-fix — `generate_eval_id(suffix)` + retry loop on `IntegrityError` (BLOCKING) | [x] | S6a — session 031, PR #68 |
+| 142 | F4/F5-fix — Default `benchmark` + `benchmark results` to `combined_score` only, `--metric all` | [x] | S6a — session 031, PR #69 |
+| 143 | F6-fix — Default `benchmark results --per-instance` to `combined_score` | [x] | S6a — session 031, PR #69 |
+| 144 | F7-fix — Add `--all` flag, comma-separated `--solutions`, mutual exclusion guard | [x] | S6a — session 031, PR #69 |
+
+### Sprint 006b — Demo v0.6.1 Feedback Fixes
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 145 | F4b-fix — Add tip in `--metric all` help text for wide table handling | [x] | S6b — session 032, PR #71 |
+| 146 | F8-fix — `benchmark delete` command with confirmation and `--force` | [x] | S6b — session 032, PR #71 |
+| 147 | F9/F10-fix — Dynamic alias column width in list views (rich Table `no_wrap`) | [x] | S6b — session 032, PR #71 |
+| 148 | Pull-timeout-fix — Override httpx timeout to `None` for `pull_model()` | [x] | S6b — session 032, PR #71 |
 
 ### Sprint 007 — Doctor, Setup & Cross-Cutting Polish
 

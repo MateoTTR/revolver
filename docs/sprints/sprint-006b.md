@@ -1,35 +1,29 @@
-# Sprint 006b — Demo v0.6.0 Feedback Fixes
+# Sprint 006b — Demo v0.6.1 Feedback Fixes
 
-**Status**: In progress
-**Goal**: Fix 4 findings from demo v0.6.0 benchmark session: eval_id collision (BLOCKING), illegible benchmark tables (MAJOR), wrong default metric in per-instance view (MEDIUM), and missing `--all` shortcut (MEDIUM). Target release: v0.6.1.
-**Demo**: Run `revolver benchmark --all --dataset tsp-eval` (no workaround needed); view `benchmark results --latest` with readable combined_score table; `benchmark results --latest --metric all` for full detail; `benchmark results --per-instance --latest` showing combined_score by default.
+**Status**: Complete
+**Goal**: Fix 4 residual findings from demo v0.6.1 feedback: wide table tip (MINOR), benchmark delete (MINOR), alias column width (MINOR), and pull timeout (MINOR). Single PR, single release.
+**Demo**: `revolver benchmark delete <id>` works; `benchmark list` and `solution list` show full aliases; `llm add --pull` succeeds on large models.
 
 ---
 
 ## Scope
 
-### Command groups affected
-- `revolver eval` — eval_id generation (collision fix)
-- `revolver benchmark` — display filtering, new CLI options
-
 ### Feedback items addressed
 
 | ID | Finding | Severity | Source |
 |---|---|---|---|
-| F1 | `generate_eval_id()` collision when benchmark evaluates 2+ solutions in same second | **BLOQUANT** | Demo v0.6.0 |
-| F4 | `benchmark results` displays 27 columns — illegible without `--metric` | **MAJEUR** | Demo v0.6.0 |
-| F5 | `benchmark` inline output (same as F4 — trop de colonnes) | **MAJEUR** | Demo v0.6.0 |
-| F6 | `benchmark results --per-instance` defaults to `baseline_length` instead of `combined_score` | **MOYEN** | Demo v0.6.0 |
-| F7 | `--solutions` requires long repetition, no `--all` flag | **MOYEN** | Demo v0.6.0 |
+| F4b | `--metric all` output is unreadable in standard terminals — add tip | **MINOR** | Demo v0.6.1 |
+| F8 | No `benchmark delete` command — benchmarks accumulate without cleanup | **MINOR** | Demo v0.6.0 |
+| F9/F10 | Alias columns truncated in `benchmark list` and `solution list` | **MINOR** | Demo v0.6.0 |
+| NEW | `llm add --pull` crashes with ReadTimeout on large models (>10 GB) | **MINOR** | Demo v0.6.1 |
 
 ### Explicitly out of scope
 
 | Item | Reason |
 |---|---|
 | F2 — Soften split='train' warning | Nice-to-have, deferred |
-| F3 — Soften version compatibility warning | Nice-to-have, deferred |
-| F8 — `benchmark delete` | Nice-to-have, deferred |
-| F9/F10 — Alias truncation in list views | Nice-to-have, deferred |
+| F3 — Soften version compatibility warning | Message is fine as-is |
+| OpenEvolve version pinning | User prefers unpinned |
 
 ---
 
@@ -37,10 +31,10 @@
 
 | # | Task | PR | Depends on | Status | Acceptance criteria |
 |---|---|---|---|---|---|
-| 141 | **F1-fix** — `generate_eval_id(suffix)` + retry loop on `IntegrityError` (same pattern as `generate_benchmark_id()`) | #68 | — | [x] | 701 tests pass, ruff/mypy clean |
-| 142 | **F4/F5-fix** — Default `benchmark` inline + `benchmark results` aggregate to `combined_score` only. Support `--metric all`. | #69 | — | [x] | No breaking change on CSV/JSON export |
-| 143 | **F6-fix** — Default `benchmark results --per-instance` to `combined_score` instead of first alphabetical metric. | #69 | — | [x] | Per-instance shows combined_score by default |
-| 144 | **F7-fix** — Add `--all` flag (resolve all project solutions). Accept `--solutions A,B,C` (comma-separated). Mutual exclusion guard. | #69 | — | [x] | `--all` + `--solutions` exits code 1 |
+| 145 | **F4b-fix** — Add tip in `--metric all` help text for wide table handling | #71 | — | [x] | Help text mentions `--format csv` or `less -S` |
+| 146 | **F8-fix** — `benchmark delete`: DB cascade (`benchmark_solutions`), core function, CLI command with `--force` | #71 | — | [x] | Delete removes benchmark + junction rows, confirmation prompt |
+| 147 | **F9/F10-fix** — Dynamic alias column width in `infra.output` render (rich Table `no_wrap`) | #71 | — | [x] | Alias columns not truncated in list views |
+| 148 | **Pull-timeout-fix** — Override httpx timeout to `None` for `pull_model()` stream | #71 | — | [x] | `llm add --pull` does not timeout on large models |
 
 ---
 
@@ -48,69 +42,40 @@
 
 | Component | Scenario | Test ID | PR |
 |---|---|---|---|
-| `generate_eval_id` | Format without suffix | `test_format_without_suffix` | #68 |
-| `generate_eval_id` | Format with suffix | `test_format_with_suffix` | #68 |
-| `generate_eval_id` | No suffix when None | `test_no_suffix_when_none` | #68 |
-| `generate_eval_id` | Distinct IDs with different suffixes | `test_suffix_produces_distinct_ids` | #68 |
-| `benchmark` CLI | `--all` resolves all solutions | `test_benchmark_all_flag` | #69 |
-| `benchmark` CLI | Comma-separated `--solutions` | `test_benchmark_comma_separated_solutions` | #69 |
-| `benchmark` CLI | Default to combined_score in results | `test_results_defaults_to_combined_score` | #69 |
-| `benchmark` CLI | `--metric all` shows all columns | `test_results_metric_all_shows_everything` | #69 |
-| `benchmark` CLI | `--all` with empty project exits 1 | `test_benchmark_all_no_solutions` | #69 |
-| `benchmark` CLI | `--all` + `--solutions` mutual exclusion | `test_benchmark_all_and_solutions_exclusive` | #69 |
+| `benchmark delete` | Delete with confirmation prompt (user accepts) | `test_benchmark_delete_confirm_prompt` | #71 |
+| `benchmark delete` | Delete non-existent benchmark exits with error | `test_benchmark_delete_nonexistent` | #71 |
+| `benchmark delete` | Delete with `--force` skips confirmation, cleans junction table | `test_benchmark_delete_force` | #71 |
 
 ---
 
 ## Parallelization
 
-### Dependency graph
+Single PR — no parallelization needed. All 4 fixes in one branch.
 
-```
-Sprint 006 complete (v0.6.0)
-  │
-  ├──> PR #68: eval_id collision fix (F1)
-  │         generate_eval_id(suffix) + retry loop
-  │         Files: core/eval.py, tests/unit/test_core_benchmark.py
-  │
-  └──> PR #69: Benchmark UX fixes (F4-F7)
-              Default metric filtering + --all flag + comma-separated
-              Files: cli/benchmark.py, tests/integration/test_benchmark.py
-```
+### Files modified
 
-### Parallel work streams
-
-| Stream | Tasks | Can start after | Agent assignment |
-|---|---|---|---|
-| A — eval_id collision | F1-fix (#141) | Sprint 006 done | Agent 1 (worktree) |
-| B — Benchmark UX | F4-F7 (#142-144) | Sprint 006 done | Agent 2 (worktree) |
-
-Peak parallelism: 2 agents simultaneously (no file overlap).
-
-### Conflict risks
-- **None** — PR #68 modifies `core/eval.py`, PR #69 modifies `cli/benchmark.py`. No shared files.
-
-### Merge order
-- Any order (fully independent).
+| Fix | Files |
+|---|---|
+| F4b | `src/revolver/cli/benchmark.py` |
+| F8 | `src/revolver/infra/db.py`, `src/revolver/core/benchmark.py`, `src/revolver/cli/benchmark.py` |
+| F9/F10 | `src/revolver/infra/output.py` |
+| Pull timeout | `src/revolver/infra/ollama.py` |
 
 ---
 
 ## Sprint Review
 
 ### Tests passing
-- PR #68: 701 tests (697 existing + 4 new)
-- PR #69: 703 tests (697 existing + 6 new)
+- PR #71: 710 tests (703 existing + 7 new)
 
 ### PRs merged
 | PR | Branch | Scope | Session |
 |---|---|---|---|
-| #68 | `feature/s6b-eval-id-collision` | F1 | session 031 |
-| #69 | `feature/s6b-benchmark-ux` | F4, F5, F6, F7 | session 031 |
+| #71 | `feature/s6b-feedback-fixes` | F4b, F8, F9/F10, pull timeout | session 032 |
 
 ### Demo-able features
-- [ ] `revolver benchmark --all --dataset <name>` works without listing every solution
-- [ ] `revolver benchmark --solutions A,B,C --dataset <name>` accepts comma-separated
-- [ ] `revolver benchmark` inline table shows only combined_score (readable)
-- [ ] `revolver benchmark results --latest` shows combined_score by default
-- [ ] `revolver benchmark results --latest --metric all` shows all metrics
-- [ ] `revolver benchmark results --per-instance --latest` defaults to combined_score
-- [ ] No more `IntegrityError` when evaluating multiple solutions in same second
+- [x] `revolver benchmark delete <id>` deletes benchmark and junction rows
+- [x] `revolver benchmark delete <id>` prompts for confirmation (unless `--force`)
+- [x] `benchmark list` and `solution list` show full aliases
+- [x] `--metric all` help text includes tip for wide output
+- [x] `llm add --pull` does not timeout on large models

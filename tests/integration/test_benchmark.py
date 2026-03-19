@@ -994,7 +994,7 @@ def test_benchmark_error_all_evals_fail(bench_project: dict[str, object]) -> Non
     assert "Error" in output or "failed" in output.lower()
 
 
-# ── Sprint 006b fix tests ────────────────────────────────────────────────────
+# ── Sprint 006a fix tests ────────────────────────────────────────────────────
 
 
 @pytest.mark.integration
