@@ -27,6 +27,9 @@ from revolver.core.exceptions import (
     RevolverError,
 )
 from revolver.infra.db import (
+    delete_benchmark as db_delete_benchmark,
+)
+from revolver.infra.db import (
     get_benchmark,
     get_benchmark_solutions,
     get_dataset,
@@ -59,6 +62,7 @@ __all__ = [
     "BenchmarkError",
     "BenchmarkNotFoundError",
     "ExportError",
+    "delete_benchmark",
     "export_benchmark",
     "generate_benchmark_id",
     "get_benchmark_results",
@@ -715,6 +719,39 @@ def list_benchmarks(
             )
         )
     return summaries
+
+
+def delete_benchmark(
+    benchmark_id: str,
+    *,
+    project_root: Path | None = None,
+) -> str:
+    """Delete a benchmark and its associated solution references.
+
+    This is a pure domain function — confirmation prompts belong in the CLI
+    layer.  It resolves the benchmark, deletes the record, and returns the
+    deleted ID.
+
+    Args:
+        benchmark_id: Benchmark ID to delete.
+        project_root: Project root directory (auto-detected if None).
+
+    Returns:
+        The benchmark ID that was deleted.
+
+    Raises:
+        BenchmarkNotFoundError: If the benchmark is not found.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        deleted = db_delete_benchmark(conn, benchmark_id)
+        if not deleted:
+            raise BenchmarkNotFoundError(f"Benchmark '{benchmark_id}' not found.")
+        return benchmark_id
+    finally:
+        conn.close()
 
 
 # ── CSV / JSON export helpers ─────────────────────────────────────────────────

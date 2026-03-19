@@ -165,7 +165,10 @@ def results(
         str | None,
         typer.Option(
             "--metric",
-            help="Metric to display (default: combined_score, 'all' for everything).",
+            help=(
+                "Metric to display (default: combined_score, 'all' for everything). "
+                "Tip: use --format csv for wide tables, or pipe to less -S."
+            ),
         ),
     ] = None,
     per_instance: Annotated[
@@ -366,3 +369,44 @@ def list_cmd(
                     for b in benchmarks
                 ]
                 render(rows, json_mode=False)
+
+
+# ── delete subcommand (F8 — Sprint 006b) ──────────────────────────────────
+
+
+@benchmark_app.command("delete")
+def delete(
+    ctx: typer.Context,
+    benchmark_id: Annotated[
+        str,
+        typer.Argument(help="Benchmark ID to delete."),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """Delete a benchmark and its associated solution references."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        # Confirmation logic lives in the CLI layer, not in core
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
+            typer.confirm(f"Delete benchmark '{benchmark_id}'?", abort=True)
+
+        deleted_id = core_benchmark.delete_benchmark(benchmark_id)
+
+        if json_mode:
+            render(
+                {"benchmark_id": deleted_id, "status": "deleted"},
+                json_mode=True,
+            )
+        else:
+            render(
+                {"benchmark_id": deleted_id, "status": "deleted"},
+                json_mode=False,
+            )

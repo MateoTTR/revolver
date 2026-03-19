@@ -43,10 +43,10 @@ def render(data: dict[str, Any] | list[dict[str, Any]], *, json_mode: bool = Fal
     elif isinstance(data, list) and data:
         table = Table(show_header=True, header_style="bold")
         for col in data[0]:
-            table.add_column(str(col))
+            table.add_column(str(col), no_wrap=True)
         for row in data:
             table.add_row(*(str(v) for v in row.values()))
-        stdout_console.print(table)
+        stdout_console.print(table, overflow="ellipsis")
     else:
         stdout_console.print(str(data))
 

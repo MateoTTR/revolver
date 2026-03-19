@@ -195,7 +195,7 @@ class OllamaClient:
         try:
             if stream:
                 with self._client.stream(
-                    "POST", "/api/pull", json={"name": name, "stream": True}
+                    "POST", "/api/pull", json={"name": name, "stream": True}, timeout=None
                 ) as resp:
                     if resp.status_code >= 400:
                         raise ModelPullError(
@@ -214,7 +214,9 @@ class OllamaClient:
                             completed=data.get("completed"),
                         )
             else:
-                resp = self._client.post("/api/pull", json={"name": name, "stream": False})
+                resp = self._client.post(
+                    "/api/pull", json={"name": name, "stream": False}, timeout=None
+                )
                 if resp.status_code >= 400:
                     raise ModelPullError(f"Failed to pull model '{name}': HTTP {resp.status_code}")
                 data = resp.json()

@@ -1190,3 +1190,123 @@ def test_benchmark_all_and_solutions_exclusive(bench_project: dict[str, object])
     assert result.exit_code == 1
     output = _get_all_output(result)
     assert "mutually exclusive" in output.lower()
+
+
+# ── Sprint 006b: benchmark delete tests ──────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_benchmark_delete_existing(bench_project: dict[str, object]) -> None:
+    """Delete an existing benchmark removes it from list.
+
+    Validates: F8 (benchmark delete)
+    """
+    root = bench_project["root"]
+    db_path = bench_project["db_path"]
+    assert isinstance(root, Path)
+    assert isinstance(db_path, Path)
+
+    # Insert a benchmark directly into the DB
+    from revolver.infra.db import insert_benchmark, insert_benchmark_solutions
+
+    conn = get_project_db(db_path)
+    try:
+        insert_benchmark(
+            conn,
+            benchmark_id="bench-delete-test",
+            alias="to-delete",
+            dataset_name="eval-bench",
+            created_at=datetime.now(UTC),
+        )
+        insert_benchmark_solutions(conn, "bench-delete-test", ["sol-001", "sol-002"])
+    finally:
+        conn.close()
+
+    # Delete with --force
+    result = _invoke_with_cwd(
+        ["benchmark", "delete", "bench-delete-test", "--force"],
+        root,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    assert "deleted" in output.lower()
+
+    # Verify it's gone from the DB
+    conn2 = get_project_db(db_path)
+    try:
+        from revolver.infra.db import get_benchmark
+
+        row = get_benchmark(conn2, "bench-delete-test")
+        assert row is None, "Benchmark should have been deleted"
+    finally:
+        conn2.close()
+
+
+@pytest.mark.integration
+def test_benchmark_delete_nonexistent(bench_project: dict[str, object]) -> None:
+    """Deleting a non-existent benchmark exits with error.
+
+    Validates: F8 (benchmark delete error case)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    result = _invoke_with_cwd(
+        ["benchmark", "delete", "bench-does-not-exist", "--force"],
+        root,
+    )
+
+    assert result.exit_code != 0, f"Expected non-zero exit, got {result.exit_code}"
+    output = _get_all_output(result)
+    assert "not found" in output.lower()
+
+
+@pytest.mark.integration
+def test_benchmark_delete_force(bench_project: dict[str, object]) -> None:
+    """Delete with --force skips confirmation prompt.
+
+    Validates: F8 (benchmark delete --force)
+    """
+    root = bench_project["root"]
+    db_path = bench_project["db_path"]
+    assert isinstance(root, Path)
+    assert isinstance(db_path, Path)
+
+    # Insert a benchmark directly into the DB
+    from revolver.infra.db import insert_benchmark, insert_benchmark_solutions
+
+    conn = get_project_db(db_path)
+    try:
+        insert_benchmark(
+            conn,
+            benchmark_id="bench-force-test",
+            alias=None,
+            dataset_name="eval-bench",
+            created_at=datetime.now(UTC),
+        )
+        insert_benchmark_solutions(conn, "bench-force-test", ["sol-001"])
+    finally:
+        conn.close()
+
+    # Delete with --force (no interactive prompt)
+    result = _invoke_with_cwd(
+        ["benchmark", "delete", "bench-force-test", "--force"],
+        root,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    assert "deleted" in output.lower()
+
+    # Verify junction table rows are also gone
+    conn2 = get_project_db(db_path)
+    try:
+        cursor = conn2.execute(
+            "SELECT COUNT(*) FROM benchmark_solutions WHERE benchmark_id = ?",
+            ("bench-force-test",),
+        )
+        count = cursor.fetchone()[0]
+        assert count == 0, "benchmark_solutions rows should have been deleted"
+    finally:
+        conn2.close()

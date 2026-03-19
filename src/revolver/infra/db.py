@@ -1832,3 +1832,26 @@ def list_benchmarks_with_count(conn: sqlite3.Connection) -> list[dict[str, objec
     finally:
         conn.row_factory = None
     return rows
+
+
+def delete_benchmark(conn: sqlite3.Connection, benchmark_id: str) -> bool:
+    """Delete a benchmark and its associated solution references.
+
+    Deletes from ``benchmark_solutions`` (junction table) first, then from
+    ``benchmarks``.  Both DELETEs run inside an explicit transaction so the
+    operation is atomic.
+
+    Args:
+        conn: An open project database connection.
+        benchmark_id: The benchmark ID to delete.
+
+    Returns:
+        True if a benchmark was deleted, False if not found.
+    """
+    with conn:
+        conn.execute(
+            "DELETE FROM benchmark_solutions WHERE benchmark_id = ?",
+            (benchmark_id,),
+        )
+        cursor = conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
+        return cursor.rowcount > 0
