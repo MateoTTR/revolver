@@ -9,12 +9,12 @@ Traceable to: val-integration-tests.md section 2.5 (13 scenarios).
 
 from __future__ import annotations
 
-import json
-import re
-import shutil
 from collections.abc import Generator
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import re
+import shutil
 from unittest.mock import MagicMock, patch
 
 import pytest

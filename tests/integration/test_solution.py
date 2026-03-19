@@ -9,10 +9,10 @@ Traceable to: val-integration-tests.md section 2.7 (9 scenarios).
 
 from __future__ import annotations
 
-import json
-import re
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import re
 from unittest.mock import patch
 
 import pytest

@@ -1,7 +1,7 @@
 """Smoke test — verify package imports and CLI entrypoint."""
 
-import re
 from pathlib import Path
+import re
 
 import pytest
 from typer.testing import CliRunner

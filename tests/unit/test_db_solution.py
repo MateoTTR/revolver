@@ -16,9 +16,9 @@ Traceable to: FR-SOL-001..013, DES-001 §3.6, sprint-005 S5-03.
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+import sqlite3
 
 import pytest
 

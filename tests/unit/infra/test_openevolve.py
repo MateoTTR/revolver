@@ -5,8 +5,8 @@ All tests mock the OpenEvolve controller to avoid a hard dependency.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

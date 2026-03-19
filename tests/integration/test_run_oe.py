@@ -10,9 +10,9 @@ Skipped automatically when openevolve is not installed.
 from __future__ import annotations
 
 import copy
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+import shutil
 
 import pytest
 

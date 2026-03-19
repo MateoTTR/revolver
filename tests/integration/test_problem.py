@@ -8,14 +8,14 @@ Traceable to: val-integration-tests.md section 2.3.
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 import shutil
 import stat
-from pathlib import Path
 
 import pytest
-import yaml
 from typer.testing import CliRunner
+import yaml
 
 from revolver.cli import app
 from revolver.core.project import init_project

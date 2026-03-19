@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 
-import pytest
 from pydantic import ValidationError
+import pytest
 
 from revolver.models.dataset import (
     DatasetInfo,

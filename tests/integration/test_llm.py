@@ -8,11 +8,11 @@ Traceable to: val-integration-tests.md section 2.2.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 import json
 import os
-import re
-from collections.abc import Generator
 from pathlib import Path
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -8,10 +8,10 @@ Traceable to: DES-003, FR-PRB-006..013.
 
 from __future__ import annotations
 
-import shutil
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
+import shutil
+import sys
 
 from revolver.core.exceptions import (
     DuplicateNameError,
@@ -23,8 +23,6 @@ from revolver.infra.db import (
     get_problem_version_by_hash,
     get_project_db,
     insert_problem_version,
-)
-from revolver.infra.db import (
     list_problem_versions as db_list_problem_versions,
 )
 from revolver.infra.evaluator_loader import load_evaluator
@@ -33,11 +31,9 @@ from revolver.infra.hashing import compute_snapshot_hash, file_hash
 from revolver.infra.store import (
     PROBLEM_DIR,
     REVOLVER_DIR,
+    ProjectNotFoundError as StoreProjectNotFoundError,
     find_project_root,
     write_manifest,
-)
-from revolver.infra.store import (
-    ProjectNotFoundError as StoreProjectNotFoundError,
 )
 from revolver.models.problem import (
     FileSnapshot,

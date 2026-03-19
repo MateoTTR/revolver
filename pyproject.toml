@@ -50,6 +50,11 @@ select = [
     "RUF",  # ruff-specific
 ]
 
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+force-single-line = false
+combine-as-imports = true
+
 # ── Mypy ──────────────────────────────────────────────────────────────────────
 [tool.mypy]
 python_version = "3.12"

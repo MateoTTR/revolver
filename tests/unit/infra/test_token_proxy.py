@@ -5,8 +5,8 @@ Uses actual HTTP requests to verify the proxy works end-to-end.
 
 from __future__ import annotations
 
-import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 from threading import Thread
 from typing import Any, ClassVar
 from unittest.mock import patch

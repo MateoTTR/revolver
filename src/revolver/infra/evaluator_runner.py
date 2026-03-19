@@ -9,13 +9,12 @@ Traceable to: DES-006 (Evaluation Loop), FR-EVL-002, NFR-007.
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 import importlib.util
 import os
+from pathlib import Path
 import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
-from pathlib import Path
 
 from revolver.models.problem import InstanceTestResult
 

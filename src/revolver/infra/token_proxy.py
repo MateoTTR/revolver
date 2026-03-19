@@ -12,13 +12,13 @@ Traceable to: DES-005 §4.5 (DD-14), FR-RUN-028/029/030.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import socket
 import sys
 import threading
 import time
-from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen

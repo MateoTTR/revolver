@@ -16,8 +16,8 @@ All DB and eval functions are mocked at the module level:
 from __future__ import annotations
 
 import csv
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import MagicMock, patch

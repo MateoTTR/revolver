@@ -12,8 +12,8 @@ All OpenEvolve calls are mocked. Tests cover:
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
