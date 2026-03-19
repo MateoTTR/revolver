@@ -1148,3 +1148,45 @@ def test_results_metric_all_shows_everything(bench_project: dict[str, object]) -
     assert all_cols > default_cols, (
         f"--metric all should have more columns ({all_cols}) than default ({default_cols})"
     )
+
+
+@pytest.mark.integration
+def test_benchmark_all_no_solutions(bench_project: dict[str, object]) -> None:
+    """--all with no solutions in project exits with code 1.
+
+    Validates: F7 (--all edge case)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    with patch(
+        "revolver.cli.benchmark.core_solution.list_solutions",
+        return_value=[],
+    ):
+        result = _invoke_with_cwd(
+            ["benchmark", "--all", "--dataset", "eval-bench"],
+            root,
+        )
+
+    assert result.exit_code == 1
+    output = _get_all_output(result)
+    assert "no solutions" in output.lower()
+
+
+@pytest.mark.integration
+def test_benchmark_all_and_solutions_exclusive(bench_project: dict[str, object]) -> None:
+    """--all and --solutions together exits with code 1.
+
+    Validates: F7 (mutual exclusion)
+    """
+    root = bench_project["root"]
+    assert isinstance(root, Path)
+
+    result = _invoke_with_cwd(
+        ["benchmark", "--all", "--solutions", "sol-001", "--dataset", "eval-bench"],
+        root,
+    )
+
+    assert result.exit_code == 1
+    output = _get_all_output(result)
+    assert "mutually exclusive" in output.lower()
