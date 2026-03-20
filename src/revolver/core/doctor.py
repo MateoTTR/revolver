@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 import importlib.metadata
+import subprocess
 from typing import Literal
 
 import httpx
@@ -117,8 +118,16 @@ def _check_openevolve() -> DependencyStatus:
 # ── External tool checks ─────────────────────────────────────────────────────
 
 
-def _check_ollama(base_url: str = "http://localhost:11434") -> DependencyStatus:
-    """Check Ollama: binary presence, service running, API reachable."""
+def _check_ollama(
+    base_url: str = "http://localhost:11434", *, has_conda: bool = False
+) -> DependencyStatus:
+    """Check Ollama: binary presence, service running, API reachable.
+
+    Per spec-setup.md §4:
+    - Ollama missing + conda available → FAIL (fixable via conda)
+    - Ollama missing + no conda → WARN (manual install only)
+    - Ollama installed but not responding → WARN
+    """
     try:
         resp = httpx.get(f"{base_url}/api/version", timeout=5.0)
         resp.raise_for_status()
@@ -132,13 +141,25 @@ def _check_ollama(base_url: str = "http://localhost:11434") -> DependencyStatus:
             fixable=True,
         )
     except httpx.ConnectError:
-        return DependencyStatus(
-            name="ollama",
-            type="external",
-            status=CheckStatus.FAIL,
-            message="not found or not running",
-            fixable=True,
-        )
+        if has_conda:
+            return DependencyStatus(
+                name="ollama",
+                type="external",
+                status=CheckStatus.FAIL,
+                message="not found. Run `revolver setup` to install via conda-forge.",
+                fixable=True,
+            )
+        else:
+            return DependencyStatus(
+                name="ollama",
+                type="external",
+                status=CheckStatus.WARN,
+                message=(
+                    "not found. Install from https://ollama.com"
+                    " or activate a conda environment and run `revolver setup`."
+                ),
+                fixable=False,
+            )
     except (httpx.HTTPStatusError, httpx.TimeoutException, Exception):
         return DependencyStatus(
             name="ollama",
@@ -199,6 +220,24 @@ def _check_revolver() -> DependencyStatus:
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 
+def _detect_conda() -> bool:
+    """Check if conda or mamba is available."""
+    for cmd in ("conda", "mamba"):
+        try:
+            result = subprocess.run(
+                [cmd, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
 def run_doctor() -> DoctorReport:
     """Run all dependency health checks and return a DoctorReport.
 
@@ -206,7 +245,7 @@ def run_doctor() -> DoctorReport:
     1. Revolver itself
     2. Core Python packages (typer, pydantic, pyyaml, rich, httpx)
     3. OpenEvolve
-    4. Ollama (HTTP API)
+    4. Ollama (HTTP API) — status depends on conda availability
     5. nvidia-smi / GPU
 
     Returns:
@@ -224,8 +263,9 @@ def run_doctor() -> DoctorReport:
     # 3. OpenEvolve
     report.checks.append(_check_openevolve())
 
-    # 4. Ollama
-    report.checks.append(_check_ollama())
+    # 4. Ollama — per spec, status depends on conda availability
+    has_conda = _detect_conda()
+    report.checks.append(_check_ollama(has_conda=has_conda))
 
     # 5. nvidia-smi / GPU
     report.checks.append(_check_nvidia_smi())

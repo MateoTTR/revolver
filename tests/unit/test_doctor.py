@@ -154,14 +154,25 @@ def test_check_ollama_running() -> None:
 
 
 @pytest.mark.unit
-def test_check_ollama_not_running() -> None:
-    """_check_ollama returns FAIL on connection error."""
+def test_check_ollama_not_running_with_conda() -> None:
+    """_check_ollama returns FAIL when conda available (fixable)."""
     with patch("revolver.core.doctor.httpx.get", side_effect=httpx.ConnectError("refused")):
-        result = _check_ollama()
+        result = _check_ollama(has_conda=True)
 
     assert result.status == CheckStatus.FAIL
     assert "not found" in (result.message or "")
     assert result.fixable is True
+
+
+@pytest.mark.unit
+def test_check_ollama_not_running_without_conda() -> None:
+    """_check_ollama returns WARN when no conda (not fixable)."""
+    with patch("revolver.core.doctor.httpx.get", side_effect=httpx.ConnectError("refused")):
+        result = _check_ollama(has_conda=False)
+
+    assert result.status == CheckStatus.WARN
+    assert "not found" in (result.message or "")
+    assert result.fixable is False
 
 
 @pytest.mark.unit
@@ -259,6 +270,7 @@ def test_run_doctor_all_pass() -> None:
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
+        patch("revolver.core.doctor._detect_conda", return_value=True),
     ):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -289,6 +301,7 @@ def test_run_doctor_missing_dep() -> None:
         patch("revolver.core.doctor.importlib.metadata.version", side_effect=mock_version),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
+        patch("revolver.core.doctor._detect_conda", return_value=True),
     ):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -304,3 +317,26 @@ def test_run_doctor_missing_dep() -> None:
     oe_check = next(c for c in report.checks if c.name == "openevolve")
     assert oe_check.status == CheckStatus.FAIL
     assert oe_check.message == "not installed"
+
+
+@pytest.mark.unit
+def test_run_doctor_ollama_warn_without_conda() -> None:
+    """run_doctor without conda: missing Ollama is WARN (not FAIL)."""
+    gpu = GpuInfo(name="RTX 5090", vram_used_mib=0, vram_total_mib=32768)
+
+    with (
+        patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
+        patch(
+            "revolver.core.doctor.httpx.get",
+            side_effect=httpx.ConnectError("refused"),
+        ),
+        patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
+        patch("revolver.core.doctor._detect_conda", return_value=False),
+    ):
+        report = run_doctor()
+
+    ollama_check = next(c for c in report.checks if c.name == "ollama")
+    assert ollama_check.status == CheckStatus.WARN
+    assert ollama_check.fixable is False
+    # Overall should be WARN (not FAIL) since Ollama is the only issue
+    assert report.overall_status == CheckStatus.WARN
