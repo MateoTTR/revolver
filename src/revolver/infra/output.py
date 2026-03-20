@@ -67,3 +67,18 @@ def create_progress() -> Progress:
         A ``rich.progress.Progress`` instance attached to stderr.
     """
     return Progress(console=Console(file=sys.stderr))
+
+
+def print_confirmation(message: str, *, json_mode: bool = False, quiet: bool = False) -> None:
+    """Print a one-line confirmation summary to stdout.
+
+    Summaries are suppressed in ``--json`` and ``--quiet`` modes (NFR-006).
+
+    Args:
+        message: The confirmation message (e.g. "Done: Project 'foo' initialized at /tmp").
+        json_mode: If ``True``, suppress the message.
+        quiet: If ``True``, suppress the message.
+    """
+    if json_mode or quiet:
+        return
+    print(message)

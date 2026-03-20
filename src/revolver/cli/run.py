@@ -16,7 +16,7 @@ import typer
 from revolver.cli import run_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import run as core_run
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 from revolver.models.run import RunConfig
 
 # ── Default callback: launch run (DES-005 §2.1) ─────────────────────────────
@@ -64,6 +64,7 @@ def run_launch(
 
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         # Validate required options
         if not version:
@@ -92,7 +93,16 @@ def run_launch(
                 f"{f', iterations={iterations}' if iterations else ''}\n"
             )
 
-        result = core_run.launch_run(config)
+        # Progress indicator for OpenEvolve execution (NFR-005)
+        use_progress = not dry_run and not json_mode and not quiet
+        if use_progress:
+            from rich.console import Console
+
+            stderr_console = Console(stderr=True)
+            with stderr_console.status("Running OpenEvolve evolution..."):
+                result = core_run.launch_run(config)
+        else:
+            result = core_run.launch_run(config)
 
         if dry_run:
             if json_mode:
@@ -160,6 +170,13 @@ def run_launch(
             if result.resumed_from:
                 data["resumed_from"] = result.resumed_from
             render(data, json_mode=False)
+
+        # Confirmation summary (NFR-006)
+        print_confirmation(
+            f"Done: Run {result.run_id} completed (status: completed)",
+            json_mode=json_mode,
+            quiet=quiet,
+        )
 
 
 # ── run status (DES-005 §2.2) ───────────────────────────────────────────────

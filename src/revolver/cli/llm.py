@@ -17,7 +17,7 @@ from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import llm as llm_core
 from revolver.infra.db import get_global_db
 from revolver.infra.ollama import OllamaClient
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 
 
 @llm_app.command("add")
@@ -126,6 +126,7 @@ def llm_add(
             conn.close()
 
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         if json_mode:
             render(
@@ -151,6 +152,11 @@ def llm_add(
                     "base_url": entry.base_url or "",
                 },
                 json_mode=False,
+            )
+            print_confirmation(
+                f"Done: LLM '{entry.name}' registered",
+                json_mode=json_mode,
+                quiet=quiet,
             )
 
 
@@ -388,8 +394,14 @@ def llm_remove(
             conn.close()
 
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         if json_mode:
             render({"name": name, "removed": True}, json_mode=True)
         else:
             render({"status": "removed", "name": name}, json_mode=False)
+            print_confirmation(
+                f"Done: LLM '{name}' removed",
+                json_mode=json_mode,
+                quiet=quiet,
+            )

@@ -16,7 +16,7 @@ import typer
 from revolver.cli import project_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core.project import init_project
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 
 
 @project_app.command("init")
@@ -51,6 +51,7 @@ def project_init(
         resolved = target.resolve()
 
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         files = ".revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml"
 
@@ -78,4 +79,9 @@ def project_init(
                     "created": files,
                 },
                 json_mode=False,
+            )
+            print_confirmation(
+                f"Done: Project '{config.name}' initialized at {resolved}",
+                json_mode=json_mode,
+                quiet=quiet,
             )
