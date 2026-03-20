@@ -18,17 +18,26 @@ OpenEvolve provides the core evolutionary loop for LLM-guided code optimization.
 | Cost tracking | None | Token usage, API cost estimates, compute time |
 | Result export | Raw logs | Structured CSV/JSON with full metadata |
 
-## Features (current)
+## Features
 
 ```
-revolver project init         # Initialize a new optimization project
-revolver llm add/start/stop   # Register and manage LLMs (local Ollama or remote API)
-revolver llm list/status      # Monitor registered LLMs and GPU usage
-revolver problem test          # Validate evaluator against instances
-revolver problem version       # Create immutable problem snapshots
+revolver project init                  # Initialize a new optimization project
+revolver llm add/start/stop/remove     # Register and manage LLMs (local Ollama or remote API)
+revolver llm list/status               # Monitor registered LLMs and GPU usage
+revolver problem test                  # Validate evaluator against instances
+revolver problem version/versions      # Create and list immutable problem snapshots
+revolver dataset add/update/remove     # Register and manage evaluation datasets
+revolver dataset list/info/verify      # Inspect datasets and verify integrity
+revolver run/run resume                # Launch or resume OpenEvolve optimization runs
+revolver run status/list/info          # Monitor and inspect runs
+revolver eval/eval results             # Evaluate solutions on datasets
+revolver solution list/info/alias      # Browse and tag solutions
+revolver solution extract/delete       # Extract solution code or clean up
+revolver benchmark run/results         # Compare multiple solutions on same dataset
+revolver benchmark list/export/delete  # Manage and export benchmark results (CSV/JSON)
 ```
 
-**Coming soon**: `dataset`, `run`, `eval`, `solution`, `benchmark`, `doctor`, `setup`
+**Planned**: `doctor`, `setup` (Sprint 007)
 
 ## Architecture
 
@@ -76,7 +85,7 @@ This creates:
 
 ```bash
 # Remote API (Anthropic, OpenAI, Google)
-revolver llm add claude --provider anthropic --model claude-sonnet-4-20250514 \
+revolver llm add claude --provider anthropic --model claude-sonnet-4-6-20250514 \
     --api-key-env ANTHROPIC_API_KEY
 
 # Local model via Ollama
@@ -104,6 +113,31 @@ revolver problem version --tag v1.0 -m "Initial formulation"
 revolver problem versions
 ```
 
+### Register a dataset
+
+```bash
+revolver dataset add training-set --path data/instances/ --split train
+revolver dataset add eval-set --path data/eval/ --split eval
+```
+
+### Run optimization
+
+```bash
+revolver run --version v1.0 --llm claude --dataset training-set
+revolver run status
+```
+
+### Evaluate and benchmark solutions
+
+```bash
+revolver eval --solution <solution-id> --dataset eval-set
+revolver eval results --solution <solution-id>
+
+revolver benchmark run --solutions sol1,sol2,sol3 --dataset eval-set
+revolver benchmark results --id <benchmark-id>
+revolver benchmark export --id <benchmark-id> --format csv --output results.csv
+```
+
 ## Key Design Decisions
 
 - **CLI-first**: all functionality exposed as composable CLI commands with `--json` output
@@ -129,7 +163,7 @@ revolver problem versions
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (172 tests, ~3s)
+# Run tests (710+ tests, ~15s)
 python -m pytest tests/
 
 # Lint
@@ -142,15 +176,20 @@ mypy
 
 ### Project Status
 
-| Sprint | Focus | Status |
-|---|---|---|
-| Sprint 001 | Project scaffolding, DB, shared infrastructure | Done |
-| Sprint 002 | LLM registration & problem versioning | Done |
-| Sprint 003 | Dataset registration & integrity | Planned |
-| Sprint 004 | Run orchestration (OpenEvolve integration) | Planned |
-| Sprint 005 | Solution management & evaluation loop | Planned |
-| Sprint 006 | Benchmark: multi-solution comparison & export | Planned |
-| Sprint 007 | Doctor, setup & cross-cutting polish | Planned |
+| Sprint | Focus | Version | Status |
+|---|---|---|---|
+| Sprint 001 | Project scaffolding, DB, shared infrastructure | v0.1.0 | Done |
+| Sprint 002 | LLM registration & problem versioning | v0.2.0 | Done |
+| Sprint 003 | Dataset registration & integrity | v0.3.0 | Done |
+| Sprint 004 | Run orchestration (OpenEvolve integration) | v0.4.0 | Done |
+| Sprint 004a | Demo feedback fixes | v0.4.4 | Done |
+| Sprint 004b | Proxy robustness & UX | v0.4.5 | Done |
+| Sprint 005 | Solution management & evaluation loop | v0.5.0 | Done |
+| Sprint 005a | Demo feedback fixes | v0.5.1 | Done |
+| Sprint 006 | Benchmark: multi-solution comparison & export | v0.6.0 | Done |
+| Sprint 006a | Demo feedback fixes | v0.6.1 | Done |
+| Sprint 006b | Demo feedback fixes | v0.6.2 | Done |
+| Sprint 007 | Doctor, setup & cross-cutting polish | — | Planned |
 
 ## Documentation
 
