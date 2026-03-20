@@ -233,6 +233,12 @@
 | 108 | Write L2 cross-cutting integration tests (6 scenarios) | [x] | S7 — session 034, PR #79 |
 | 109 | Full regression: run all ~80 L2 integration tests (4+21+14+13+19+9+14 = 94 scenarios) | [x] | S7 — session 034, PR #79 |
 
+### Sprint 007a — Post-Demo Fixes (v0.7.1)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 154 | Fix `--json`/`--verbose`/`--quiet` flag propagation to subcommands (GlobalOptionGroup) | [x] | S7a — session 035, PR #81 |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
