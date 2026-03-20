@@ -28,9 +28,9 @@ revolver problem test                  # Validate evaluator against instances
 revolver problem version/versions      # Create and list immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
 revolver dataset list/info/verify      # Inspect datasets and verify integrity
-revolver run start/resume              # Launch or resume OpenEvolve optimization runs
+revolver run/run resume                # Launch or resume OpenEvolve optimization runs
 revolver run status/list/info          # Monitor and inspect runs
-revolver eval run/results              # Evaluate solutions on datasets
+revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
 revolver solution extract/delete       # Extract solution code or clean up
 revolver benchmark run/results         # Compare multiple solutions on same dataset
@@ -116,26 +116,26 @@ revolver problem versions
 ### Register a dataset
 
 ```bash
-revolver dataset add training-set data/instances/ --split train
-revolver dataset add eval-set data/eval/ --split eval
+revolver dataset add training-set --path data/instances/ --split train
+revolver dataset add eval-set --path data/eval/ --split eval
 ```
 
 ### Run optimization
 
 ```bash
-revolver run start --llm claude --problem-version v1.0 --dataset training-set
+revolver run --version v1.0 --llm claude --dataset training-set
 revolver run status
 ```
 
 ### Evaluate and benchmark solutions
 
 ```bash
-revolver eval run --solution <solution-id> --dataset eval-set
+revolver eval --solution <solution-id> --dataset eval-set
 revolver eval results --solution <solution-id>
 
 revolver benchmark run --solutions sol1,sol2,sol3 --dataset eval-set
 revolver benchmark results --id <benchmark-id>
-revolver benchmark export --id <benchmark-id> --format csv
+revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 ```
 
 ## Key Design Decisions
@@ -163,7 +163,7 @@ revolver benchmark export --id <benchmark-id> --format csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (710+ tests)
+# Run tests (710+ tests, ~15s)
 python -m pytest tests/
 
 # Lint
