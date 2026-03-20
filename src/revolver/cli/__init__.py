@@ -3,6 +3,10 @@
 Provides the ``revolver`` CLI entry point with global options
 (``--json``, ``--verbose``, ``--quiet``) and registers all command
 group stubs so that ``revolver --help`` displays the full structure.
+
+The ``--json``, ``--verbose``, and ``--quiet`` flags can be placed at
+any position in the command line (root, group, or command level) thanks
+to the ``GlobalOptionGroup`` custom Click group class.
 """
 
 from __future__ import annotations
@@ -10,11 +14,13 @@ from __future__ import annotations
 import typer
 
 from revolver import __version__
+from revolver.cli._global_options import GlobalOptionGroup
 
 # ── Root application ─────────────────────────────────────────────────────────
 
 app = typer.Typer(
     name="revolver",
+    cls=GlobalOptionGroup,
     help="MLOps CLI for LLM-guided evolutionary optimization via OpenEvolve.",
     no_args_is_help=True,
 )
@@ -61,37 +67,45 @@ def main(
 ) -> None:
     """MLOps CLI for LLM-guided evolutionary optimization via OpenEvolve."""
     ctx.ensure_object(dict)
-    ctx.obj["json"] = json_output
-    ctx.obj["verbose"] = verbose
-    ctx.obj["quiet"] = quiet
+    # Use ``or`` to preserve values already set by GlobalOptionGroup.parse_args
+    # (which strips the flags before Click's normal option parsing).
+    ctx.obj["json"] = json_output or ctx.obj.get("json", False)
+    ctx.obj["verbose"] = verbose or ctx.obj.get("verbose", False)
+    ctx.obj["quiet"] = quiet or ctx.obj.get("quiet", False)
 
 
 # ── Command group stubs ──────────────────────────────────────────────────────
 # Each group is an empty Typer instance registered via app.add_typer().
 # Actual commands will be added in their respective modules in later sprints.
 
-project_app = typer.Typer(help="Project initialization and management.")
+project_app = typer.Typer(cls=GlobalOptionGroup, help="Project initialization and management.")
 app.add_typer(project_app, name="project")
 
-llm_app = typer.Typer(help="LLM registration, lifecycle, and monitoring.")
+llm_app = typer.Typer(cls=GlobalOptionGroup, help="LLM registration, lifecycle, and monitoring.")
 app.add_typer(llm_app, name="llm")
 
-problem_app = typer.Typer(help="Problem definition, testing, and versioning.")
+problem_app = typer.Typer(
+    cls=GlobalOptionGroup, help="Problem definition, testing, and versioning."
+)
 app.add_typer(problem_app, name="problem")
 
-dataset_app = typer.Typer(help="Dataset registration and integrity management.")
+dataset_app = typer.Typer(
+    cls=GlobalOptionGroup, help="Dataset registration and integrity management."
+)
 app.add_typer(dataset_app, name="dataset")
 
-run_app = typer.Typer(help="Solution generation via OpenEvolve.")
+run_app = typer.Typer(cls=GlobalOptionGroup, help="Solution generation via OpenEvolve.")
 app.add_typer(run_app, name="run")
 
-solution_app = typer.Typer(help="Solution browsing, metadata, and aliasing.")
+solution_app = typer.Typer(
+    cls=GlobalOptionGroup, help="Solution browsing, metadata, and aliasing."
+)
 app.add_typer(solution_app, name="solution")
 
-eval_app = typer.Typer(help="Single solution evaluation.")
+eval_app = typer.Typer(cls=GlobalOptionGroup, help="Single solution evaluation.")
 app.add_typer(eval_app, name="eval")
 
-benchmark_app = typer.Typer(help="Multi-solution comparison and export.")
+benchmark_app = typer.Typer(cls=GlobalOptionGroup, help="Multi-solution comparison and export.")
 app.add_typer(benchmark_app, name="benchmark")
 
 # ── Command registrations ───────────────────────────────────────────────────

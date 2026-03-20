@@ -182,6 +182,103 @@ def test_json_flag_all_commands(tmp_project: Path) -> None:
     assert "project" in parsed
 
 
+# ── Test 1b: test_json_flag_after_subcommand ──────────────────────────────────
+
+
+@pytest.mark.integration
+def test_json_flag_after_subcommand(tmp_project: Path) -> None:
+    """Verify that --json works when placed AFTER the subcommand,
+    e.g. ``revolver llm list --json`` instead of ``revolver --json llm list``.
+
+    This is the natural user syntax and must be supported by propagating
+    --json/--verbose/--quiet through group callbacks.
+
+    Validates: NFR-003 (F1 hotfix)
+    """
+    report = _make_all_ok_report()
+
+    # Commands with --json placed at the END (after subcommand)
+    json_after_commands: list[tuple[list[str], dict[str, object]]] = [
+        # llm list --json
+        (["llm", "list", "--json"], {}),
+        # problem versions --json
+        (["problem", "versions", "--json"], {}),
+        # dataset list --json
+        (["dataset", "list", "--json"], {}),
+        # run list --json
+        (["run", "list", "--json"], {}),
+        # solution list --json
+        (["solution", "list", "--json"], {}),
+        # benchmark list --json
+        (["benchmark", "list", "--json"], {}),
+        # doctor --json
+        (["doctor", "--json"], {"revolver.cli.doctor.run_doctor": report}),
+    ]
+
+    for args, mocks in json_after_commands:
+        patches = []
+        for target, return_value in mocks.items():
+            p = patch(target, return_value=return_value)
+            patches.append(p)
+            p.start()
+
+        try:
+            if "doctor" in args:
+                result = runner.invoke(app, args)
+            else:
+                result = _invoke_with_cwd(args, tmp_project)
+        finally:
+            for p in patches:
+                p.stop()
+
+        stdout = getattr(result, "stdout", "") or ""
+        output_text = getattr(result, "output", "") or ""
+        text = stdout or output_text
+
+        # Must parse as valid JSON
+        parsed = None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            for i, ch in enumerate(text):
+                if ch in ("{", "["):
+                    try:
+                        decoder = json.JSONDecoder()
+                        parsed, _ = decoder.raw_decode(text, i)
+                        break
+                    except json.JSONDecodeError:
+                        continue
+
+        assert parsed is not None, (
+            f"--json after subcommand on {args} did not produce valid JSON. "
+            f"Exit code: {result.exit_code}. Output: {text[:300]}"
+        )
+
+
+@pytest.mark.integration
+def test_json_flag_on_group(tmp_project: Path) -> None:
+    """Verify that --json works when placed on the GROUP level,
+    e.g. ``revolver llm --json list``.
+
+    Validates: NFR-003 (F1 hotfix)
+    """
+    # llm --json list
+    result = _invoke_with_cwd(["llm", "--json", "list"], tmp_project)
+    stdout = getattr(result, "stdout", "") or ""
+    output_text = getattr(result, "output", "") or ""
+    text = stdout or output_text
+    parsed = json.loads(text)
+    assert isinstance(parsed, list)
+
+    # dataset --json list
+    result = _invoke_with_cwd(["dataset", "--json", "list"], tmp_project)
+    stdout = getattr(result, "stdout", "") or ""
+    output_text = getattr(result, "output", "") or ""
+    text = stdout or output_text
+    parsed = json.loads(text)
+    assert isinstance(parsed, list)
+
+
 # ── Test 2: test_help_on_all_commands ────────────────────────────────────────
 
 
