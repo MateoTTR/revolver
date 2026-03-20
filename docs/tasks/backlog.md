@@ -220,18 +220,18 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 98 | Implement `core.doctor` — dependency health checks | [ ] | S7 |
-| 99 | Implement `core.setup` — assisted installation | [ ] | S7 |
-| 100 | Implement `cli.doctor` — Typer command with `--fix` | [ ] | S7 |
-| 101 | Implement `cli.setup` — Typer command with `--dry-run`, `--force` | [ ] | S7 |
-| 102 | Cross-cutting: audit `--json` output consistency on all commands | [ ] | S7 |
-| 103 | Cross-cutting: audit error handling (stderr + exit codes) | [ ] | S7 |
-| 104 | Cross-cutting: add progress indicators to long commands | [ ] | S7 |
-| 105 | Cross-cutting: add confirmation summaries to state-modifying commands | [ ] | S7 |
-| 106 | Implement tab completion for bash/zsh | [ ] | S7 |
-| 107 | Write L2 integration tests for `doctor` and `setup` (8 scenarios) | [ ] | S7 |
-| 108 | Write L2 cross-cutting integration tests (6 scenarios) | [ ] | S7 |
-| 109 | Full regression: run all ~80 L2 integration tests (4+21+14+13+19+9+14 = 94 scenarios) | [ ] | S7 |
+| 98 | Implement `core.doctor` — dependency health checks | [x] | S7 — session 034, PR #76 |
+| 99 | Implement `core.setup` — assisted installation | [x] | S7 — session 034, PR #76 |
+| 100 | Implement `cli.doctor` — Typer command with `--fix` | [x] | S7 — session 034, PR #76 |
+| 101 | Implement `cli.setup` — Typer command with `--dry-run`, `--force` | [x] | S7 — session 034, PR #76 |
+| 102 | Cross-cutting: audit `--json` output consistency on all commands | [x] | S7 — session 034, PR #77 |
+| 103 | Cross-cutting: audit error handling (stderr + exit codes) | [x] | S7 — session 034, PR #77 |
+| 104 | Cross-cutting: add progress indicators to long commands | [x] | S7 — session 034, PR #77 |
+| 105 | Cross-cutting: add confirmation summaries to state-modifying commands | [x] | S7 — session 034, PR #77 |
+| 106 | Implement tab completion for bash/zsh | [x] | S7 — session 034, PR #77 |
+| 107 | Write L2 integration tests for `doctor` and `setup` (8 scenarios) | [x] | S7 — session 034, PR #79 |
+| 108 | Write L2 cross-cutting integration tests (6 scenarios) | [x] | S7 — session 034, PR #79 |
+| 109 | Full regression: run all ~80 L2 integration tests (4+21+14+13+19+9+14 = 94 scenarios) | [x] | S7 — session 034, PR #79 |
 
 ### Unscheduled — Release Process
 

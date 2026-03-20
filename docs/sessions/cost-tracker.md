@@ -40,13 +40,14 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 31 | 2026-03-19 | session-031 | ~1h | Phase 5 | Sprint 006a: 4 demo fixes (2 PRs), eval_id collision, benchmark UX, v0.6.1, 703 tests |
 | 32 | 2026-03-19 | session-032 | ~45min | Phase 5 | Sprint 006b: 4 minor fixes (1 PR), benchmark delete, alias width, pull timeout, v0.6.2, 710 tests |
 | 33 | 2026-03-20 | session-033 | ~1h30 | Phase 5 | Sprint 006c: LLM per-model config + iteration tracking (1 PR), README update, CI paths-ignore, v0.6.3, 739 tests |
+| 34 | 2026-03-20 | session-034 | ~1h | Phase 5 | Sprint 007 complete: doctor+setup (PR #76), cross-cutting audit (PR #77), L2 tests+regression (PR #79), v0.7.0, 799 tests |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 34 |
-| **Total duration** | ~51h |
+| **Total sessions** | 35 |
+| **Total duration** | ~52h |
 | **Avg duration/session** | ~1h30 |
 
 ## Notes
