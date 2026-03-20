@@ -322,6 +322,11 @@ def run_list(
                         "dataset": s.dataset,
                         "status": s.status,
                         "iterations": s.iterations,
+                        "valid": (
+                            f"{s.valid_iterations}/{s.iterations}"
+                            if s.valid_iterations is not None
+                            else "\u2014"
+                        ),
                         "best_score": (f"{s.best_score:.4f}" if s.best_score is not None else "-"),
                         "alias": s.alias or "",
                         "created_at": str(s.created_at),
@@ -363,6 +368,13 @@ def run_info(
                 "iterations": info.iterations,
                 "created_at": str(info.created_at),
             }
+            if info.valid_iterations is not None:
+                pct = (
+                    f"{info.valid_iterations / info.iterations * 100:.0f}"
+                    if info.iterations > 0
+                    else "0"
+                )
+                data["valid_iterations"] = f"{info.valid_iterations}/{info.iterations} ({pct}%)"
             if info.generation_time_s is not None:
                 data["generation_time_s"] = f"{info.generation_time_s:.1f}"
             if info.resumed_from:

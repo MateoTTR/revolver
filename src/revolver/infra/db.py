@@ -9,6 +9,7 @@ Traceable to: DES-001 (SQLite Data Model), NFR-013, NFR-016.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -27,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ CREATE TABLE IF NOT EXISTS runs (
     status            TEXT NOT NULL DEFAULT 'running'
                       CHECK (status IN ('running', 'completed',
                              'interrupted', 'completed_with_errors')),
+    valid_iterations  INTEGER,
     created_at        TEXT NOT NULL
 );
 
@@ -162,6 +164,8 @@ CREATE TABLE IF NOT EXISTS llms (
     api_key_env     TEXT,
     input_cost_per_mtok  REAL,
     output_cost_per_mtok REAL,
+    max_tokens      INTEGER,
+    timeout_s       INTEGER,
     registered_at   TEXT NOT NULL
 );
 """
@@ -218,7 +222,19 @@ CREATE TABLE IF NOT EXISTS benchmark_solutions (
     PRIMARY KEY (benchmark_id, solution_id)
 );
 """,
+    # Migration v4 is handled specially in _run_migrations() because
+    # SQLite does not support ADD COLUMN IF NOT EXISTS and executescript
+    # cannot use try/except.  See _MIGRATION_4_COLUMNS below.
 }
+
+
+# Migration v4: ADD COLUMN statements executed individually with error handling
+# because SQLite does not support ADD COLUMN IF NOT EXISTS.
+_MIGRATION_4_COLUMNS: list[str] = [
+    "ALTER TABLE llms ADD COLUMN max_tokens INTEGER",
+    "ALTER TABLE llms ADD COLUMN timeout_s INTEGER",
+    "ALTER TABLE runs ADD COLUMN valid_iterations INTEGER",
+]
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
@@ -228,13 +244,20 @@ def _configure_connection(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_schema_version(conn: sqlite3.Connection) -> None:
-    """Insert schema_version row if not present."""
-    now = datetime.now(UTC).isoformat()
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
-        (CURRENT_SCHEMA_VERSION, now),
-    )
-    conn.commit()
+    """Insert current schema_version row only for fresh databases.
+
+    If no version rows exist yet (fresh DB), inserts the current version.
+    If rows already exist (existing DB), migrations will handle advancement.
+    """
+    cursor = conn.execute("SELECT COUNT(*) FROM schema_version")
+    count = cursor.fetchone()[0]
+    if count == 0:
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (CURRENT_SCHEMA_VERSION, now),
+        )
+        conn.commit()
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -252,6 +275,19 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
                 (target_version, now),
             )
             conn.commit()
+
+    # Migration v4: ADD COLUMN with idempotent handling (columns may already exist).
+    if current < 4:
+        for alter_sql in _MIGRATION_4_COLUMNS:
+            with contextlib.suppress(sqlite3.OperationalError):
+                conn.execute(alter_sql)
+        conn.commit()
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (4, now),
+        )
+        conn.commit()
 
 
 def get_project_db(path: Path) -> sqlite3.Connection:
@@ -417,7 +453,7 @@ def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
 
 _LLM_COLUMNS = (
     "name, provider, model, source, base_url, api_key_env, "
-    "input_cost_per_mtok, output_cost_per_mtok, registered_at"
+    "input_cost_per_mtok, output_cost_per_mtok, max_tokens, timeout_s, registered_at"
 )
 
 
@@ -432,7 +468,9 @@ def _row_to_llm_entry(row: tuple[object, ...]) -> LLMEntry:
         api_key_env=row[5],  # type: ignore[arg-type]
         input_cost_per_mtok=row[6],  # type: ignore[arg-type]
         output_cost_per_mtok=row[7],  # type: ignore[arg-type]
-        registered_at=row[8],  # type: ignore[arg-type]
+        max_tokens=row[8],  # type: ignore[arg-type]
+        timeout_s=row[9],  # type: ignore[arg-type]
+        registered_at=row[10],  # type: ignore[arg-type]
     )
 
 
@@ -451,8 +489,9 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
             """\
             INSERT INTO llms (
                 name, provider, model, source, base_url, api_key_env,
-                input_cost_per_mtok, output_cost_per_mtok, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                input_cost_per_mtok, output_cost_per_mtok,
+                max_tokens, timeout_s, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.name,
@@ -463,6 +502,8 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
                 entry.api_key_env,
                 entry.input_cost_per_mtok,
                 entry.output_cost_per_mtok,
+                entry.max_tokens,
+                entry.timeout_s,
                 entry.registered_at.isoformat(),
             ),
         )
@@ -869,6 +910,7 @@ def insert_run(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     config_snapshot: str | None = None,
+    valid_iterations: int | None = None,
 ) -> None:
     """Insert a run record into the project database.
 
@@ -889,6 +931,7 @@ def insert_run(
         prompt_tokens: Total input tokens consumed.
         completion_tokens: Total output tokens consumed.
         config_snapshot: Verbatim OpenEvolve YAML config.
+        valid_iterations: Number of iterations that produced valid programs.
     """
     conn.execute(
         """\
@@ -896,8 +939,8 @@ def insert_run(
             id, problem_version, llm, dataset, iterations,
             generation_time_s, prompt_tokens, completion_tokens,
             config_snapshot, problem_hash, dataset_hash, llm_model,
-            resumed_from, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            resumed_from, status, valid_iterations, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -914,6 +957,7 @@ def insert_run(
             llm_model,
             resumed_from,
             status,
+            valid_iterations,
             created_at.isoformat(),
         ),
     )
@@ -957,6 +1001,25 @@ def update_run_tokens(
     conn.execute(
         "UPDATE runs SET prompt_tokens = ?, completion_tokens = ? WHERE id = ?",
         (prompt_tokens, completion_tokens, run_id),
+    )
+    conn.commit()
+
+
+def update_run_valid_iterations(
+    conn: sqlite3.Connection,
+    run_id: str,
+    valid_iterations: int,
+) -> None:
+    """Update the valid_iterations count for a run.
+
+    Args:
+        conn: An open project database connection.
+        run_id: The run ID to update.
+        valid_iterations: Number of iterations that produced valid programs.
+    """
+    conn.execute(
+        "UPDATE runs SET valid_iterations = ? WHERE id = ?",
+        (valid_iterations, run_id),
     )
     conn.commit()
 

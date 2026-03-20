@@ -51,12 +51,14 @@ from revolver.infra.db import (
     update_run_generation_time,
     update_run_status,
     update_run_tokens,
+    update_run_valid_iterations,
 )
 from revolver.infra.evaluator_runner import run_instance as eval_run_instance
 from revolver.infra.openevolve import (
     OpenEvolveRunner,
     RunOutput,
     build_config,
+    count_valid_programs,
     resolve_api_keys,
     revolver_env,
 )
@@ -554,6 +556,16 @@ def launch_run(
             # Collect programs from OpenEvolve output dir
             programs = _collect_programs(oe_output_dir, run_dir / "programs")
 
+            # Count valid iterations from checkpoint database
+            valid_iters: int | None = None
+            oe_checkpoint_dir = run_dir / "oe-checkpoint"
+            if oe_checkpoint_dir.exists():
+                valid_iters = count_valid_programs(oe_checkpoint_dir)
+            if valid_iters is None and oe_output_dir.exists():
+                valid_iters = count_valid_programs(oe_output_dir)
+            if valid_iters is not None:
+                update_run_valid_iterations(proj_conn, run_id, valid_iters)
+
             # Generate solution_id, insert solution (rank=1) in DB
             solution_id = generate_solution_id()
             best_score = run_output.best_score
@@ -601,6 +613,7 @@ def launch_run(
                 created_at=now,
                 generation_time_s=generation_time_s,
                 iterations=iterations,
+                valid_iterations=valid_iters,
                 status="completed",
                 problem_version=config.problem_version,
                 problem_hash=pv.hash,
@@ -626,6 +639,7 @@ def launch_run(
                 llm=config.llm_name,
                 dataset=config.dataset_name,
                 iterations=iterations,
+                valid_iterations=valid_iters,
                 generation_time_s=generation_time_s,
                 token_usage=token_usage_model,
             )
@@ -1062,6 +1076,16 @@ def resume_run(
             # Collect programs
             programs = _collect_programs(oe_output_dir, new_run_dir / "programs")
 
+            # Count valid iterations from checkpoint database
+            valid_iters: int | None = None
+            resume_oe_checkpoint = new_run_dir / "oe-checkpoint"
+            if resume_oe_checkpoint.exists():
+                valid_iters = count_valid_programs(resume_oe_checkpoint)
+            if valid_iters is None and oe_output_dir.exists():
+                valid_iters = count_valid_programs(oe_output_dir)
+            if valid_iters is not None:
+                update_run_valid_iterations(proj_conn, new_run_id, valid_iters)
+
             # Create solution
             solution_id = generate_solution_id()
             best_score = run_output_resume.best_score
@@ -1106,6 +1130,7 @@ def resume_run(
                 created_at=now,
                 generation_time_s=generation_time_s,
                 iterations=actual_iterations,
+                valid_iterations=valid_iters,
                 status="completed",
                 problem_version=parent_version,
                 problem_hash=pv.hash,
@@ -1130,6 +1155,7 @@ def resume_run(
                 llm=parent_llm_name,
                 dataset=parent_dataset_name,
                 iterations=actual_iterations,
+                valid_iterations=valid_iters,
                 generation_time_s=generation_time_s,
                 token_usage=token_usage_model,
                 resumed_from=run_id,
@@ -1326,6 +1352,11 @@ def list_runs(
                     llm=str(row["llm"]),
                     dataset=str(row["dataset"]),
                     iterations=int(row["iterations"]),  # type: ignore[call-overload]
+                    valid_iterations=(
+                        int(row["valid_iterations"])  # type: ignore[call-overload]
+                        if row.get("valid_iterations") is not None
+                        else None
+                    ),
                     generation_time_s=(
                         float(row["generation_time_s"])  # type: ignore[arg-type]
                         if row.get("generation_time_s") is not None
@@ -1425,6 +1456,11 @@ def get_run_info(
             dataset=str(run_data["dataset"]),
             dataset_hash=str(run_data["dataset_hash"]),
             iterations=int(run_data["iterations"]),  # type: ignore[call-overload]
+            valid_iterations=(
+                int(run_data["valid_iterations"])  # type: ignore[call-overload]
+                if run_data.get("valid_iterations") is not None
+                else None
+            ),
             generation_time_s=(
                 float(run_data["generation_time_s"])  # type: ignore[arg-type]
                 if run_data.get("generation_time_s") is not None

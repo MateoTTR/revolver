@@ -106,6 +106,7 @@ class RunManifest(BaseModel):
         created_at: Timestamp of run creation.
         generation_time_s: Wall-clock generation time in seconds.
         iterations: Number of OpenEvolve iterations executed.
+        valid_iterations: Number of iterations that produced valid programs.
         status: Run status (``"running"``, ``"completed"``, ``"interrupted"``).
         problem_version: Problem version tag used.
         problem_hash: Hash of the problem snapshot used.
@@ -127,6 +128,7 @@ class RunManifest(BaseModel):
     created_at: datetime
     generation_time_s: float | None = None
     iterations: int
+    valid_iterations: int | None = None
     status: str = "running"
 
     # Lineage
@@ -161,6 +163,7 @@ class RunResult(BaseModel):
         llm: LLM registry name used.
         dataset: Dataset name used.
         iterations: Number of iterations executed.
+        valid_iterations: Number of iterations that produced valid programs.
         generation_time_s: Wall-clock generation time in seconds.
         token_usage: Token counts from the proxy (``None`` if unavailable).
         resumed_from: Parent run ID if this is a resumed run.
@@ -173,6 +176,7 @@ class RunResult(BaseModel):
     llm: str
     dataset: str
     iterations: int
+    valid_iterations: int | None = None
     generation_time_s: float
     token_usage: TokenUsage | None = None
     resumed_from: str | None = None
@@ -217,6 +221,7 @@ class RunSummary(BaseModel):
         llm: LLM registry name used.
         dataset: Dataset name used.
         iterations: Number of iterations executed.
+        valid_iterations: Number of iterations that produced valid programs.
         generation_time_s: Wall-clock generation time in seconds.
         token_usage: Token counts for display in list view.
         status: Run status (``"running"``, ``"completed"``, ``"interrupted"``).
@@ -231,6 +236,7 @@ class RunSummary(BaseModel):
     llm: str
     dataset: str
     iterations: int
+    valid_iterations: int | None = None
     generation_time_s: float = 0.0
     token_usage: TokenUsage | None = None
     status: str
@@ -252,6 +258,7 @@ class RunInfo(BaseModel):
         dataset: Dataset name used.
         dataset_hash: Hash of the dataset at registration time.
         iterations: Number of iterations executed.
+        valid_iterations: Number of iterations that produced valid programs.
         generation_time_s: Wall-clock generation time in seconds.
         token_usage: Token counts and cost estimate.
         status: Run status.
@@ -270,6 +277,7 @@ class RunInfo(BaseModel):
     dataset: str
     dataset_hash: str
     iterations: int
+    valid_iterations: int | None = None
     generation_time_s: float = 0.0
     token_usage: TokenUsage | None = None
     status: str

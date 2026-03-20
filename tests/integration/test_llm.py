@@ -637,3 +637,102 @@ def test_llm_stop_mock_unload(mock_global_db: Path) -> None:
 
     # Verify unload was called
     mock_stop_client.unload_model.assert_called_once_with("codestral:22b")
+
+
+# ── Test 12: Add with --max-tokens and --timeout ─────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_add_with_max_tokens_and_timeout(mock_global_db: Path) -> None:
+    """Add a remote LLM with --max-tokens and --timeout -> stored in DB."""
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "llm",
+            "add",
+            "claude-config",
+            "--model",
+            "claude-sonnet-4-20250514",
+            "--source",
+            "remote",
+            "--provider",
+            "anthropic",
+            "--api-key-env",
+            "ANTHROPIC_API_KEY",
+            "--max-tokens",
+            "8192",
+            "--timeout",
+            "120",
+        ],
+    )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["name"] == "claude-config"
+
+    # Verify DB entry has max_tokens and timeout_s
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 1
+    assert entries[0].max_tokens == 8192
+    assert entries[0].timeout_s == 120
+
+
+# ── Test 13: List shows max_tokens/timeout_s columns ─────────────────────
+
+
+@pytest.mark.integration
+def test_llm_list_shows_config_columns(mock_global_db: Path) -> None:
+    """List LLMs with config shows max_tokens/timeout_s in JSON output."""
+    # Add an LLM with config
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "llm-with-config",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--max-tokens",
+            "4096",
+            "--timeout",
+            "60",
+        ],
+    )
+
+    # Add an LLM without config
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "llm-no-config",
+            "--model",
+            "gpt-4o-mini",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+        ],
+    )
+
+    # List in JSON mode
+    result = runner.invoke(app, ["--json", "llm", "list"])
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    by_name = {e["name"]: e for e in data}
+
+    assert by_name["llm-with-config"]["max_tokens"] == 4096
+    assert by_name["llm-with-config"]["timeout_s"] == 60
+    assert by_name["llm-no-config"]["max_tokens"] is None
+    assert by_name["llm-no-config"]["timeout_s"] is None
