@@ -922,3 +922,129 @@ def test_run_resume(project_with_prereqs: dict[str, Path]) -> None:
     # Verify wrapper was copied to new run dir
     new_run_dir = root / REVOLVER_DIR / "runs" / new_run_id
     assert new_run_dir.exists()
+
+
+# ── Test 14: run info shows valid_iterations ─────────────────────────────
+
+
+@pytest.mark.integration
+def test_run_info_shows_valid_iterations(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run info shows valid_iterations when populated in DB."""
+    root = project_with_prereqs["root"]
+
+    # Insert a run with valid_iterations directly in DB
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, created_at, "
+            "valid_iterations) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run-vi-001",
+                "v1.0",
+                "test-llm",
+                "train-small",
+                100,
+                "hash-vi",
+                "dhash-vi",
+                "gpt-4",
+                "completed",
+                "2026-03-20T10:00:00",
+                85,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Get info via CLI
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "info", "run-vi-001"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    info = _parse_json_output(result)
+    assert info["run_id"] == "run-vi-001"
+    assert info["valid_iterations"] == 85
+    assert info["iterations"] == 100
+
+
+# ── Test 15: run list shows valid column ─────────────────────────────────
+
+
+@pytest.mark.integration
+def test_run_list_shows_valid_iterations(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run list includes valid_iterations in JSON output."""
+    root = project_with_prereqs["root"]
+
+    # Insert two runs: one with valid_iterations, one without
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, created_at, "
+            "valid_iterations) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run-vl-001",
+                "v1.0",
+                "test-llm",
+                "train-small",
+                50,
+                "hash-vl1",
+                "dhash-vl1",
+                "gpt-4",
+                "completed",
+                "2026-03-20T11:00:00",
+                42,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run-vl-002",
+                "v1.0",
+                "test-llm",
+                "train-small",
+                50,
+                "hash-vl2",
+                "dhash-vl2",
+                "gpt-4",
+                "completed",
+                "2026-03-20T11:00:01",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # List runs via CLI
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "list"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    by_id = {r["run_id"]: r for r in data}
+
+    assert by_id["run-vl-001"]["valid_iterations"] == 42
+    assert by_id["run-vl-002"]["valid_iterations"] is None

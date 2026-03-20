@@ -648,15 +648,15 @@ class TestSchemaMigrationV3:
         assert cursor.fetchone() is not None
 
     @pytest.mark.unit
-    def test_schema_version_is_3(self, db_conn: sqlite3.Connection) -> None:
-        """schema_version table must contain version=3 after migration."""
+    def test_schema_version_is_current(self, db_conn: sqlite3.Connection) -> None:
+        """schema_version table must contain current version after migration."""
         from revolver.infra.db import CURRENT_SCHEMA_VERSION
 
         cursor = db_conn.execute("SELECT MAX(version) FROM schema_version")
         row = cursor.fetchone()
         assert row is not None
         assert row[0] == CURRENT_SCHEMA_VERSION
-        assert CURRENT_SCHEMA_VERSION == 3
+        assert CURRENT_SCHEMA_VERSION == 4
 
     @pytest.mark.unit
     def test_migration_v3_upgrades_existing_v2_db(self, tmp_path: Path) -> None:
@@ -711,6 +711,6 @@ class TestSchemaMigrationV3:
         cursor = conn_v3.execute("SELECT MAX(version) FROM schema_version")
         row = cursor.fetchone()
         assert row is not None
-        assert row[0] == 3, "schema_version must be 3 after migration"
+        assert row[0] >= 3, "schema_version must be at least 3 after migration"
 
         conn_v3.close()

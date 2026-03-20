@@ -79,6 +79,20 @@ def llm_add(
             help="Cost per million output tokens (USD).",
         ),
     ] = None,
+    max_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--max-tokens",
+            help="Maximum tokens per LLM response (injected into OE config).",
+        ),
+    ] = None,
+    timeout: Annotated[
+        int | None,
+        typer.Option(
+            "--timeout",
+            help="Request timeout in seconds (injected into OE config).",
+        ),
+    ] = None,
 ) -> None:
     """Register a new LLM (local Ollama or remote API)."""
     with cli_error_boundary():
@@ -101,6 +115,8 @@ def llm_add(
                     pull=pull,
                     input_cost_per_mtok=input_cost,
                     output_cost_per_mtok=output_cost,
+                    max_tokens=max_tokens,
+                    timeout_s=timeout,
                     client=client,
                 )
             finally:
@@ -308,6 +324,8 @@ def llm_list(
                         "source": e.source,
                         "provider": e.provider,
                         "base_url": e.base_url,
+                        "max_tokens": e.max_tokens,
+                        "timeout_s": e.timeout_s,
                     }
                     for e in entries
                 ],
@@ -315,15 +333,22 @@ def llm_list(
             )
         else:
             if entries:
-                rows = [
-                    {
+                # Show max_tokens/timeout_s columns only if any LLM has them set
+                has_config = any(
+                    e.max_tokens is not None or e.timeout_s is not None for e in entries
+                )
+                rows: list[dict[str, object]] = []
+                for e in entries:
+                    row: dict[str, object] = {
                         "name": e.name,
                         "model": e.model,
                         "source": e.source,
                         "provider": e.provider or "",
                     }
-                    for e in entries
-                ]
+                    if has_config:
+                        row["max_tokens"] = str(e.max_tokens) if e.max_tokens is not None else "-"
+                        row["timeout_s"] = str(e.timeout_s) if e.timeout_s is not None else "-"
+                    rows.append(row)
                 render(rows, json_mode=False)
             else:
                 render({"info": "No LLMs registered"}, json_mode=False)

@@ -191,6 +191,7 @@ def build_config(
     Merge order (last wins):
         1. Problem version's config.yaml (base)
         2. LLM endpoint configuration (api_base, primary_model, api_key_env)
+        2b. LLM per-model config (max_tokens, timeout) from LLM registry
         3. Problem description injection into prompt.system_message
         4. --iterations override
         5. --config-override key=value pairs
@@ -245,6 +246,16 @@ def build_config(
     if llm_config:
         config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
         config["llm"].update(llm_config)
+
+    # 2b. LLM per-model config (max_tokens, timeout) from registry
+    if llm.max_tokens is not None:
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["max_tokens"] = llm.max_tokens
+    if llm.timeout_s is not None:
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["timeout"] = llm.timeout_s
 
     # Google provider detection (FB-02): Google's Generative Language API
     # rejects the ``seed`` parameter with HTTP 400.  Disable random_seed.
@@ -400,11 +411,52 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def count_valid_programs(checkpoint_dir: Path) -> int | None:
+    """Count valid program entries in an OpenEvolve checkpoint database.
+
+    Scans for ``database.json`` in the checkpoint directory or its
+    immediate subdirectories (e.g. ``checkpoint_N/database.json``).
+
+    Args:
+        checkpoint_dir: Path to the OpenEvolve checkpoint directory.
+
+    Returns:
+        The number of program entries in the database, or ``None`` if
+        the file is not found or cannot be parsed.
+    """
+    import json as _json
+
+    # Look for database.json directly or in subdirectories
+    candidates = [checkpoint_dir / "database.json"]
+    if checkpoint_dir.exists():
+        for child in sorted(checkpoint_dir.iterdir()):
+            if child.is_dir():
+                candidates.append(child / "database.json")
+
+    for db_path in candidates:
+        if db_path.exists():
+            try:
+                data = _json.loads(db_path.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return len(data)
+                if isinstance(data, dict) and "programs" in data:
+                    programs = data["programs"]
+                    if isinstance(programs, list):
+                        return len(programs)
+                # If dict without "programs" key, count top-level entries
+                if isinstance(data, dict):
+                    return len(data)
+            except (OSError, ValueError, KeyError):
+                return None
+    return None
+
+
 __all__ = [
     "OpenEvolveRunner",
     "ProgressInfo",
     "RunOutput",
     "build_config",
+    "count_valid_programs",
     "resolve_api_keys",
     "revolver_env",
 ]

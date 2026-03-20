@@ -67,6 +67,8 @@ def register_llm(
     pull: bool = False,
     input_cost_per_mtok: float | None = None,
     output_cost_per_mtok: float | None = None,
+    max_tokens: int | None = None,
+    timeout_s: int | None = None,
     client: OllamaClient | None = None,
 ) -> LLMEntry:
     """Register a new LLM in the global database.
@@ -88,6 +90,8 @@ def register_llm(
         pull: Whether to pull the model from Ollama registry (local only).
         input_cost_per_mtok: Cost per million input tokens (USD).
         output_cost_per_mtok: Cost per million output tokens (USD).
+        max_tokens: Maximum tokens per LLM response (injected into OE config).
+        timeout_s: Request timeout in seconds (injected into OE config).
         client: OllamaClient instance (local only; created if not provided).
 
     Returns:
@@ -163,6 +167,8 @@ def register_llm(
         api_key_env=api_key_env,
         input_cost_per_mtok=input_cost_per_mtok,
         output_cost_per_mtok=output_cost_per_mtok,
+        max_tokens=max_tokens,
+        timeout_s=timeout_s,
         registered_at=datetime.now(UTC),
     )
 
