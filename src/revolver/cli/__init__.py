@@ -100,9 +100,11 @@ app.add_typer(benchmark_app, name="benchmark")
 
 import revolver.cli.benchmark as _benchmark_commands  # noqa: F401, E402
 import revolver.cli.dataset as _dataset_commands  # noqa: F401, E402
+import revolver.cli.doctor as _doctor_commands  # noqa: F401, E402
 import revolver.cli.eval as _eval_commands  # noqa: F401, E402
 import revolver.cli.llm as _llm_commands  # noqa: F401, E402
 import revolver.cli.problem as _problem_commands  # noqa: F401, E402
 import revolver.cli.project as _project_commands  # noqa: F401, E402
 import revolver.cli.run as _run_commands  # noqa: F401, E402
+import revolver.cli.setup as _setup_commands  # noqa: F401, E402
 import revolver.cli.solution as _solution_commands  # noqa: F401, E402
