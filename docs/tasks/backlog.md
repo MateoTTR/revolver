@@ -206,6 +206,16 @@
 | 147 | F9/F10-fix — Dynamic alias column width in list views (rich Table `no_wrap`) | [x] | S6b — session 032, PR #71 |
 | 148 | Pull-timeout-fix — Override httpx timeout to `None` for `pull_model()` | [x] | S6b — session 032, PR #71 |
 
+### Sprint 006c — LLM Config & Iteration Tracking
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 149 | Add `max_tokens` and `timeout_s` fields to LLMEntry model + DB migration v4 | [x] | S6c — session 033, PR #73 |
+| 150 | Add `--max-tokens` and `--timeout` CLI options to `llm add`, inject in `build_config()` | [x] | S6c — session 033, PR #73 |
+| 151 | Add `valid_iterations` to run models + DB, parse OpenEvolve checkpoint `database.json` | [x] | S6c — session 033, PR #73 |
+| 152 | Display iteration success rate in `run info` and `run list` | [x] | S6c — session 033, PR #73 |
+| 153 | Update README.md to reflect v0.6.2 feature completeness | [x] | S6c — session 033, PR #72 |
+
 ### Sprint 007 — Doctor, Setup & Cross-Cutting Polish
 
 | # | Task | Status | Sprint |
