@@ -102,6 +102,12 @@ def register_llm(
         OllamaNotRunningError: If Ollama is not reachable (local only).
         ValidationError: If required parameters are missing or invalid.
     """
+    # Validate positive values for optional config
+    if max_tokens is not None and max_tokens < 1:
+        raise ValidationError("--max-tokens must be a positive integer")
+    if timeout_s is not None and timeout_s < 1:
+        raise ValidationError("--timeout must be a positive integer")
+
     # Check uniqueness
     existing = db.get_llm(conn, name)
     if existing is not None:

@@ -15,6 +15,7 @@ import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+import json as _json
 import os
 from pathlib import Path
 from typing import Any
@@ -424,7 +425,6 @@ def count_valid_programs(checkpoint_dir: Path) -> int | None:
         The number of program entries in the database, or ``None`` if
         the file is not found or cannot be parsed.
     """
-    import json as _json
 
     # Look for database.json directly or in subdirectories
     candidates = [checkpoint_dir / "database.json"]
@@ -443,9 +443,8 @@ def count_valid_programs(checkpoint_dir: Path) -> int | None:
                     programs = data["programs"]
                     if isinstance(programs, list):
                         return len(programs)
-                # If dict without "programs" key, count top-level entries
-                if isinstance(data, dict):
-                    return len(data)
+                # Unknown dict format — cannot determine program count
+                return None
             except (OSError, ValueError, KeyError):
                 return None
     return None
