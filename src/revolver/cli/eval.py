@@ -18,7 +18,7 @@ from revolver.cli import eval_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import eval as core_eval
 from revolver.infra.db import get_eval_metadata, get_project_db, get_solution
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 from revolver.infra.store import REVOLVER_DIR, find_project_root
 from revolver.models.eval import EvalDetailResult, EvalResult
 
@@ -56,6 +56,7 @@ def eval_default(
 
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         # Validate required options
         if not solution:
@@ -96,8 +97,8 @@ def eval_default(
             except Exception:
                 pass  # If check fails, let core handle it
 
-        # Progress bar setup
-        if not json_mode:
+        # Progress bar setup (suppressed in --quiet mode, NFR-005)
+        if not json_mode and not quiet:
             from rich.console import Console
             from rich.progress import (
                 BarColumn,
@@ -206,6 +207,13 @@ def eval_default(
                             row["time_s"] = f"{inst.compute_time_s:.3f}"
                         inst_rows.append(row)
                     render(inst_rows, json_mode=False)
+
+        # Confirmation summary (NFR-006)
+        print_confirmation(
+            f"Done: Evaluation completed for solution {solution}",
+            json_mode=json_mode,
+            quiet=quiet,
+        )
 
 
 # ── results subcommand (DES-006 §9) ──────────────────────────────────────────

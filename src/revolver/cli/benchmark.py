@@ -17,7 +17,7 @@ import typer
 from revolver.cli import benchmark_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import benchmark as core_benchmark, solution as core_solution
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 from revolver.models.benchmark import BenchmarkDetailResult, BenchmarkResult
 
 _DEFAULT_METRIC = "combined_score"
@@ -56,6 +56,7 @@ def benchmark_default(
 
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         # Mutual exclusion: --all and --solutions
         if all_solutions and solutions:
@@ -85,8 +86,8 @@ def benchmark_default(
             sys.stderr.write("Error: --dataset is required.\n")
             raise typer.Exit(code=1)
 
-        # Progress display for human mode
-        if not json_mode:
+        # Progress display for human mode (suppressed in --quiet, NFR-005)
+        if not json_mode and not quiet:
 
             def on_progress(solution_id: str, status: str) -> None:
                 sys.stderr.write(f"  [{status}] {solution_id}\n")
@@ -144,6 +145,14 @@ def benchmark_default(
                             break
                     rows.append(row)
                 render(rows, json_mode=False)
+
+        # Confirmation summary (NFR-006)
+        bm_alias = result.alias or result.benchmark_id
+        print_confirmation(
+            f"Done: Benchmark '{bm_alias}' completed",
+            json_mode=json_mode,
+            quiet=quiet,
+        )
 
 
 # ── results subcommand (DES-007 §11) ──────────────────────────────────────────
@@ -312,6 +321,7 @@ def export(
     """Export benchmark results to a file."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         # Require --id or --latest
         if not benchmark_id and not latest:
@@ -333,6 +343,13 @@ def export(
             )
         else:
             sys.stderr.write(f"Exported benchmark results to: {written_path}\n")
+
+        # Confirmation summary (NFR-006)
+        print_confirmation(
+            f"Done: Exported to {written_path}",
+            json_mode=json_mode,
+            quiet=quiet,
+        )
 
 
 # ── list subcommand (DES-007 §11) ─────────────────────────────────────────────
@@ -388,6 +405,7 @@ def delete(
     """Delete a benchmark and its associated solution references."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         # Confirmation logic lives in the CLI layer, not in core
         if not force:
@@ -408,4 +426,9 @@ def delete(
             render(
                 {"benchmark_id": deleted_id, "status": "deleted"},
                 json_mode=False,
+            )
+            print_confirmation(
+                f"Done: Benchmark '{deleted_id}' deleted",
+                json_mode=json_mode,
+                quiet=quiet,
             )

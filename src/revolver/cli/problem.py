@@ -16,7 +16,7 @@ import typer
 from revolver.cli import problem_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import problem as core_problem
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 
 
 @problem_app.command("test")
@@ -72,16 +72,32 @@ def problem_test(
             raise typer.BadParameter("At least one of --instance or --dataset must be provided.")
 
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
         ctx_verbose: bool = ctx.obj.get("verbose", False) if ctx.obj else False
         is_verbose = verbose or ctx_verbose
 
-        result = core_problem.test_problem(
-            instance=instance,
-            dataset=dataset,
-            program=program,
-            evaluator=evaluator,
-            timeout=timeout,
-        )
+        # Progress indicator for dataset evaluation (NFR-005)
+        use_progress = dataset is not None and not json_mode and not quiet
+        if use_progress:
+            from rich.console import Console
+
+            stderr_console = Console(stderr=True)
+            with stderr_console.status("Evaluating dataset instances..."):
+                result = core_problem.test_problem(
+                    instance=instance,
+                    dataset=dataset,
+                    program=program,
+                    evaluator=evaluator,
+                    timeout=timeout,
+                )
+        else:
+            result = core_problem.test_problem(
+                instance=instance,
+                dataset=dataset,
+                program=program,
+                evaluator=evaluator,
+                timeout=timeout,
+            )
 
         if json_mode:
             render(
@@ -142,6 +158,7 @@ def problem_version(
     """Create a new problem version snapshot."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         pv = core_problem.create_version(tag=tag, message=message)
 
@@ -160,6 +177,11 @@ def problem_version(
                     "created_at": str(pv.created_at),
                 },
                 json_mode=False,
+            )
+            print_confirmation(
+                f"Done: Problem versioned as {pv.hash[:12]}",
+                json_mode=json_mode,
+                quiet=quiet,
             )
 
 

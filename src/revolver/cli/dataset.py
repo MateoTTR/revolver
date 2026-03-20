@@ -16,7 +16,7 @@ import typer
 from revolver.cli import dataset_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import dataset as core_dataset
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 
 
 @dataset_app.command("add")
@@ -50,16 +50,34 @@ def dataset_add(
     """Register a new dataset from a directory of instances."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
-        registration = core_dataset.register_dataset(
-            project_root=None,
-            name=name,
-            path=path,
-            split=split,
-            snapshot=snapshot,
-            compatible_with=compatible_with,
-            description=description,
-        )
+        # Progress indicator for large dataset registration (NFR-005)
+        use_progress = not json_mode and not quiet
+        if use_progress:
+            from rich.console import Console
+
+            stderr_console = Console(stderr=True)
+            with stderr_console.status("Registering dataset (computing hashes)..."):
+                registration = core_dataset.register_dataset(
+                    project_root=None,
+                    name=name,
+                    path=path,
+                    split=split,
+                    snapshot=snapshot,
+                    compatible_with=compatible_with,
+                    description=description,
+                )
+        else:
+            registration = core_dataset.register_dataset(
+                project_root=None,
+                name=name,
+                path=path,
+                split=split,
+                snapshot=snapshot,
+                compatible_with=compatible_with,
+                description=description,
+            )
 
         if json_mode:
             render(
@@ -78,6 +96,12 @@ def dataset_add(
                     "global_hash": registration.global_hash,
                 },
                 json_mode=False,
+            )
+            count = registration.instance_count
+            print_confirmation(
+                f"Done: Dataset '{registration.name}' registered ({count} instances)",
+                json_mode=json_mode,
+                quiet=quiet,
             )
 
 
@@ -101,6 +125,7 @@ def dataset_update(
     """Update mutable dataset metadata (compatibility, description)."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         updated = core_dataset.update_dataset(
             project_root=None,
@@ -124,6 +149,11 @@ def dataset_update(
                 },
                 json_mode=False,
             )
+            print_confirmation(
+                f"Done: Dataset '{updated.name}' updated",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
 
 
 @dataset_app.command("remove")
@@ -138,6 +168,7 @@ def dataset_remove(
     """Remove a registered dataset."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         core_dataset.remove_dataset(
             project_root=None,
@@ -149,6 +180,11 @@ def dataset_remove(
             render({"name": name, "removed": True}, json_mode=True)
         else:
             render({"status": "removed", "name": name}, json_mode=False)
+            print_confirmation(
+                f"Done: Dataset '{name}' removed",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
 
 
 @dataset_app.command("list")

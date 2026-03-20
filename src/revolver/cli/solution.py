@@ -16,7 +16,7 @@ import typer
 from revolver.cli import solution_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import solution as core_solution
-from revolver.infra.output import render
+from revolver.infra.output import print_confirmation, render
 
 # ── solution list (FR-SOL-001, FR-SOL-002) ──────────────────────────────────
 
@@ -145,6 +145,7 @@ def solution_alias(
     """Set an alias on a solution."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         core_solution.set_alias(solution_id, alias_name)
 
@@ -157,6 +158,11 @@ def solution_alias(
             render(
                 {"solution_id": solution_id, "alias": alias_name, "status": "updated"},
                 json_mode=False,
+            )
+            print_confirmation(
+                f"Done: Alias '{alias_name}' set for solution {solution_id}",
+                json_mode=json_mode,
+                quiet=quiet,
             )
 
 
@@ -182,6 +188,7 @@ def solution_extract(
     """Promote a stored program to a new solution entry."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         solution = core_solution.extract_solution(
             run_id=run,
@@ -210,6 +217,18 @@ def solution_extract(
                 data["alias"] = solution.alias
             render(data, json_mode=False)
 
+        # Confirmation summary (NFR-006)
+        program_path = getattr(solution, "program_path", None)
+        if program_path:
+            extract_msg = f"Done: Solution extracted to {program_path}"
+        else:
+            extract_msg = f"Done: Solution {solution.id} extracted"
+        print_confirmation(
+            extract_msg,
+            json_mode=json_mode,
+            quiet=quiet,
+        )
+
 
 # ── solution delete (F4 — Sprint 005a) ──────────────────────────────────────
 
@@ -229,6 +248,7 @@ def solution_delete(
     """Delete a solution and its associated evaluation data."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         # Confirmation logic lives in the CLI layer, not in core
         if not force:
@@ -249,4 +269,9 @@ def solution_delete(
             render(
                 {"solution_id": deleted_id, "status": "deleted"},
                 json_mode=False,
+            )
+            print_confirmation(
+                f"Done: Solution {deleted_id} deleted",
+                json_mode=json_mode,
+                quiet=quiet,
             )
