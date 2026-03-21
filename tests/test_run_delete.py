@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 from unittest.mock import patch
 
@@ -19,7 +21,9 @@ import pytest
 from typer.testing import CliRunner
 
 from revolver.cli import app
+from revolver.core.exceptions import RevolverError
 from revolver.core.project import init_project
+from revolver.core.run import delete_run as core_delete_run
 from revolver.infra.db import (
     count_evals_for_run,
     delete_run as db_delete_run,
@@ -278,14 +282,29 @@ class TestDeleteRunDB:
         )
         assert count_evals_for_run(db_conn, "run-no-evals") == 0
 
+    @pytest.mark.unit
+    def test_run_delete_running_run_raises(self, tmp_path: Path) -> None:
+        """delete_run raises RevolverError when the target run is active."""
+        init_project(tmp_path, "test-project")
+        _create_run_with_solutions(tmp_path, "run-active", num_solutions=1)
+
+        fake_lock = {"run_id": "run-active", "pid": str(os.getpid())}
+
+        with (
+            patch("revolver.core.run.get_active_locks", return_value=[fake_lock]),
+            patch("revolver.core.run._is_pid_alive", return_value=True),
+            pytest.raises(RevolverError, match="currently active"),
+        ):
+            core_delete_run("run-active", project_root=tmp_path)
+
 
 # ── L2 Integration tests: CLI ──────────────────────────────────────────────
-
-pytestmark = pytest.mark.integration
 
 
 class TestRunDeleteCLI:
     """Integration tests for ``revolver run delete`` CLI command."""
+
+    pytestmark = pytest.mark.integration
 
     def test_run_delete_by_id(self, tmp_project: Path) -> None:
         """Delete an existing run with --force, verify DB + files gone.
@@ -399,8 +418,6 @@ class TestRunDeleteCLI:
 
         # Remove the directory manually to simulate partial state
         run_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / run_id
-        import shutil
-
         shutil.rmtree(run_dir)
         assert not run_dir.exists()
 

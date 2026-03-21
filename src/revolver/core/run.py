@@ -36,6 +36,7 @@ from revolver.core.exceptions import (
 )
 from revolver.infra.db import (
     count_evals_for_run,
+    count_solutions_for_run,
     delete_run as db_delete_run,
     get_dataset,
     get_dataset_compat,
@@ -1686,19 +1687,29 @@ def delete_run(
         if run_data is None:
             raise RevolverError(f"Run '{run_id}' not found.")
 
-        # 2. Count solutions and evals for summary
-        solutions = get_solutions_for_run(conn, run_id)
-        solutions_count = len(solutions)
+        # 2. Guard: refuse to delete an active run
+        active_locks = get_active_locks(root)
+        for lock in active_locks:
+            pid_str = lock.get("pid")
+            if lock.get("run_id") == run_id and pid_str and _is_pid_alive(int(pid_str)):
+                raise RevolverError(
+                    f"Run '{run_id}' is currently active (PID={lock['pid']})."
+                    " Stop the run before deleting it."
+                )
+
+        # 3. Count solutions and evals for summary
+        solutions_count = count_solutions_for_run(conn, run_id)
         evals_count = count_evals_for_run(conn, run_id)
 
-        # 3. Delete on-disk files (tolerate missing directory)
+        # 4. Delete from DB first (CASCADE handles solutions/evals)
+        #    If DB delete fails, files remain intact.
+        db_delete_run(conn, run_id)
+
+        # 5. Delete on-disk files (tolerate missing directory)
         delete_run_dir(root, run_id)
 
-        # 4. Remove lock file if present
+        # 6. Remove lock file if present
         remove_run_lock(root, run_id)
-
-        # 5. Delete from DB (CASCADE handles solutions/evals)
-        db_delete_run(conn, run_id)
 
         return {
             "run_id": run_id,

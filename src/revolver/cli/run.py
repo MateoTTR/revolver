@@ -16,6 +16,7 @@ import typer
 from revolver.cli import run_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import run as core_run
+from revolver.core.exceptions import ValidationError
 from revolver.infra.output import print_confirmation, render
 from revolver.models.run import RunConfig
 
@@ -453,33 +454,21 @@ def run_delete(
         # Confirmation logic lives in the CLI layer, not in core
         if not force:
             if json_mode:
-                from revolver.core.exceptions import ValidationError
-
                 raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
             typer.confirm(f"Delete run '{run_id}' and all its data?", abort=True)
 
         summary = core_run.delete_run(run_id)
 
-        if json_mode:
-            render(
-                {
-                    "run_id": summary["run_id"],
-                    "solutions_deleted": summary["solutions_deleted"],
-                    "evals_deleted": summary["evals_deleted"],
-                    "status": "deleted",
-                },
-                json_mode=True,
-            )
-        else:
-            render(
-                {
-                    "run_id": summary["run_id"],
-                    "solutions_deleted": summary["solutions_deleted"],
-                    "evals_deleted": summary["evals_deleted"],
-                    "status": "deleted",
-                },
-                json_mode=False,
-            )
+        result = {
+            "run_id": summary["run_id"],
+            "solutions_deleted": summary["solutions_deleted"],
+            "evals_deleted": summary["evals_deleted"],
+            "status": "deleted",
+        }
+
+        render(result, json_mode=json_mode)
+
+        if not json_mode:
             print_confirmation(
                 f"Done: Run {run_id} deleted "
                 f"({summary['solutions_deleted']} solutions, "
