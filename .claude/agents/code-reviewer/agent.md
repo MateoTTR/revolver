@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Reviews PR code changes for functionality, performance, security, and quality issues. Use after creating a PR or when code has been developed by a subagent. Produces a structured review and posts findings as a GitHub PR comment.
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 maxTurns: 25
 ---
