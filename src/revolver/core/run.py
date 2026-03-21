@@ -424,9 +424,11 @@ def launch_run(
         run_dir = create_run_dir(root, run_id)
 
         # 10. Generate wrapper evaluator
-        evaluator_cfg = oe_config.get("evaluator", {})
+        # Revolver config uses "evaluation:" section; OE uses "evaluator:".
+        # Check both keys, preferring "evaluation" (user-facing).
+        eval_cfg = oe_config.get("evaluation", oe_config.get("evaluator", {}))
         timeout_per_instance: float | None = (
-            evaluator_cfg.get("timeout_per_instance") if isinstance(evaluator_cfg, dict) else None
+            eval_cfg.get("timeout_per_instance") if isinstance(eval_cfg, dict) else None
         )
         wrapper_path = generate_wrapper(
             snapshot_dir, run_dir, timeout_per_instance=timeout_per_instance
