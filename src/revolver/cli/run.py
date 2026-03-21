@@ -95,14 +95,15 @@ def run_launch(
 
         # Progress indicator for OpenEvolve execution (NFR-005)
         use_progress = not dry_run and not json_mode and not quiet
+        suppress_info = json_mode or quiet
         if use_progress:
             from rich.console import Console
 
             stderr_console = Console(stderr=True)
             with stderr_console.status("Running OpenEvolve evolution..."):
-                result = core_run.launch_run(config)
+                result = core_run.launch_run(config, quiet=suppress_info)
         else:
-            result = core_run.launch_run(config)
+            result = core_run.launch_run(config, quiet=suppress_info)
 
         if dry_run:
             if json_mode:
@@ -246,10 +247,11 @@ def run_resume(
     """Resume an interrupted or completed run from its checkpoint."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         sys.stderr.write(f"Resuming run from: {run}\n")
 
-        result = core_run.resume_run(run_id=run)
+        result = core_run.resume_run(run_id=run, quiet=(json_mode or quiet))
 
         # Display token usage on stderr
         if result.token_usage is not None:

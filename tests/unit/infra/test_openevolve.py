@@ -425,24 +425,33 @@ class TestResolveApiKeys:
         # Other keys preserved
         assert result["llm"]["primary_model"] == "m"
 
-    def test_no_api_key_when_env_var_unset(self) -> None:
-        """api_key_env is removed but api_key not set when env var is missing."""
+    def test_api_key_missing_fatal(self) -> None:
+        """ValidationError raised when env var is not set (S8-02)."""
         config: dict[str, Any] = {"llm": {"api_key_env": "MISSING_KEY"}}
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MISSING_KEY", None)
-            result = resolve_api_keys(config)
+            with pytest.raises(ValidationError, match="MISSING_KEY"):
+                resolve_api_keys(config)
 
-        assert "api_key_env" not in result["llm"]
-        assert "api_key" not in result["llm"]
-
-    def test_no_api_key_when_env_var_empty(self) -> None:
-        """api_key_env is removed but api_key not set when env var is empty."""
+    def test_api_key_empty_fatal(self) -> None:
+        """ValidationError raised when env var is set but empty (S8-02)."""
         config: dict[str, Any] = {"llm": {"api_key_env": "EMPTY_KEY"}}
-        with patch.dict(os.environ, {"EMPTY_KEY": ""}):
-            result = resolve_api_keys(config)
+        with (
+            patch.dict(os.environ, {"EMPTY_KEY": ""}),
+            pytest.raises(ValidationError, match="EMPTY_KEY"),
+        ):
+            resolve_api_keys(config)
 
-        assert "api_key_env" not in result["llm"]
-        assert "api_key" not in result["llm"]
+    def test_api_key_missing_error_message_includes_env_name(self) -> None:
+        """Error message includes the env var name for user clarity (S8-02)."""
+        config: dict[str, Any] = {"llm": {"api_key_env": "GEMINI_API_KEY"}}
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GEMINI_API_KEY", None)
+            with pytest.raises(
+                ValidationError,
+                match=r"API key environment variable 'GEMINI_API_KEY' is not set",
+            ):
+                resolve_api_keys(config)
 
     def test_no_llm_section(self) -> None:
         """Config without llm section is returned unchanged."""

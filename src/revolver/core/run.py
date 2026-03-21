@@ -272,6 +272,8 @@ def _handle_post_run_failure(
 def launch_run(
     config: RunConfig,
     project_root: Path | None = None,
+    *,
+    quiet: bool = False,
 ) -> RunResult:
     """Launch a full OpenEvolve evolution run.
 
@@ -282,6 +284,7 @@ def launch_run(
     Args:
         config: Run configuration with problem version, LLM, dataset, etc.
         project_root: Explicit project root, or ``None`` to auto-detect.
+        quiet: Suppress informational stderr messages (e.g. in --quiet/--json mode).
 
     Returns:
         A :class:`RunResult` with run ID, solution, programs, and token usage.
@@ -582,6 +585,8 @@ def launch_run(
             update_run_generation_time(proj_conn, run_id, generation_time_s)
 
             # Run _post_run_evaluation() (warn on failure)
+            if not quiet:
+                sys.stderr.write("Running post-run evaluation...\n")
             try:
                 _post_run_evaluation(
                     proj_conn=proj_conn,
@@ -830,6 +835,8 @@ def resume_run(
     run_id: str,
     iterations: int | None = None,
     project_root: Path | None = None,
+    *,
+    quiet: bool = False,
 ) -> RunResult:
     """Resume a run from its checkpoint, creating a new run.
 
@@ -840,6 +847,7 @@ def resume_run(
         run_id: ID of the parent run to resume from.
         iterations: Override iteration count for the resumed run.
         project_root: Explicit project root, or ``None`` to auto-detect.
+        quiet: Suppress informational stderr messages (e.g. in --quiet/--json mode).
 
     Returns:
         A :class:`RunResult` for the new resumed run.
@@ -1101,6 +1109,8 @@ def resume_run(
             update_run_generation_time(proj_conn, new_run_id, generation_time_s)
 
             # Post-run eval
+            if not quiet:
+                sys.stderr.write("Running post-run evaluation...\n")
             try:
                 _post_run_evaluation(
                     proj_conn=proj_conn,

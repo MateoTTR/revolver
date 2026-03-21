@@ -1977,3 +1977,140 @@ def test_launch_run_oe_failure_still_sets_interrupted(
         assert rows[0][0] == "interrupted"
     finally:
         conn.close()
+
+
+# ── S8-11: Post-run evaluation message tests ─────────────────────────────────
+
+
+@pytest.mark.unit
+def test_launch_run_post_eval_message(
+    project_with_prereqs: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """launch_run emits 'Running post-run evaluation...' on stderr (S8-11)."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    mock_run_output = RunOutput(best_score=0.95, best_program="prog", output_dir=None)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=100, completion_tokens=50)
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        launch_run(config, project_root=root)
+
+    captured = capsys.readouterr()
+    assert "Running post-run evaluation..." in captured.err
+
+
+@pytest.mark.unit
+def test_launch_run_post_eval_message_suppressed_when_quiet(
+    project_with_prereqs: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """launch_run suppresses post-eval message when quiet=True (S8-11)."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    mock_run_output = RunOutput(best_score=0.95, best_program="prog", output_dir=None)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=100, completion_tokens=50)
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        launch_run(config, project_root=root, quiet=True)
+
+    captured = capsys.readouterr()
+    assert "Running post-run evaluation..." not in captured.err
