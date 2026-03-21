@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -57,14 +57,14 @@ CREATE TABLE IF NOT EXISTS datasets (
 );
 
 CREATE TABLE IF NOT EXISTS dataset_instances (
-    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name) ON DELETE CASCADE,
     instance_id     TEXT NOT NULL,
     hash            TEXT NOT NULL,
     PRIMARY KEY (dataset_name, instance_id)
 );
 
 CREATE TABLE IF NOT EXISTS dataset_compat (
-    dataset_name    TEXT NOT NULL REFERENCES datasets(name),
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name) ON DELETE CASCADE,
     problem_version TEXT NOT NULL REFERENCES problem_versions(tag),
     PRIMARY KEY (dataset_name, problem_version)
 );
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_resumed ON runs(resumed_from);
 
 CREATE TABLE IF NOT EXISTS solutions (
     id         TEXT PRIMARY KEY,
-    run_id     TEXT NOT NULL REFERENCES runs(id),
+    run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     rank       INTEGER NOT NULL,
     best_score REAL,
     alias      TEXT UNIQUE,
@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_solutions_run ON solutions(run_id);
 
 CREATE TABLE IF NOT EXISTS eval_metadata (
     eval_id          TEXT PRIMARY KEY,
-    solution_id      TEXT NOT NULL REFERENCES solutions(id),
+    solution_id      TEXT NOT NULL REFERENCES solutions(id) ON DELETE CASCADE,
     dataset_name     TEXT NOT NULL REFERENCES datasets(name),
     instance_count   INTEGER NOT NULL,
     instances_solved INTEGER NOT NULL,
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS eval_metadata (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_eval_unique ON eval_metadata(solution_id, dataset_name);
 
 CREATE TABLE IF NOT EXISTS eval_instances (
-    eval_id         TEXT NOT NULL REFERENCES eval_metadata(eval_id),
+    eval_id         TEXT NOT NULL REFERENCES eval_metadata(eval_id) ON DELETE CASCADE,
     instance_id     TEXT NOT NULL,
     metric_name     TEXT NOT NULL,
     value           REAL,
@@ -141,8 +141,8 @@ CREATE TABLE IF NOT EXISTS benchmarks (
 CREATE INDEX IF NOT EXISTS idx_benchmarks_created ON benchmarks(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS benchmark_solutions (
-    benchmark_id    TEXT NOT NULL REFERENCES benchmarks(id),
-    solution_id     TEXT NOT NULL REFERENCES solutions(id),
+    benchmark_id    TEXT NOT NULL REFERENCES benchmarks(id) ON DELETE CASCADE,
+    solution_id     TEXT NOT NULL REFERENCES solutions(id) ON DELETE CASCADE,
     PRIMARY KEY (benchmark_id, solution_id)
 );
 """
@@ -237,6 +237,130 @@ _MIGRATION_4_COLUMNS: list[str] = [
 ]
 
 
+def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
+    """Migration v4→v5: Add ON DELETE CASCADE to all FK constraints.
+
+    SQLite does not support ALTER CONSTRAINT, so each table with foreign keys
+    must be recreated.  We disable FK checks during the migration to allow
+    dropping/renaming tables that are referenced by other tables.
+
+    This migration only applies to project databases.  If the solutions table
+    does not exist (e.g. global DB), we skip the table recreation and just
+    record the version bump.
+    """
+    # Guard: only project databases have the tables we need to migrate.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='solutions'")
+    if cursor.fetchone() is None:
+        # Global DB — nothing to migrate, just record version.
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (5, now),
+        )
+        conn.commit()
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+
+    # --- solutions: FK run_id → runs(id) ON DELETE CASCADE ---
+    conn.executescript("""\
+CREATE TABLE solutions_new (
+    id         TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    rank       INTEGER NOT NULL,
+    best_score REAL,
+    alias      TEXT UNIQUE,
+    UNIQUE(run_id, rank)
+);
+INSERT INTO solutions_new SELECT * FROM solutions;
+DROP TABLE solutions;
+ALTER TABLE solutions_new RENAME TO solutions;
+CREATE INDEX IF NOT EXISTS idx_solutions_run ON solutions(run_id);
+""")
+
+    # --- eval_metadata: FK solution_id → solutions(id) ON DELETE CASCADE ---
+    conn.executescript("""\
+CREATE TABLE eval_metadata_new (
+    eval_id          TEXT PRIMARY KEY,
+    solution_id      TEXT NOT NULL REFERENCES solutions(id) ON DELETE CASCADE,
+    dataset_name     TEXT NOT NULL REFERENCES datasets(name),
+    instance_count   INTEGER NOT NULL,
+    instances_solved INTEGER NOT NULL,
+    eval_time_s      REAL,
+    user_aggregates  TEXT,
+    evaluated_at     TEXT NOT NULL
+);
+INSERT INTO eval_metadata_new SELECT * FROM eval_metadata;
+DROP TABLE eval_metadata;
+ALTER TABLE eval_metadata_new RENAME TO eval_metadata;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_eval_unique ON eval_metadata(solution_id, dataset_name);
+""")
+
+    # --- eval_instances: FK eval_id → eval_metadata(eval_id) ON DELETE CASCADE ---
+    conn.executescript("""\
+CREATE TABLE eval_instances_new (
+    eval_id         TEXT NOT NULL REFERENCES eval_metadata(eval_id) ON DELETE CASCADE,
+    instance_id     TEXT NOT NULL,
+    metric_name     TEXT NOT NULL,
+    value           REAL,
+    status          TEXT NOT NULL CHECK (status IN ('solved', 'failed', 'timeout')),
+    error_message   TEXT,
+    compute_time_s  REAL,
+    PRIMARY KEY (eval_id, instance_id, metric_name)
+);
+INSERT INTO eval_instances_new SELECT * FROM eval_instances;
+DROP TABLE eval_instances;
+ALTER TABLE eval_instances_new RENAME TO eval_instances;
+CREATE INDEX IF NOT EXISTS idx_eval_inst_eval ON eval_instances(eval_id);
+""")
+
+    # --- benchmark_solutions: FK benchmark_id → benchmarks(id), solution_id → solutions(id) ---
+    conn.executescript("""\
+CREATE TABLE benchmark_solutions_new (
+    benchmark_id    TEXT NOT NULL REFERENCES benchmarks(id) ON DELETE CASCADE,
+    solution_id     TEXT NOT NULL REFERENCES solutions(id) ON DELETE CASCADE,
+    PRIMARY KEY (benchmark_id, solution_id)
+);
+INSERT INTO benchmark_solutions_new SELECT * FROM benchmark_solutions;
+DROP TABLE benchmark_solutions;
+ALTER TABLE benchmark_solutions_new RENAME TO benchmark_solutions;
+""")
+
+    # --- dataset_instances: FK dataset_name → datasets(name) ON DELETE CASCADE ---
+    conn.executescript("""\
+CREATE TABLE dataset_instances_new (
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name) ON DELETE CASCADE,
+    instance_id     TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    PRIMARY KEY (dataset_name, instance_id)
+);
+INSERT INTO dataset_instances_new SELECT * FROM dataset_instances;
+DROP TABLE dataset_instances;
+ALTER TABLE dataset_instances_new RENAME TO dataset_instances;
+""")
+
+    # --- dataset_compat: FK dataset_name → datasets(name) ON DELETE CASCADE ---
+    conn.executescript("""\
+CREATE TABLE dataset_compat_new (
+    dataset_name    TEXT NOT NULL REFERENCES datasets(name) ON DELETE CASCADE,
+    problem_version TEXT NOT NULL REFERENCES problem_versions(tag),
+    PRIMARY KEY (dataset_name, problem_version)
+);
+INSERT INTO dataset_compat_new SELECT * FROM dataset_compat;
+DROP TABLE dataset_compat;
+ALTER TABLE dataset_compat_new RENAME TO dataset_compat;
+""")
+
+    # Re-enable FK enforcement and record version.
+    conn.execute("PRAGMA foreign_keys=ON")
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (5, now),
+    )
+    conn.commit()
+
+
 def _configure_connection(conn: sqlite3.Connection) -> None:
     """Apply standard PRAGMAs to a connection."""
     conn.execute("PRAGMA journal_mode=WAL")
@@ -288,6 +412,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             (4, now),
         )
         conn.commit()
+
+    # Migration v5: Add ON DELETE CASCADE to FK constraints (table recreation).
+    if current < 5:
+        _migrate_v4_to_v5(conn)
 
 
 def get_project_db(path: Path) -> sqlite3.Connection:
