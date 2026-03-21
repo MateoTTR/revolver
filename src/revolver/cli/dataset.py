@@ -162,13 +162,25 @@ def dataset_remove(
     name: Annotated[str, typer.Argument(help="Dataset name to remove.")],
     force: Annotated[
         bool,
-        typer.Option("--force", help="Remove even if referenced by solutions."),
+        typer.Option(
+            "--force",
+            "-f",
+            help="Skip confirmation prompt and remove even if referenced by solutions.",
+        ),
     ] = False,
 ) -> None:
     """Remove a registered dataset."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        # Confirmation logic: require --force in JSON mode, prompt interactively otherwise
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to remove in JSON mode (no interactive prompt)")
+            typer.confirm(f"Remove dataset '{name}'?", abort=True)
 
         core_dataset.remove_dataset(
             project_root=None,

@@ -326,8 +326,8 @@ def test_errors_on_stderr(tmp_project: Path) -> None:
 
     Validates: NFR-001, NFR-004
     """
-    # llm remove nonexistent -> error
-    result = runner.invoke(app, ["llm", "remove", "nonexistent-llm"])
+    # llm remove nonexistent -> error (--force to skip confirmation prompt)
+    result = runner.invoke(app, ["llm", "remove", "nonexistent-llm", "--force"])
 
     assert result.exit_code == 1, f"Expected exit 1, got {result.exit_code}"
 

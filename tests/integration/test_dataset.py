@@ -372,8 +372,8 @@ def test_remove_deletes_metadata(tmp_project: Path, dataset_dir: Path) -> None:
     manifest_path = tmp_project / REVOLVER_DIR / "datasets" / "ds-remove" / "manifest.yaml"
     assert manifest_path.exists()
 
-    # Remove
-    result = _invoke_with_cwd(["dataset", "remove", "ds-remove"], tmp_project)
+    # Remove (--force to skip confirmation prompt)
+    result = _invoke_with_cwd(["dataset", "remove", "ds-remove", "--force"], tmp_project)
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
 
@@ -436,8 +436,9 @@ def test_remove_blocked_by_reference(tmp_project: Path, dataset_dir: Path) -> No
     finally:
         conn.close()
 
-    # Attempt to remove (should be blocked)
-    result = _invoke_with_cwd(["dataset", "remove", "ds-blocked"], tmp_project)
+    # Attempt to remove: confirm "y" at prompt, but blocked by referential constraint
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(app, ["dataset", "remove", "ds-blocked"], input="y\n")
     assert result.exit_code == 1, f"Expected exit 1, got {result.exit_code}"
     output = _get_all_output(result)
     assert "referenced" in output.lower() or "solution" in output.lower()
@@ -513,11 +514,102 @@ def test_remove_snapshot_deletes_files(tmp_project: Path, dataset_dir: Path) -> 
     assert snapshot_dir.is_dir()
     assert len(list(snapshot_dir.iterdir())) == 3
 
-    # Remove
-    result = _invoke_with_cwd(["dataset", "remove", "ds-snap-rm"], tmp_project)
+    # Remove (--force to skip confirmation prompt)
+    result = _invoke_with_cwd(["dataset", "remove", "ds-snap-rm", "--force"], tmp_project)
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
 
     # Verify snapshot directory deleted
     dataset_store_dir = tmp_project / REVOLVER_DIR / "datasets" / "ds-snap-rm"
     assert not dataset_store_dir.exists()
+
+
+@pytest.mark.integration
+def test_dataset_remove_force(tmp_project: Path, dataset_dir: Path) -> None:
+    """--force skips confirmation prompt and removes the dataset."""
+    _invoke_with_cwd(
+        ["dataset", "add", "ds-force-rm", "--path", str(dataset_dir)],
+        tmp_project,
+    )
+
+    # Verify dataset exists in DB
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM datasets WHERE name = ?", ("ds-force-rm",))
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+    # Remove with --force: no prompt, exits 0
+    result = _invoke_with_cwd(
+        ["dataset", "remove", "ds-force-rm", "--force"],
+        tmp_project,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "removed" in output.lower()
+
+    # Verify DB entry removed
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM datasets WHERE name = ?", ("ds-force-rm",))
+        assert cursor.fetchone() is None
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_dataset_remove_confirmation_abort(tmp_project: Path, dataset_dir: Path) -> None:
+    """Without --force, user declines confirmation -> dataset is NOT removed."""
+    _invoke_with_cwd(
+        ["dataset", "add", "ds-keep", "--path", str(dataset_dir)],
+        tmp_project,
+    )
+
+    # Remove without --force, answer "n" → aborted
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(
+            app,
+            ["dataset", "remove", "ds-keep"],
+            input="n\n",
+        )
+
+    # typer.confirm with abort=True raises Abort → exit code 1
+    assert result.exit_code == 1
+
+    # Verify dataset is still in DB
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM datasets WHERE name = ?", ("ds-keep",))
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_dataset_remove_json_requires_force(tmp_project: Path, dataset_dir: Path) -> None:
+    """In --json mode, remove without --force exits with error."""
+    _invoke_with_cwd(
+        ["dataset", "add", "ds-json-test", "--path", str(dataset_dir)],
+        tmp_project,
+    )
+
+    # Attempt remove in JSON mode without --force
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(app, ["--json", "dataset", "remove", "ds-json-test"])
+
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "--force" in output.lower()
+
+    # Verify dataset is still in DB
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM datasets WHERE name = ?", ("ds-json-test",))
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
