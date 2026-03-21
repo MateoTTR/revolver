@@ -404,11 +404,7 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
             if key:
                 llm_section["api_key"] = key
             else:
-                import sys
-
-                sys.stderr.write(
-                    f"Warning: env var {env_name} is not set; the run will likely fail.\n"
-                )
+                raise ValidationError(f"API key environment variable '{env_name}' is not set")
     return config
 
 

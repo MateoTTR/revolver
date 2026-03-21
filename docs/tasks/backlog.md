@@ -239,6 +239,46 @@
 |---|---|---|---|
 | 154 | Fix `--json`/`--verbose`/`--quiet` flag propagation to subcommands (GlobalOptionGroup) | [x] | S7a — session 035, PR #81 |
 
+### Sprint 008 — Reliability & Lifecycle Management (v0.8.0)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 155 | Fix `evaluator_loader.py`: accept `evaluate_instance()` as valid signature (B4) | [ ] | S8 — PR-A |
+| 156 | Fix `resolve_api_keys()`: convert missing-key warning to fatal `ValidationError` (F1) | [ ] | S8 — PR-B |
+| 157 | Add "Running post-run evaluation..." message to `cli/run.py` (P3) | [ ] | S8 — PR-B |
+| 158 | Propagate `timeout_per_instance` into `_WRAPPER_TEMPLATE` in `core/run.py` (B3) | [ ] | S8 — PR-C |
+| 159 | ~~OE watchdog timeout~~ → **Upstream issue**: file issue on OpenEvolve for `ProcessPoolExecutor.shutdown(wait=True)` hang (B1). Repro script at `revolver-demos/tsp/demos/benchmark-multimodel/repro-b1-hang.py` | [ ] | S8 — upstream |
+| 160 | Add `--force`/`--yes` flag to `revolver llm remove` (FR4) | [ ] | S8 — PR-D |
+| 161 | Add `--force`/`--yes` flag to `revolver dataset remove` (FR4) | [ ] | S8 — PR-D |
+| 162 | DB migration v5: `ON DELETE CASCADE` on FK constraints (FR5) | [ ] | S8 — PR-E |
+| 163 | `infra.db` helpers: `delete_run()`, `get_solutions_for_run()` | [ ] | S8 — PR-F |
+| 164 | `core.run.delete_run()` domain function | [ ] | S8 — PR-F |
+| 165 | `cli.run.run_delete` command: `revolver run delete <id> [--force]` (FR1) | [ ] | S8 — PR-F |
+| 166 | Write L2 integration tests for Sprint 008 features | [ ] | S8 — PR-G |
+
+### Sprint 009 — Scriptability & UX Polish (v0.8.1)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 167 | `infra.db.update_llm()` SQL helper (FR6) | [ ] | S9 — PR-A |
+| 168 | `core.llm.update_llm()` domain function (FR6) | [ ] | S9 — PR-A |
+| 169 | `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N]` (FR6) | [ ] | S9 — PR-A |
+| 170 | `core.run.delete_all_runs()` domain function (FR2) | [ ] | S9 — PR-B |
+| 171 | Add `--all` flag to `revolver run delete` (FR2) | [ ] | S9 — PR-B |
+| 172 | `infra.db` helpers: `delete_problem_version()`, `count_runs_for_version()` (FR3) | [ ] | S9 — PR-C |
+| 173 | `core.problem.delete_version()` domain function with dependency check (FR3) | [ ] | S9 — PR-C |
+| 174 | `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]` (FR3) | [ ] | S9 — PR-C |
+| 175 | Real-time run progress: stream OE output line-by-line in `cli/run.py` (FR7) | [ ] | S9 — PR-D |
+| 176 | Smart default for `--version` in `revolver run` (P4) | [ ] | S9 — PR-E |
+| 177 | Smart default for `--dataset` in `revolver run` (P5) | [ ] | S9 — PR-E |
+| 178 | Add `--no-templates` flag to `revolver project init` (P2) | [ ] | S9 — PR-F |
+| 179 | Fix misleading `--format csv` tip in `benchmark results --help` (P6) | [ ] | S9 — PR-G |
+| 180 | Clarify `-s local` vs `--provider ollama` in `llm add --help` (P7) | [ ] | S9 — PR-G |
+| 182 | Update spec-llm: `--source local` (not `ollama`), document `--max-tokens`/`--timeout` (C1, C2) | [ ] | S9 — PR-I |
+| 183 | Update spec-dataset: positional `NAME`, align `--split`/`--compatible-with` required/optional (C4-C6) | [ ] | S9 — PR-I |
+| 184 | Update spec-benchmark (add `delete`), spec index (add `list`/`delete`), spec-project (`name` required), remove `--sort` from spec-solution/spec-run (W5-W6, W9-W11) | [ ] | S9 — PR-I |
+| 185 | Write L2 integration tests for Sprint 009 features | [ ] | S9 — PR-J |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
