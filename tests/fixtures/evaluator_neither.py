@@ -1,6 +1,6 @@
 """Evaluator fixture with neither evaluate() nor evaluate_instance().
 
-Used to test that generate_wrapper() raises EvaluatorError.
+Used to test that load_evaluator() raises EvaluatorLoadError.
 """
 
 from __future__ import annotations
