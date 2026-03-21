@@ -243,17 +243,17 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 155 | Fix `evaluator_loader.py`: accept `evaluate_instance()` as valid signature (B4) | [ ] | S8 — PR-A |
-| 156 | Fix `resolve_api_keys()`: convert missing-key warning to fatal `ValidationError` (F1) | [ ] | S8 — PR-B |
-| 157 | Add "Running post-run evaluation..." message to `cli/run.py` (P3) | [ ] | S8 — PR-B |
-| 158 | Propagate `timeout_per_instance` into `_WRAPPER_TEMPLATE` in `core/run.py` (B3) | [ ] | S8 — PR-C |
-| 159 | ~~OE watchdog timeout~~ → **Upstream issue**: file issue on OpenEvolve for `ProcessPoolExecutor.shutdown(wait=True)` hang (B1). Repro script at `revolver-demos/tsp/demos/benchmark-multimodel/repro-b1-hang.py` | [ ] | S8 — upstream |
-| 160 | Add `--force`/`--yes` flag to `revolver llm remove` (FR4) | [ ] | S8 — PR-D |
-| 161 | Add `--force`/`--yes` flag to `revolver dataset remove` (FR4) | [ ] | S8 — PR-D |
-| 162 | DB migration v5: `ON DELETE CASCADE` on FK constraints (FR5) | [ ] | S8 — PR-E |
-| 163 | `infra.db` helpers: `delete_run()`, `get_solutions_for_run()` | [ ] | S8 — PR-F |
-| 164 | `core.run.delete_run()` domain function | [ ] | S8 — PR-F |
-| 165 | `cli.run.run_delete` command: `revolver run delete <id> [--force]` (FR1) | [ ] | S8 — PR-F |
+| 155 | Fix `evaluator_loader.py`: accept `evaluate_instance()` as valid signature (B4) | [x] | S8 — session 037, PR #86 |
+| 156 | Fix `resolve_api_keys()`: convert missing-key warning to fatal `ValidationError` (F1) | [x] | S8 — session 037, PR #88 |
+| 157 | Add "Running post-run evaluation..." message to `cli/run.py` (P3) | [x] | S8 — session 037, PR #88 |
+| 158 | Propagate `timeout_per_instance` into `_WRAPPER_TEMPLATE` in `core/run.py` (B3) | [x] | S8 — session 037, PR #87 |
+| 159 | ~~OE watchdog timeout~~ → **Upstream issue**: file issue on OpenEvolve for `ProcessPoolExecutor.shutdown(wait=True)` hang (B1). Repro script at `revolver-demos/tsp/demos/benchmark-multimodel/repro-b1-hang.py` | [~] | S8 — upstream |
+| 160 | Add `--force`/`--yes` flag to `revolver llm remove` (FR4) | [x] | S8 — session 037, PR #89 |
+| 161 | Add `--force`/`--yes` flag to `revolver dataset remove` (FR4) | [x] | S8 — session 037, PR #89 |
+| 162 | DB migration v5: `ON DELETE CASCADE` on FK constraints (FR5) | [x] | S8 — session 037, PR #91 |
+| 163 | `infra.db` helpers: `delete_run()`, `count_evals_for_run()` | [~] | S8 — session 037, PR #93 (draft) |
+| 164 | `core.run.delete_run()` domain function | [~] | S8 — session 037, PR #93 (draft) |
+| 165 | `cli.run.run_delete` command: `revolver run delete <id> [--force]` (FR1) | [~] | S8 — session 037, PR #93 (draft) |
 | 166 | Write L2 integration tests for Sprint 008 features | [ ] | S8 — PR-G |
 
 ### Sprint 009 — Scriptability & UX Polish (v0.8.1)
