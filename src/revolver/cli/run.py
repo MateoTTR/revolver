@@ -431,3 +431,59 @@ def run_info(
                     for p in info.programs
                 ]
                 render(prog_rows, json_mode=False)
+
+
+# ── run delete (FR-RUN-027) ──────────────────────────────────────────────────
+
+
+@run_app.command("delete")
+def run_delete(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Run ID to delete.")],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """Delete a run and its associated solutions, evals, and files."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        # Confirmation logic lives in the CLI layer, not in core
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
+            typer.confirm(f"Delete run '{run_id}' and all its data?", abort=True)
+
+        summary = core_run.delete_run(run_id)
+
+        if json_mode:
+            render(
+                {
+                    "run_id": summary["run_id"],
+                    "solutions_deleted": summary["solutions_deleted"],
+                    "evals_deleted": summary["evals_deleted"],
+                    "status": "deleted",
+                },
+                json_mode=True,
+            )
+        else:
+            render(
+                {
+                    "run_id": summary["run_id"],
+                    "solutions_deleted": summary["solutions_deleted"],
+                    "evals_deleted": summary["evals_deleted"],
+                    "status": "deleted",
+                },
+                json_mode=False,
+            )
+            print_confirmation(
+                f"Done: Run {run_id} deleted "
+                f"({summary['solutions_deleted']} solutions, "
+                f"{summary['evals_deleted']} evals removed)",
+                json_mode=json_mode,
+                quiet=quiet,
+            )

@@ -389,6 +389,22 @@ def copy_run_file(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def delete_run_dir(project_root: Path, run_id: str) -> None:
+    """Remove the run directory tree.
+
+    Deletes ``<project_root>/.revolver/runs/<run_id>/`` and all contents
+    (manifest, programs, checkpoints, etc.).  Silently ignores if the
+    directory does not exist.
+
+    Args:
+        project_root: Project root directory.
+        run_id: Unique run identifier.
+    """
+    run_path = _run_dir(project_root, run_id)
+    if run_path.exists():
+        shutil.rmtree(run_path)
+
+
 def get_run_dir(project_root: Path, run_id: str) -> Path:
     """Return the run directory path.
 
