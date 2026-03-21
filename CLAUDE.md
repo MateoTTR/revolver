@@ -102,7 +102,7 @@ Before starting any work in a session:
 | Phase 2 | Architecture, tech choices (ADRs), data model | **Done** |
 | Phase 3 | POCs for critical aspects | **Done** (covered by POC #11/12/13) |
 | Phase 4 | Validation strategy, test plan, traceability | **Done** |
-| Phase 5 | Implementation | **In progress** — Sprint 004a complete (v0.4.4), Sprint 005 next |
+| Phase 5 | Implementation | **In progress** — Sprint 008 complete (v0.8.0), Sprint 008a next |
 
 ---
 

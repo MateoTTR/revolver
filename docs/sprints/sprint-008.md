@@ -216,22 +216,23 @@ Peak parallelism: 4 agents (Streams A, B, C, E simultaneously).
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Completed**: Session 037 (2026-03-21)
+**Release**: v0.8.0
 
 ### Tests passing
-- X / 10 new integration tests passing
-- X / 148 total cumulative integration tests passing
+- 13 / 10 new tests passing (exceeded target)
+- 749 / ~148 total tests passing (cumulative)
 
 ### Demo-able features
-- [ ] `revolver problem test` works with `evaluate_instance()` evaluators
-- [ ] `revolver llm remove <name> --force` exits without prompt (scriptable)
-- [ ] `revolver dataset remove <name> --force` exits without prompt (scriptable)
-- [ ] `revolver run delete <id> --force` removes run + solutions + eval data + files
-- [ ] `revolver run` aborts with fatal error when API key env var is unset
-- [ ] Post-run eval phase shows "Running post-run evaluation..." message
-- [ ] Wrapper `_revolver_evaluator.py` contains per-instance timeout guard
-- [ ] DB v5 migration runs cleanly on existing projects
-- [ ] B1 upstream issue filed on OpenEvolve with repro script
+- [x] `revolver problem test` works with `evaluate_instance()` evaluators (PR #86)
+- [x] `revolver llm remove <name> --force` exits without prompt (scriptable) (PR #89)
+- [x] `revolver dataset remove <name> --force` exits without prompt (scriptable) (PR #89)
+- [x] `revolver run delete <id> --force` removes run + solutions + eval data + files (PR #93)
+- [x] `revolver run` aborts with fatal error when API key env var is unset (PR #88)
+- [x] Post-run eval phase shows "Running post-run evaluation..." message (PR #88)
+- [x] Wrapper `_revolver_evaluator.py` contains per-instance timeout guard (PR #87)
+- [x] DB v5 migration runs cleanly on existing projects (PR #91)
+- [~] B1 upstream issue: root cause confirmed and reproduced (not filed yet)
 
 ### Carry-over
-_TBD at sprint end._
+- B1 upstream OE issue: file on OpenEvolve GitHub

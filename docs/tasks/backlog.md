@@ -251,33 +251,33 @@
 | 160 | Add `--force`/`--yes` flag to `revolver llm remove` (FR4) | [x] | S8 — session 037, PR #89 |
 | 161 | Add `--force`/`--yes` flag to `revolver dataset remove` (FR4) | [x] | S8 — session 037, PR #89 |
 | 162 | DB migration v5: `ON DELETE CASCADE` on FK constraints (FR5) | [x] | S8 — session 037, PR #91 |
-| 163 | `infra.db` helpers: `delete_run()`, `count_evals_for_run()` | [~] | S8 — session 037, PR #93 (draft) |
-| 164 | `core.run.delete_run()` domain function | [~] | S8 — session 037, PR #93 (draft) |
-| 165 | `cli.run.run_delete` command: `revolver run delete <id> [--force]` (FR1) | [~] | S8 — session 037, PR #93 (draft) |
-| 166 | Write L2 integration tests for Sprint 008 features | [ ] | S8 — PR-G |
+| 163 | `infra.db` helpers: `delete_run()`, `count_evals_for_run()` | [x] | S8 — session 037, PR #93 |
+| 164 | `core.run.delete_run()` domain function | [x] | S8 — session 037, PR #93 |
+| 165 | `cli.run.run_delete` command: `revolver run delete <id> [--force]` (FR1) | [x] | S8 — session 037, PR #93 |
+| 166 | Write L2 integration tests for Sprint 008 features | [x] | S8 — session 037, included in PRs |
 
-### Sprint 009 — Scriptability & UX Polish (v0.8.1)
+### Sprint 008a — Scriptability & UX Polish (v0.8.1)
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 167 | `infra.db.update_llm()` SQL helper (FR6) | [ ] | S9 — PR-A |
-| 168 | `core.llm.update_llm()` domain function (FR6) | [ ] | S9 — PR-A |
-| 169 | `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N]` (FR6) | [ ] | S9 — PR-A |
-| 170 | `core.run.delete_all_runs()` domain function (FR2) | [ ] | S9 — PR-B |
-| 171 | Add `--all` flag to `revolver run delete` (FR2) | [ ] | S9 — PR-B |
-| 172 | `infra.db` helpers: `delete_problem_version()`, `count_runs_for_version()` (FR3) | [ ] | S9 — PR-C |
-| 173 | `core.problem.delete_version()` domain function with dependency check (FR3) | [ ] | S9 — PR-C |
-| 174 | `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]` (FR3) | [ ] | S9 — PR-C |
-| 175 | Real-time run progress: stream OE output line-by-line in `cli/run.py` (FR7) | [ ] | S9 — PR-D |
-| 176 | Smart default for `--version` in `revolver run` (P4) | [ ] | S9 — PR-E |
-| 177 | Smart default for `--dataset` in `revolver run` (P5) | [ ] | S9 — PR-E |
-| 178 | Add `--no-templates` flag to `revolver project init` (P2) | [ ] | S9 — PR-F |
-| 179 | Fix misleading `--format csv` tip in `benchmark results --help` (P6) | [ ] | S9 — PR-G |
-| 180 | Clarify `-s local` vs `--provider ollama` in `llm add --help` (P7) | [ ] | S9 — PR-G |
-| 182 | Update spec-llm: `--source local` (not `ollama`), document `--max-tokens`/`--timeout` (C1, C2) | [ ] | S9 — PR-I |
-| 183 | Update spec-dataset: positional `NAME`, align `--split`/`--compatible-with` required/optional (C4-C6) | [ ] | S9 — PR-I |
-| 184 | Update spec-benchmark (add `delete`), spec index (add `list`/`delete`), spec-project (`name` required), remove `--sort` from spec-solution/spec-run (W5-W6, W9-W11) | [ ] | S9 — PR-I |
-| 185 | Write L2 integration tests for Sprint 009 features | [ ] | S9 — PR-J |
+| 167 | `infra.db.update_llm()` SQL helper (FR6) | [ ] | S8a — PR-A |
+| 168 | `core.llm.update_llm()` domain function (FR6) | [ ] | S8a — PR-A |
+| 169 | `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N]` (FR6) | [ ] | S8a — PR-A |
+| 170 | `core.run.delete_all_runs()` domain function (FR2) | [ ] | S8a — PR-B |
+| 171 | Add `--all` flag to `revolver run delete` (FR2) | [ ] | S8a — PR-B |
+| 172 | `infra.db` helpers: `delete_problem_version()`, `count_runs_for_version()` (FR3) | [ ] | S8a — PR-C |
+| 173 | `core.problem.delete_version()` domain function with dependency check (FR3) | [ ] | S8a — PR-C |
+| 174 | `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]` (FR3) | [ ] | S8a — PR-C |
+| 175 | Real-time run progress: stream OE output line-by-line in `cli/run.py` (FR7) | [ ] | S8a — PR-D |
+| 176 | Smart default for `--version` in `revolver run` (P4) | [ ] | S8a — PR-E |
+| 177 | Smart default for `--dataset` in `revolver run` (P5) | [ ] | S8a — PR-E |
+| 178 | Add `--no-templates` flag to `revolver project init` (P2) | [ ] | S8a — PR-F |
+| 179 | Fix misleading `--format csv` tip in `benchmark results --help` (P6) | [ ] | S8a — PR-G |
+| 180 | Clarify `-s local` vs `--provider ollama` in `llm add --help` (P7) | [ ] | S8a — PR-G |
+| 182 | Update spec-llm: `--source local` (not `ollama`), document `--max-tokens`/`--timeout` (C1, C2) | [ ] | S8a — PR-I |
+| 183 | Update spec-dataset: positional `NAME`, align `--split`/`--compatible-with` required/optional (C4-C6) | [ ] | S8a — PR-I |
+| 184 | Update spec-benchmark (add `delete`), spec index (add `list`/`delete`), spec-project (`name` required), remove `--sort` from spec-solution/spec-run (W5-W6, W9-W11) | [ ] | S8a — PR-I |
+| 185 | Write L2 integration tests for Sprint 008a features | [ ] | S8a — PR-J |
 
 ### Unscheduled — Release Process
 
