@@ -364,6 +364,10 @@ def llm_list(
 def llm_remove(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Name of the LLM to remove.")],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
     delete_model: Annotated[
         bool,
         typer.Option(
@@ -374,6 +378,16 @@ def llm_remove(
 ) -> None:
     """Remove a registered LLM from the database."""
     with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        # Confirmation logic: require --force in JSON mode, prompt interactively otherwise
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to remove in JSON mode (no interactive prompt)")
+            typer.confirm(f"Remove LLM '{name}'?", abort=True)
+
         conn = get_global_db()
         try:
             # Only create OllamaClient if needed
@@ -393,7 +407,6 @@ def llm_remove(
         finally:
             conn.close()
 
-        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         if json_mode:

@@ -380,8 +380,8 @@ def test_llm_remove_existing(mock_global_db: Path) -> None:
     entries = _query_llms(mock_global_db)
     assert len(entries) == 1
 
-    # Remove
-    result = runner.invoke(app, ["--json", "llm", "remove", "to-remove"])
+    # Remove (--force required in JSON mode to skip interactive prompt)
+    result = runner.invoke(app, ["--json", "llm", "remove", "to-remove", "--force"])
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
 
     data = json.loads(result.stdout)
@@ -398,7 +398,7 @@ def test_llm_remove_existing(mock_global_db: Path) -> None:
 @pytest.mark.integration
 def test_llm_remove_nonexistent(mock_global_db: Path) -> None:
     """Removing a nonexistent LLM -> exit code 1."""
-    result = runner.invoke(app, ["llm", "remove", "does-not-exist"])
+    result = runner.invoke(app, ["llm", "remove", "does-not-exist", "--force"])
     assert result.exit_code == 1
 
     output = _get_all_output(result)
@@ -736,3 +736,121 @@ def test_llm_list_shows_config_columns(mock_global_db: Path) -> None:
     assert by_name["llm-with-config"]["timeout_s"] == 60
     assert by_name["llm-no-config"]["max_tokens"] is None
     assert by_name["llm-no-config"]["timeout_s"] is None
+
+
+# ── Test 14: Remove with --force skips confirmation ──────────────────────
+
+
+@pytest.mark.integration
+def test_llm_remove_force(mock_global_db: Path) -> None:
+    """--force skips the confirmation prompt and removes the LLM."""
+    # Add an LLM first
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "force-remove",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+        ],
+    )
+
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 1
+
+    # Remove with --force: no prompt, exits 0
+    result = runner.invoke(app, ["llm", "remove", "force-remove", "--force"])
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    output = _get_all_output(result)
+    assert "removed" in output.lower()
+
+    # Verify DB is empty
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 0
+
+
+# ── Test 15: Remove without --force prompts for confirmation ─────────────
+
+
+@pytest.mark.integration
+def test_llm_remove_confirmation_abort(mock_global_db: Path) -> None:
+    """Without --force, user declines confirmation → LLM is NOT removed."""
+    # Add an LLM first
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "keep-me",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+        ],
+    )
+
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 1
+
+    # Remove without --force, answer "n" → aborted
+    interactive_runner = CliRunner()
+    result = interactive_runner.invoke(
+        app,
+        ["llm", "remove", "keep-me"],
+        input="n\n",
+    )
+
+    # typer.confirm with abort=True raises Abort → exit code 1
+    assert result.exit_code == 1
+
+    # Verify LLM is still in DB
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 1
+
+
+# ── Test 16: Remove in JSON mode without --force → error ─────────────────
+
+
+@pytest.mark.integration
+def test_llm_remove_json_requires_force(mock_global_db: Path) -> None:
+    """In --json mode, remove without --force exits with error."""
+    # Add an LLM first
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "json-test",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+        ],
+    )
+
+    # Attempt remove in JSON mode without --force
+    result = runner.invoke(app, ["--json", "llm", "remove", "json-test"])
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "--force" in output.lower()
+
+    # Verify LLM is still in DB
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 1
