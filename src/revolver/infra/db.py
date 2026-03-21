@@ -2046,3 +2046,59 @@ def delete_benchmark(conn: sqlite3.Connection, benchmark_id: str) -> bool:
         )
         cursor = conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
         return cursor.rowcount > 0
+
+
+def count_solutions_for_run(conn: sqlite3.Connection, run_id: str) -> int:
+    """Count solution rows belonging to a run.
+
+    Args:
+        conn: An open project database connection.
+        run_id: The run ID whose solutions to count.
+
+    Returns:
+        The number of solutions linked to the run.
+    """
+    cursor = conn.execute(
+        "SELECT COUNT(*) FROM solutions WHERE run_id = ?",
+        (run_id,),
+    )
+    row = cursor.fetchone()
+    return int(row[0]) if row else 0
+
+
+def count_evals_for_run(conn: sqlite3.Connection, run_id: str) -> int:
+    """Count eval_metadata rows for all solutions belonging to a run.
+
+    Args:
+        conn: An open project database connection.
+        run_id: The run ID whose evals to count.
+
+    Returns:
+        The number of eval_metadata rows linked to the run's solutions.
+    """
+    cursor = conn.execute(
+        "SELECT COUNT(*) FROM eval_metadata em "
+        "JOIN solutions s ON em.solution_id = s.id "
+        "WHERE s.run_id = ?",
+        (run_id,),
+    )
+    row = cursor.fetchone()
+    return int(row[0]) if row else 0
+
+
+def delete_run(conn: sqlite3.Connection, run_id: str) -> bool:
+    """Delete a run from the database.
+
+    CASCADE foreign keys handle deletion of associated solutions,
+    eval_metadata, and eval_instances automatically.
+
+    Args:
+        conn: An open project database connection.
+        run_id: The run ID to delete.
+
+    Returns:
+        True if a run was deleted, False if not found.
+    """
+    with conn:
+        cursor = conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        return cursor.rowcount > 0

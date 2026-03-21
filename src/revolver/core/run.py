@@ -35,6 +35,9 @@ from revolver.core.exceptions import (
     RevolverError,
 )
 from revolver.infra.db import (
+    count_evals_for_run,
+    count_solutions_for_run,
+    delete_run as db_delete_run,
     get_dataset,
     get_dataset_compat,
     get_global_db,
@@ -68,6 +71,7 @@ from revolver.infra.store import (
     ProjectNotFoundError as StoreProjectNotFoundError,
     copy_run_file,
     create_run_dir,
+    delete_run_dir,
     find_project_root,
     get_active_locks,
     get_run_dir,
@@ -1703,3 +1707,77 @@ def _collect_programs(oe_output_dir: Path, programs_dir: Path) -> list[ProgramEn
         )
 
     return programs
+
+
+# ── Run deletion ─────────────────────────────────────────────────────────────
+
+
+def delete_run(
+    run_id: str,
+    *,
+    project_root: Path | None = None,
+) -> dict[str, object]:
+    """Delete a run, its solutions, evals, and on-disk files.
+
+    Confirmation prompts belong in the CLI layer — this is a pure domain
+    function.
+
+    Steps:
+        1. Resolve project root & open DB.
+        2. Verify run exists (raise :class:`RevolverError` if not).
+        3. Count solutions and evals for the summary.
+        4. Remove the run directory from disk (tolerate missing).
+        5. Remove any leftover lock file.
+        6. ``DELETE FROM runs`` — CASCADE handles solutions/evals.
+        7. Return a summary dict.
+
+    Args:
+        run_id: ID of the run to delete.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A dict with keys ``run_id``, ``solutions_deleted``, ``evals_deleted``.
+
+    Raises:
+        RevolverError: If the run is not found.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        # 1. Verify run exists
+        run_data = get_run(conn, run_id)
+        if run_data is None:
+            raise RevolverError(f"Run '{run_id}' not found.")
+
+        # 2. Guard: refuse to delete an active run
+        active_locks = get_active_locks(root)
+        for lock in active_locks:
+            pid_str = lock.get("pid")
+            if lock.get("run_id") == run_id and pid_str and _is_pid_alive(int(pid_str)):
+                raise RevolverError(
+                    f"Run '{run_id}' is currently active (PID={lock['pid']})."
+                    " Stop the run before deleting it."
+                )
+
+        # 3. Count solutions and evals for summary
+        solutions_count = count_solutions_for_run(conn, run_id)
+        evals_count = count_evals_for_run(conn, run_id)
+
+        # 4. Delete from DB first (CASCADE handles solutions/evals)
+        #    If DB delete fails, files remain intact.
+        db_delete_run(conn, run_id)
+
+        # 5. Delete on-disk files (tolerate missing directory)
+        delete_run_dir(root, run_id)
+
+        # 6. Remove lock file if present
+        remove_run_lock(root, run_id)
+
+        return {
+            "run_id": run_id,
+            "solutions_deleted": solutions_count,
+            "evals_deleted": evals_count,
+        }
+    finally:
+        conn.close()
