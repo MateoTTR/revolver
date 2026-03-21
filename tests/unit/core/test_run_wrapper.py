@@ -113,6 +113,98 @@ class TestGenerateWrapperInstanceMode:
         assert "instance_log" in code
 
 
+class TestGenerateWrapperTimeout:
+    """Tests for per-instance timeout propagation into wrapper (S8-03)."""
+
+    def test_wrapper_has_timeout(self, tmp_path: Path) -> None:
+        """Wrapper generated with timeout_per_instance contains the timeout value."""
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_instance.py", snapshot_dir / "evaluator.py")
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+
+        result = generate_wrapper(snapshot_dir, output_dir, timeout_per_instance=30)
+        code = result.read_text()
+
+        assert "_TIMEOUT_PER_INSTANCE = 30" in code
+        assert "multiprocessing" in code
+        assert "proc.kill()" in code
+        assert "proc.join(" in code
+        assert "TimeoutError" in code
+
+    def test_wrapper_has_float_timeout(self, tmp_path: Path) -> None:
+        """Wrapper generated with float timeout_per_instance renders correctly."""
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_instance.py", snapshot_dir / "evaluator.py")
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+
+        result = generate_wrapper(snapshot_dir, output_dir, timeout_per_instance=45.5)
+        code = result.read_text()
+
+        assert "_TIMEOUT_PER_INSTANCE = 45.5" in code
+
+    def test_wrapper_no_timeout(self, tmp_path: Path) -> None:
+        """Wrapper generated without timeout has _TIMEOUT_PER_INSTANCE = None."""
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_instance.py", snapshot_dir / "evaluator.py")
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+
+        result = generate_wrapper(snapshot_dir, output_dir)
+        code = result.read_text()
+
+        assert "_TIMEOUT_PER_INSTANCE = None" in code
+
+    def test_wrapper_no_timeout_is_valid_python(self, tmp_path: Path) -> None:
+        """Wrapper without timeout compiles without syntax errors."""
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_instance.py", snapshot_dir / "evaluator.py")
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+
+        result = generate_wrapper(snapshot_dir, output_dir)
+        code = result.read_text()
+        compile(code, str(result), "exec")
+
+    def test_wrapper_with_timeout_is_valid_python(self, tmp_path: Path) -> None:
+        """Wrapper with timeout compiles without syntax errors."""
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_instance.py", snapshot_dir / "evaluator.py")
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+
+        result = generate_wrapper(snapshot_dir, output_dir, timeout_per_instance=30)
+        code = result.read_text()
+        compile(code, str(result), "exec")
+
+    def test_wrapper_no_timeout_calls_directly(self, tmp_path: Path) -> None:
+        """When timeout is None, _call_evaluate_instance calls directly."""
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_instance.py", snapshot_dir / "evaluator.py")
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+
+        result = generate_wrapper(snapshot_dir, output_dir)
+        code = result.read_text()
+
+        # The function should exist and have the direct-call branch
+        assert "def _call_evaluate_instance(" in code
+        assert "return evaluate_instance(program_path, instance_path)" in code
+
+
 class TestGenerateWrapperLegacyMode:
     """Tests for generate_wrapper() with evaluate() evaluators (legacy mode)."""
 

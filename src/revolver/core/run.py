@@ -108,13 +108,50 @@ from pathlib import Path
 sys.path.insert(0, {snapshot_dir!r})
 from evaluator import evaluate_instance
 
+# Per-instance timeout in seconds (None = no timeout)
+_TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
+
+
+def _call_evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
+    """Call evaluate_instance with optional per-instance timeout guard."""
+    if _TIMEOUT_PER_INSTANCE is None:
+        return evaluate_instance(program_path, instance_path)
+
+    import multiprocessing
+    import queue as _queue_mod
+
+    result_queue: multiprocessing.Queue[dict[str, float] | Exception] = multiprocessing.Queue()
+
+    def _target() -> None:
+        try:
+            result_queue.put(evaluate_instance(program_path, instance_path))
+        except Exception as exc:
+            result_queue.put(exc)
+
+    proc = multiprocessing.Process(target=_target)
+    proc.start()
+    proc.join(_TIMEOUT_PER_INSTANCE)
+    if proc.is_alive():
+        proc.kill()
+        proc.join()
+        raise TimeoutError(
+            f"evaluate_instance timed out after {{_TIMEOUT_PER_INSTANCE}}s"
+        )
+    try:
+        result = result_queue.get_nowait()
+    except _queue_mod.Empty:
+        raise RuntimeError("evaluate_instance process ended without returning a result")
+    if isinstance(result, Exception):
+        raise result
+    return result
+
 
 def evaluate(program_path: str) -> dict[str, float]:
     instance_path = os.environ.get("REVOLVER_INSTANCE_PATH")
 
     if instance_path:
         # Single-instance mode (revolver eval / revolver benchmark)
-        return evaluate_instance(program_path, instance_path)
+        return _call_evaluate_instance(program_path, instance_path)
 
     # Aggregated mode (OpenEvolve training)
     dataset_dir = os.environ["REVOLVER_DATASET_DIR"]
@@ -126,9 +163,11 @@ def evaluate(program_path: str) -> dict[str, float]:
     all_metrics: list[dict[str, float]] = []
     for inst in instances:
         try:
-            metrics = evaluate_instance(program_path, str(inst))
+            metrics = _call_evaluate_instance(program_path, str(inst))
             all_metrics.append(metrics)
             _log_instance(inst.name, metrics)
+        except TimeoutError as _te:
+            print(f"[revolver] timeout for {{inst.name}}: {{_te}}", file=sys.stderr)
         except Exception as _e:
             print(f"[revolver] evaluation failed for {{inst.name}}: {{_e}}", file=sys.stderr)
 
@@ -385,7 +424,13 @@ def launch_run(
         run_dir = create_run_dir(root, run_id)
 
         # 10. Generate wrapper evaluator
-        wrapper_path = generate_wrapper(snapshot_dir, run_dir)
+        evaluator_cfg = oe_config.get("evaluator", {})
+        timeout_per_instance: float | None = (
+            evaluator_cfg.get("timeout_per_instance") if isinstance(evaluator_cfg, dict) else None
+        )
+        wrapper_path = generate_wrapper(
+            snapshot_dir, run_dir, timeout_per_instance=timeout_per_instance
+        )
 
         # Set output dir in config
         oe_output_dir = run_dir / "oe-output"
@@ -1484,6 +1529,7 @@ def get_run_info(
 def generate_wrapper(
     snapshot_dir: Path,
     output_dir: Path,
+    timeout_per_instance: float | None = None,
 ) -> Path:
     """Generate the wrapper evaluator file for OpenEvolve.
 
@@ -1499,6 +1545,10 @@ def generate_wrapper(
             (e.g., ``.revolver/problem/<tag>/``).
         output_dir: Path to the run directory
             (e.g., ``.revolver/runs/<id>/``).
+        timeout_per_instance: Optional per-instance timeout in seconds.
+            When set, each ``evaluate_instance()`` call is guarded by a
+            ``multiprocessing.Process`` with ``.join(timeout)`` + ``.kill()``.
+            Defaults to ``None`` (no timeout).
 
     Returns:
         Path to the generated (or copied) ``_revolver_evaluator.py``.
@@ -1537,6 +1587,7 @@ def generate_wrapper(
         # Generate wrapper from template
         wrapper_code = _WRAPPER_TEMPLATE.format(
             snapshot_dir=str(snapshot_dir),
+            timeout_per_instance=timeout_per_instance,
         )
         output_path.write_text(wrapper_code)
         return output_path
