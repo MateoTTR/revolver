@@ -158,6 +158,10 @@ class OpenEvolveRunner:
         if self._controller is None:
             self._init_controller()
 
+        # Ensure unbuffered output for real-time progress (S8a-09).
+        # This affects any child processes OpenEvolve may spawn.
+        os.environ["PYTHONUNBUFFERED"] = "1"
+
         try:
             checkpoint_str = str(checkpoint) if checkpoint else None
             best = asyncio.run(

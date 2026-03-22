@@ -8,6 +8,7 @@ Traceable to: DES-005 section 2, FR-RUN-001..030.
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Annotated
 
@@ -94,17 +95,13 @@ def run_launch(
                 f"{f', iterations={iterations}' if iterations else ''}\n"
             )
 
-        # Progress indicator for OpenEvolve execution (NFR-005)
-        use_progress = not dry_run and not json_mode and not quiet
+        # Real-time progress: stream OE output line-by-line (S8a-09)
+        # Disable Python output buffering so child processes flush immediately.
         suppress_info = json_mode or quiet
-        if use_progress:
-            from rich.console import Console
-
-            stderr_console = Console(stderr=True)
-            with stderr_console.status("Running OpenEvolve evolution..."):
-                result = core_run.launch_run(config, quiet=suppress_info)
-        else:
-            result = core_run.launch_run(config, quiet=suppress_info)
+        os.environ["PYTHONUNBUFFERED"] = "1"
+        if not dry_run and not suppress_info:
+            sys.stderr.write("Running OpenEvolve evolution...\n")
+        result = core_run.launch_run(config, quiet=suppress_info)
 
         if dry_run:
             if json_mode:
