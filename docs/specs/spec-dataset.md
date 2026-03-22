@@ -13,18 +13,23 @@ This spec covers dataset registration, integrity management, and compatibility t
 
 ## 2. Commands
 
-### 2.1 `revolver dataset add`
+### 2.1 `revolver dataset add <NAME>`
 
 Register a dataset directory.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `NAME` | Yes | User-defined identifier |
 
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `--name <id>` | string | Yes | User-defined identifier |
 | `--path <dir>` | string | Yes | Path to the dataset directory |
-| `--split <type>` | string | Yes | `train` or `eval` |
-| `--compatible-with <tag>` | string | Yes | Problem version tag this dataset works with |
+| `--split <type>` | string | No | `train` or `eval` |
+| `--compatible-with <tag>` | string | No | Problem version tag(s) this dataset works with (repeatable) |
 | `--snapshot` | flag | No | Copy all instance files into `.revolver/datasets/<name>/snapshot/` |
 | `--description <text>` | string | No | Short description |
 

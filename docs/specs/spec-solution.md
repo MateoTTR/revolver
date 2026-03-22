@@ -24,7 +24,6 @@ List all solutions in the current project.
 | `--version <tag>` | string | — | Filter by problem version |
 | `--llm <name>` | string | — | Filter by LLM used |
 | `--rank <n>` | int | — | Filter by rank (1 = best from run). Useful to show only auto-created or only extracted solutions |
-| `--sort <field>` | string | `created_at` | Sort by: `created_at`, `score`, `alias` |
 
 **Output** (human):
 ```

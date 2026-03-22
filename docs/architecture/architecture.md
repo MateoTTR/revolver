@@ -115,10 +115,10 @@ src/revolver/
 │   ├── llm.py               # revolver llm {add,start,stop,status,list,remove}
 │   ├── problem.py           # revolver problem {test,version,versions}
 │   ├── dataset.py           # revolver dataset {add,update,remove,list,info}
-│   ├── run.py               # revolver run {<default>,status,resume,list,info}
+│   ├── run.py               # revolver run {<default>,status,resume,list,info,delete}
 │   ├── eval.py              # revolver eval {<default>,results}
-│   ├── solution.py          # revolver solution {list,info,alias,extract}
-│   ├── benchmark.py         # revolver benchmark {<default>,results,export,list}
+│   ├── solution.py          # revolver solution {list,info,alias,extract,delete}
+│   ├── benchmark.py         # revolver benchmark {<default>,results,export,list,delete}
 │   ├── doctor.py            # revolver doctor
 │   └── setup.py             # revolver setup
 │

@@ -281,8 +281,8 @@ revolver llm add claude-opus \
 
 # Register and deploy a local LLM
 revolver llm add codestral-local \
-  --source huggingface \
-  --model mistralai/Codestral-22B-v0.1
+  --source local \
+  --model codestral:22b
 
 # Check available LLMs
 revolver llm list
