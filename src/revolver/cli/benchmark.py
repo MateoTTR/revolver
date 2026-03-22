@@ -175,7 +175,7 @@ def results(
             "--metric",
             help=(
                 "Metric to display (default: combined_score, 'all' for everything). "
-                "Tip: use --format csv for wide tables, or pipe to less -S."
+                "For CSV export use: revolver benchmark export --format csv."
             ),
         ),
     ] = None,
