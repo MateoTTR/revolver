@@ -252,6 +252,36 @@ def _run_legacy_global_aggregation(
         executor.shutdown(wait=False, cancel_futures=True)
 
 
+def has_existing_eval(
+    solution_id_or_alias: str,
+    dataset_name: str,
+    project_root: Path | None = None,
+) -> EvalMetadata | None:
+    """Check whether an evaluation already exists for a solution+dataset pair.
+
+    This function encapsulates the DB lookup so that the CLI layer does not
+    need to import from ``infra.db`` directly.
+
+    Args:
+        solution_id_or_alias: Solution ID or alias to look up.
+        dataset_name: Name of the evaluation dataset.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        The existing :class:`EvalMetadata` if found, otherwise ``None``.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        solution = get_solution(conn, solution_id_or_alias)
+        if solution is None:
+            return None
+        return get_eval_metadata(conn, solution.id, dataset_name)
+    finally:
+        conn.close()
+
+
 def evaluate_solution(
     solution_id_or_alias: str,
     dataset_name: str,
