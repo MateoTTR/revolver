@@ -1,6 +1,6 @@
 # Sprint 008a — Scriptability & UX Polish (v0.8.1)
 
-**Status**: Planning
+**Status**: Complete
 **Goal**: Improve scripting support, user experience, and documentation consistency. Delivers `llm update`, bulk run delete, problem version delete, real-time run progress, smarter defaults for `run`, UX fixes for misleading help text, and a full documentation alignment pass (README, user story E2E, specs, ConOps, architecture, traceability matrix). Target release: v0.8.1.
 **Demo**: `revolver llm update claude-sonnet --max-tokens 16384` modifies the LLM without removing it; `revolver run delete --all --force` purges all runs; `revolver run` auto-selects the latest version and the only train dataset; `revolver run start` shows real-time iteration progress; `revolver benchmark results` help text no longer references `--format csv`.
 
@@ -93,30 +93,30 @@ Cross-document consistency review (spec-reviewer agent + manual verification).
 
 | # | Task | Layer | Depends on | PR | Status | Acceptance criteria |
 |---|---|---|---|---|---|---|
-| S8a-01 | Implement `core.llm.update_llm(name, conn, *, max_tokens, timeout_s, input_cost_per_mtok, output_cost_per_mtok)` — modify LLM record in place without re-registering. Validate positive values. Only provided (non-None) fields are updated. | domain | — | PR-A | [ ] | `update_llm()` updates only the specified fields; unspecified fields are unchanged; `RevolverError` if LLM not found; round-trip test passes |
-| S8a-02 | Add `infra.db.update_llm(conn, name, **fields)` SQL helper — builds `UPDATE llms SET ... WHERE name=?` dynamically for only the fields provided. | infra | — | PR-A | [ ] | `UPDATE` only touches provided columns; existing columns unchanged; `conn.rowcount == 0` if not found |
-| S8a-03 | Implement `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N] [--input-cost F] [--output-cost F]`. Print updated entry; `--json` outputs full record. | cli | S8a-01 | PR-A | [ ] | `revolver llm update my-llm --max-tokens 16384` updates DB; `revolver llm list` reflects change; error if no update flags provided |
-| S8a-04 | Add `--all` flag to `revolver run delete` (from Sprint 008 (v0.8.0)). Deletes every run in the project. Requires `--force` when `--all` is used (or confirmation prompt listing the count). | cli | Sprint 008 (v0.8.0) done | PR-B | [ ] | `revolver run delete --all --force` removes all runs + solutions + files; `revolver run delete --all` without `--force` prompts with count; `run list` returns empty after |
-| S8a-05 | Implement `core.run.delete_all_runs(project_root, force)` — domain function that lists all runs then calls `delete_run()` for each. Returns count of deleted runs. | domain | Sprint 008 (v0.8.0) done | PR-B | [ ] | All runs deleted; count returned; no partial state on failure (best-effort for disk ops) |
-| S8a-06 | Implement `core.problem.delete_version(tag, project_root, *, force)` — domain function: (1) check no runs reference this version (query `runs` table); (2) if runs found and not `force`: raise `RevolverError` with count; (3) if `force` or no runs: delete version snapshot from disk + DB row. | domain | — | PR-C | [ ] | Version with no runs: deleted cleanly; version with runs + no `--force`: exit 1 with "N run(s) reference this version"; version with runs + `--force`: deleted; snapshot directory removed |
-| S8a-07 | Add `infra.db.delete_problem_version(conn, tag)`, `count_runs_for_version(conn, tag)` helpers. | infra | — | PR-C | [ ] | `count_runs_for_version` returns correct count; `DELETE FROM problem_versions WHERE tag=?` works |
-| S8a-08 | Implement `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]`. Confirmation prompt unless `--force`. | cli | S8a-06 | PR-C | [ ] | `revolver problem version delete v1.0 --force` deletes; `revolver problem version delete v1.0` with runs → error listing count; `revolver problem versions` no longer shows deleted tag |
-| S8a-09 | Real-time run progress: modify `cli/run.py` to stream OpenEvolve stdout/stderr line-by-line in real time instead of capturing all output then printing. Use `subprocess` with `stdout=PIPE` line-by-line reading, or ensure the existing `asyncio.run()` path flushes output. Disable buffering in child process (`PYTHONUNBUFFERED=1`). | cli | — | PR-D | [ ] | Lines appear as they are printed by OE (not buffered until end); `--quiet` suppresses OE output; `--json` still produces valid JSON at end |
-| S8a-10 | Smart default for `--version` in `revolver run`: if `--version` is omitted and exactly one problem version exists, use it automatically and print a notice ("Using version v1.2 (only version)"). If multiple exist and `--version` is omitted, error with list of available versions. | cli | — | PR-E | [ ] | Single version → auto-selected with notice; multiple versions → helpful error listing them; explicit `--version` always respected |
-| S8a-11 | Smart default for `--dataset` in `revolver run`: if `--dataset` is omitted and exactly one dataset with `split='train'` exists, use it automatically and print a notice. If no train dataset exists or multiple exist and `--dataset` is omitted, error with list. | cli | — | PR-E | [ ] | Single train dataset → auto-selected with notice; multiple → error with list; no train datasets → error pointing to `dataset add --split train`; explicit `--dataset` always respected |
-| S8a-12 | Add `--no-templates` flag to `revolver project init`. When set, skip writing `evaluator.py`, `initial_program.py`, `config.yaml` template files (only create `.revolver/` directory and manifest). | cli | — | PR-F | [ ] | `revolver project init --no-templates` creates `.revolver/` only; template files absent; `revolver project init` (no flag) unchanged; L2 test for both modes |
-| S8a-13 | Fix `benchmark results` help text: remove the misleading tip about `--format csv`. Add a tip pointing to `revolver benchmark export --format csv` instead. | cli | — | PR-G | [ ] | `revolver benchmark results --help` no longer mentions `--format csv`; the tip text reads "For CSV export use: revolver benchmark export --format csv" |
-| S8a-14 | Clarify `llm add` help text for `-s local` vs provider: update `--source` help string to clearly state "use '-s local' for Ollama (provider is set automatically)"; remove any reference to `--provider ollama`. | cli | — | PR-G | [ ] | `revolver llm add --help` shows updated source option description; no reference to `--provider ollama` |
-| S8a-16 | Update spec-llm: (C1) change `--source ollama` examples to `--source local`; (C2) document `--max-tokens` and `--timeout` options on `llm add`. | docs | — | PR-I | [ ] | spec-llm §2.1 shows `--source local`, documents `--max-tokens` and `--timeout` with defaults |
-| S8a-17 | Update spec-dataset: (C4) change `--name` option to positional `NAME` argument; (C5) decide `--split` required/optional and align; (C6) mark `--compatible-with` as optional. | docs | — | PR-I | [ ] | spec-dataset §2.1 matches code: `NAME` positional, `--split` aligned, `--compatible-with` optional |
-| S8a-18 | Update spec-benchmark and specifications index: (W9) add `benchmark list` and `benchmark delete` to index; (W10) add `benchmark delete` section to spec-benchmark. Update spec-project (W11): mark `name` as required argument. Remove `--sort` from spec-solution (W5) and spec-run (W6). Add `run delete` to spec-run §2 and spec index. | docs | — | PR-I | [ ] | Specifications index lists all implemented commands; spec-benchmark includes `delete`; `--sort` removed from specs where not implemented; spec-run includes `delete` |
-| S8a-20 | Fix conops.md §5.1 workflow: change `--source huggingface` to `--source local`, align LLM registration example with actual CLI syntax. | docs | — | PR-I | [ ] | ConOps §5.1 uses `--source local` for Ollama models; workflow matches implemented CLI |
-| S8a-21 | Update architecture.md §3 package tree comments: add `delete` to `run.py` and `solution.py` inline comments. | docs | — | PR-I | [ ] | Architecture §3 tree shows `run.py # revolver run {...,delete}` and `solution.py # revolver solution {...,delete}` |
-| S8a-22 | Update README.md: fix features list (`benchmark` not `benchmark run`, remove `dataset verify`, add `run delete`), update sprint table through S008, update test count, remove "Planned" for `doctor`/`setup`, add version badge. | docs | — | PR-H | [ ] | README features match implemented commands; sprint table complete through S008; test count reflects v0.8.0 |
-| S8a-23 | Rewrite user-story-e2e.md: fix `--source ollama` → `--source local`, `--name` → positional, version `0.1.0` → current, update all command outputs to match current CLI behavior. | docs | — | PR-H | [ ] | All CLI commands in user story are runnable with current implementation; outputs reflect actual format |
-| S8a-24 | Refactor `cli/eval.py` lines 72-98: extract re-eval existence check into `core.eval.has_existing_eval(solution, dataset)`, replace direct `infra.db` calls with core-layer function. | code | — | PR-K | [ ] | `cli/eval.py` no longer imports `get_project_db`, `get_eval_metadata`, `get_solution` from `infra.db`; existing L2 eval tests still pass |
-| S8a-25 | Update traceability matrix: (W6) add entries for `run delete` and `benchmark delete`; (W7) update all 199 "Planned" statuses by verifying each test ID against `tests/` directory. | docs | — | PR-L | [ ] | Matrix contains entries for all implemented commands; statuses reflect actual test existence (Implemented/Planned) |
-| S8a-19 | Write L2 integration tests for Sprint 008a features. | test | S8a-01..S8a-25 | PR-J | [ ] | `test_llm_update_max_tokens`, `test_llm_update_no_fields_error`, `test_run_delete_all`, `test_problem_version_delete_no_runs`, `test_problem_version_delete_with_runs_no_force`, `test_problem_version_delete_with_runs_force`, `test_run_smart_default_version`, `test_run_smart_default_dataset`, `test_project_init_no_templates` all pass |
+| S8a-01 | Implement `core.llm.update_llm(name, conn, *, max_tokens, timeout_s, input_cost_per_mtok, output_cost_per_mtok)` — modify LLM record in place without re-registering. Validate positive values. Only provided (non-None) fields are updated. | domain | — | PR-A | [x] | `update_llm()` updates only the specified fields; unspecified fields are unchanged; `RevolverError` if LLM not found; round-trip test passes |
+| S8a-02 | Add `infra.db.update_llm(conn, name, **fields)` SQL helper — builds `UPDATE llms SET ... WHERE name=?` dynamically for only the fields provided. | infra | — | PR-A | [x] | `UPDATE` only touches provided columns; existing columns unchanged; `conn.rowcount == 0` if not found |
+| S8a-03 | Implement `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N] [--input-cost F] [--output-cost F]`. Print updated entry; `--json` outputs full record. | cli | S8a-01 | PR-A | [x] | `revolver llm update my-llm --max-tokens 16384` updates DB; `revolver llm list` reflects change; error if no update flags provided |
+| S8a-04 | Add `--all` flag to `revolver run delete` (from Sprint 008 (v0.8.0)). Deletes every run in the project. Requires `--force` when `--all` is used (or confirmation prompt listing the count). | cli | Sprint 008 (v0.8.0) done | PR-B | [x] | `revolver run delete --all --force` removes all runs + solutions + files; `revolver run delete --all` without `--force` prompts with count; `run list` returns empty after |
+| S8a-05 | Implement `core.run.delete_all_runs(project_root, force)` — domain function that lists all runs then calls `delete_run()` for each. Returns count of deleted runs. | domain | Sprint 008 (v0.8.0) done | PR-B | [x] | All runs deleted; count returned; no partial state on failure (best-effort for disk ops) |
+| S8a-06 | Implement `core.problem.delete_version(tag, project_root, *, force)` — domain function: (1) check no runs reference this version (query `runs` table); (2) if runs found and not `force`: raise `RevolverError` with count; (3) if `force` or no runs: delete version snapshot from disk + DB row. | domain | — | PR-C | [x] | Version with no runs: deleted cleanly; version with runs + no `--force`: exit 1 with "N run(s) reference this version"; version with runs + `--force`: deleted; snapshot directory removed |
+| S8a-07 | Add `infra.db.delete_problem_version(conn, tag)`, `count_runs_for_version(conn, tag)` helpers. | infra | — | PR-C | [x] | `count_runs_for_version` returns correct count; `DELETE FROM problem_versions WHERE tag=?` works |
+| S8a-08 | Implement `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]`. Confirmation prompt unless `--force`. | cli | S8a-06 | PR-C | [x] | `revolver problem version delete v1.0 --force` deletes; `revolver problem version delete v1.0` with runs → error listing count; `revolver problem versions` no longer shows deleted tag |
+| S8a-09 | Real-time run progress: modify `cli/run.py` to stream OpenEvolve stdout/stderr line-by-line in real time instead of capturing all output then printing. Use `subprocess` with `stdout=PIPE` line-by-line reading, or ensure the existing `asyncio.run()` path flushes output. Disable buffering in child process (`PYTHONUNBUFFERED=1`). | cli | — | PR-D | [x] | Lines appear as they are printed by OE (not buffered until end); `--quiet` suppresses OE output; `--json` still produces valid JSON at end |
+| S8a-10 | Smart default for `--version` in `revolver run`: if `--version` is omitted and exactly one problem version exists, use it automatically and print a notice ("Using version v1.2 (only version)"). If multiple exist and `--version` is omitted, error with list of available versions. | cli | — | PR-E | [x] | Single version → auto-selected with notice; multiple versions → helpful error listing them; explicit `--version` always respected |
+| S8a-11 | Smart default for `--dataset` in `revolver run`: if `--dataset` is omitted and exactly one dataset with `split='train'` exists, use it automatically and print a notice. If no train dataset exists or multiple exist and `--dataset` is omitted, error with list. | cli | — | PR-E | [x] | Single train dataset → auto-selected with notice; multiple → error with list; no train datasets → error pointing to `dataset add --split train`; explicit `--dataset` always respected |
+| S8a-12 | Add `--no-templates` flag to `revolver project init`. When set, skip writing `evaluator.py`, `initial_program.py`, `config.yaml` template files (only create `.revolver/` directory and manifest). | cli | — | PR-F | [x] | `revolver project init --no-templates` creates `.revolver/` only; template files absent; `revolver project init` (no flag) unchanged; L2 test for both modes |
+| S8a-13 | Fix `benchmark results` help text: remove the misleading tip about `--format csv`. Add a tip pointing to `revolver benchmark export --format csv` instead. | cli | — | PR-G | [x] | `revolver benchmark results --help` no longer mentions `--format csv`; the tip text reads "For CSV export use: revolver benchmark export --format csv" |
+| S8a-14 | Clarify `llm add` help text for `-s local` vs provider: update `--source` help string to clearly state "use '-s local' for Ollama (provider is set automatically)"; remove any reference to `--provider ollama`. | cli | — | PR-G | [x] | `revolver llm add --help` shows updated source option description; no reference to `--provider ollama` |
+| S8a-16 | Update spec-llm: (C1) change `--source ollama` examples to `--source local`; (C2) document `--max-tokens` and `--timeout` options on `llm add`. | docs | — | PR-I | [x] | spec-llm §2.1 shows `--source local`, documents `--max-tokens` and `--timeout` with defaults |
+| S8a-17 | Update spec-dataset: (C4) change `--name` option to positional `NAME` argument; (C5) decide `--split` required/optional and align; (C6) mark `--compatible-with` as optional. | docs | — | PR-I | [x] | spec-dataset §2.1 matches code: `NAME` positional, `--split` aligned, `--compatible-with` optional |
+| S8a-18 | Update spec-benchmark and specifications index: (W9) add `benchmark list` and `benchmark delete` to index; (W10) add `benchmark delete` section to spec-benchmark. Update spec-project (W11): mark `name` as required argument. Remove `--sort` from spec-solution (W5) and spec-run (W6). Add `run delete` to spec-run §2 and spec index. | docs | — | PR-I | [x] | Specifications index lists all implemented commands; spec-benchmark includes `delete`; `--sort` removed from specs where not implemented; spec-run includes `delete` |
+| S8a-20 | Fix conops.md §5.1 workflow: change `--source huggingface` to `--source local`, align LLM registration example with actual CLI syntax. | docs | — | PR-I | [x] | ConOps §5.1 uses `--source local` for Ollama models; workflow matches implemented CLI |
+| S8a-21 | Update architecture.md §3 package tree comments: add `delete` to `run.py` and `solution.py` inline comments. | docs | — | PR-I | [x] | Architecture §3 tree shows `run.py # revolver run {...,delete}` and `solution.py # revolver solution {...,delete}` |
+| S8a-22 | Update README.md: fix features list (`benchmark` not `benchmark run`, remove `dataset verify`, add `run delete`), update sprint table through S008, update test count, remove "Planned" for `doctor`/`setup`, add version badge. | docs | — | PR-H | [x] | README features match implemented commands; sprint table complete through S008; test count reflects v0.8.0 |
+| S8a-23 | Rewrite user-story-e2e.md: fix `--source ollama` → `--source local`, `--name` → positional, version `0.1.0` → current, update all command outputs to match current CLI behavior. | docs | — | PR-H | [x] | All CLI commands in user story are runnable with current implementation; outputs reflect actual format |
+| S8a-24 | Refactor `cli/eval.py` lines 72-98: extract re-eval existence check into `core.eval.has_existing_eval(solution, dataset)`, replace direct `infra.db` calls with core-layer function. | code | — | PR-K | [x] | `cli/eval.py` no longer imports `get_project_db`, `get_eval_metadata`, `get_solution` from `infra.db`; existing L2 eval tests still pass |
+| S8a-25 | Update traceability matrix: (W6) add entries for `run delete` and `benchmark delete`; (W7) update all 199 "Planned" statuses by verifying each test ID against `tests/` directory. | docs | — | PR-L | [x] | Matrix contains entries for all implemented commands; statuses reflect actual test existence (Implemented/Planned) |
+| S8a-19 | Write L2 integration tests for Sprint 008a features. | test | S8a-01..S8a-25 | PR-J | [x] | `test_llm_update_max_tokens`, `test_llm_update_no_fields_error`, `test_run_delete_all`, `test_problem_version_delete_no_runs`, `test_problem_version_delete_with_runs_no_force`, `test_problem_version_delete_with_runs_force`, `test_run_smart_default_version`, `test_run_smart_default_dataset`, `test_project_init_no_templates` all pass |
 
 ---
 
@@ -235,28 +235,31 @@ Peak parallelism: 4 agents (Streams A, B, C, D simultaneously). Streams E–K fi
 
 ## Sprint Review
 
-_Filled at sprint end._
-
 ### Tests passing
-- X / 9 new integration tests passing
-- X / ~160 total cumulative integration tests passing
+- 30 / 9+ new integration tests passing (exceeded target)
+- 870 total tests passing (up from ~840)
 
 ### Demo-able features
-- [ ] `revolver llm update <name> --max-tokens N` modifies LLM without remove+add
-- [ ] `revolver run delete --all --force` purges entire run history
-- [ ] `revolver problem version delete <tag>` refuses if runs reference it (without `--force`)
-- [ ] `revolver run` auto-selects version when only one exists
-- [ ] `revolver run` auto-selects train dataset when only one exists
-- [ ] `revolver run` shows iteration progress in real time (not buffered)
-- [ ] `revolver project init --no-templates` creates bare project structure
-- [ ] `revolver benchmark results --help` no longer shows misleading `--format csv` tip
-- [ ] `revolver llm add --help` clearly explains `-s local` for Ollama
-- [ ] All spec docs aligned with code (CLI consistency audit findings resolved)
-- [ ] README.md reflects v0.8.1 feature set and sprint history
-- [ ] User story E2E uses correct CLI syntax throughout
-- [ ] ConOps §5.1 workflow uses `--source local`
-- [ ] `cli/eval.py` no longer imports from `infra.db`
-- [ ] Traceability matrix statuses reflect actual test implementation
+- [x] `revolver llm update <name> --max-tokens N` modifies LLM without remove+add
+- [x] `revolver run delete --all --force` purges entire run history
+- [x] `revolver problem version delete <tag>` refuses if runs reference it (without `--force`)
+- [x] `revolver run` auto-selects version when only one exists
+- [x] `revolver run` auto-selects train dataset when only one exists
+- [x] `revolver run` shows iteration progress in real time (not buffered)
+- [x] `revolver project init --no-templates` creates bare project structure
+- [x] `revolver benchmark results --help` no longer shows misleading `--format csv` tip
+- [x] `revolver llm add --help` clearly explains `-s local` for Ollama
+- [x] All spec docs aligned with code (CLI consistency audit findings resolved)
+- [x] README.md reflects v0.8.1 feature set and sprint history
+- [x] User story E2E uses correct CLI syntax throughout
+- [x] ConOps §5.1 workflow uses `--source local`
+- [x] `cli/eval.py` no longer imports from `infra.db`
+- [x] Traceability matrix statuses reflect actual test implementation
+
+### Bonus
+- CI self-hosted runner scaled to 3 replicas for parallel job execution
+- `problem version` subcommands restructured: `version`, `versions` → `version create`, `version list`, `version delete`
+- `ActiveRunError` exception subclass for precise error handling in bulk delete
 
 ### Carry-over
-_TBD at sprint end._
+None — all tasks completed.

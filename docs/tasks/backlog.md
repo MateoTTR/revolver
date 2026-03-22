@@ -260,30 +260,30 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 167 | `infra.db.update_llm()` SQL helper (FR6) | [ ] | S8a — PR-A |
-| 168 | `core.llm.update_llm()` domain function (FR6) | [ ] | S8a — PR-A |
-| 169 | `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N]` (FR6) | [ ] | S8a — PR-A |
-| 170 | `core.run.delete_all_runs()` domain function (FR2) | [ ] | S8a — PR-B |
-| 171 | Add `--all` flag to `revolver run delete` (FR2) | [ ] | S8a — PR-B |
-| 172 | `infra.db` helpers: `delete_problem_version()`, `count_runs_for_version()` (FR3) | [ ] | S8a — PR-C |
-| 173 | `core.problem.delete_version()` domain function with dependency check (FR3) | [ ] | S8a — PR-C |
-| 174 | `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]` (FR3) | [ ] | S8a — PR-C |
-| 175 | Real-time run progress: stream OE output line-by-line in `cli/run.py` (FR7) | [ ] | S8a — PR-D |
-| 176 | Smart default for `--version` in `revolver run` (P4) | [ ] | S8a — PR-E |
-| 177 | Smart default for `--dataset` in `revolver run` (P5) | [ ] | S8a — PR-E |
-| 178 | Add `--no-templates` flag to `revolver project init` (P2) | [ ] | S8a — PR-F |
-| 179 | Fix misleading `--format csv` tip in `benchmark results --help` (P6) | [ ] | S8a — PR-G |
-| 180 | Clarify `-s local` vs `--provider ollama` in `llm add --help` (P7) | [ ] | S8a — PR-G |
-| 182 | Update spec-llm: `--source local` (not `ollama`), document `--max-tokens`/`--timeout` (C1, C2) | [ ] | S8a — PR-I |
-| 183 | Update spec-dataset: positional `NAME`, align `--split`/`--compatible-with` required/optional (C4-C6) | [ ] | S8a — PR-I |
-| 184 | Update spec-benchmark (add `delete`), spec index (add `list`/`delete`), spec-project (`name` required), remove `--sort` from spec-solution/spec-run (W5-W6, W9-W11) | [ ] | S8a — PR-I |
-| 186 | Fix conops.md §5.1: `--source huggingface` → `--source local`, align workflow with implementation | [ ] | S8a — PR-I |
-| 187 | Update architecture.md §3 package tree: add `delete` to run.py and solution.py comments | [ ] | S8a — PR-I |
-| 188 | Update README.md: fix features list, sprint table, test count, remove "Planned" doctor/setup | [ ] | S8a — PR-H |
-| 189 | Rewrite user-story-e2e.md: fix CLI syntax (`--source local`, positional `name`), update outputs | [ ] | S8a — PR-H |
-| 190 | Refactor `cli/eval.py`: route re-eval check through `core.eval` instead of direct `infra.db` calls (F7) | [ ] | S8a — PR-K |
-| 191 | Update traceability matrix: add `run delete`/`benchmark delete` entries + update 199 "Planned" statuses | [ ] | S8a — PR-L |
-| 185 | Write L2 integration tests for Sprint 008a features | [ ] | S8a — PR-J |
+| 167 | `infra.db.update_llm()` SQL helper (FR6) | [x] | S8a — session 038, PR #104 |
+| 168 | `core.llm.update_llm()` domain function (FR6) | [x] | S8a — session 038, PR #104 |
+| 169 | `cli.llm.llm_update` command: `revolver llm update <name> [--max-tokens N] [--timeout N]` (FR6) | [x] | S8a — session 038, PR #104 |
+| 170 | `core.run.delete_all_runs()` domain function (FR2) | [x] | S8a — session 038, PR #99 |
+| 171 | Add `--all` flag to `revolver run delete` (FR2) | [x] | S8a — session 038, PR #99 |
+| 172 | `infra.db` helpers: `delete_problem_version()`, `count_runs_for_version()` (FR3) | [x] | S8a — session 038, PR #105 |
+| 173 | `core.problem.delete_version()` domain function with dependency check (FR3) | [x] | S8a — session 038, PR #105 |
+| 174 | `cli.problem.problem_version_delete` command: `revolver problem version delete <tag> [--force]` (FR3) | [x] | S8a — session 038, PR #105 |
+| 175 | Real-time run progress: stream OE output line-by-line in `cli/run.py` (FR7) | [x] | S8a — session 038, PR #113 |
+| 176 | Smart default for `--version` in `revolver run` (P4) | [x] | S8a — session 038, PR #112 |
+| 177 | Smart default for `--dataset` in `revolver run` (P5) | [x] | S8a — session 038, PR #112 |
+| 178 | Add `--no-templates` flag to `revolver project init` (P2) | [x] | S8a — session 038, PR #103 |
+| 179 | Fix misleading `--format csv` tip in `benchmark results --help` (P6) | [x] | S8a — session 038, PR #108 |
+| 180 | Clarify `-s local` vs `--provider ollama` in `llm add --help` (P7) | [x] | S8a — session 038, PR #108 |
+| 182 | Update spec-llm: `--source local` (not `ollama`), document `--max-tokens`/`--timeout` (C1, C2) | [x] | S8a — session 038, PR #114 |
+| 183 | Update spec-dataset: positional `NAME`, align `--split`/`--compatible-with` required/optional (C4-C6) | [x] | S8a — session 038, PR #114 |
+| 184 | Update spec-benchmark (add `delete`), spec index (add `list`/`delete`), spec-project (`name` required), remove `--sort` from spec-solution/spec-run (W5-W6, W9-W11) | [x] | S8a — session 038, PR #114 |
+| 186 | Fix conops.md §5.1: `--source huggingface` → `--source local`, align workflow with implementation | [x] | S8a — session 038, PR #114 |
+| 187 | Update architecture.md §3 package tree: add `delete` to run.py and solution.py comments | [x] | S8a — session 038, PR #114 |
+| 188 | Update README.md: fix features list, sprint table, test count, remove "Planned" doctor/setup | [x] | S8a — session 038, PR #115 |
+| 189 | Rewrite user-story-e2e.md: fix CLI syntax (`--source local`, positional `name`), update outputs | [x] | S8a — session 038, PR #115 |
+| 190 | Refactor `cli/eval.py`: route re-eval check through `core.eval` instead of direct `infra.db` calls (F7) | [x] | S8a — session 038, PR #111 |
+| 191 | Update traceability matrix: add `run delete`/`benchmark delete` entries + update 199 "Planned" statuses | [x] | S8a — session 038, PR #116 |
+| 185 | Write L2 integration tests for Sprint 008a features | [x] | S8a — session 038, included in PRs |
 
 ### Unscheduled — Release Process
 
