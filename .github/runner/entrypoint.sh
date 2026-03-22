@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
-RUNNER_NAME="${RUNNER_NAME:-self-hosted-wsl2}"
+RUNNER_NAME="${RUNNER_NAME:-wsl2-$(hostname)}"
 RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64}"
 
 # Get a fresh registration token via GitHub API

@@ -6,8 +6,10 @@ services:
     environment:
       - GITHUB_PAT=${GITHUB_PAT}
       - GITHUB_REPOSITORY=MateoTTR/revolver
-      - RUNNER_NAME=wsl2-runner
       - RUNNER_LABELS=self-hosted,linux,x64
+      # RUNNER_NAME is set dynamically from hostname in entrypoint.sh
     restart: always
+    deploy:
+      replicas: 3
     # 'restart: always' + ephemeral mode = after each job the container
     # exits and Docker restarts it, giving a fresh environment.
