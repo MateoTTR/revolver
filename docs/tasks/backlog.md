@@ -277,6 +277,12 @@
 | 182 | Update spec-llm: `--source local` (not `ollama`), document `--max-tokens`/`--timeout` (C1, C2) | [ ] | S8a — PR-I |
 | 183 | Update spec-dataset: positional `NAME`, align `--split`/`--compatible-with` required/optional (C4-C6) | [ ] | S8a — PR-I |
 | 184 | Update spec-benchmark (add `delete`), spec index (add `list`/`delete`), spec-project (`name` required), remove `--sort` from spec-solution/spec-run (W5-W6, W9-W11) | [ ] | S8a — PR-I |
+| 186 | Fix conops.md §5.1: `--source huggingface` → `--source local`, align workflow with implementation | [ ] | S8a — PR-I |
+| 187 | Update architecture.md §3 package tree: add `delete` to run.py and solution.py comments | [ ] | S8a — PR-I |
+| 188 | Update README.md: fix features list, sprint table, test count, remove "Planned" doctor/setup | [ ] | S8a — PR-H |
+| 189 | Rewrite user-story-e2e.md: fix CLI syntax (`--source local`, positional `name`), update outputs | [ ] | S8a — PR-H |
+| 190 | Refactor `cli/eval.py`: route re-eval check through `core.eval` instead of direct `infra.db` calls (F7) | [ ] | S8a — PR-K |
+| 191 | Update traceability matrix: add `run delete`/`benchmark delete` entries + update 199 "Planned" statuses | [ ] | S8a — PR-L |
 | 185 | Write L2 integration tests for Sprint 008a features | [ ] | S8a — PR-J |
 
 ### Unscheduled — Release Process

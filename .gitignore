@@ -9,3 +9,4 @@ build/
 .ruff_cache/
 *.egg
 .claude/worktrees/
+.github/runner/.env

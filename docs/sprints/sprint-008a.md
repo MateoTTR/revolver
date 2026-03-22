@@ -1,7 +1,7 @@
 # Sprint 008a — Scriptability & UX Polish (v0.8.1)
 
 **Status**: Planning
-**Goal**: Improve scripting support and user experience based on the multi-model TSP benchmark feedback. Delivers `llm update`, bulk run delete, problem version delete, real-time run progress, smarter defaults for `run`, and UX fixes for misleading help text. Target release: v0.8.1.
+**Goal**: Improve scripting support, user experience, and documentation consistency. Delivers `llm update`, bulk run delete, problem version delete, real-time run progress, smarter defaults for `run`, UX fixes for misleading help text, and a full documentation alignment pass (README, user story E2E, specs, ConOps, architecture, traceability matrix). Target release: v0.8.1.
 **Demo**: `revolver llm update claude-sonnet --max-tokens 16384` modifies the LLM without removing it; `revolver run delete --all --force` purges all runs; `revolver run` auto-selects the latest version and the only train dataset; `revolver run start` shows real-time iteration progress; `revolver benchmark results` help text no longer references `--format csv`.
 
 ---
@@ -10,6 +10,7 @@
 
 - Demo feedback: `/home/mathi/revolver-demos/tsp/demos/benchmark-multimodel/feedback.md`
 - CLI consistency audit: session 036 (2026-03-21)
+- Pre-sprint doc audit: session 038 (2026-03-22) — spec-reviewer + manual review
 - Predecessor: Sprint 008 (v0.8.0)
 
 ---
@@ -45,6 +46,22 @@ Full audit of 37 subcommands comparing `--help` output, spec docs, and code impl
 | W10 | WARNING | spec | `benchmark delete` implemented but not in spec-benchmark | Add to spec-benchmark |
 | W11 | WARNING | spec/cli | `project init name`: optional in spec, required in code | Update spec to match code (required) |
 
+## Findings from pre-sprint documentation audit (session 038)
+
+Cross-document consistency review (spec-reviewer agent + manual verification).
+
+| ID | Severity | Area | Description | Sprint action |
+|---|---|---|---|---|
+| F1 | CRITICAL | README.md | Features list: `benchmark run` (inexistant), `dataset verify` (inexistant), `doctor`/`setup` "Planned" | Rewrite README features + sprint table |
+| F5 | CRITICAL | user-story-e2e.md | `--source ollama`, `--name` option, version `0.1.0`, outdated outputs | Rewrite entire E2E scenario |
+| F6 | CRITICAL | conops.md §5.1 | `--source huggingface` inexistant in code | Fix to `--source local` |
+| F7 | CRITICAL | cli/eval.py | CLI calls `infra.db` directly (layer violation) | Refactor through `core.eval` |
+| W1 | WARNING | README.md | Test count "710+" → actual 749 | Update in README rewrite |
+| W2 | WARNING | README.md | Sprint table incomplete (missing S006c–S008) | Update in README rewrite |
+| W6 | WARNING | traceability-matrix.md | `run delete`, `benchmark delete` not traced | Add entries |
+| W7 | WARNING | traceability-matrix.md | All 199 statuses = "Planned" despite 749 tests passing | Update statuses |
+| W8 | WARNING | architecture.md §3 | `run delete`, `solution delete` missing from package tree | Update tree comments |
+
 ---
 
 ## Scope
@@ -57,7 +74,10 @@ Full audit of 37 subcommands comparing `--help` output, spec docs, and code impl
 - `revolver project init` — `--no-templates` flag
 - `revolver benchmark results` — fix misleading help text
 - `revolver llm add` — clarify `-s local` help text
+- `revolver eval` — refactor CLI layer to route through core (architecture fix)
 - Spec docs — align with code for all CLI consistency audit findings
+- User-facing docs — README.md, user-story-e2e.md, ConOps §5.1, architecture §3
+- Validation docs — traceability matrix status update + missing entries
 
 ### Key FRs covered
 - FR-LLM-007 — LLM update (new)
@@ -89,8 +109,14 @@ Full audit of 37 subcommands comparing `--help` output, spec docs, and code impl
 | S8a-14 | Clarify `llm add` help text for `-s local` vs provider: update `--source` help string to clearly state "use '-s local' for Ollama (provider is set automatically)"; remove any reference to `--provider ollama`. | cli | — | PR-G | [ ] | `revolver llm add --help` shows updated source option description; no reference to `--provider ollama` |
 | S8a-16 | Update spec-llm: (C1) change `--source ollama` examples to `--source local`; (C2) document `--max-tokens` and `--timeout` options on `llm add`. | docs | — | PR-I | [ ] | spec-llm §2.1 shows `--source local`, documents `--max-tokens` and `--timeout` with defaults |
 | S8a-17 | Update spec-dataset: (C4) change `--name` option to positional `NAME` argument; (C5) decide `--split` required/optional and align; (C6) mark `--compatible-with` as optional. | docs | — | PR-I | [ ] | spec-dataset §2.1 matches code: `NAME` positional, `--split` aligned, `--compatible-with` optional |
-| S8a-18 | Update spec-benchmark and specifications index: (W9) add `benchmark list` and `benchmark delete` to index; (W10) add `benchmark delete` section to spec-benchmark. Update spec-project (W11): mark `name` as required argument. Remove `--sort` from spec-solution (W5) and spec-run (W6). | docs | — | PR-I | [ ] | Specifications index lists all implemented commands; spec-benchmark includes `delete`; `--sort` removed from specs where not implemented |
-| S8a-19 | Write L2 integration tests for Sprint 009 features. | test | S8a-01..S8a-18 | PR-J | [ ] | `test_llm_update_max_tokens`, `test_llm_update_no_fields_error`, `test_run_delete_all`, `test_problem_version_delete_no_runs`, `test_problem_version_delete_with_runs_no_force`, `test_problem_version_delete_with_runs_force`, `test_run_smart_default_version`, `test_run_smart_default_dataset`, `test_project_init_no_templates` all pass |
+| S8a-18 | Update spec-benchmark and specifications index: (W9) add `benchmark list` and `benchmark delete` to index; (W10) add `benchmark delete` section to spec-benchmark. Update spec-project (W11): mark `name` as required argument. Remove `--sort` from spec-solution (W5) and spec-run (W6). Add `run delete` to spec-run §2 and spec index. | docs | — | PR-I | [ ] | Specifications index lists all implemented commands; spec-benchmark includes `delete`; `--sort` removed from specs where not implemented; spec-run includes `delete` |
+| S8a-20 | Fix conops.md §5.1 workflow: change `--source huggingface` to `--source local`, align LLM registration example with actual CLI syntax. | docs | — | PR-I | [ ] | ConOps §5.1 uses `--source local` for Ollama models; workflow matches implemented CLI |
+| S8a-21 | Update architecture.md §3 package tree comments: add `delete` to `run.py` and `solution.py` inline comments. | docs | — | PR-I | [ ] | Architecture §3 tree shows `run.py # revolver run {...,delete}` and `solution.py # revolver solution {...,delete}` |
+| S8a-22 | Update README.md: fix features list (`benchmark` not `benchmark run`, remove `dataset verify`, add `run delete`), update sprint table through S008, update test count, remove "Planned" for `doctor`/`setup`, add version badge. | docs | — | PR-H | [ ] | README features match implemented commands; sprint table complete through S008; test count reflects v0.8.0 |
+| S8a-23 | Rewrite user-story-e2e.md: fix `--source ollama` → `--source local`, `--name` → positional, version `0.1.0` → current, update all command outputs to match current CLI behavior. | docs | — | PR-H | [ ] | All CLI commands in user story are runnable with current implementation; outputs reflect actual format |
+| S8a-24 | Refactor `cli/eval.py` lines 72-98: extract re-eval existence check into `core.eval.has_existing_eval(solution, dataset)`, replace direct `infra.db` calls with core-layer function. | code | — | PR-K | [ ] | `cli/eval.py` no longer imports `get_project_db`, `get_eval_metadata`, `get_solution` from `infra.db`; existing L2 eval tests still pass |
+| S8a-25 | Update traceability matrix: (W6) add entries for `run delete` and `benchmark delete`; (W7) update all 199 "Planned" statuses by verifying each test ID against `tests/` directory. | docs | — | PR-L | [ ] | Matrix contains entries for all implemented commands; statuses reflect actual test existence (Implemented/Planned) |
+| S8a-19 | Write L2 integration tests for Sprint 008a features. | test | S8a-01..S8a-25 | PR-J | [ ] | `test_llm_update_max_tokens`, `test_llm_update_no_fields_error`, `test_run_delete_all`, `test_problem_version_delete_no_runs`, `test_problem_version_delete_with_runs_no_force`, `test_problem_version_delete_with_runs_force`, `test_run_smart_default_version`, `test_run_smart_default_dataset`, `test_project_init_no_templates` all pass |
 
 ---
 
@@ -125,8 +151,11 @@ Tests that must pass at sprint end:
 | PR-E | Smart defaults for `run` | `cli/run.py`, `core/run.py` | Independent (different sections than PR-D in run.py) |
 | PR-F | `project init --no-templates` | `cli/project.py`, `core/project.py`, `tests/` | Independent |
 | PR-G | Help text fixes (benchmark + llm) | `cli/benchmark.py`, `cli/llm.py` | Independent |
-| PR-I | Spec alignment (CLI consistency audit) | `docs/specs/spec-llm.md`, `docs/specs/spec-dataset.md`, `docs/specs/spec-benchmark.md`, `docs/specs/spec-solution.md`, `docs/specs/spec-run.md`, `docs/specs/spec-project.md`, `docs/specs/specifications.md` | Independent |
+| PR-H | User-facing docs (README + E2E user story) | `README.md`, `docs/specs/user-story-e2e.md` | Independent |
+| PR-I | Spec + doc alignment (CLI audit + pre-sprint audit) | `docs/specs/spec-*.md`, `docs/specs/specifications.md`, `docs/conops/conops.md`, `docs/architecture/architecture.md` | Independent |
 | PR-J | Full regression + sprint L2 tests | `tests/` | Depends on all PRs merged |
+| PR-K | Eval CLI layer refactor | `cli/eval.py`, `core/eval.py` | Independent |
+| PR-L | Traceability matrix update | `docs/validation/traceability-matrix.md` | Independent |
 
 ---
 
@@ -158,19 +187,23 @@ Sprint 008 (v0.8.0) complete ──┬──> S8a-02 (infra: update_llm SQL)
                       │                                                            │
                       ├──> S8a-12 (cli: project init --no-templates) ──────────────┤
                       │                                                            │
-                      ├──> S8a-13 (cli: help text fixes) ───────────────────────────┤
-                      │    S8a-14 (cli: llm add help text) ─────────────────────────┤
+                      ├──> S8a-13 (cli: help text fixes) ──────────────────────────┤
+                      │    S8a-14 (cli: llm add help text) ────────────────────────┤
                       │                                                            │
-                      └──> S8a-16 (docs: spec-llm alignment)                        │
-                           S8a-17 (docs: spec-dataset alignment) ───────────────────┤
-                           S8a-18 (docs: spec-benchmark/index/sort cleanup) ────────┤
-                                                                                    │
-                                                              S8a-19 (tests) ◄───────┘
+                      ├──> S8a-16..S8a-21 (docs: spec + conops + arch alignment)──┤
+                      │                                                            │
+                      ├──> S8a-22..S8a-23 (docs: README + E2E user story) ────────┤
+                      │                                                            │
+                      ├──> S8a-24 (code: eval.py layer refactor) ─────────────────┤
+                      │                                                            │
+                      ├──> S8a-25 (docs: traceability matrix update) ─────────────┤
+                      │                                                            │
+                      └──────────────────────────────── S8a-19 (tests) ◄───────────┘
 ```
 
 ### Critical path
 Sprint 008 (v0.8.0) → S8a-02 → S8a-01 → S8a-03 → S8a-19
-Estimated sequential depth: 4 steps.
+Estimated sequential depth: 4 steps (unchanged — new tasks are all independent).
 
 ### Parallel work streams
 
@@ -183,15 +216,20 @@ Estimated sequential depth: 4 steps.
 | E — Smart defaults | S8a-10, S8a-11 | Sprint 008 (v0.8.0) done | Agent 1 (after S8a-03) |
 | F — `project init --no-templates` | S8a-12 | Sprint 008 (v0.8.0) done | Agent 2 (after S8a-08) |
 | G — Help text fixes | S8a-13, S8a-14 | Sprint 008 (v0.8.0) done | Agent 3 (after S8a-04) |
-| H — Spec alignment (CLI audit) | S8a-16, S8a-17, S8a-18 | Sprint 008 (v0.8.0) done | Agent 2 (after S8a-08) |
-| I — Integration tests + regression | S8a-19 | All PRs merged | Any agent |
+| H — User-facing docs (README + E2E) | S8a-22, S8a-23 | Sprint 008 (v0.8.0) done | Agent 2 (after S8a-08) |
+| I — Spec + doc alignment | S8a-16..S8a-21 | Sprint 008 (v0.8.0) done | Agent 4 (after S8a-09) |
+| J — Eval CLI refactor | S8a-24 | Sprint 008 (v0.8.0) done | Agent 3 (after S8a-04) |
+| K — Traceability matrix | S8a-25 | Sprint 008 (v0.8.0) done | Agent 1 (after S8a-03) |
+| L — Integration tests + regression | S8a-19 | All PRs merged | Any agent |
 
-Peak parallelism: 4 agents (Streams A, B, C, D simultaneously after Sprint 008 (v0.8.0)).
+Peak parallelism: 4 agents (Streams A, B, C, D simultaneously). Streams E–K fit into agent gaps after their first task completes.
 
 ### Conflict risks
 - **`cli/run.py`** — PR-D (real-time progress, `launch_run` output) and PR-E (smart defaults, argument parsing) both touch `cli/run.py`. Coordinate merge order: merge PR-E first (argument validation at top of function), then PR-D (output loop in body). Alternatively, scope PRs to non-overlapping line ranges.
 - **`infra/db.py`** — PR-A (`update_llm` helper) and PR-C (`delete_problem_version`, `count_runs_for_version`) both add functions to `infra/db.py`. Low conflict risk (additive changes in different areas of the file).
 - **`cli/llm.py`** — PR-A (new `llm update` command) and PR-G (help text fix on `llm add`) both touch `cli/llm.py`. Merge PR-G first (1-line change to help string), then PR-A adds a new command function.
+- **`cli/eval.py`** — PR-K (layer refactor) is the only PR touching this file. No conflict risk.
+- **`docs/specs/`** — PR-I is the only PR touching spec files. PR-H touches README and user-story-e2e only. No overlap.
 
 ---
 
@@ -201,7 +239,7 @@ _Filled at sprint end._
 
 ### Tests passing
 - X / 9 new integration tests passing
-- X / 157 total cumulative integration tests passing
+- X / ~160 total cumulative integration tests passing
 
 ### Demo-able features
 - [ ] `revolver llm update <name> --max-tokens N` modifies LLM without remove+add
@@ -214,6 +252,11 @@ _Filled at sprint end._
 - [ ] `revolver benchmark results --help` no longer shows misleading `--format csv` tip
 - [ ] `revolver llm add --help` clearly explains `-s local` for Ollama
 - [ ] All spec docs aligned with code (CLI consistency audit findings resolved)
+- [ ] README.md reflects v0.8.1 feature set and sprint history
+- [ ] User story E2E uses correct CLI syntax throughout
+- [ ] ConOps §5.1 workflow uses `--source local`
+- [ ] `cli/eval.py` no longer imports from `infra.db`
+- [ ] Traceability matrix statuses reflect actual test implementation
 
 ### Carry-over
 _TBD at sprint end._
