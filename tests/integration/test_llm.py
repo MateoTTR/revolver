@@ -854,3 +854,164 @@ def test_llm_remove_json_requires_force(mock_global_db: Path) -> None:
     # Verify LLM is still in DB
     entries = _query_llms(mock_global_db)
     assert len(entries) == 1
+
+
+# ── Test 17: Update max_tokens ───────────────────────────────────────────
+
+
+def _add_remote_llm(name: str = "test-llm") -> None:
+    """Helper: add a remote LLM for update tests."""
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            name,
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--max-tokens",
+            "4096",
+            "--timeout",
+            "60",
+            "--input-cost",
+            "2.5",
+            "--output-cost",
+            "10.0",
+        ],
+    )
+
+
+@pytest.mark.integration
+def test_llm_update_max_tokens(mock_global_db: Path) -> None:
+    """Update max_tokens on an existing LLM, verify reflected in list."""
+    _add_remote_llm()
+
+    # Update max_tokens
+    result = runner.invoke(
+        app,
+        ["--json", "llm", "update", "test-llm", "--max-tokens", "16384"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["name"] == "test-llm"
+    assert data["max_tokens"] == 16384
+    # Other fields unchanged
+    assert data["timeout_s"] == 60
+
+    # Verify via list
+    list_result = runner.invoke(app, ["--json", "llm", "list"])
+    list_data = json.loads(list_result.stdout)
+    assert list_data[0]["max_tokens"] == 16384
+    assert list_data[0]["timeout_s"] == 60
+
+
+# ── Test 18: Update no fields error ──────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_no_fields_error(mock_global_db: Path) -> None:
+    """No update flags provided -> exit code 1."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "no update flags" in output.lower()
+
+
+# ── Test 19: Update timeout_s ────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_timeout(mock_global_db: Path) -> None:
+    """Update timeout_s on an existing LLM."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["--json", "llm", "update", "test-llm", "--timeout", "300"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["timeout_s"] == 300
+    assert data["max_tokens"] == 4096  # unchanged
+
+
+# ── Test 20: Update multiple fields ──────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_multiple_fields(mock_global_db: Path) -> None:
+    """Update multiple fields at once."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "llm",
+            "update",
+            "test-llm",
+            "--max-tokens",
+            "8192",
+            "--timeout",
+            "180",
+            "--input-cost",
+            "5.0",
+            "--output-cost",
+            "20.0",
+        ],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["max_tokens"] == 8192
+    assert data["timeout_s"] == 180
+    assert data["input_cost_per_mtok"] == 5.0
+    assert data["output_cost_per_mtok"] == 20.0
+
+
+# ── Test 21: Update nonexistent LLM error ────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_nonexistent(mock_global_db: Path) -> None:
+    """Updating a nonexistent LLM -> exit code 1."""
+    result = runner.invoke(
+        app,
+        ["llm", "update", "does-not-exist", "--max-tokens", "8192"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "not found" in output.lower()
+
+
+# ── Test 22: Update with invalid max_tokens error ────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_invalid_max_tokens(mock_global_db: Path) -> None:
+    """Updating with zero max_tokens -> exit code 1."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--max-tokens", "0"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "positive" in output.lower()

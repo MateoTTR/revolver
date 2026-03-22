@@ -684,6 +684,56 @@ def delete_llm(conn: sqlite3.Connection, name: str) -> None:
     conn.commit()
 
 
+def update_llm(
+    conn: sqlite3.Connection,
+    name: str,
+    *,
+    max_tokens: int | None = None,
+    timeout_s: int | None = None,
+    input_cost_per_mtok: float | None = None,
+    output_cost_per_mtok: float | None = None,
+) -> int:
+    """Update mutable fields of an LLM entry.
+
+    Builds a dynamic ``UPDATE llms SET ... WHERE name=?`` query that only
+    touches the columns for which a non-None value was provided.
+
+    Args:
+        conn: A connection to the global database.
+        name: The unique LLM name to update.
+        max_tokens: New value for maximum tokens per response.
+        timeout_s: New value for request timeout in seconds.
+        input_cost_per_mtok: New value for cost per million input tokens.
+        output_cost_per_mtok: New value for cost per million output tokens.
+
+    Returns:
+        The number of rows affected (0 if name not found, 1 if updated).
+    """
+    fields: dict[str, object] = {}
+    if max_tokens is not None:
+        fields["max_tokens"] = max_tokens
+    if timeout_s is not None:
+        fields["timeout_s"] = timeout_s
+    if input_cost_per_mtok is not None:
+        fields["input_cost_per_mtok"] = input_cost_per_mtok
+    if output_cost_per_mtok is not None:
+        fields["output_cost_per_mtok"] = output_cost_per_mtok
+
+    if not fields:
+        return 0
+
+    set_clause = ", ".join(f"{col} = ?" for col in fields)
+    values = list(fields.values())
+    values.append(name)
+
+    cursor = conn.execute(
+        f"UPDATE llms SET {set_clause} WHERE name = ?",
+        values,
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
 def update_llm_stats(
     conn: sqlite3.Connection,
     name: str,

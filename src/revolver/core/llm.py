@@ -182,6 +182,68 @@ def register_llm(
     return entry
 
 
+# ── update_llm ──────────────────────────────────────────────────────────
+
+
+def update_llm(
+    name: str,
+    conn: sqlite3.Connection,
+    *,
+    max_tokens: int | None = None,
+    timeout_s: int | None = None,
+    input_cost_per_mtok: float | None = None,
+    output_cost_per_mtok: float | None = None,
+) -> LLMEntry:
+    """Update mutable fields of a registered LLM.
+
+    Only fields with non-None values are updated; the rest remain unchanged.
+
+    Args:
+        name: LLM registry name.
+        conn: Global database connection.
+        max_tokens: New value for maximum tokens per response.
+        timeout_s: New value for request timeout in seconds.
+        input_cost_per_mtok: New value for cost per million input tokens (USD).
+        output_cost_per_mtok: New value for cost per million output tokens (USD).
+
+    Returns:
+        The updated :class:`LLMEntry`.
+
+    Raises:
+        RevolverError: If the LLM is not found.
+        ValidationError: If any provided value is not positive.
+    """
+    # Validate positive values
+    if max_tokens is not None and max_tokens < 1:
+        raise ValidationError("--max-tokens must be a positive integer")
+    if timeout_s is not None and timeout_s < 1:
+        raise ValidationError("--timeout must be a positive integer")
+    if input_cost_per_mtok is not None and input_cost_per_mtok < 0:
+        raise ValidationError("--input-cost must be non-negative")
+    if output_cost_per_mtok is not None and output_cost_per_mtok < 0:
+        raise ValidationError("--output-cost must be non-negative")
+
+    row_count = db.update_llm(
+        conn,
+        name,
+        max_tokens=max_tokens,
+        timeout_s=timeout_s,
+        input_cost_per_mtok=input_cost_per_mtok,
+        output_cost_per_mtok=output_cost_per_mtok,
+    )
+
+    if row_count == 0:
+        # Distinguish "no fields provided" from "LLM not found"
+        existing = db.get_llm(conn, name)
+        if existing is None:
+            raise RevolverError(f"LLM '{name}' not found")
+
+    # Return the updated entry
+    entry = db.get_llm(conn, name)
+    assert entry is not None  # guaranteed since update succeeded
+    return entry
+
+
 # ── remove_llm ──────────────────────────────────────────────────────────────
 
 
