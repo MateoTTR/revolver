@@ -51,6 +51,8 @@ from revolver.infra.db import (
     get_solutions_for_run,
     insert_run,
     insert_solution,
+    list_datasets as db_list_datasets,
+    list_problem_versions as db_list_problem_versions,
     list_runs as db_list_runs,
     update_run_generation_time,
     update_run_status,
@@ -261,6 +263,77 @@ def _resolve_project_root(project_root: Path | None) -> Path:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
         raise RevolverError(str(exc)) from exc
+
+
+# ── Smart defaults (S8a-10, S8a-11) ──────────────────────────────────────────
+
+
+def resolve_default_version(
+    project_root: Path | None = None,
+) -> str:
+    """Auto-select the problem version when exactly one exists.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        The single version tag.
+
+    Raises:
+        RevolverError: If zero or multiple versions exist.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    proj_conn = get_project_db(db_path)
+    try:
+        versions = db_list_problem_versions(proj_conn)
+    finally:
+        proj_conn.close()
+
+    if len(versions) == 0:
+        raise RevolverError(
+            "No problem versions found. Create one with 'revolver problem version'."
+        )
+    if len(versions) == 1:
+        return versions[0].tag
+    # Multiple versions: list them in the error message
+    tags = ", ".join(v.tag for v in versions)
+    raise RevolverError(f"Multiple problem versions exist ({tags}). Specify one with --version.")
+
+
+def resolve_default_dataset(
+    project_root: Path | None = None,
+) -> str:
+    """Auto-select the dataset when exactly one train dataset exists.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        The single train dataset name.
+
+    Raises:
+        RevolverError: If zero or multiple train datasets exist.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    proj_conn = get_project_db(db_path)
+    try:
+        all_datasets = db_list_datasets(proj_conn)
+    finally:
+        proj_conn.close()
+
+    train_datasets = [d for d in all_datasets if d.split == "train"]
+
+    if len(train_datasets) == 0:
+        raise RevolverError(
+            "No train datasets found. Register one with 'revolver dataset add --split train'."
+        )
+    if len(train_datasets) == 1:
+        return train_datasets[0].name
+    # Multiple train datasets: list them in the error message
+    names = ", ".join(d.name for d in train_datasets)
+    raise RevolverError(f"Multiple train datasets exist ({names}). Specify one with --dataset.")
 
 
 # ── Post-run failure handler ──────────────────────────────────────────────────

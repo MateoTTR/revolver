@@ -68,16 +68,16 @@ def run_launch(
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
-        # Validate required options
+        # Smart defaults for --version and --dataset (S8a-10, S8a-11)
         if not version:
-            sys.stderr.write("Error: --version is required.\n")
-            raise typer.Exit(code=1)
+            version = core_run.resolve_default_version()
+            typer.echo(f"Using version {version} (only version)")
         if not llm:
             sys.stderr.write("Error: --llm is required.\n")
             raise typer.Exit(code=1)
         if not dataset:
-            sys.stderr.write("Error: --dataset is required.\n")
-            raise typer.Exit(code=1)
+            dataset = core_run.resolve_default_dataset()
+            typer.echo(f"Using dataset {dataset} (only train dataset)")
 
         config = RunConfig(
             problem_version=version,
