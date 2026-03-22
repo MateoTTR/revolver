@@ -115,8 +115,8 @@ def test_json_flag_all_commands(tmp_project: Path) -> None:
     json_commands: list[tuple[list[str], dict[str, object]]] = [
         # llm list — returns empty list
         (["--json", "llm", "list"], {}),
-        # problem versions — returns empty list
-        (["--json", "problem", "versions"], {}),
+        # problem version list — returns empty list
+        (["--json", "problem", "version", "list"], {}),
         # dataset list — returns empty list
         (["--json", "dataset", "list"], {}),
         # run list — returns empty list
@@ -201,8 +201,8 @@ def test_json_flag_after_subcommand(tmp_project: Path) -> None:
     json_after_commands: list[tuple[list[str], dict[str, object]]] = [
         # llm list --json
         (["llm", "list", "--json"], {}),
-        # problem versions --json
-        (["problem", "versions", "--json"], {}),
+        # problem version list --json
+        (["problem", "version", "list", "--json"], {}),
         # dataset list --json
         (["dataset", "list", "--json"], {}),
         # run list --json
