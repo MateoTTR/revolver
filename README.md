@@ -22,22 +22,22 @@ OpenEvolve provides the core evolutionary loop for LLM-guided code optimization.
 
 ```
 revolver project init                  # Initialize a new optimization project
+revolver doctor                        # Verify environment dependencies
+revolver setup                         # Install missing Python dependencies
 revolver llm add/start/stop/remove     # Register and manage LLMs (local Ollama or remote API)
 revolver llm list/status               # Monitor registered LLMs and GPU usage
 revolver problem test                  # Validate evaluator against instances
 revolver problem version/versions      # Create and list immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
-revolver dataset list/info/verify      # Inspect datasets and verify integrity
+revolver dataset list/info             # Inspect datasets
 revolver run/run resume                # Launch or resume OpenEvolve optimization runs
-revolver run status/list/info          # Monitor and inspect runs
+revolver run status/list/info/delete   # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
 revolver solution extract/delete       # Extract solution code or clean up
-revolver benchmark run/results         # Compare multiple solutions on same dataset
+revolver benchmark/benchmark results   # Compare multiple solutions on same dataset
 revolver benchmark list/export/delete  # Manage and export benchmark results (CSV/JSON)
 ```
-
-**Planned**: `doctor`, `setup` (Sprint 007)
 
 ## Architecture
 
@@ -89,7 +89,7 @@ revolver llm add claude --provider anthropic --model claude-sonnet-4-6-20250514 
     --api-key-env ANTHROPIC_API_KEY
 
 # Local model via Ollama
-revolver llm add codestral --source ollama --model codestral:22b --pull
+revolver llm add codestral --source local --model codestral:22b --pull
 
 # Check status
 revolver llm list
@@ -133,7 +133,7 @@ revolver run status
 revolver eval --solution <solution-id> --dataset eval-set
 revolver eval results --solution <solution-id>
 
-revolver benchmark run --solutions sol1,sol2,sol3 --dataset eval-set
+revolver benchmark --solutions sol1,sol2,sol3 --dataset eval-set
 revolver benchmark results --id <benchmark-id>
 revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 ```
@@ -163,7 +163,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (710+ tests, ~15s)
+# Run tests (830+ tests, ~15s)
 python -m pytest tests/
 
 # Lint
@@ -189,7 +189,10 @@ mypy
 | Sprint 006 | Benchmark: multi-solution comparison & export | v0.6.0 | Done |
 | Sprint 006a | Demo feedback fixes | v0.6.1 | Done |
 | Sprint 006b | Demo feedback fixes | v0.6.2 | Done |
-| Sprint 007 | Doctor, setup & cross-cutting polish | — | Planned |
+| Sprint 006c | LLM config injection & iteration stats | v0.6.3 | Done |
+| Sprint 007 | Doctor, setup & cross-cutting polish | v0.7.0 | Done |
+| Sprint 007a | Post-demo fixes (global options) | v0.7.1 | Done |
+| Sprint 008 | Reliability & lifecycle management | v0.8.0 | Done |
 
 ## Documentation
 
