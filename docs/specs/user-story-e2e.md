@@ -15,7 +15,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.1.0
+    ✓ revolver         0.8.0
     ✓ openevolve       0.2.0
 
   External tools:
@@ -27,25 +27,40 @@ All checks passed.
 
 ```bash
 # Register the local LLM (Ollama + Codestral)
-$ revolver llm add codestral-local --source ollama --model codestral:22b --pull
+$ revolver llm add codestral-local --source local --model codestral:22b --pull
 
-LLM "codestral-local" registered (source: ollama, model: codestral:22b)
-Model pulled successfully (12 GB, digest: sha256:0898a8b2...)
+ status    registered
+ name      codestral-local
+ model     codestral:22b
+ source    local
+ provider
+ base_url
+
+Done: LLM 'codestral-local' registered
 ```
 
 ```bash
 # Register the remote LLM (Claude via Anthropic API)
-$ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
+$ revolver llm add claude-opus --source remote --provider anthropic --model claude-opus-4-6 \
+    --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
 
-LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6, pricing: $15.00/$75.00 per Mtok)
+ status    registered
+ name      claude-opus
+ model     claude-opus-4-6
+ source    remote
+ provider  anthropic
+ base_url
+
+Done: LLM 'claude-opus' registered
 ```
 
 ```bash
 # Verify both are registered
 $ revolver llm list
 
-codestral-local   ollama      codestral:22b
-claude-opus       anthropic   claude-opus-4-6
+ name              source  model            provider   base_url
+ codestral-local   local   codestral:22b
+ claude-opus       remote  claude-opus-4-6  anthropic
 ```
 
 ---
@@ -56,8 +71,12 @@ claude-opus       anthropic   claude-opus-4-6
 # Create a new project
 $ revolver project init scheduling-optimizer --description "Job-shop scheduling with makespan minimization"
 
-Project "scheduling-optimizer" initialized in ./scheduling-optimizer/
-Created: .revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml
+ status    success
+ project   scheduling-optimizer
+ path      /home/alice/scheduling-optimizer
+ created   .revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml
+
+Done: Project 'scheduling-optimizer' initialized at /home/alice/scheduling-optimizer
 
 $ cd scheduling-optimizer/
 ```
@@ -125,10 +144,13 @@ Summary: 50 passed, 0 failed, mean time: 0.9s, max time: 3.8s
 # Satisfied — create an immutable version snapshot
 $ revolver problem version --tag v1.0 --message "Initial formulation: greedy heuristic, makespan objective"
 
-Problem version "v1.0" created
-  Files: initial_program.py, evaluator.py, config.yaml, problem.md
-  Hash: sha256:a1b2c3d4...
-  Message: Initial formulation: greedy heuristic, makespan objective
+ tag          v1.0
+ hash         sha256:a1b2c3d4...
+ message      Initial formulation: greedy heuristic, makespan objective
+ files        4
+ created_at   2026-03-10 14:00:00
+
+Done: Problem versioned as sha256:a1b2
 ```
 
 ---
@@ -139,37 +161,43 @@ Alice has two directories of instances: a small training set and a larger evalua
 
 ```bash
 # Register training dataset
-$ revolver dataset add --name train-small --path ./data/instances-small/ --split train --compatible-with v1.0 --description "50 small instances for evolution"
+$ revolver dataset add train-small --path ./data/instances-small/ --split train \
+    --compatible-with v1.0 --description "50 small instances for evolution"
 
-Dataset "train-small" registered
-  Path: ./data/instances-small/
-  Split: train
-  Instances: 50
-  Global hash: sha256:f1e2d3c4...
-  Compatible with: v1.0
-  Storage: reference (hash-only)
+ status          registered
+ name            train-small
+ path            ./data/instances-small/
+ storage         reference
+ split           train
+ instance_count  50
+ global_hash     sha256:f1e2d3c4...
+
+Done: Dataset 'train-small' registered (50 instances)
 ```
 
 ```bash
 # Register evaluation dataset (larger, held-out instances)
-$ revolver dataset add --name eval-bench --path ./data/instances-eval/ --split eval --compatible-with v1.0 --description "200 instances for benchmarking"
+$ revolver dataset add eval-bench --path ./data/instances-eval/ --split eval \
+    --compatible-with v1.0 --description "200 instances for benchmarking"
 
-Dataset "eval-bench" registered
-  Path: ./data/instances-eval/
-  Split: eval
-  Instances: 200
-  Global hash: sha256:b7a8c9d0...
-  Compatible with: v1.0
-  Storage: reference (hash-only)
+ status          registered
+ name            eval-bench
+ path            ./data/instances-eval/
+ storage         reference
+ split           eval
+ instance_count  200
+ global_hash     sha256:b7a8c9d0...
+
+Done: Dataset 'eval-bench' registered (200 instances)
 ```
 
 ```bash
 # Verify datasets
 $ revolver dataset list
 
-Name          Split  Instances  Compatible With  Storage
-train-small   train  50         v1.0             reference
-eval-bench    eval   200        v1.0             reference
+ name          split  instance_count  storage
+ train-small   train  50              reference
+ eval-bench    eval   200             reference
 ```
 
 ---
@@ -232,9 +260,9 @@ Run completed: run-20260310-173000
 # See both solutions
 $ revolver solution list
 
-ID                      Alias            Version  LLM              Score   Rank  Run                   Date
-sol-20260310-143000     codestral-v1.0   v1.0     codestral-local  0.74    #1    run-20260310-143000   2026-03-10
-sol-20260310-173000     claude-v1.0      v1.0     claude-opus      0.82    #1    run-20260310-173000   2026-03-10
+ id                      alias            version  llm              score   rank
+ sol-20260310-143000     codestral-v1.0   v1.0     codestral-local  0.7400  #1
+ sol-20260310-173000     claude-v1.0      v1.0     claude-opus      0.8200  #1
 ```
 
 ---
@@ -243,7 +271,7 @@ sol-20260310-173000     claude-v1.0      v1.0     claude-opus      0.82    #1   
 
 ```bash
 # Run a comparative benchmark on the held-out eval dataset
-$ revolver benchmark --solutions codestral-v1.0 claude-v1.0 --dataset eval-bench --alias baseline-comparison
+$ revolver benchmark --solutions codestral-v1.0,claude-v1.0 --dataset eval-bench --alias baseline-comparison
 
 Evaluating "codestral-v1.0" on "eval-bench" (200 instances)
   [████████████████████████████████] 200/200
@@ -285,6 +313,13 @@ $ revolver benchmark export --latest --format json --output ./analysis/benchmark
 Exported benchmark "baseline-comparison" to ./analysis/benchmark-summary.json
 ```
 
+```bash
+# Clean up: delete a run and its solutions when no longer needed
+$ revolver run delete run-20260310-143000 --force
+
+Done: Run 'run-20260310-143000' deleted (including 3 solutions and run files)
+```
+
 ---
 
 ## Summary — Command Sequence
@@ -292,15 +327,16 @@ Exported benchmark "baseline-comparison" to ./analysis/benchmark-summary.json
 | # | Phase | Command | Purpose |
 |---|---|---|---|
 | 1 | Setup | `revolver doctor` | Verify environment |
-| 2 | Setup | `revolver llm add` (×2) | Register LLMs |
+| 2 | Setup | `revolver llm add` (x2) | Register LLMs |
 | 3 | Project | `revolver project init` | Create project |
 | 4 | Problem | `revolver problem test --instance` | Quick smoke test |
 | 5 | Problem | `revolver problem test --dataset` | Full validation |
 | 6 | Problem | `revolver problem version` | Freeze problem definition |
-| 7 | Dataset | `revolver dataset add` (×2) | Register train + eval datasets |
+| 7 | Dataset | `revolver dataset add` (x2) | Register train + eval datasets |
 | 8 | Run | `revolver llm start` | Load local model |
-| 9 | Run | `revolver run` (×2) | Generate solutions |
+| 9 | Run | `revolver run` (x2) | Generate solutions |
 | 10 | Run | `revolver llm stop` | Free GPU |
 | 11 | Benchmark | `revolver benchmark` | Compare solutions |
 | 12 | Benchmark | `revolver benchmark results --per-instance` | Instance-level analysis |
 | 13 | Benchmark | `revolver benchmark export` | Export for external tools |
+| 14 | Cleanup | `revolver run delete` | Remove old runs |
