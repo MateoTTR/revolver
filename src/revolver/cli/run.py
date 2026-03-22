@@ -483,20 +483,28 @@ def run_delete(
                     )
                 typer.confirm(f"Delete all {count} run(s) and their data?", abort=True)
 
-            deleted = core_run.delete_all_runs()
+            bulk_result = core_run.delete_all_runs()
+            deleted: int = bulk_result["deleted"]  # type: ignore[assignment]
+            skipped: list[str] = bulk_result["skipped"]  # type: ignore[assignment]
 
             result_data: dict[str, object] = {
                 "runs_deleted": deleted,
                 "status": "deleted",
             }
+            if skipped:
+                result_data["skipped"] = skipped
             render(result_data, json_mode=json_mode)
 
             if not json_mode:
-                print_confirmation(
-                    f"Done: {deleted} run(s) deleted",
-                    json_mode=json_mode,
-                    quiet=quiet,
-                )
+                msg = f"Done: {deleted} run(s) deleted"
+                if skipped:
+                    msg += f" ({len(skipped)} skipped — active)"
+                print_confirmation(msg, quiet=quiet)
+                for sid in skipped:
+                    typer.echo(
+                        f"Warning: Could not delete run '{sid}' (active), skipping.",
+                        err=True,
+                    )
             return
 
         # Single-run deletion: run_id is required
@@ -525,6 +533,5 @@ def run_delete(
                 f"Done: Run {run_id} deleted "
                 f"({summary['solutions_deleted']} solutions, "
                 f"{summary['evals_deleted']} evals removed)",
-                json_mode=json_mode,
                 quiet=quiet,
             )
