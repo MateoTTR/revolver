@@ -118,16 +118,19 @@ def init_project(
     path: Path,
     name: str,
     description: str = "",
+    no_templates: bool = False,
 ) -> ProjectConfig:
     """Initialize a new Revolver project.
 
     Creates the ``.revolver/`` directory structure, SQLite database,
-    ``project.yaml`` manifest, and template files.
+    ``project.yaml`` manifest, and (optionally) template files.
 
     Args:
         path: Project root directory. Created if it does not exist (FR-PRJ-007).
         name: Project name.
         description: Short project description.
+        no_templates: If True, skip writing template files
+            (``evaluator.py``, ``initial_program.py``, ``config.yaml``).
 
     Returns:
         The created ``ProjectConfig``.
@@ -175,13 +178,14 @@ def init_project(
         },
     )
 
-    # FR-PRJ-003: generate template initial_program.py
-    (path / "initial_program.py").write_text(_INITIAL_PROGRAM_TEMPLATE, encoding="utf-8")
+    if not no_templates:
+        # FR-PRJ-003: generate template initial_program.py
+        (path / "initial_program.py").write_text(_INITIAL_PROGRAM_TEMPLATE, encoding="utf-8")
 
-    # FR-PRJ-004: generate template evaluator.py
-    (path / "evaluator.py").write_text(_EVALUATOR_TEMPLATE, encoding="utf-8")
+        # FR-PRJ-004: generate template evaluator.py
+        (path / "evaluator.py").write_text(_EVALUATOR_TEMPLATE, encoding="utf-8")
 
-    # FR-PRJ-005: generate template config.yaml
-    (path / "config.yaml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+        # FR-PRJ-005: generate template config.yaml
+        (path / "config.yaml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
 
     return config
