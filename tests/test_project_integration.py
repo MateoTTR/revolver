@@ -147,3 +147,36 @@ def test_init_directory_permissions(
     revolver_dir = tmp_path / ".revolver"
     mode = stat.S_IMODE(revolver_dir.stat().st_mode)
     assert mode == 0o700, f"Expected mode 0o700, got {oct(mode)}"
+
+
+@pytest.mark.integration
+def test_project_init_no_templates(tmp_path: pytest.TempPathFactory) -> None:
+    """--no-templates creates .revolver/ and manifest but skips template files."""
+    result = runner.invoke(
+        app, ["project", "init", "my-project", "--path", str(tmp_path), "--no-templates"]
+    )
+    assert result.exit_code == 0, f"stdout: {result.stdout}"
+
+    # .revolver/ directory exists
+    revolver_dir = tmp_path / ".revolver"
+    assert revolver_dir.is_dir()
+
+    # project.yaml manifest exists with correct name
+    project_yaml = tmp_path / "project.yaml"
+    assert project_yaml.is_file()
+    with open(project_yaml, encoding="utf-8") as f:
+        manifest = yaml.safe_load(f)
+    assert manifest["name"] == "my-project"
+
+    # SQLite database exists
+    db_path = revolver_dir / "revolver.db"
+    assert db_path.is_file()
+
+    # Template files are NOT created
+    assert not (tmp_path / "evaluator.py").exists()
+    assert not (tmp_path / "initial_program.py").exists()
+    assert not (tmp_path / "config.yaml").exists()
+
+    # Output message contains project name
+    output = _strip_ansi(result.stdout)
+    assert "my-project" in output

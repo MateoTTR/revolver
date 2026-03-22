@@ -37,6 +37,13 @@ def project_init(
             help="Short project description.",
         ),
     ] = "",
+    no_templates: Annotated[
+        bool,
+        typer.Option(
+            "--no-templates/--templates",
+            help="Skip writing template files (evaluator.py, initial_program.py, config.yaml).",
+        ),
+    ] = False,
 ) -> None:
     """Initialize a new Revolver project."""
     with cli_error_boundary():
@@ -46,6 +53,7 @@ def project_init(
             path=target,
             name=name,
             description=description,
+            no_templates=no_templates,
         )
 
         resolved = target.resolve()
@@ -53,20 +61,18 @@ def project_init(
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
-        files = ".revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml"
+        files_list = [".revolver/", "project.yaml"]
+        if not no_templates:
+            files_list.extend(["initial_program.py", "evaluator.py", "config.yaml"])
+
+        files = ", ".join(files_list)
 
         if json_mode:
             render(
                 {
                     "project": config.name,
                     "path": str(resolved),
-                    "files_created": [
-                        ".revolver/",
-                        "initial_program.py",
-                        "evaluator.py",
-                        "config.yaml",
-                        "project.yaml",
-                    ],
+                    "files_created": files_list,
                 },
                 json_mode=True,
             )
