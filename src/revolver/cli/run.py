@@ -45,7 +45,10 @@ def run_launch(
     ] = None,
     alias: Annotated[
         str | None,
-        typer.Option("--alias", help="User-friendly alias for the rank-1 solution."),
+        typer.Option(
+            "--alias",
+            help="User-friendly alias for the rank-1 solution.",
+        ),
     ] = None,
     config_override: Annotated[
         list[str] | None,
@@ -56,7 +59,10 @@ def run_launch(
     ] = None,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="Display resolved config without launching."),
+        typer.Option(
+            "--dry-run",
+            help="Display resolved config without launching.",
+        ),
     ] = False,
 ) -> None:
     """Launch an OpenEvolve evolution run."""
@@ -68,16 +74,18 @@ def run_launch(
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
-        # Validate required options
+        # Smart defaults for --version and --dataset (S8a-10, S8a-11)
         if not version:
-            sys.stderr.write("Error: --version is required.\n")
-            raise typer.Exit(code=1)
+            version = core_run.resolve_default_version()
+            if not json_mode and not quiet:
+                sys.stderr.write(f"Using version {version} (only version)\n")
         if not llm:
             sys.stderr.write("Error: --llm is required.\n")
             raise typer.Exit(code=1)
         if not dataset:
-            sys.stderr.write("Error: --dataset is required.\n")
-            raise typer.Exit(code=1)
+            dataset = core_run.resolve_default_dataset()
+            if not json_mode and not quiet:
+                sys.stderr.write(f"Using dataset {dataset} (only train dataset)\n")
 
         config = RunConfig(
             problem_version=version,

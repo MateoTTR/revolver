@@ -1172,3 +1172,222 @@ def test_run_delete_all_with_id_error(
     output = _get_all_output(result)
     assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
     assert "Cannot use --all with a specific run ID" in output
+
+
+# ── Test: Smart default version — single version auto-selected (S8a-10) ─────
+
+
+@pytest.mark.integration
+def test_run_smart_default_version(project_with_prereqs: dict[str, Path]) -> None:
+    """Single version auto-selected with notice when --version omitted."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        ["run", "--llm", "test-llm", "--dataset", "train-small", "--dry-run"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "Using version v1.0 (only version)" in output
+    assert "dry-run" in output.lower()
+
+
+@pytest.mark.integration
+def test_run_smart_default_version_multiple_error(
+    tmp_project: Path, dataset_dir: Path, global_db_path: Path
+) -> None:
+    """Multiple versions → error listing available versions when --version omitted."""
+    _create_problem_version(tmp_project, "v1.0")
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO problem_versions (tag, hash, message, created_at) VALUES (?, ?, ?, ?)",
+            ("v2.0", "fakehash-v2", "Version v2.0", "2026-03-22T10:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _register_dataset(tmp_project, dataset_dir, compatible_with=["v1.0"])
+    _register_llm(global_db_path)
+
+    result = _invoke_with_mocks(
+        ["run", "--llm", "test-llm", "--dataset", "train-small", "--dry-run"],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Multiple problem versions exist" in output
+    assert "v1.0" in output
+    assert "v2.0" in output
+    assert "--version" in output
+
+
+@pytest.mark.integration
+def test_run_smart_default_version_no_versions_error(
+    tmp_project: Path, dataset_dir: Path, global_db_path: Path
+) -> None:
+    """No problem versions → error pointing to 'problem version'."""
+    _register_dataset(tmp_project, dataset_dir, compatible_with=[])
+    _register_llm(global_db_path)
+
+    result = _invoke_with_mocks(
+        ["run", "--llm", "test-llm", "--dataset", "train-small", "--dry-run"],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "No problem versions found" in output
+    assert "problem version" in output
+
+
+@pytest.mark.integration
+def test_run_smart_default_version_explicit_respected(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Explicit --version is always respected, even with smart defaults available."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # Should NOT show smart default notice when explicit
+    assert "Using version" not in output
+    assert "dry-run" in output.lower()
+
+
+# ── Test: Smart default dataset — single train dataset auto-selected (S8a-11) ─
+
+
+@pytest.mark.integration
+def test_run_smart_default_dataset(project_with_prereqs: dict[str, Path]) -> None:
+    """Single train dataset auto-selected with notice when --dataset omitted."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        ["run", "--version", "v1.0", "--llm", "test-llm", "--dry-run"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "Using dataset train-small (only train dataset)" in output
+    assert "dry-run" in output.lower()
+
+
+@pytest.mark.integration
+def test_run_smart_default_dataset_multiple_error(
+    tmp_project: Path, dataset_dir: Path, global_db_path: Path
+) -> None:
+    """Multiple train datasets → error listing them when --dataset omitted."""
+    _create_problem_version(tmp_project, "v1.0")
+    _register_dataset(tmp_project, dataset_dir, name="train-a", split="train")
+    _register_dataset(tmp_project, dataset_dir, name="train-b", split="train")
+    _register_llm(global_db_path)
+
+    result = _invoke_with_mocks(
+        ["run", "--version", "v1.0", "--llm", "test-llm", "--dry-run"],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Multiple train datasets exist" in output
+    assert "train-a" in output
+    assert "train-b" in output
+    assert "--dataset" in output
+
+
+@pytest.mark.integration
+def test_run_smart_default_dataset_no_train_error(
+    tmp_project: Path, dataset_dir: Path, global_db_path: Path
+) -> None:
+    """No train datasets → error pointing to 'dataset add --split train'."""
+    _create_problem_version(tmp_project, "v1.0")
+    _register_dataset(tmp_project, dataset_dir, name="eval-set", split="eval")
+    _register_llm(global_db_path)
+
+    result = _invoke_with_mocks(
+        ["run", "--version", "v1.0", "--llm", "test-llm", "--dry-run"],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "No train datasets found" in output
+    assert "dataset add --split train" in output
+
+
+@pytest.mark.integration
+def test_run_smart_default_dataset_explicit_respected(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Explicit --dataset is always respected, even with smart defaults available."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # Should NOT show smart default notice when explicit
+    assert "Using dataset" not in output
+    assert "dry-run" in output.lower()
+
+
+@pytest.mark.integration
+def test_run_smart_default_both(project_with_prereqs: dict[str, Path]) -> None:
+    """Both version and dataset auto-selected when both omitted."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        ["run", "--llm", "test-llm", "--dry-run"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "Using version v1.0 (only version)" in output
+    assert "Using dataset train-small (only train dataset)" in output
+    assert "dry-run" in output.lower()
