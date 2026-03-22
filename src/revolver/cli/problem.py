@@ -14,10 +14,18 @@ from typing import Annotated
 import typer
 
 from revolver.cli import problem_app
+from revolver.cli._global_options import GlobalOptionGroup
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import problem as core_problem
 from revolver.core.exceptions import ValidationError
 from revolver.infra.output import print_confirmation, render
+
+# ── version sub-app ──────────────────────────────────────────────────────────
+version_app = typer.Typer(
+    cls=GlobalOptionGroup,
+    help="Problem version management (create, list, delete).",
+)
+problem_app.add_typer(version_app, name="version")
 
 
 @problem_app.command("test")
@@ -137,8 +145,8 @@ def problem_test(
             render(summary, json_mode=False)
 
 
-@problem_app.command("version")
-def problem_version(
+@version_app.command("create")
+def problem_version_create(
     ctx: typer.Context,
     tag: Annotated[
         str,
@@ -186,8 +194,8 @@ def problem_version(
             )
 
 
-@problem_app.command("versions")
-def problem_versions(
+@version_app.command("list")
+def problem_version_list(
     ctx: typer.Context,
 ) -> None:
     """List all problem versions."""
@@ -217,7 +225,7 @@ def problem_versions(
                 render(rows, json_mode=False)
 
 
-@problem_app.command("version-delete")
+@version_app.command("delete")
 def problem_version_delete(
     ctx: typer.Context,
     tag: Annotated[str, typer.Argument(help="Version tag to delete.")],

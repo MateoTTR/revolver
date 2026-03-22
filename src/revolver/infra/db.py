@@ -611,13 +611,14 @@ def delete_problem_version(conn: sqlite3.Connection, tag: str) -> bool:
     Returns:
         True if a version was deleted, False if not found.
     """
-    # PRAGMA foreign_keys cannot be changed inside a transaction,
-    # so we commit any pending work, disable FKs, then re-enable.
-    conn.commit()
+    # When --force is used, runs may still reference this version.
+    # We temporarily disable FK checks so the DELETE succeeds without
+    # cascade-deleting those runs (intentional orphaning).
+    # PRAGMA foreign_keys cannot be toggled inside a transaction,
+    # so we ensure no transaction is active first.
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
         with conn:
-            # Remove compatibility links
             conn.execute(
                 "DELETE FROM dataset_compat WHERE problem_version = ?",
                 (tag,),
