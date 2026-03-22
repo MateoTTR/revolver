@@ -233,14 +233,19 @@ def update_llm(
     )
 
     if row_count == 0:
-        # Distinguish "no fields provided" from "LLM not found"
+        # Distinguish "no fields provided" from "LLM not found".
+        # If existing is not None, row_count == 0 means all provided values
+        # matched the current values (no actual change). This is unreachable
+        # today because the CLI layer requires at least one update flag, but
+        # we keep the guard for defensive robustness.
         existing = db.get_llm(conn, name)
         if existing is None:
             raise RevolverError(f"LLM '{name}' not found")
 
     # Return the updated entry
     entry = db.get_llm(conn, name)
-    assert entry is not None  # guaranteed since update succeeded
+    if entry is None:
+        raise RevolverError(f"LLM '{name}' not found after update")
     return entry
 
 

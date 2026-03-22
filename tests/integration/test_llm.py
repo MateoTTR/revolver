@@ -861,7 +861,7 @@ def test_llm_remove_json_requires_force(mock_global_db: Path) -> None:
 
 def _add_remote_llm(name: str = "test-llm") -> None:
     """Helper: add a remote LLM for update tests."""
-    runner.invoke(
+    result = runner.invoke(
         app,
         [
             "llm",
@@ -885,6 +885,7 @@ def _add_remote_llm(name: str = "test-llm") -> None:
             "10.0",
         ],
     )
+    assert result.exit_code == 0, result.output
 
 
 @pytest.mark.integration
@@ -1015,3 +1016,75 @@ def test_llm_update_invalid_max_tokens(mock_global_db: Path) -> None:
 
     output = _get_all_output(result)
     assert "positive" in output.lower()
+
+
+# ── Test 23: Update with --timeout 0 error ─────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_invalid_timeout_zero(mock_global_db: Path) -> None:
+    """Updating with timeout=0 -> exit code 1 (must be positive)."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--timeout", "0"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "positive" in output.lower()
+
+
+# ── Test 24: Update with negative input cost error ────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_negative_input_cost(mock_global_db: Path) -> None:
+    """Updating with negative input cost -> exit code 1."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--input-cost", "-1.0"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "non-negative" in output.lower()
+
+
+# ── Test 25: Update with negative output cost error ───────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_negative_output_cost(mock_global_db: Path) -> None:
+    """Updating with negative output cost -> exit code 1."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--output-cost", "-0.01"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "non-negative" in output.lower()
+
+
+# ── Test 26: Update with zero input cost succeeds ─────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_zero_input_cost_valid(mock_global_db: Path) -> None:
+    """Updating with input cost = 0.0 succeeds (zero is a valid cost)."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["--json", "llm", "update", "test-llm", "--input-cost", "0.0"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["input_cost_per_mtok"] == 0.0
