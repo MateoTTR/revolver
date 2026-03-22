@@ -1781,3 +1781,34 @@ def delete_run(
         }
     finally:
         conn.close()
+
+
+def delete_all_runs(
+    *,
+    project_root: Path | None = None,
+) -> int:
+    """Delete all runs in the project.
+
+    Iterates over every run returned by :func:`list_runs` and calls
+    :func:`delete_run` for each.  Active runs are skipped (logged to
+    stderr) rather than aborting the whole operation.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        The number of runs successfully deleted.
+    """
+    summaries = list_runs(project_root=project_root)
+    if not summaries:
+        return 0
+
+    deleted = 0
+    for summary in summaries:
+        try:
+            delete_run(summary.run_id, project_root=project_root)
+            deleted += 1
+        except RevolverError:
+            # Active or otherwise undeletable — skip, continue
+            sys.stderr.write(f"Warning: Could not delete run '{summary.run_id}', skipping.\n")
+    return deleted
