@@ -45,7 +45,10 @@ def run_launch(
     ] = None,
     alias: Annotated[
         str | None,
-        typer.Option("--alias", help="User-friendly alias for the rank-1 solution."),
+        typer.Option(
+            "--alias",
+            help="User-friendly alias for the rank-1 solution.",
+        ),
     ] = None,
     config_override: Annotated[
         list[str] | None,
@@ -56,7 +59,10 @@ def run_launch(
     ] = None,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="Display resolved config without launching."),
+        typer.Option(
+            "--dry-run",
+            help="Display resolved config without launching.",
+        ),
     ] = False,
 ) -> None:
     """Launch an OpenEvolve evolution run."""
@@ -71,13 +77,15 @@ def run_launch(
         # Smart defaults for --version and --dataset (S8a-10, S8a-11)
         if not version:
             version = core_run.resolve_default_version()
-            typer.echo(f"Using version {version} (only version)")
+            if not json_mode and not quiet:
+                sys.stderr.write(f"Using version {version} (only version)\n")
         if not llm:
             sys.stderr.write("Error: --llm is required.\n")
             raise typer.Exit(code=1)
         if not dataset:
             dataset = core_run.resolve_default_dataset()
-            typer.echo(f"Using dataset {dataset} (only train dataset)")
+            if not json_mode and not quiet:
+                sys.stderr.write(f"Using dataset {dataset} (only train dataset)\n")
 
         config = RunConfig(
             problem_version=version,

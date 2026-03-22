@@ -1080,7 +1080,6 @@ def _insert_run_directly(project_root: Path, run_id: str) -> None:
         conn.close()
 
 
-
 @pytest.mark.integration
 def test_run_delete_all(project_with_prereqs: dict[str, Path]) -> None:
     """run delete --all --force removes all runs; run list returns empty."""
@@ -1227,6 +1226,26 @@ def test_run_smart_default_version_multiple_error(
     assert "v1.0" in output
     assert "v2.0" in output
     assert "--version" in output
+
+
+@pytest.mark.integration
+def test_run_smart_default_version_no_versions_error(
+    tmp_project: Path, dataset_dir: Path, global_db_path: Path
+) -> None:
+    """No problem versions → error pointing to 'problem version'."""
+    _register_dataset(tmp_project, dataset_dir, compatible_with=[])
+    _register_llm(global_db_path)
+
+    result = _invoke_with_mocks(
+        ["run", "--llm", "test-llm", "--dataset", "train-small", "--dry-run"],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "No problem versions found" in output
+    assert "problem version" in output
 
 
 @pytest.mark.integration
