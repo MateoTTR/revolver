@@ -33,7 +33,10 @@ def llm_add(
         typer.Option(
             "--source",
             "-s",
-            help="Model source: 'local' for Ollama, 'remote' for API.",
+            help=(
+                "Model source: use 'local' for Ollama "
+                "(provider is set automatically), 'remote' for API."
+            ),
         ),
     ] = "remote",
     provider: Annotated[
