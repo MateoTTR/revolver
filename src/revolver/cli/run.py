@@ -442,16 +442,74 @@ def run_info(
 @run_app.command("delete")
 def run_delete(
     ctx: typer.Context,
-    run_id: Annotated[str, typer.Argument(help="Run ID to delete.")],
+    run_id: Annotated[
+        str | None,
+        typer.Argument(help="Run ID to delete."),
+    ] = None,
     force: Annotated[
         bool,
         typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+    all_runs: Annotated[
+        bool,
+        typer.Option("--all", help="Delete all runs in the project."),
     ] = False,
 ) -> None:
     """Delete a run and its associated solutions, evals, and files."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        # Mutual exclusion: --all and run_id cannot be used together
+        if all_runs and run_id is not None:
+            raise ValidationError("Cannot use --all with a specific run ID")
+
+        if all_runs:
+            # Count runs first for confirmation
+            summaries = core_run.list_runs()
+            count = len(summaries)
+
+            if count == 0:
+                render(
+                    {"status": "no-op", "message": "No runs to delete."},
+                    json_mode=json_mode,
+                )
+                return
+
+            if not force:
+                if json_mode:
+                    raise ValidationError(
+                        "Use --force to delete in JSON mode (no interactive prompt)"
+                    )
+                typer.confirm(f"Delete all {count} run(s) and their data?", abort=True)
+
+            bulk_result = core_run.delete_all_runs()
+            deleted: int = bulk_result["deleted"]  # type: ignore[assignment]
+            skipped: list[str] = bulk_result["skipped"]  # type: ignore[assignment]
+
+            result_data: dict[str, object] = {
+                "runs_deleted": deleted,
+                "status": "deleted",
+            }
+            if skipped:
+                result_data["skipped"] = skipped
+            render(result_data, json_mode=json_mode)
+
+            if not json_mode:
+                msg = f"Done: {deleted} run(s) deleted"
+                if skipped:
+                    msg += f" ({len(skipped)} skipped — active)"
+                print_confirmation(msg, quiet=quiet)
+                for sid in skipped:
+                    typer.echo(
+                        f"Warning: Could not delete run '{sid}' (active), skipping.",
+                        err=True,
+                    )
+            return
+
+        # Single-run deletion: run_id is required
+        if run_id is None:
+            raise ValidationError("Run ID is required (or use --all to delete all runs)")
 
         # Confirmation logic lives in the CLI layer, not in core
         if not force:
@@ -475,6 +533,5 @@ def run_delete(
                 f"Done: Run {run_id} deleted "
                 f"({summary['solutions_deleted']} solutions, "
                 f"{summary['evals_deleted']} evals removed)",
-                json_mode=json_mode,
                 quiet=quiet,
             )

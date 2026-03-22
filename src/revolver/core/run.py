@@ -29,6 +29,7 @@ import yaml
 
 from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
 from revolver.core.exceptions import (
+    ActiveRunError,
     EvaluatorLoadError,
     ExternalError,
     IntegrityError,
@@ -1755,7 +1756,7 @@ def delete_run(
         for lock in active_locks:
             pid_str = lock.get("pid")
             if lock.get("run_id") == run_id and pid_str and _is_pid_alive(int(pid_str)):
-                raise RevolverError(
+                raise ActiveRunError(
                     f"Run '{run_id}' is currently active (PID={lock['pid']})."
                     " Stop the run before deleting it."
                 )
@@ -1781,3 +1782,38 @@ def delete_run(
         }
     finally:
         conn.close()
+
+
+def delete_all_runs(
+    *,
+    project_root: Path | None = None,
+) -> dict[str, object]:
+    """Delete all runs in the project.
+
+    Iterates over every run returned by :func:`list_runs` and calls
+    :func:`delete_run` for each.  Active runs are skipped rather than
+    aborting the whole operation.
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A dict with ``deleted`` (int) and ``skipped`` (list of run IDs
+        that could not be deleted because they are active).
+    """
+    # Note: list_runs is called here even though the CLI may have already
+    # called it for the confirmation count.  This is acceptable because the
+    # query is lightweight and avoids coupling the API to the CLI flow.
+    summaries = list_runs(project_root=project_root)
+    if not summaries:
+        return {"deleted": 0, "skipped": []}
+
+    deleted = 0
+    skipped: list[str] = []
+    for summary in summaries:
+        try:
+            delete_run(summary.run_id, project_root=project_root)
+            deleted += 1
+        except ActiveRunError:
+            skipped.append(summary.run_id)
+    return {"deleted": deleted, "skipped": skipped}

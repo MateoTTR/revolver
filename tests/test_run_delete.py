@@ -21,7 +21,7 @@ import pytest
 from typer.testing import CliRunner
 
 from revolver.cli import app
-from revolver.core.exceptions import RevolverError
+from revolver.core.exceptions import ActiveRunError
 from revolver.core.project import init_project
 from revolver.core.run import delete_run as core_delete_run
 from revolver.infra.db import (
@@ -284,7 +284,7 @@ class TestDeleteRunDB:
 
     @pytest.mark.unit
     def test_run_delete_running_run_raises(self, tmp_path: Path) -> None:
-        """delete_run raises RevolverError when the target run is active."""
+        """delete_run raises ActiveRunError when the target run is active."""
         init_project(tmp_path, "test-project")
         _create_run_with_solutions(tmp_path, "run-active", num_solutions=1)
 
@@ -293,7 +293,7 @@ class TestDeleteRunDB:
         with (
             patch("revolver.core.run.get_active_locks", return_value=[fake_lock]),
             patch("revolver.core.run._is_pid_alive", return_value=True),
-            pytest.raises(RevolverError, match="currently active"),
+            pytest.raises(ActiveRunError, match="currently active"),
         ):
             core_delete_run("run-active", project_root=tmp_path)
 

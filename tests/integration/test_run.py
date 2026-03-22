@@ -1048,3 +1048,127 @@ def test_run_list_shows_valid_iterations(
 
     assert by_id["run-vl-001"]["valid_iterations"] == 42
     assert by_id["run-vl-002"]["valid_iterations"] is None
+
+
+# ── run delete --all tests (S8a-04, S8a-05) ────────────────────────────────
+
+
+def _insert_run_directly(project_root: Path, run_id: str) -> None:
+    """Insert a minimal run row directly into the project database."""
+    db_path = project_root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                "v1.0",
+                "test-llm",
+                "train-small",
+                10,
+                f"hash-{run_id}",
+                f"dhash-{run_id}",
+                "gpt-4",
+                "completed",
+                "2026-03-20T10:00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_delete_all(project_with_prereqs: dict[str, Path]) -> None:
+    """run delete --all --force removes all runs; run list returns empty."""
+    root = project_with_prereqs["root"]
+
+    # Insert 3 runs directly
+    for i in range(1, 4):
+        _insert_run_directly(root, f"run-del-all-{i:03d}")
+
+    # Delete all with --force
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "delete", "--all", "--force"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert data["runs_deleted"] == 3
+    assert data["status"] == "deleted"
+
+    # Verify run list is now empty
+    with patch("pathlib.Path.cwd", return_value=root):
+        list_result = runner.invoke(
+            app,
+            ["--json", "run", "list"],
+            catch_exceptions=False,
+        )
+
+    list_data = _parse_json_output(list_result)
+    assert list_data == []
+
+
+@pytest.mark.integration
+def test_run_delete_all_no_force(project_with_prereqs: dict[str, Path]) -> None:
+    """run delete --all without --force in JSON mode raises ValidationError."""
+    root = project_with_prereqs["root"]
+
+    # Insert a run so there is something to delete
+    _insert_run_directly(root, "run-del-nf-001")
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "delete", "--all"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "--force" in output
+
+
+@pytest.mark.integration
+def test_run_delete_all_empty(project_with_prereqs: dict[str, Path]) -> None:
+    """run delete --all --force with no runs returns no-op."""
+    root = project_with_prereqs["root"]
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "delete", "--all", "--force"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert data["status"] == "no-op"
+
+
+@pytest.mark.integration
+def test_run_delete_all_with_id_error(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run delete --all <run_id> is mutually exclusive — should error."""
+    root = project_with_prereqs["root"]
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["run", "delete", "--all", "run-some-id", "--force"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Cannot use --all with a specific run ID" in output

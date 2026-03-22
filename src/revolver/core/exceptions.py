@@ -99,6 +99,12 @@ class BenchmarkNotFoundError(RevolverError):
     exit_code: int = 1
 
 
+class ActiveRunError(RevolverError):
+    """Raised when an operation is attempted on an active (running) run."""
+
+    exit_code: int = 1
+
+
 class ExportError(RevolverError):
     """Raised when an export operation fails (invalid format, unwritable path)."""
 
