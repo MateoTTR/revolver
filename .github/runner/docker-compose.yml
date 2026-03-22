@@ -1,0 +1,13 @@
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - GITHUB_PAT=${GITHUB_PAT}
+      - GITHUB_REPOSITORY=MateoTTR/revolver
+      - RUNNER_NAME=wsl2-runner
+      - RUNNER_LABELS=self-hosted,linux,x64
+    restart: always
+    # 'restart: always' + ephemeral mode = after each job the container
+    # exits and Docker restarts it, giving a fresh environment.
