@@ -19,6 +19,8 @@ from revolver.core.exceptions import (
     ValidationError,
 )
 from revolver.infra.db import (
+    count_runs_for_version,
+    delete_problem_version as db_delete_problem_version,
     get_problem_version,
     get_problem_version_by_hash,
     get_project_db,
@@ -302,5 +304,67 @@ def get_version(tag: str, project_root: Path | None = None) -> ProblemVersion:
         if pv is None:
             raise RevolverError(f"Problem version '{tag}' not found.")
         return pv
+    finally:
+        conn.close()
+
+
+def delete_version(
+    tag: str,
+    project_root: Path | None = None,
+    *,
+    force: bool = False,
+) -> dict[str, object]:
+    """Delete a problem version, its snapshot directory, and DB record.
+
+    Steps:
+        1. Resolve project root & open DB.
+        2. Count runs referencing this version.
+        3. If runs exist and not force: raise :class:`RevolverError`.
+        4. Delete snapshot directory from disk (tolerate missing).
+        5. Delete DB record.
+        6. Return a summary dict.
+
+    Args:
+        tag: The version tag to delete.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+        force: If True, delete even when runs reference this version.
+
+    Returns:
+        A dict with keys ``tag`` and ``runs_referencing``.
+
+    Raises:
+        RevolverError: If the tag does not exist, or runs reference it
+            and *force* is False.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        # 1. Count runs referencing this version
+        run_count = count_runs_for_version(conn, tag)
+
+        # 2. Guard: refuse to delete if runs exist and not forced
+        if run_count > 0 and not force:
+            raise RevolverError(
+                f"{run_count} run(s) reference version '{tag}'. Use --force to delete anyway."
+            )
+
+        # 3. Delete snapshot directory from disk (tolerate missing)
+        snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / tag
+        if snapshot_dir.exists():
+            # Snapshot files are read-only (0o444), make writable before removal
+            for fpath in snapshot_dir.iterdir():
+                fpath.chmod(0o644)
+            shutil.rmtree(snapshot_dir)
+
+        # 4. Delete from DB
+        deleted = db_delete_problem_version(conn, tag)
+        if not deleted:
+            raise RevolverError(f"Problem version '{tag}' not found.")
+
+        return {
+            "tag": tag,
+            "runs_referencing": run_count,
+        }
     finally:
         conn.close()

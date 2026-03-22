@@ -577,6 +577,57 @@ def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
     ]
 
 
+def count_runs_for_version(conn: sqlite3.Connection, tag: str) -> int:
+    """Count runs that reference a given problem version tag.
+
+    Args:
+        conn: An open project database connection.
+        tag: The problem version tag to check.
+
+    Returns:
+        The number of runs referencing this version.
+    """
+    cursor = conn.execute(
+        "SELECT COUNT(*) FROM runs WHERE problem_version = ?",
+        (tag,),
+    )
+    row = cursor.fetchone()
+    return int(row[0]) if row else 0
+
+
+def delete_problem_version(conn: sqlite3.Connection, tag: str) -> bool:
+    """Delete a problem version from the database.
+
+    Removes the version row and any ``dataset_compat`` rows that
+    reference it.  Foreign-key checks are temporarily disabled so that
+    runs referencing this version are *not* cascade-deleted (the caller
+    is expected to guard against unwanted orphaned references via
+    ``count_runs_for_version``).
+
+    Args:
+        conn: An open project database connection.
+        tag: The problem version tag to delete.
+
+    Returns:
+        True if a version was deleted, False if not found.
+    """
+    # PRAGMA foreign_keys cannot be changed inside a transaction,
+    # so we commit any pending work, disable FKs, then re-enable.
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        with conn:
+            # Remove compatibility links
+            conn.execute(
+                "DELETE FROM dataset_compat WHERE problem_version = ?",
+                (tag,),
+            )
+            cursor = conn.execute("DELETE FROM problem_versions WHERE tag = ?", (tag,))
+            return cursor.rowcount > 0
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
 # ── LLM CRUD operations ─────────────────────────────────────────────────────
 
 _LLM_COLUMNS = (

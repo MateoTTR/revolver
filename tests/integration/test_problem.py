@@ -392,3 +392,143 @@ def test_problem_versions_list(tmp_project: Path) -> None:
     assert "v1.0" in tags
     assert "v1.1" in tags
     assert len(versions) == 2
+
+
+# ── problem version delete ──────────────────────────────────────────────────
+
+
+def _seed_dataset_and_run(
+    project_root: Path,
+    version_tag: str = "v1.0",
+    run_id: str = "run-20260322-120000",
+) -> None:
+    """Insert a dataset and run referencing the given version tag."""
+    from datetime import UTC, datetime
+
+    from revolver.infra.db import get_project_db, insert_run
+
+    db_path = project_root / ".revolver" / "revolver.db"
+    conn = get_project_db(db_path)
+    now = datetime.now(UTC)
+    try:
+        # Insert dataset required by FK constraint
+        conn.execute(
+            "INSERT OR IGNORE INTO datasets "
+            "(name, path, split, storage, description, "
+            "global_hash, instance_count, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "train-small",
+                "/data/train",
+                "train",
+                "reference",
+                "",
+                "sha256:dshash",
+                10,
+                now.isoformat(),
+            ),
+        )
+        conn.commit()
+
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version=version_tag,
+            llm="test-llm",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="sha256:pvhash",
+            dataset_hash="sha256:dshash",
+            llm_model="gpt-4",
+            created_at=now,
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_problem_version_delete_no_runs(tmp_project: Path) -> None:
+    """Delete a version with no runs referencing it; verify DB + snapshot gone."""
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+    from revolver.core.problem import create_version, delete_version, list_versions
+
+    create_version(tag="v1.0", message="To delete", project_root=tmp_project)
+
+    # Verify snapshot exists before delete
+    snapshot_dir = tmp_project / ".revolver" / "problem" / "v1.0"
+    assert snapshot_dir.is_dir()
+
+    summary = delete_version(tag="v1.0", project_root=tmp_project)
+
+    assert summary["tag"] == "v1.0"
+    assert summary["runs_referencing"] == 0
+
+    # Snapshot directory is gone
+    assert not snapshot_dir.exists()
+
+    # DB record is gone
+    versions = list_versions(project_root=tmp_project)
+    tags = [v.tag for v in versions]
+    assert "v1.0" not in tags
+
+
+@pytest.mark.integration
+def test_problem_version_delete_with_runs_no_force(tmp_project: Path) -> None:
+    """Delete a version with runs and no --force; verify error with count."""
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+    from revolver.core.exceptions import RevolverError
+    from revolver.core.problem import create_version, delete_version
+
+    create_version(tag="v1.0", message="Has runs", project_root=tmp_project)
+    _seed_dataset_and_run(tmp_project, version_tag="v1.0")
+
+    with pytest.raises(RevolverError, match=r"1 run\(s\) reference version 'v1\.0'"):
+        delete_version(tag="v1.0", project_root=tmp_project)
+
+    # Snapshot directory still exists
+    snapshot_dir = tmp_project / ".revolver" / "problem" / "v1.0"
+    assert snapshot_dir.is_dir()
+
+
+@pytest.mark.integration
+def test_problem_version_delete_with_runs_force(tmp_project: Path) -> None:
+    """Delete a version with runs and --force; verify deleted."""
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+    from revolver.core.problem import create_version, delete_version, list_versions
+
+    create_version(tag="v1.0", message="Force delete", project_root=tmp_project)
+    _seed_dataset_and_run(tmp_project, version_tag="v1.0")
+
+    summary = delete_version(tag="v1.0", project_root=tmp_project, force=True)
+
+    assert summary["tag"] == "v1.0"
+    assert summary["runs_referencing"] == 1
+
+    # Snapshot directory is gone
+    snapshot_dir = tmp_project / ".revolver" / "problem" / "v1.0"
+    assert not snapshot_dir.exists()
+
+    # DB record is gone
+    versions = list_versions(project_root=tmp_project)
+    tags = [v.tag for v in versions]
+    assert "v1.0" not in tags
+
+
+@pytest.mark.integration
+def test_problem_version_delete_not_found(tmp_project: Path) -> None:
+    """Delete a nonexistent version tag; verify error."""
+    from revolver.core.exceptions import RevolverError
+    from revolver.core.problem import delete_version
+
+    with pytest.raises(RevolverError, match=r"not found"):
+        delete_version(tag="ghost-version", project_root=tmp_project)

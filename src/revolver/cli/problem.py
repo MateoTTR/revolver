@@ -16,6 +16,7 @@ import typer
 from revolver.cli import problem_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import problem as core_problem
+from revolver.core.exceptions import ValidationError
 from revolver.infra.output import print_confirmation, render
 
 
@@ -214,3 +215,45 @@ def problem_versions(
                     for v in versions
                 ]
                 render(rows, json_mode=False)
+
+
+@problem_app.command("version-delete")
+def problem_version_delete(
+    ctx: typer.Context,
+    tag: Annotated[str, typer.Argument(help="Version tag to delete.")],
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Skip confirmation and delete even if runs reference this version.",
+        ),
+    ] = False,
+) -> None:
+    """Delete a problem version snapshot (DB record + files)."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        # Confirmation logic lives in the CLI layer, not in core
+        if not force:
+            if json_mode:
+                raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
+            typer.confirm(f"Delete problem version '{tag}' and its snapshot?", abort=True)
+
+        summary = core_problem.delete_version(tag=tag, force=force)
+
+        result = {
+            "tag": summary["tag"],
+            "runs_referencing": summary["runs_referencing"],
+            "status": "deleted",
+        }
+
+        render(result, json_mode=json_mode)
+
+        if not json_mode:
+            print_confirmation(
+                f"Done: Problem version '{tag}' deleted",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
