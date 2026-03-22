@@ -8,7 +8,6 @@ Traceable to: DES-006 section 9, FR-EVL-001..020.
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 from typing import Annotated
 
@@ -17,9 +16,7 @@ import typer
 from revolver.cli import eval_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import eval as core_eval
-from revolver.infra.db import get_eval_metadata, get_project_db, get_solution
 from revolver.infra.output import print_confirmation, render
-from revolver.infra.store import REVOLVER_DIR, find_project_root
 from revolver.models.eval import EvalDetailResult, EvalResult
 
 # ── Default callback: run evaluation (DES-006 §9) ────────────────────────────
@@ -70,28 +67,20 @@ def eval_default(
         # This keeps CLI-specific confirmation logic out of core layer.
         if not force:
             try:
-                root = find_project_root(Path.cwd())
-                conn = get_project_db(root / REVOLVER_DIR / "revolver.db")
-                try:
-                    sol = get_solution(conn, solution)
-                    if sol is not None:
-                        existing = get_eval_metadata(conn, sol.id, dataset)
-                        if existing is not None:
-                            if json_mode:
-                                sys.stderr.write(
-                                    "Error: Evaluation already exists. "
-                                    "Use --force to re-evaluate.\n"
-                                )
-                                raise typer.Exit(code=1)
-                            if not typer.confirm(
-                                f"Evaluation exists for '{solution}' on '{dataset}'. Re-evaluate?",
-                                default=False,
-                            ):
-                                raise typer.Exit(code=0)
-                            # User confirmed — pass force=True to core
-                            force = True
-                finally:
-                    conn.close()
+                existing = core_eval.has_existing_eval(solution, dataset)
+                if existing is not None:
+                    if json_mode:
+                        sys.stderr.write(
+                            "Error: Evaluation already exists. Use --force to re-evaluate.\n"
+                        )
+                        raise typer.Exit(code=1)
+                    if not typer.confirm(
+                        f"Evaluation exists for '{solution}' on '{dataset}'. Re-evaluate?",
+                        default=False,
+                    ):
+                        raise typer.Exit(code=0)
+                    # User confirmed — pass force=True to core
+                    force = True
             except typer.Exit:
                 raise
             except Exception:
