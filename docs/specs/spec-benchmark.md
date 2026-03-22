@@ -160,6 +160,43 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 
 **Exit codes**: 0 always
 
+### 2.5 `revolver benchmark delete <benchmark-id>`
+
+Delete a benchmark and its associated solution references.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `benchmark-id` | Yes | Benchmark ID to delete |
+
+**Options**:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--force` / `-f` | flag | false | Skip interactive confirmation prompt |
+
+**Behavior**:
+1. Resolve the benchmark by ID
+2. If `--json` is active and `--force` is not set, return an error (no interactive prompt possible in JSON mode)
+3. If `--force` is not set, display benchmark details and ask for confirmation
+4. Delete benchmark solution references and the benchmark row from SQLite
+
+**Output** (human):
+```
+Deleted benchmark "bench-20260310-170000"
+```
+
+**Output** (JSON):
+```json
+{
+  "benchmark_id": "bench-20260310-170000",
+  "status": "deleted"
+}
+```
+
+**Exit codes**: 0 success, 1 if not found or confirmation declined
+
 ---
 
 ## 3. Functional Requirements
@@ -183,6 +220,9 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | FR-BEN-015 | SHOULD | `results --per-instance` identifies the best solution per instance | — |
 | FR-BEN-016 | MUST | `export --per-instance` exports raw per-instance data for all solutions (enables histograms, scatter plots, custom analysis) | §8 |
 | FR-BEN-017 | MUST | Include `run_id` in benchmark result entries for traceability back to the physical run | DES-001 §3.6 |
+| FR-BEN-018 | MUST | `delete` removes a benchmark by ID with interactive confirmation prompt | — |
+| FR-BEN-019 | MUST | `delete --force` bypasses the interactive confirmation prompt | — |
+| FR-BEN-020 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error | NFR-003 |
 
 ---
 
@@ -200,6 +240,9 @@ bench-20260312-090000   2026-03-12 09:00     eval-benchmark   5          —
 | Output path not writable | Error: "Cannot write to <path>" | 1 |
 | No benchmark results found (for `results`/`export`) | Error: "No benchmark found" | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
+| `delete` with non-existent benchmark | Error: "Benchmark '<id>' not found" | 1 |
+| `delete` in JSON mode without `--force` | Error: "Use --force to delete in JSON mode (no interactive prompt)" | 1 |
+| `delete` confirmation declined by user | No deletion, exit silently | 1 |
 
 ---
 

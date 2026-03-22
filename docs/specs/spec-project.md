@@ -15,7 +15,7 @@ This spec covers project initialization and the project-level data model. A proj
 
 ## 2. Commands
 
-### 2.1 `revolver project init [name]`
+### 2.1 `revolver project init <name>`
 
 Initialize a new Revolver project.
 
@@ -23,7 +23,7 @@ Initialize a new Revolver project.
 
 | Argument | Required | Description |
 |---|---|---|
-| `name` | No | Project name. Defaults to current directory name. |
+| `name` | Yes | Project name |
 
 **Options**:
 

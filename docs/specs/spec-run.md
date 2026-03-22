@@ -152,7 +152,6 @@ List all runs in the current project.
 | `--version <tag>` | string | — | Filter by problem version |
 | `--llm <name>` | string | — | Filter by LLM used |
 | `--status <status>` | string | — | Filter by status: `running`, `completed`, `completed_with_errors`, `interrupted` |
-| `--sort <field>` | string | `created_at` | Sort by: `created_at`, `score`, `iterations` |
 
 **Output** (human):
 ```
@@ -201,6 +200,48 @@ Resume chain: (none)
 
 **Exit codes**: 0 success, 1 if not found
 
+### 2.6 `revolver run delete <run-id>`
+
+Delete a run and all its associated data (solutions, evaluations, files).
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `run-id` | Yes | Run ID to delete |
+
+**Options**:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--force` / `-f` | flag | false | Skip interactive confirmation prompt |
+
+**Behavior**:
+1. Resolve the run by ID
+2. If `--json` is active and `--force` is not set, return an error (no interactive prompt possible in JSON mode)
+3. If `--force` is not set, display run details and ask for confirmation
+4. Delete associated solutions and their evaluation data within a transaction
+5. Delete the run row from SQLite and the run directory from the filesystem
+
+**Output** (human):
+```
+Deleted run "run-20260310-143000"
+  Solutions deleted: 1
+  Evaluations deleted: 2
+```
+
+**Output** (JSON):
+```json
+{
+  "run_id": "run-20260310-143000",
+  "solutions_deleted": 1,
+  "evals_deleted": 2,
+  "status": "deleted"
+}
+```
+
+**Exit codes**: 0 success, 1 if not found or confirmation declined
+
 ---
 
 ## 3. Functional Requirements
@@ -241,6 +282,11 @@ Resume chain: (none)
 | FR-RUN-032 | MUST | Post-processing errors are logged to `run-error.log` in the run directory | — |
 | FR-RUN-033 | MUST | `solution extract` accepts runs with status `completed_with_errors` if the program file exists | — |
 | FR-RUN-034 | MUST | `resume` accepts `completed_with_errors` as a valid parent run status | — |
+| FR-RUN-035 | MUST | `delete` removes a run by ID with interactive confirmation prompt | — |
+| FR-RUN-036 | MUST | `delete --force` bypasses the interactive confirmation prompt | — |
+| FR-RUN-037 | MUST | Deleting a run cascade-deletes associated solutions and their evaluation data | — |
+| FR-RUN-038 | MUST | Deleting a run removes the run directory from the filesystem | — |
+| FR-RUN-039 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error | NFR-003 |
 
 ---
 
@@ -261,6 +307,9 @@ Resume chain: (none)
 | Another local run already in progress | Error: "A local LLM run is already in progress (see `.revolver/runs/locks/`). Wait for it to complete or cancel it." | 3 |
 | `--dry-run` with missing or invalid inputs | Error reported as normal (exit 1), no run launched | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
+| `delete` with non-existent run | Error: "Run '<run-id>' not found" | 1 |
+| `delete` in JSON mode without `--force` | Error: "Use --force to delete in JSON mode (no interactive prompt)" | 1 |
+| `delete` confirmation declined by user | No deletion, exit silently | 1 |
 
 ---
 

@@ -34,12 +34,14 @@ Register a new LLM in the global registry.
 |---|---|---|---|
 | `--provider <name>` | string | For remote | Provider: `anthropic`, `openai`, `google`, or `openai-compat` |
 | `--model <id>` | string | Yes | Model identifier (e.g., `claude-opus-4-6`, `codestral:22b`) |
-| `--source ollama` | string | For local | Use Ollama as the serving backend |
+| `--source local` | string | For local | Use Ollama as the serving backend (default: `remote`) |
 | `--api-key-env <var>` | string | For remote | Environment variable name holding the API key (e.g., `ANTHROPIC_API_KEY`) |
 | `--base-url <url>` | string | No | Override API base URL. Auto-set to `http://localhost:11434/v1` for Ollama |
 | `--pull` | flag | No | For Ollama: immediately pull the model after registration (default: prompt user) |
 | `--input-cost <price>` | float | No | Cost per million input tokens in USD (e.g., `3.0` for $3/Mtok). Used for cost estimation. |
 | `--output-cost <price>` | float | No | Cost per million output tokens in USD (e.g., `15.0` for $15/Mtok). Used for cost estimation. |
+| `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Injected into OpenEvolve config at run time. |
+| `--timeout <seconds>` | int | No | Request timeout in seconds. Injected into OpenEvolve config at run time. |
 
 **Output** (human):
 ```
