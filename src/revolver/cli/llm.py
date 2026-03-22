@@ -360,6 +360,111 @@ def llm_list(
                 render({"info": "No LLMs registered"}, json_mode=False)
 
 
+@llm_app.command("update")
+def llm_update(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the LLM to update.")],
+    max_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--max-tokens",
+            help="Maximum tokens per LLM response (injected into OE config).",
+        ),
+    ] = None,
+    timeout: Annotated[
+        int | None,
+        typer.Option(
+            "--timeout",
+            help="Request timeout in seconds (injected into OE config).",
+        ),
+    ] = None,
+    input_cost: Annotated[
+        float | None,
+        typer.Option(
+            "--input-cost",
+            help="Cost per million input tokens (USD).",
+        ),
+    ] = None,
+    output_cost: Annotated[
+        float | None,
+        typer.Option(
+            "--output-cost",
+            help="Cost per million output tokens (USD).",
+        ),
+    ] = None,
+) -> None:
+    """Update configuration fields of a registered LLM."""
+    with cli_error_boundary():
+        # Require at least one update flag
+        if all(v is None for v in (max_tokens, timeout, input_cost, output_cost)):
+            from revolver.core.exceptions import ValidationError
+
+            raise ValidationError(
+                "No update flags provided. Use at least one of: "
+                "--max-tokens, --timeout, --input-cost, --output-cost"
+            )
+
+        conn = get_global_db()
+        try:
+            entry = llm_core.update_llm(
+                name=name,
+                conn=conn,
+                max_tokens=max_tokens,
+                timeout_s=timeout,
+                input_cost_per_mtok=input_cost,
+                output_cost_per_mtok=output_cost,
+            )
+        finally:
+            conn.close()
+
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        if json_mode:
+            render(
+                {
+                    "name": entry.name,
+                    "model": entry.model,
+                    "source": entry.source,
+                    "provider": entry.provider,
+                    "base_url": entry.base_url,
+                    "api_key_env": entry.api_key_env,
+                    "input_cost_per_mtok": entry.input_cost_per_mtok,
+                    "output_cost_per_mtok": entry.output_cost_per_mtok,
+                    "max_tokens": entry.max_tokens,
+                    "timeout_s": entry.timeout_s,
+                    "registered_at": entry.registered_at.isoformat(),
+                },
+                json_mode=True,
+            )
+        else:
+            render(
+                {
+                    "status": "updated",
+                    "name": entry.name,
+                    "model": entry.model,
+                    "max_tokens": str(entry.max_tokens) if entry.max_tokens is not None else "-",
+                    "timeout_s": str(entry.timeout_s) if entry.timeout_s is not None else "-",
+                    "input_cost_per_mtok": (
+                        str(entry.input_cost_per_mtok)
+                        if entry.input_cost_per_mtok is not None
+                        else "-"
+                    ),
+                    "output_cost_per_mtok": (
+                        str(entry.output_cost_per_mtok)
+                        if entry.output_cost_per_mtok is not None
+                        else "-"
+                    ),
+                },
+                json_mode=False,
+            )
+            print_confirmation(
+                f"Done: LLM '{entry.name}' updated",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
+
+
 @llm_app.command("remove")
 def llm_remove(
     ctx: typer.Context,
