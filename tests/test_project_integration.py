@@ -8,6 +8,7 @@ Traceable to: val-integration-tests.md section 2.1.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import stat
@@ -180,3 +181,67 @@ def test_project_init_no_templates(tmp_path: pytest.TempPathFactory) -> None:
     # Output message contains project name
     output = _strip_ansi(result.stdout)
     assert "my-project" in output
+
+
+@pytest.mark.integration
+def test_project_init_templates_flag(tmp_path: pytest.TempPathFactory) -> None:
+    """--templates (positive flag) creates template files, same as default behavior."""
+    result = runner.invoke(
+        app, ["project", "init", "my-project", "--path", str(tmp_path), "--templates"]
+    )
+    assert result.exit_code == 0, f"stdout: {result.stdout}"
+
+    # .revolver/ directory exists
+    revolver_dir = tmp_path / ".revolver"
+    assert revolver_dir.is_dir()
+
+    # project.yaml manifest exists
+    project_yaml = tmp_path / "project.yaml"
+    assert project_yaml.is_file()
+
+    # Template files ARE created (same as default)
+    assert (tmp_path / "evaluator.py").is_file()
+    assert (tmp_path / "initial_program.py").is_file()
+    assert (tmp_path / "config.yaml").is_file()
+
+    # initial_program.py contains EVOLVE-BLOCK markers
+    initial_program = (tmp_path / "initial_program.py").read_text(encoding="utf-8")
+    assert "EVOLVE-BLOCK-START" in initial_program
+    assert "EVOLVE-BLOCK-END" in initial_program
+
+    # evaluator.py contains evaluate_instance with correct signature
+    evaluator = (tmp_path / "evaluator.py").read_text(encoding="utf-8")
+    assert "def evaluate_instance(program_path: str, instance_path: str)" in evaluator
+
+
+@pytest.mark.integration
+def test_project_init_no_templates_json(tmp_path: pytest.TempPathFactory) -> None:
+    """--no-templates --json: JSON output has files_created without template files."""
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "project",
+            "init",
+            "my-project",
+            "--path",
+            str(tmp_path),
+            "--no-templates",
+        ],
+    )
+    assert result.exit_code == 0, f"stdout: {result.stdout}"
+
+    output = _strip_ansi(result.stdout)
+    data = json.loads(output)
+
+    assert data["project"] == "my-project"
+    assert isinstance(data["files_created"], list)
+
+    # Template files must NOT appear in files_created
+    assert "evaluator.py" not in data["files_created"]
+    assert "initial_program.py" not in data["files_created"]
+    assert "config.yaml" not in data["files_created"]
+
+    # Core entries must still be present
+    assert ".revolver/" in data["files_created"]
+    assert "project.yaml" in data["files_created"]
