@@ -285,6 +285,30 @@
 | 191 | Update traceability matrix: add `run delete`/`benchmark delete` entries + update 199 "Planned" statuses | [x] | S8a — session 038, PR #116 |
 | 185 | Write L2 integration tests for Sprint 008a features | [x] | S8a — session 038, included in PRs |
 
+### Sprint 009 — Solution UX + Config fluide + Run robustness
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 192 | `core.solution.show_solution(id_or_alias)` — read program file, return source code as string (Bloc A1) | [ ] | S9 — PR-A |
+| 193 | `core.solution.diff_solutions(a, b)` — unified diff via `difflib.unified_diff()` (Bloc A3) | [ ] | S9 — PR-A |
+| 194 | `cli.solution.solution_show` — `revolver solution show <alias>`, `--json` support (Bloc A1) | [ ] | S9 — PR-A |
+| 195 | `cli.solution.solution_export` — `revolver solution export <alias> [-o <path>]`, default `./<alias>.py` (Bloc A2) | [ ] | S9 — PR-A |
+| 196 | `cli.solution.solution_diff` — `revolver solution diff <a> <b>`, diff(1) exit codes (Bloc A3) | [ ] | S9 — PR-A |
+| 197 | `core.solution.extract_solution()` — add `force=True` param (delete existing), hardcode `rank=1` in CLI (Bloc B2) | [ ] | S9 — PR-B |
+| 198 | `cli.solution.solution_extract` — remove `--rank` flag, add `--force` flag (Bloc B2) | [ ] | S9 — PR-B |
+| 199 | `core.run.launch_run()` — wrap OE call in try/except, mark `failed`/`interrupted` in DB (Bloc B1) | [ ] | S9 — PR-C |
+| 200 | Workspace detection guard — `is_in_workspace()` helper + explicit error in `cli.run`, `cli.solution`, `cli.benchmark` (Bloc B3) | [ ] | S9 — PR-D |
+| 201 | `infra.openevolve.build_config()` — add `temperature` parameter, inject into `config["llm"]["temperature"]` (Bloc C1) | [ ] | S9 — PR-E |
+| 202 | `infra.openevolve.build_config()` — add `parallel` parameter, inject into `config["evaluator"]["parallel_evaluations"]` (Bloc C2) | [ ] | S9 — PR-E |
+| 203 | `cli.run` — add `--temperature FLOAT` and `--parallel INT` flags, pass to `build_config()` (Bloc C1+C2) | [ ] | S9 — PR-E |
+| 204 | `infra.openevolve._parse_value()` — JSON array/object support via `json.loads()` (Bloc C3) | [ ] | S9 — PR-F |
+| 205 | `models.llm.LLMEntry` — add `temperature` field; DB migration v6; update `insert_llm`, `get_llm`, `update_llm` (Bloc C4) | [ ] | S9 — PR-G |
+| 206 | `core.llm` + `infra.openevolve.build_config()` — inject `llm.temperature` into OE config, CLI `--temperature` overrides (Bloc C4) | [ ] | S9 — PR-G |
+| 207 | `cli.llm` — add `--temperature` to `llm add` and `llm update`; display in `llm list` (Bloc C4) | [ ] | S9 — PR-G |
+| 208 | Write L2 integration tests for Sprint 009 features (~25 new scenarios) | [ ] | S9 — PR-J |
+| 209 | New guide `docs/guides/tuning-oe-config.md` — MAP-Elites, islands, parallel_evaluations, iteration profiles, multi-objective (Bloc D1) | [ ] | S9 — PR-H |
+| 210 | Update `docs/guides/initial-program-structure.md` — beamforming learnings, baseline calibration, scipy guidance (Bloc D2) | [ ] | S9 — PR-I |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
