@@ -24,7 +24,6 @@ from revolver.infra.db import (
     get_solution_by_alias,
     get_solution_detail,
     get_solutions_for_run,
-    insert_solution,
     list_solutions as db_list_solutions,
     update_solution_alias,
 )
@@ -159,12 +158,18 @@ def extract_solution(
 ) -> Solution:
     """Promote a stored program to a new solution DB entry.
 
-    1. Verify run exists
+    1. Verify run exists and is completed
     2. Verify program file exists at ``.revolver/runs/<run_id>/programs/rank-<rank>.py``
-    3. Generate unique ID: ``sol-YYYYMMDD-HHMMSS`` (with counter for collisions)
-    4. Read best_score from the program's OE output if available
-    5. Insert via ``db.insert_solution()``
+    3. Validate: check alias uniqueness and duplicate ``(run_id, rank)``
+    4. Generate unique ID: ``sol-YYYYMMDD-HHMMSS`` (with counter for collisions)
+    5. Atomically delete old solution (if ``force=True``) and insert new one
     6. Return the new :class:`Solution`
+
+    When ``force=True`` and a solution already exists for the same
+    ``(run_id, rank)`` pair, the old solution is replaced atomically:
+    the delete and insert happen within a single SQLite transaction so
+    that a crash or insert failure cannot leave the database without a
+    solution for that ``(run_id, rank)`` slot.
 
     Args:
         run_id: ID of the run that produced the program.
@@ -179,6 +184,8 @@ def extract_solution(
 
     Raises:
         RevolverError: If the run is not found or the program file does not exist.
+        ValidationError: If rank is <= 0, the run is not completed, or the
+            program file does not exist.
         DuplicateNameError: If ``force=False`` and ``(run_id, rank)`` already
             extracted, or if the alias is already in use.
     """
@@ -203,37 +210,59 @@ def extract_solution(
         if not program_path.exists():
             raise ValidationError(f"Program file not found: {program_path}")
 
-        # 3. Generate unique ID
-        solution_id = _generate_solution_id(conn)
-
-        # 4. best_score: not available from file, set None
-        best_score: float | None = None
-
-        # 5. Pre-insert validation: check duplicates before INSERT
-        existing = get_solutions_for_run(conn, run_id)
-        for s in existing:
-            if s.rank == rank:
-                if force:
-                    # Delete existing solution to allow replacement
-                    db_delete_solution(conn, s.id)
-                else:
-                    raise DuplicateNameError(
-                        f"Solution already exists for run={run_id}, rank={rank}"
-                    )
+        # 3. Pre-mutation validation: check alias uniqueness and duplicates
+        # Alias check MUST happen before any delete to avoid data loss on
+        # alias collision when force=True.
         if alias:
             existing_alias = get_solution_by_alias(conn, alias)
             if existing_alias is not None:
                 raise DuplicateNameError(f"Alias '{alias}' is already in use")
 
-        # 6. Insert via db.insert_solution()
-        insert_solution(
-            conn,
-            solution_id=solution_id,
-            run_id=run_id,
-            rank=rank,
-            best_score=best_score,
-            alias=alias,
-        )
+        existing = get_solutions_for_run(conn, run_id)
+        old_solution_id: str | None = None
+        for s in existing:
+            if s.rank == rank:
+                if force:
+                    old_solution_id = s.id
+                else:
+                    raise DuplicateNameError(
+                        f"Solution already exists for run={run_id}, rank={rank}"
+                    )
+
+        # 4. Generate unique ID
+        solution_id = _generate_solution_id(conn)
+
+        # 5. best_score: not available from file, set None
+        best_score: float | None = None
+
+        # 6. Atomic delete + insert within a single transaction.
+        # We use raw SQL instead of the helper functions to avoid
+        # separate commits (db_delete_solution and insert_solution each
+        # commit independently).
+        with conn:
+            if old_solution_id is not None:
+                # Cascade-delete eval data for the old solution
+                conn.execute(
+                    "DELETE FROM eval_instances WHERE eval_id IN "
+                    "(SELECT eval_id FROM eval_metadata WHERE solution_id = ?)",
+                    (old_solution_id,),
+                )
+                conn.execute(
+                    "DELETE FROM eval_metadata WHERE solution_id = ?",
+                    (old_solution_id,),
+                )
+                cursor = conn.execute(
+                    "DELETE FROM solutions WHERE id = ?",
+                    (old_solution_id,),
+                )
+                if cursor.rowcount == 0:
+                    raise RevolverError(f"Failed to delete existing solution: {old_solution_id}")
+
+            conn.execute(
+                "INSERT INTO solutions (id, run_id, rank, best_score, alias) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (solution_id, run_id, rank, best_score, alias),
+            )
 
         # 7. Return the new Solution
         return Solution(
