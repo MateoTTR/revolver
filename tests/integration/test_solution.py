@@ -186,6 +186,57 @@ def _create_run_with_solution(
     (programs_dir / f"rank-{rank}.py").write_text("def solve(): pass\n", encoding="utf-8")
 
 
+def _create_run_with_solution_content(
+    project_root: Path,
+    run_id: str,
+    solution_id: str,
+    program_content: str,
+    *,
+    problem_version: str = "v1.0",
+    llm: str = "test-llm",
+    dataset: str = "train-small",
+    best_score: float | None = 0.95,
+    alias: str | None = None,
+    rank: int = 1,
+    create_run: bool = True,
+) -> None:
+    """Create a run and solution in the DB with custom program content."""
+    db_path = project_root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    now = datetime.now(UTC)
+    try:
+        if create_run:
+            insert_run(
+                conn,
+                run_id=run_id,
+                problem_version=problem_version,
+                llm=llm,
+                dataset=dataset,
+                iterations=10,
+                problem_hash=f"phash-{problem_version}",
+                dataset_hash=f"dhash-{dataset}",
+                llm_model="gpt-4",
+                created_at=now,
+                status="completed",
+                generation_time_s=30.0,
+            )
+        insert_solution(
+            conn,
+            solution_id=solution_id,
+            run_id=run_id,
+            rank=rank,
+            best_score=best_score,
+            alias=alias,
+        )
+    finally:
+        conn.close()
+
+    # Create program file with custom content
+    programs_dir = project_root / REVOLVER_DIR / RUNS_DIR / run_id / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (programs_dir / f"rank-{rank}.py").write_text(program_content, encoding="utf-8")
+
+
 @pytest.fixture()
 def project_with_solutions(tmp_project: Path) -> Path:
     """Set up a project with 2 runs and solutions for testing.
@@ -879,3 +930,201 @@ def test_solution_delete_user_confirms(project_with_solutions: Path) -> None:
         assert cursor.fetchone() is None
     finally:
         conn.close()
+
+
+# ── solution show / export / diff tests (Sprint 009 — S9-01..S9-05) ─────
+
+
+@pytest.fixture()
+def project_with_show_solutions(tmp_project: Path) -> Path:
+    """Set up a project with two solutions having different program content.
+
+    - sol-alpha: alias "alpha", code = "def alpha(): return 1\\n"
+    - sol-beta:  alias "beta",  code = "def beta(): return 2\\n"
+    """
+    _create_problem_version_in_db(tmp_project, "v1.0")
+    _create_dataset_in_db(tmp_project, "train-small")
+
+    _create_run_with_solution_content(
+        tmp_project,
+        run_id="run-alpha",
+        solution_id="sol-alpha",
+        program_content="def alpha(): return 1\n",
+        alias="alpha",
+    )
+    _create_run_with_solution_content(
+        tmp_project,
+        run_id="run-beta",
+        solution_id="sol-beta",
+        program_content="def beta(): return 2\n",
+        alias="beta",
+    )
+    return tmp_project
+
+
+@pytest.mark.integration
+def test_solution_show_stdout(project_with_show_solutions: Path) -> None:
+    """``solution show`` prints source code to stdout.
+
+    Validates: S9-01, S9-03 — FR-SOL-003, FR-SOL-004
+    """
+    result = _invoke_with_cwd(
+        ["solution", "show", "alpha"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = getattr(result, "output", "")
+    assert "def alpha(): return 1" in output
+
+
+@pytest.mark.integration
+def test_solution_show_json(project_with_show_solutions: Path) -> None:
+    """``solution show --json`` outputs code as a string field.
+
+    Validates: S9-03 — FR-SOL-003
+    """
+    result = _invoke_with_cwd(
+        ["--json", "solution", "show", "alpha"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    assert "code" in data
+    assert "def alpha(): return 1" in data["code"]
+    assert data["alias"] == "alpha"
+
+
+@pytest.mark.integration
+def test_solution_show_not_found(project_with_show_solutions: Path) -> None:
+    """``solution show`` with unknown alias → exit 1.
+
+    Validates: S9-03 — error handling
+    """
+    result = _invoke_with_cwd(
+        ["solution", "show", "nonexistent"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+
+
+@pytest.mark.integration
+def test_solution_export_default(
+    project_with_show_solutions: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``solution export`` copies to default ./<alias>.py.
+
+    Validates: S9-04 — FR-SOL-003, FR-SOL-004
+    """
+    # Change to a temp directory for default export (monkeypatch is test-safe)
+    export_dir = project_with_show_solutions / "export-test"
+    export_dir.mkdir()
+    monkeypatch.chdir(export_dir)
+
+    result = _invoke_with_cwd(
+        ["solution", "export", "alpha"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+
+    exported_file = export_dir / "alpha.py"
+    assert exported_file.exists()
+    content = exported_file.read_text(encoding="utf-8")
+    assert "def alpha(): return 1" in content
+
+
+@pytest.mark.integration
+def test_solution_export_explicit_path(project_with_show_solutions: Path) -> None:
+    """``solution export -o <path>`` copies to explicit path.
+
+    Validates: S9-04 — FR-SOL-003, FR-SOL-004
+    """
+    target = project_with_show_solutions / "my-output.py"
+
+    result = _invoke_with_cwd(
+        ["solution", "export", "alpha", "-o", str(target)],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+
+    assert target.exists()
+    content = target.read_text(encoding="utf-8")
+    assert "def alpha(): return 1" in content
+
+
+@pytest.mark.integration
+def test_solution_export_not_found(project_with_show_solutions: Path) -> None:
+    """``solution export`` with unknown alias → exit 1.
+
+    Validates: S9-04 — error handling
+    """
+    result = _invoke_with_cwd(
+        ["solution", "export", "nonexistent"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+
+
+@pytest.mark.integration
+def test_solution_diff_different(project_with_show_solutions: Path) -> None:
+    """``solution diff`` shows unified diff for two different solutions.
+
+    Validates: S9-02, S9-05 — diff on stdout, exit 0
+    """
+    result = _invoke_with_cwd(
+        ["solution", "diff", "alpha", "beta"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = getattr(result, "output", "")
+    # Should contain diff markers
+    assert "---" in output
+    assert "+++" in output
+    assert "-def alpha" in output
+    assert "+def beta" in output
+
+
+@pytest.mark.integration
+def test_solution_diff_identical(project_with_show_solutions: Path) -> None:
+    """``solution diff`` with two identical programs → empty diff, exit 0.
+
+    Validates: S9-05 — identical programs, exit 0
+    """
+    # Create a second solution pointing to the same content
+    _create_run_with_solution_content(
+        project_with_show_solutions,
+        run_id="run-alpha-copy",
+        solution_id="sol-alpha-copy",
+        program_content="def alpha(): return 1\n",
+        alias="alpha-copy",
+    )
+
+    result = _invoke_with_cwd(
+        ["solution", "diff", "alpha", "alpha-copy"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = getattr(result, "output", "")
+    # Identical files → no diff markers
+    assert "---" not in output
+    assert "+++" not in output
+
+
+@pytest.mark.integration
+def test_solution_diff_json(project_with_show_solutions: Path) -> None:
+    """``solution diff --json`` returns diff text + identical flag.
+
+    Validates: S9-05 — JSON output format
+    """
+    result = _invoke_with_cwd(
+        ["--json", "solution", "diff", "alpha", "beta"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    assert "diff" in data
+    assert "identical" in data
+    assert data["identical"] is False
+    assert "---" in data["diff"]

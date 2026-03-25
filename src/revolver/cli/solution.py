@@ -8,6 +8,8 @@ Traceable to: DES-005 §7, FR-SOL-001..013.
 
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
 import sys
 from typing import Annotated
 
@@ -164,6 +166,95 @@ def solution_alias(
                 json_mode=json_mode,
                 quiet=quiet,
             )
+
+
+# ── solution show (FR-SOL-003, FR-SOL-004) ────────────────────────────────
+
+
+@solution_app.command("show")
+def solution_show(
+    ctx: typer.Context,
+    alias_or_id: Annotated[
+        str,
+        typer.Argument(help="Solution ID or alias."),
+    ],
+) -> None:
+    """Print solution program source code to stdout."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        code, sol = core_solution.show_solution(alias_or_id)
+
+        if json_mode:
+            render(
+                {"alias": sol.alias or sol.id, "code": code},
+                json_mode=True,
+            )
+        else:
+            sys.stdout.write(code)
+
+
+# ── solution export (FR-SOL-003, FR-SOL-004) ─────────────────────────────
+
+
+@solution_app.command("export")
+def solution_export(
+    ctx: typer.Context,
+    alias_or_id: Annotated[
+        str,
+        typer.Argument(help="Solution ID or alias."),
+    ],
+    output: Annotated[
+        str | None,
+        typer.Option("-o", "--output", help="Target file path (default: ./<alias>.py)."),
+    ] = None,
+) -> None:
+    """Copy the solution program file to a local path."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        # Resolve solution and get validated program path (core layer)
+        sol, program_path = core_solution.get_solution_program_path(alias_or_id)
+
+        # Determine target path
+        default_name = f"{sol.alias}.py" if sol.alias else f"{sol.id}.py"
+        target = Path(output) if output else Path(default_name)
+
+        shutil.copy2(program_path, target)
+
+        if json_mode:
+            render({"exported_to": str(target)}, json_mode=True)
+        else:
+            sys.stderr.write(f"Exported to {target}\n")
+
+
+# ── solution diff ────────────────────────────────────────────────────────
+
+
+@solution_app.command("diff")
+def solution_diff(
+    ctx: typer.Context,
+    a: Annotated[
+        str,
+        typer.Argument(help="First solution ID or alias."),
+    ],
+    b: Annotated[
+        str,
+        typer.Argument(help="Second solution ID or alias."),
+    ],
+) -> None:
+    """Print unified diff between two solution programs."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        diff_lines = core_solution.diff_solutions(a, b)
+
+        if json_mode:
+            diff_text = "".join(diff_lines)
+            identical = len(diff_lines) == 0
+            render({"diff": diff_text, "identical": identical}, json_mode=True)
+        else:
+            sys.stdout.write("".join(diff_lines))
 
 
 # ── solution extract (FR-SOL-011..013) ──────────────────────────────────────

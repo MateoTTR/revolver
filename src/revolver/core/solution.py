@@ -1,8 +1,11 @@
-"""Core solution logic: listing, detail, alias, extract.
+"""Core solution logic: listing, detail, alias, extract, show, diff.
 
 Implements the domain layer for ``revolver solution`` commands:
 - ``list_solutions()`` — list with filters (FR-SOL-001, FR-SOL-002)
 - ``get_solution_info()`` — full lineage JOIN + siblings (FR-SOL-003..005, FR-SOL-009)
+- ``get_solution_program_path()`` — resolve solution to validated program path
+- ``show_solution()`` — read program source code (FR-SOL-003, FR-SOL-004)
+- ``diff_solutions()`` — unified diff between two solutions
 - ``set_alias()`` — unique alias (FR-SOL-006, FR-SOL-007)
 - ``extract_solution()`` — promote program to solution (FR-SOL-011..013)
 
@@ -12,6 +15,7 @@ Traceable to: DES-005 §7, DES-006, FR-SOL-001..013.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import difflib
 from pathlib import Path
 import sqlite3
 
@@ -112,6 +116,135 @@ def get_solution_info(
         ]
 
         return detail
+    finally:
+        conn.close()
+
+
+def get_solution_program_path(
+    id_or_alias: str,
+    *,
+    project_root: Path | None = None,
+) -> tuple[Solution, Path]:
+    """Resolve a solution and return its validated program file path.
+
+    Looks up the solution by ID or alias, derives the program path from
+    the run directory structure, and validates that the file exists on disk.
+
+    Args:
+        id_or_alias: Solution ID or alias to look up.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A tuple of (Solution, Path) where Path is the validated program file path.
+
+    Raises:
+        RevolverError: If the solution is not found or the program file
+            does not exist on disk.
+    """
+    root = project_root or find_project_root(Path.cwd())
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        sol = get_solution(conn, id_or_alias)
+        if sol is None:
+            raise RevolverError(f"Solution not found: {id_or_alias}")
+
+        rank = sol.rank if sol.rank is not None else 1
+        program_path = root / REVOLVER_DIR / RUNS_DIR / sol.run_id / "programs" / f"rank-{rank}.py"
+        if not program_path.exists():
+            raise RevolverError(f"Program file not found: {program_path}")
+
+        return sol, program_path
+    finally:
+        conn.close()
+
+
+def show_solution(
+    id_or_alias: str,
+    *,
+    project_root: Path | None = None,
+) -> tuple[str, Solution]:
+    """Read the program source code for a solution.
+
+    Resolves the solution by ID or alias, locates the program file
+    via ``program_path``, and returns its contents as a string along
+    with the resolved Solution object.
+
+    Args:
+        id_or_alias: Solution ID or alias to look up.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A tuple of (source_code, Solution).
+
+    Raises:
+        RevolverError: If the solution is not found or the program file
+            does not exist on disk.
+    """
+    sol, program_path = get_solution_program_path(id_or_alias, project_root=project_root)
+    return program_path.read_text(encoding="utf-8"), sol
+
+
+def diff_solutions(
+    a: str,
+    b: str,
+    *,
+    project_root: Path | None = None,
+) -> list[str]:
+    """Compute a unified diff between two solution programs.
+
+    Resolves both solutions by ID or alias, reads their program files,
+    and returns the output of :func:`difflib.unified_diff`.
+
+    Args:
+        a: First solution ID or alias.
+        b: Second solution ID or alias.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A list of diff lines (may be empty if programs are identical).
+
+    Raises:
+        RevolverError: If either solution is not found or its program file
+            does not exist on disk.
+    """
+    root = project_root or find_project_root(Path.cwd())
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        sol_a = get_solution(conn, a)
+        if sol_a is None:
+            raise RevolverError(f"Solution not found: {a}")
+
+        sol_b = get_solution(conn, b)
+        if sol_b is None:
+            raise RevolverError(f"Solution not found: {b}")
+
+        rank_a = sol_a.rank if sol_a.rank is not None else 1
+        rank_b = sol_b.rank if sol_b.rank is not None else 1
+
+        path_a = root / REVOLVER_DIR / RUNS_DIR / sol_a.run_id / "programs" / f"rank-{rank_a}.py"
+        path_b = root / REVOLVER_DIR / RUNS_DIR / sol_b.run_id / "programs" / f"rank-{rank_b}.py"
+
+        if not path_a.exists():
+            raise RevolverError(f"Program file not found: {path_a}")
+        if not path_b.exists():
+            raise RevolverError(f"Program file not found: {path_b}")
+
+        lines_a = path_a.read_text(encoding="utf-8").splitlines(keepends=True)
+        lines_b = path_b.read_text(encoding="utf-8").splitlines(keepends=True)
+
+        label_a = sol_a.alias or sol_a.id
+        label_b = sol_b.alias or sol_b.id
+
+        return list(
+            difflib.unified_diff(
+                lines_a,
+                lines_b,
+                fromfile=label_a,
+                tofile=label_b,
+            )
+        )
     finally:
         conn.close()
 
