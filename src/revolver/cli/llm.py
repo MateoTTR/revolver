@@ -96,6 +96,13 @@ def llm_add(
             help="Request timeout in seconds (injected into OE config).",
         ),
     ] = None,
+    temperature: Annotated[
+        float | None,
+        typer.Option(
+            "--temperature",
+            help="Sampling temperature 0.0-2.0 (injected into OE config).",
+        ),
+    ] = None,
 ) -> None:
     """Register a new LLM (local Ollama or remote API)."""
     with cli_error_boundary():
@@ -120,6 +127,7 @@ def llm_add(
                     output_cost_per_mtok=output_cost,
                     max_tokens=max_tokens,
                     timeout_s=timeout,
+                    temperature=temperature,
                     client=client,
                 )
             finally:
@@ -335,6 +343,7 @@ def llm_list(
                         "base_url": e.base_url,
                         "max_tokens": e.max_tokens,
                         "timeout_s": e.timeout_s,
+                        "temperature": e.temperature,
                     }
                     for e in entries
                 ],
@@ -342,10 +351,11 @@ def llm_list(
             )
         else:
             if entries:
-                # Show max_tokens/timeout_s columns only if any LLM has them set
+                # Show config columns only if any LLM has them set
                 has_config = any(
                     e.max_tokens is not None or e.timeout_s is not None for e in entries
                 )
+                has_temperature = any(e.temperature is not None for e in entries)
                 rows: list[dict[str, object]] = []
                 for e in entries:
                     row: dict[str, object] = {
@@ -357,6 +367,10 @@ def llm_list(
                     if has_config:
                         row["max_tokens"] = str(e.max_tokens) if e.max_tokens is not None else "-"
                         row["timeout_s"] = str(e.timeout_s) if e.timeout_s is not None else "-"
+                    if has_temperature:
+                        row["temperature"] = (
+                            str(e.temperature) if e.temperature is not None else "-"
+                        )
                     rows.append(row)
                 render(rows, json_mode=False)
             else:
@@ -395,16 +409,23 @@ def llm_update(
             help="Cost per million output tokens (USD).",
         ),
     ] = None,
+    temperature: Annotated[
+        float | None,
+        typer.Option(
+            "--temperature",
+            help="Sampling temperature 0.0-2.0 (injected into OE config).",
+        ),
+    ] = None,
 ) -> None:
     """Update configuration fields of a registered LLM."""
     with cli_error_boundary():
         # Require at least one update flag
-        if all(v is None for v in (max_tokens, timeout, input_cost, output_cost)):
+        if all(v is None for v in (max_tokens, timeout, input_cost, output_cost, temperature)):
             from revolver.core.exceptions import ValidationError
 
             raise ValidationError(
                 "No update flags provided. Use at least one of: "
-                "--max-tokens, --timeout, --input-cost, --output-cost"
+                "--max-tokens, --timeout, --input-cost, --output-cost, --temperature"
             )
 
         conn = get_global_db()
@@ -416,6 +437,7 @@ def llm_update(
                 timeout_s=timeout,
                 input_cost_per_mtok=input_cost,
                 output_cost_per_mtok=output_cost,
+                temperature=temperature,
             )
         finally:
             conn.close()
@@ -436,6 +458,7 @@ def llm_update(
                     "output_cost_per_mtok": entry.output_cost_per_mtok,
                     "max_tokens": entry.max_tokens,
                     "timeout_s": entry.timeout_s,
+                    "temperature": entry.temperature,
                     "registered_at": entry.registered_at.isoformat(),
                 },
                 json_mode=True,
@@ -448,6 +471,9 @@ def llm_update(
                     "model": entry.model,
                     "max_tokens": str(entry.max_tokens) if entry.max_tokens is not None else "-",
                     "timeout_s": str(entry.timeout_s) if entry.timeout_s is not None else "-",
+                    "temperature": (
+                        str(entry.temperature) if entry.temperature is not None else "-"
+                    ),
                     "input_cost_per_mtok": (
                         str(entry.input_cost_per_mtok)
                         if entry.input_cost_per_mtok is not None

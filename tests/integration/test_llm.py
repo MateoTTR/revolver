@@ -1088,3 +1088,116 @@ def test_llm_update_zero_input_cost_valid(mock_global_db: Path) -> None:
 
     data = json.loads(result.stdout)
     assert data["input_cost_per_mtok"] == 0.0
+
+
+# ── Test 27: Add with --temperature ───────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_add_temperature(mock_global_db: Path) -> None:
+    """Add a remote LLM with --temperature -> stored in DB."""
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "llm",
+            "add",
+            "claude-temp",
+            "--model",
+            "claude-sonnet-4-20250514",
+            "--source",
+            "remote",
+            "--provider",
+            "anthropic",
+            "--api-key-env",
+            "ANTHROPIC_API_KEY",
+            "--temperature",
+            "0.7",
+        ],
+    )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    # Verify DB entry has temperature
+    entries = _query_llms(mock_global_db)
+    assert len(entries) == 1
+    assert entries[0].temperature == 0.7
+
+
+# ── Test 28: Update --temperature ─────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_temperature(mock_global_db: Path) -> None:
+    """Update temperature on an existing LLM, verify reflected in list."""
+    _add_remote_llm()
+
+    # Update temperature
+    result = runner.invoke(
+        app,
+        ["--json", "llm", "update", "test-llm", "--temperature", "1.0"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["name"] == "test-llm"
+    assert data["temperature"] == 1.0
+
+    # Verify via list
+    list_result = runner.invoke(app, ["--json", "llm", "list"])
+    list_data = json.loads(list_result.stdout)
+    assert list_data[0]["temperature"] == 1.0
+
+
+# ── Test 29: LLM temperature injected in build_config ─────────────────
+
+
+@pytest.mark.integration
+def test_llm_temperature_injected_in_build_config() -> None:
+    """LLM with temperature -> build_config includes it in config['llm']['temperature']."""
+    from datetime import datetime
+
+    from revolver.infra.openevolve import build_config
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="test-model",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        temperature=0.7,
+        registered_at=datetime(2026, 1, 1),
+    )
+    result = build_config(problem_config=None, llm=llm)
+
+    assert result["llm"]["temperature"] == 0.7
+
+
+# ── Test 30: CLI --temperature overrides LLM registry value ───────────
+
+
+@pytest.mark.integration
+def test_run_temperature_overrides_llm_registry() -> None:
+    """CLI --temperature flag (via config_overrides) overrides LLM registry temperature."""
+    from datetime import datetime
+
+    from revolver.infra.openevolve import build_config
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="test-model",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        temperature=0.7,
+        registered_at=datetime(2026, 1, 1),
+    )
+    # Simulate CLI --temperature override via config_overrides (step 5)
+    result = build_config(
+        problem_config=None,
+        llm=llm,
+        config_overrides=["llm.temperature=1.5"],
+    )
+
+    # Config override (step 5) should win over LLM registry (step 2b)
+    assert result["llm"]["temperature"] == 1.5

@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS llms (
     output_cost_per_mtok REAL,
     max_tokens      INTEGER,
     timeout_s       INTEGER,
+    temperature     REAL,
     registered_at   TEXT NOT NULL
 );
 """
@@ -417,6 +418,18 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 5:
         _migrate_v4_to_v5(conn)
 
+    # Migration v6: Add temperature REAL column to llms table.
+    if current < 6:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE llms ADD COLUMN temperature REAL")
+        conn.commit()
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (6, now),
+        )
+        conn.commit()
+
 
 def get_project_db(path: Path) -> sqlite3.Connection:
     """Open (or create) the project SQLite database.
@@ -633,7 +646,8 @@ def delete_problem_version(conn: sqlite3.Connection, tag: str) -> bool:
 
 _LLM_COLUMNS = (
     "name, provider, model, source, base_url, api_key_env, "
-    "input_cost_per_mtok, output_cost_per_mtok, max_tokens, timeout_s, registered_at"
+    "input_cost_per_mtok, output_cost_per_mtok, max_tokens, timeout_s, "
+    "temperature, registered_at"
 )
 
 
@@ -650,7 +664,8 @@ def _row_to_llm_entry(row: tuple[object, ...]) -> LLMEntry:
         output_cost_per_mtok=row[7],  # type: ignore[arg-type]
         max_tokens=row[8],  # type: ignore[arg-type]
         timeout_s=row[9],  # type: ignore[arg-type]
-        registered_at=row[10],  # type: ignore[arg-type]
+        temperature=row[10],  # type: ignore[arg-type]
+        registered_at=row[11],  # type: ignore[arg-type]
     )
 
 
@@ -670,8 +685,8 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
             INSERT INTO llms (
                 name, provider, model, source, base_url, api_key_env,
                 input_cost_per_mtok, output_cost_per_mtok,
-                max_tokens, timeout_s, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                max_tokens, timeout_s, temperature, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.name,
@@ -684,6 +699,7 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
                 entry.output_cost_per_mtok,
                 entry.max_tokens,
                 entry.timeout_s,
+                entry.temperature,
                 entry.registered_at.isoformat(),
             ),
         )
@@ -744,6 +760,7 @@ def update_llm(
     timeout_s: int | None = None,
     input_cost_per_mtok: float | None = None,
     output_cost_per_mtok: float | None = None,
+    temperature: float | None = None,
 ) -> int:
     """Update mutable fields of an LLM entry.
 
@@ -757,6 +774,7 @@ def update_llm(
         timeout_s: New value for request timeout in seconds.
         input_cost_per_mtok: New value for cost per million input tokens.
         output_cost_per_mtok: New value for cost per million output tokens.
+        temperature: New value for sampling temperature (0.0-2.0).
 
     Returns:
         The number of rows affected (0 if name not found, 1 if updated).
@@ -770,6 +788,8 @@ def update_llm(
         fields["input_cost_per_mtok"] = input_cost_per_mtok
     if output_cost_per_mtok is not None:
         fields["output_cost_per_mtok"] = output_cost_per_mtok
+    if temperature is not None:
+        fields["temperature"] = temperature
 
     if not fields:
         return 0

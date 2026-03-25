@@ -28,6 +28,7 @@ class LLMEntry(BaseModel):
         output_cost_per_mtok: Cost per million output tokens (USD).
         max_tokens: Maximum tokens per LLM response (injected into OE config).
         timeout_s: Request timeout in seconds (injected into OE config).
+        temperature: Sampling temperature (0.0-2.0) injected into OE config.
         registered_at: Timestamp of registration.
     """
 
@@ -43,6 +44,7 @@ class LLMEntry(BaseModel):
     output_cost_per_mtok: float | None = None
     max_tokens: int | None = None
     timeout_s: int | None = None
+    temperature: float | None = None
     registered_at: datetime
 
 

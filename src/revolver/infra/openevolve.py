@@ -252,7 +252,7 @@ def build_config(
         config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
         config["llm"].update(llm_config)
 
-    # 2b. LLM per-model config (max_tokens, timeout) from registry
+    # 2b. LLM per-model config (max_tokens, timeout, temperature) from registry
     if llm.max_tokens is not None:
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
@@ -261,6 +261,10 @@ def build_config(
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
             config["llm"]["timeout"] = llm.timeout_s
+    if llm.temperature is not None:
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["temperature"] = llm.temperature
 
     # Google provider detection (FB-02): Google's Generative Language API
     # rejects the ``seed`` parameter with HTTP 400.  Disable random_seed.
