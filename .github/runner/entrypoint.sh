@@ -15,6 +15,10 @@ if [ -z "${RUNNER_TOKEN:-}" ]; then
         | jq -r .token)
 fi
 
+# Remove stale config from previous ephemeral run (the container is
+# restarted by Docker after each job, but the filesystem persists).
+./config.sh remove --token "dummy" 2>/dev/null || true
+
 # Configure the runner (ephemeral = de-registers after one job)
 ./config.sh \
     --url "${REPO_URL}" \
