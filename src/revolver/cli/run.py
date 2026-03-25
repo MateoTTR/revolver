@@ -64,6 +64,20 @@ def run_launch(
             help="Display resolved config without launching.",
         ),
     ] = False,
+    temperature: Annotated[
+        float | None,
+        typer.Option(
+            "--temperature",
+            help="Sampling temperature for the LLM (overrides LLM registry value).",
+        ),
+    ] = None,
+    parallel: Annotated[
+        int | None,
+        typer.Option(
+            "--parallel",
+            help="Number of parallel evaluations for OpenEvolve.",
+        ),
+    ] = None,
 ) -> None:
     """Launch an OpenEvolve evolution run."""
     # If a subcommand was invoked, skip the launch logic
@@ -95,6 +109,8 @@ def run_launch(
             alias=alias,
             config_overrides=config_override or [],
             dry_run=dry_run,
+            temperature=temperature,
+            parallel=parallel,
         )
 
         if not dry_run:

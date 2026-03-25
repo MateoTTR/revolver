@@ -483,6 +483,8 @@ def launch_run(
             iterations=config.iterations,
             config_overrides=config.config_overrides or None,
             problem_description=problem_description,
+            temperature=config.temperature,
+            parallel=config.parallel,
         )
 
         # 8. If dry_run: return early with config, no side effects

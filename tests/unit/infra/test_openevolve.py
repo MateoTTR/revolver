@@ -429,6 +429,92 @@ class TestBuildConfig:
         assert result["random_seed"] == 42
         assert result["llm"]["random_seed"] == 42
 
+    # ── S9-10: --temperature CLI flag ──────────────────────────────────────
+
+    def test_run_temperature_flag(self) -> None:
+        """build_config(..., temperature=0.5) sets config['llm']['temperature'] (S9-10)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            temperature=0.5,
+        )
+        assert result["llm"]["temperature"] == 0.5
+
+    def test_run_temperature_none_leaves_existing(self, tmp_path: Path) -> None:
+        """temperature=None leaves existing temperature value unchanged (S9-10)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("llm:\n  temperature: 0.8\n")
+
+        llm = _make_llm()
+        result = build_config(
+            problem_config=config_file,
+            llm=llm,
+            temperature=None,
+        )
+        # Base config temperature should be preserved
+        assert result["llm"]["temperature"] == 0.8
+
+    def test_run_temperature_overrides_llm_registry(self) -> None:
+        """CLI --temperature overrides LLM registry temperature (S9-10)."""
+        llm = _make_llm(temperature=0.3)
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            temperature=0.9,
+        )
+        # CLI flag (step 2c) should win over LLM registry (step 2b)
+        assert result["llm"]["temperature"] == 0.9
+
+    def test_config_override_overrides_temperature_flag(self) -> None:
+        """--config-override llm.temperature=X wins over --temperature (S9-10)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            temperature=0.5,
+            config_overrides=["llm.temperature=1.0"],
+        )
+        # Config override (step 5) should win over CLI flag (step 2c)
+        assert result["llm"]["temperature"] == 1.0
+
+    # ── S9-11: --parallel CLI flag ─────────────────────────────────────────
+
+    def test_run_parallel_flag(self) -> None:
+        """build_config(..., parallel=4) sets evaluator.parallel_evaluations (S9-11)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            parallel=4,
+        )
+        assert result["evaluator"]["parallel_evaluations"] == 4
+
+    def test_run_parallel_none_leaves_existing(self, tmp_path: Path) -> None:
+        """parallel=None leaves existing parallel_evaluations unchanged (S9-11)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("evaluator:\n  parallel_evaluations: 8\n")
+
+        llm = _make_llm()
+        result = build_config(
+            problem_config=config_file,
+            llm=llm,
+            parallel=None,
+        )
+        assert result["evaluator"]["parallel_evaluations"] == 8
+
+    def test_config_override_overrides_parallel_flag(self) -> None:
+        """--config-override evaluator.parallel_evaluations=X wins over --parallel."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            parallel=4,
+            config_overrides=["evaluator.parallel_evaluations=8"],
+        )
+        # Config override (step 5) should win over CLI flag (step 2c)
+        assert result["evaluator"]["parallel_evaluations"] == 8
+
 
 # ── resolve_api_keys tests ────────────────────────────────────────────────────
 

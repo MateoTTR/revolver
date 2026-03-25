@@ -190,13 +190,16 @@ def build_config(
     config_overrides: list[str] | None = None,
     output_dir: Path | None = None,
     problem_description: str | None = None,
+    temperature: float | None = None,
+    parallel: int | None = None,
 ) -> dict[str, Any]:
     """Build the OpenEvolve config dict.
 
     Merge order (last wins):
         1. Problem version's config.yaml (base)
         2. LLM endpoint configuration (api_base, primary_model, api_key_env)
-        2b. LLM per-model config (max_tokens, timeout) from LLM registry
+        2b. LLM per-model config (max_tokens, timeout, temperature) from LLM registry
+        2c. CLI flags: --temperature, --parallel (override LLM registry values)
         3. Problem description injection into prompt.system_message
         4. --iterations override
         5. --config-override key=value pairs
@@ -209,6 +212,11 @@ def build_config(
         config_overrides: List of ``key=value`` override strings (optional).
         output_dir: Revolver-controlled output directory (optional).
         problem_description: Content of problem.md for prompt injection (optional).
+        temperature: CLI ``--temperature`` override (optional). Overrides LLM
+            registry temperature (step 2b) but is itself overridden by
+            ``--config-override llm.temperature=X`` (step 5).
+        parallel: CLI ``--parallel`` override for ``evaluator.parallel_evaluations``
+            (optional).
 
     Returns:
         Merged configuration dictionary.
@@ -283,6 +291,16 @@ def build_config(
     config.setdefault("evaluator", {})
     if isinstance(config.get("evaluator"), dict):
         config["evaluator"].setdefault("cascade_evaluation", False)
+
+    # 2c. CLI flags: --temperature and --parallel (override LLM registry values)
+    if temperature is not None:
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["temperature"] = temperature
+    if parallel is not None:
+        config.setdefault("evaluator", {})
+        if isinstance(config.get("evaluator"), dict):
+            config["evaluator"]["parallel_evaluations"] = parallel
 
     # 3. Problem description injection (DES-005 §4.4)
     if problem_description:
