@@ -352,6 +352,8 @@ Before running OpenEvolve on your program:
 - [ ] Stub functions have docstrings explaining what they should do
 - [ ] HINT comments guide the LLM toward specific improvements
 - [ ] No implicit dependencies between functions inside the block
+- [ ] Initial program scores in the 0.3–0.7 range (not too easy, not too hard)
+- [ ] Allowed libraries are documented in `problem.md` and available to the evaluator
 
 ## Common pitfalls
 
@@ -364,3 +366,115 @@ Before running OpenEvolve on your program:
 | Functions depend on shared mutable state | LLM changes one function, breaks another | Pass data explicitly via arguments and return values |
 | Hints are too vague ("make it better") | LLM doesn't know what to try | Be specific: name algorithms, describe the optimization |
 | EVOLVE-BLOCK around I/O code | LLM rewrites file reading, not the algorithm | Move I/O outside the block |
+| Baseline already near-optimal | LLM has no room to improve — evolution adds nothing | Start with a simpler baseline (see below) |
+| Restricting scientific libraries | LLM can't use proven solvers for complex math problems | Allow scipy/numpy and document it in `problem.md` |
+
+## Lessons from real-world problems
+
+The guidance above comes from the TSP demo, where a combinatorial problem maps
+naturally to small Python functions. The beamforming demo (v0.8.1) introduced a
+harder optimization problem — phased-array antenna beamforming — and surfaced
+three additional lessons about how the initial program's strength and the
+evaluator's constraints shape evolution outcomes.
+
+### Stronger baseline = less improvement margin
+
+If your initial program already uses a sophisticated algorithm, the LLM has
+very little room to improve it. Evolution works best when the gap between the
+baseline and the theoretical optimum is wide.
+
+**Real-world example**: the beamforming initial program used a worst-point
+boosting algorithm that was already near-optimal. Across 5 models (3 local,
+2 remote), the best improvement was only +0.044 dB — the LLM could tweak
+parameters and add minor refinements (multi-init, soft-min weighting, projected
+gradient), but it could not fundamentally change the algorithmic approach.
+
+By contrast, the TSP initial program used a simple nearest-neighbor heuristic,
+leaving plenty of room for the LLM to discover 2-opt, or-opt, and other
+local search strategies.
+
+**Guideline**: start with the simplest correct algorithm, not the best one you
+know. If you already know the optimal approach, OpenEvolve is not the right
+tool. OpenEvolve excels at exploring the space between "naive" and "expert."
+
+| Baseline strength | Typical initial score | Evolution outcome |
+|---|---|---|
+| Trivial (random) | 0.0–0.1 | LLM may struggle to bootstrap — too far from a valid solution |
+| Naive-but-correct | 0.3–0.7 | **Sweet spot** — plenty of room, LLM can discover real improvements |
+| Near-optimal | 0.9+ | Marginal gains at best — LLM has nowhere meaningful to go |
+
+### Allow scientific libraries for complex problems
+
+For problems involving signal processing, linear algebra, convex optimization,
+or other domains with mature libraries, restricting the LLM to pure Python
+cripples its ability to find good solutions. An LLM that can use `scipy.optimize`
+or `numpy.linalg` can leverage decades of optimized implementations rather than
+reimplementing them from scratch.
+
+**Real-world example**: in the beamforming demo, the LLM could potentially have
+used SDP solvers (`scipy.optimize`, `cvxpy`) or convex formulations to find
+better beamforming weights. But the evaluator environment did not make these
+available, so the LLM was limited to hand-rolled gradient-style tweaks.
+
+**Guideline**: document allowed libraries explicitly in your `problem.md`.
+Ensure they are installed in the evaluator environment. The evaluator wrapper
+should not restrict imports unless you have a specific reason (e.g., measuring
+pure algorithmic skill without library help).
+
+```markdown
+# problem.md (example)
+
+## Allowed libraries
+- numpy (array operations, linear algebra)
+- scipy (optimization, signal processing)
+- Do NOT use: cvxpy (too slow for per-instance evaluation)
+```
+
+If you want to measure whether the LLM can improve on a pure-Python solution,
+make that an explicit constraint. Otherwise, let it use the tools that a human
+expert would reach for.
+
+### Problem difficulty calibration
+
+The initial program's score on your training dataset is a strong predictor of
+whether evolution will succeed. Calibrate difficulty before launching a long run.
+
+**Too easy** (initial score > 0.9):
+
+The baseline already solves the problem well. The LLM can only find marginal
+improvements, and even those may not generalize to held-out data. This was the
+situation in the beamforming demo — worst-point boosting already scored 0.100
+on a scale where gains are measured in hundredths of dB.
+
+Signs: best evolved program is barely better than baseline; most iterations
+produce no improvement; LLM diffs are cosmetic (variable renames, minor
+constant tweaks).
+
+**Too hard** (initial score < 0.1):
+
+The baseline is so far from a valid solution that the LLM cannot bootstrap.
+Every modification it tries still scores zero, so evolution has no gradient
+to follow.
+
+Signs: every iteration scores 0.0; no programs survive selection; LLM diffs
+are increasingly random as it has no positive signal to learn from.
+
+**Sweet spot** (initial score 0.3–0.7):
+
+The baseline is correct but clearly suboptimal. The LLM can see what works,
+identify bottlenecks, and make targeted improvements that produce measurable
+score gains.
+
+Signs: first few iterations already produce improvements; score curve rises
+steadily; LLM diffs are substantive (new algorithms, better data structures,
+parameter tuning).
+
+**How to calibrate**:
+
+1. Run `revolver problem test` to get the baseline score.
+2. If the score is above 0.9, simplify the initial program (remove
+   optimizations, use a more naive algorithm).
+3. If the score is below 0.1, add a better starting heuristic or reduce
+   problem difficulty (fewer constraints, smaller instances).
+4. Aim for a baseline that a human expert could improve by 2–5x — that
+   gives the LLM realistic targets.
