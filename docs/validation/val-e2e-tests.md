@@ -95,9 +95,9 @@ Derived from [user-story-e2e.md](../specs/user-story-e2e.md). Tests the canonica
 | 4 | Copy test evaluator + initial_program + instances into project | Files in place |
 | 5 | `revolver problem test --instance instances/instance_001.json` | Metrics returned, exit 0 |
 | 6 | `revolver problem test --dataset instances/` | 3/3 passed |
-| 7 | `revolver problem version --tag v1.0 --message "E2E test version"` | Snapshot created, hash computed |
-| 8 | `revolver dataset add --name e2e-train --path instances/ --split train --compatible-with v1.0` | Dataset registered, 3 instances |
-| 9 | `revolver dataset add --name e2e-eval --path instances/ --split eval --compatible-with v1.0` | Second dataset registered |
+| 7 | `revolver problem version create --tag v1.0 --message "E2E test version"` | Snapshot created, hash computed |
+| 8 | `revolver dataset add e2e-train --path instances/ --split train --compatible-with v1.0` | Dataset registered, 3 instances |
+| 9 | `revolver dataset add e2e-eval --path instances/ --split eval --compatible-with v1.0` | Second dataset registered |
 | 10 | `revolver run --version v1.0 --llm fake-llm --dataset e2e-train --iterations 2 --alias e2e-run` | Run completes, solution created, tokens tracked |
 | 11 | `revolver solution list` | Solution listed with alias |
 | 12 | `revolver eval --solution e2e-run --dataset e2e-eval` | Per-instance results stored |

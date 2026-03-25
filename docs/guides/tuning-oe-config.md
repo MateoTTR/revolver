@@ -192,7 +192,7 @@ There are two ways to set temperature, with different scopes:
 
 ```bash
 # Set temperature when registering an LLM
-revolver llm add my-llm --provider ollama --model codestral:22b \
+revolver llm add my-llm --source local --model codestral:22b \
   --temperature 0.7
 
 # Update temperature on an existing LLM

@@ -15,7 +15,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.8.0
+    ✓ revolver         0.9.0
     ✓ openevolve       0.2.0
 
   External tools:
@@ -142,7 +142,7 @@ Summary: 50 passed, 0 failed, mean time: 0.9s, max time: 3.8s
 
 ```bash
 # Satisfied — create an immutable version snapshot
-$ revolver problem version --tag v1.0 --message "Initial formulation: greedy heuristic, makespan objective"
+$ revolver problem version create --tag v1.0 --message "Initial formulation: greedy heuristic, makespan objective"
 
  tag          v1.0
  hash         sha256:a1b2c3d4...

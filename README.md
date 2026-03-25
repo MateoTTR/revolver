@@ -24,17 +24,18 @@ OpenEvolve provides the core evolutionary loop for LLM-guided code optimization.
 revolver project init                  # Initialize a new optimization project
 revolver doctor                        # Verify environment dependencies
 revolver setup                         # Install missing Python dependencies
-revolver llm add/start/stop/remove     # Register and manage LLMs (local Ollama or remote API)
+revolver llm add/update/start/stop/remove  # Register and manage LLMs (local Ollama or remote API)
 revolver llm list/status               # Monitor registered LLMs and GPU usage
 revolver problem test                  # Validate evaluator against instances
-revolver problem version/versions      # Create and list immutable problem snapshots
+revolver problem version create/list/delete  # Create, list and delete immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
 revolver dataset list/info             # Inspect datasets
 revolver run/run resume                # Launch or resume OpenEvolve optimization runs
 revolver run status/list/info/delete   # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
-revolver solution extract/delete       # Extract solution code or clean up
+revolver solution show/extract/delete  # Show, extract solution code or clean up
+revolver solution export/diff          # Export solutions or compare two solutions
 revolver benchmark/benchmark results   # Compare multiple solutions on same dataset
 revolver benchmark list/export/delete  # Manage and export benchmark results (CSV/JSON)
 ```
@@ -55,7 +56,7 @@ Three-layer architecture: **CLI → Core → Infra**. Each layer only depends on
 
 ### Prerequisites
 
-- Python >= 3.11
+- Python >= 3.12
 - [Ollama](https://ollama.ai/) (for local LLMs, optional)
 - A GPU with VRAM (for local inference, optional)
 
@@ -109,8 +110,8 @@ revolver problem test --dataset data/instances/
 ### Version your problem
 
 ```bash
-revolver problem version --tag v1.0 -m "Initial formulation"
-revolver problem versions
+revolver problem version create --tag v1.0 -m "Initial formulation"
+revolver problem version list
 ```
 
 ### Register a dataset
@@ -149,7 +150,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 
 ## Tech Stack
 
-- **Python >= 3.11** — implementation language
+- **Python >= 3.12** — implementation language
 - **[Typer](https://typer.tiangolo.com/)** — CLI framework with auto-generated help
 - **[Pydantic v2](https://docs.pydantic.dev/)** — frozen data models with validation
 - **SQLite** — structured storage (project DB + global LLM registry)
@@ -163,7 +164,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (830+ tests, ~15s)
+# Run tests (920+ tests, ~15s)
 python -m pytest tests/
 
 # Lint
@@ -193,13 +194,15 @@ mypy
 | Sprint 007 | Doctor, setup & cross-cutting polish | v0.7.0 | Done |
 | Sprint 007a | Post-demo fixes (global options) | v0.7.1 | Done |
 | Sprint 008 | Reliability & lifecycle management | v0.8.0 | Done |
+| Sprint 008a | Scriptability & UX polish | v0.8.1 | Done |
+| Sprint 009 | Solution UX + Config fluide + Run robustness | v0.9.0 | Done |
 
 ## Documentation
 
 Detailed documentation lives in `docs/`:
 
 - [ConOps](docs/conops/conops.md) — concept of operations, personas, workflows
-- [Specifications](docs/specs/specifications.md) — 106 functional + 20 non-functional requirements
+- [Specifications](docs/specs/specifications.md) — 227 functional + 20 non-functional requirements
 - [Architecture](docs/architecture/architecture.md) — system design, ADRs, design documents
 - [Validation](docs/validation/validation.md) — test strategy, traceability matrix
 
