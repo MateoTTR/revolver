@@ -52,6 +52,9 @@ jobs:
           . .venv/bin/activate
           pip install -e ".[dev]"
 
+      - name: Clean stale global DB
+        run: rm -rf ~/.revolver
+
       - name: Run tests with coverage
         run: |
           . .venv/bin/activate
