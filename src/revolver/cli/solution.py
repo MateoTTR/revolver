@@ -8,7 +8,6 @@ Traceable to: DES-005 §7, FR-SOL-001..013.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import shutil
 import sys
@@ -184,10 +183,13 @@ def solution_show(
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
 
-        code = core_solution.show_solution(alias_or_id)
+        code, sol = core_solution.show_solution(alias_or_id)
 
         if json_mode:
-            print(json.dumps({"alias": alias_or_id, "code": code}, indent=2))
+            render(
+                {"alias": sol.alias or sol.id, "code": code},
+                json_mode=True,
+            )
         else:
             sys.stdout.write(code)
 
@@ -211,25 +213,17 @@ def solution_export(
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
 
-        # Resolve solution to get alias and program path
-        info = core_solution.get_solution_info(alias_or_id)
-        program_path_str = str(info.get("program_path", ""))
-        program_path = Path(program_path_str)
-
-        from revolver.core.exceptions import RevolverError
-
-        if not program_path.exists():
-            raise RevolverError(f"Program file not found: {program_path}")
+        # Resolve solution and get validated program path (core layer)
+        sol, program_path = core_solution.get_solution_program_path(alias_or_id)
 
         # Determine target path
-        alias = str(info.get("alias", "") or "")
-        default_name = f"{alias}.py" if alias else f"{info.get('id', 'solution')}.py"
+        default_name = f"{sol.alias}.py" if sol.alias else f"{sol.id}.py"
         target = Path(output) if output else Path(default_name)
 
         shutil.copy2(program_path, target)
 
         if json_mode:
-            print(json.dumps({"exported_to": str(target)}, indent=2))
+            render({"exported_to": str(target)}, json_mode=True)
         else:
             sys.stderr.write(f"Exported to {target}\n")
 
@@ -258,7 +252,7 @@ def solution_diff(
         if json_mode:
             diff_text = "".join(diff_lines)
             identical = len(diff_lines) == 0
-            print(json.dumps({"diff": diff_text, "identical": identical}, indent=2))
+            render({"diff": diff_text, "identical": identical}, json_mode=True)
         else:
             sys.stdout.write("".join(diff_lines))
 

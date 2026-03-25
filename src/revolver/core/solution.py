@@ -3,6 +3,7 @@
 Implements the domain layer for ``revolver solution`` commands:
 - ``list_solutions()`` — list with filters (FR-SOL-001, FR-SOL-002)
 - ``get_solution_info()`` — full lineage JOIN + siblings (FR-SOL-003..005, FR-SOL-009)
+- ``get_solution_program_path()`` — resolve solution to validated program path
 - ``show_solution()`` — read program source code (FR-SOL-003, FR-SOL-004)
 - ``diff_solutions()`` — unified diff between two solutions
 - ``set_alias()`` — unique alias (FR-SOL-006, FR-SOL-007)
@@ -120,22 +121,22 @@ def get_solution_info(
         conn.close()
 
 
-def show_solution(
+def get_solution_program_path(
     id_or_alias: str,
     *,
     project_root: Path | None = None,
-) -> str:
-    """Read the program source code for a solution.
+) -> tuple[Solution, Path]:
+    """Resolve a solution and return its validated program file path.
 
-    Resolves the solution by ID or alias, locates the program file
-    via ``program_path``, and returns its contents as a string.
+    Looks up the solution by ID or alias, derives the program path from
+    the run directory structure, and validates that the file exists on disk.
 
     Args:
         id_or_alias: Solution ID or alias to look up.
         project_root: Explicit project root, or ``None`` to auto-detect.
 
     Returns:
-        The program source code as a string.
+        A tuple of (Solution, Path) where Path is the validated program file path.
 
     Raises:
         RevolverError: If the solution is not found or the program file
@@ -154,9 +155,35 @@ def show_solution(
         if not program_path.exists():
             raise RevolverError(f"Program file not found: {program_path}")
 
-        return program_path.read_text(encoding="utf-8")
+        return sol, program_path
     finally:
         conn.close()
+
+
+def show_solution(
+    id_or_alias: str,
+    *,
+    project_root: Path | None = None,
+) -> tuple[str, Solution]:
+    """Read the program source code for a solution.
+
+    Resolves the solution by ID or alias, locates the program file
+    via ``program_path``, and returns its contents as a string along
+    with the resolved Solution object.
+
+    Args:
+        id_or_alias: Solution ID or alias to look up.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A tuple of (source_code, Solution).
+
+    Raises:
+        RevolverError: If the solution is not found or the program file
+            does not exist on disk.
+    """
+    sol, program_path = get_solution_program_path(id_or_alias, project_root=project_root)
+    return program_path.read_text(encoding="utf-8"), sol
 
 
 def diff_solutions(

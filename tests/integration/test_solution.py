@@ -934,31 +934,29 @@ def test_solution_show_not_found(project_with_show_solutions: Path) -> None:
 
 
 @pytest.mark.integration
-def test_solution_export_default(project_with_show_solutions: Path) -> None:
+def test_solution_export_default(
+    project_with_show_solutions: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``solution export`` copies to default ./<alias>.py.
 
     Validates: S9-04 — FR-SOL-003, FR-SOL-004
     """
-    import os
-
-    # Change to a temp directory for default export
+    # Change to a temp directory for default export (monkeypatch is test-safe)
     export_dir = project_with_show_solutions / "export-test"
     export_dir.mkdir()
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(export_dir)
-        result = _invoke_with_cwd(
-            ["solution", "export", "alpha"],
-            project_with_show_solutions,
-        )
-        assert result.exit_code == 0  # type: ignore[union-attr]
+    monkeypatch.chdir(export_dir)
 
-        exported_file = export_dir / "alpha.py"
-        assert exported_file.exists()
-        content = exported_file.read_text(encoding="utf-8")
-        assert "def alpha(): return 1" in content
-    finally:
-        os.chdir(original_cwd)
+    result = _invoke_with_cwd(
+        ["solution", "export", "alpha"],
+        project_with_show_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+
+    exported_file = export_dir / "alpha.py"
+    assert exported_file.exists()
+    content = exported_file.read_text(encoding="utf-8")
+    assert "def alpha(): return 1" in content
 
 
 @pytest.mark.integration
