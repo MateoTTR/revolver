@@ -59,6 +59,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | Document | Path | Purpose |
 |---|---|---|
 | Initial program guide | [docs/guides/initial-program-structure.md](docs/guides/initial-program-structure.md) | Best practices for OpenEvolve initial programs |
+| Tuning OE config guide | [docs/guides/tuning-oe-config.md](docs/guides/tuning-oe-config.md) | Tuning OpenEvolve parameters (MAP-Elites, islands, parallelism, temperature) |
 
 ### Claude Agents
 
