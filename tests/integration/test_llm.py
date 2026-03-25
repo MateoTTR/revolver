@@ -1201,3 +1201,137 @@ def test_run_temperature_overrides_llm_registry() -> None:
 
     # Config override (step 5) should win over LLM registry (step 2b)
     assert result["llm"]["temperature"] == 1.5
+
+
+# ── Test 31: Add with --temperature below range ───────────────────────
+
+
+@pytest.mark.integration
+def test_llm_add_temperature_below_range(mock_global_db: Path) -> None:
+    """Adding with --temperature -0.1 -> exit code 1 (below 0.0)."""
+    result = runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "bad-temp",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--temperature",
+            "-0.1",
+        ],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "temperature" in output.lower()
+    assert "0.0" in output or "between" in output.lower()
+
+
+# ── Test 32: Add with --temperature above range ───────────────────────
+
+
+@pytest.mark.integration
+def test_llm_add_temperature_above_range(mock_global_db: Path) -> None:
+    """Adding with --temperature 2.01 -> exit code 1 (above 2.0)."""
+    result = runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "bad-temp",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--temperature",
+            "2.01",
+        ],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "temperature" in output.lower()
+    assert "2.0" in output or "between" in output.lower()
+
+
+# ── Test 33: Update with --temperature below range ────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_temperature_below_range(mock_global_db: Path) -> None:
+    """Updating with --temperature -0.1 -> exit code 1."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--temperature", "-0.1"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "temperature" in output.lower()
+
+
+# ── Test 34: Update with --temperature above range ────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_temperature_above_range(mock_global_db: Path) -> None:
+    """Updating with --temperature 2.01 -> exit code 1."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--temperature", "2.01"],
+    )
+    assert result.exit_code == 1
+
+    output = _get_all_output(result)
+    assert "temperature" in output.lower()
+
+
+# ── Test 35: Add JSON output includes temperature field ───────────────
+
+
+@pytest.mark.integration
+def test_llm_add_json_includes_temperature(mock_global_db: Path) -> None:
+    """llm add --json output must include temperature (consistency with llm update)."""
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "llm",
+            "add",
+            "json-temp",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--temperature",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert "temperature" in data
+    assert data["temperature"] == 0.5
+    # Also verify other config fields are present for consistency
+    assert "max_tokens" in data
+    assert "timeout_s" in data
