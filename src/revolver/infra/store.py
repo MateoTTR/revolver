@@ -57,6 +57,25 @@ def find_project_root(start: Path) -> Path:
         current = parent
 
 
+def is_in_workspace(cwd: Path | None = None) -> bool:
+    """Check whether the current directory is inside a Revolver workspace.
+
+    A convenience wrapper around :func:`find_project_root` that returns
+    ``True`` when a ``.revolver/`` directory is found, ``False`` otherwise.
+
+    Args:
+        cwd: Directory to check from.  Defaults to ``Path.cwd()``.
+
+    Returns:
+        ``True`` if a ``.revolver/`` directory exists in the hierarchy.
+    """
+    try:
+        find_project_root(cwd or Path.cwd())
+    except ProjectNotFoundError:
+        return False
+    return True
+
+
 def init_project_store(path: Path) -> Path:
     """Create the ``.revolver/`` directory tree with mode 700.
 

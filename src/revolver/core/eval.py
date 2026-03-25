@@ -23,7 +23,7 @@ from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
 from revolver.core.exceptions import (
     EvalError,
     EvalNotFoundError,
-    RevolverError,
+    ProjectNotFoundError,
 )
 from revolver.infra.db import (
     delete_eval,
@@ -61,7 +61,7 @@ def _resolve_project_root(project_root: Path | None = None) -> Path:
     try:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
-        raise RevolverError(str(exc)) from exc
+        raise ProjectNotFoundError(str(exc)) from exc
 
 
 def generate_eval_id(suffix: int | None = None) -> str:

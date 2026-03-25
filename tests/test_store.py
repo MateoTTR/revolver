@@ -12,6 +12,7 @@ from revolver.infra.store import (
     ProjectNotFoundError,
     find_project_root,
     init_project_store,
+    is_in_workspace,
     read_manifest,
     write_manifest,
 )
@@ -37,6 +38,21 @@ def test_find_project_root_not_found(tmp_path: Path) -> None:
     """find_project_root must raise ProjectNotFoundError when not found."""
     with pytest.raises(ProjectNotFoundError):
         find_project_root(tmp_path)
+
+
+@pytest.mark.unit
+def test_is_in_workspace_true(tmp_path: Path) -> None:
+    """is_in_workspace returns True when .revolver/ exists."""
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / REVOLVER_DIR).mkdir()
+    assert is_in_workspace(root) is True
+
+
+@pytest.mark.unit
+def test_is_in_workspace_false(tmp_path: Path) -> None:
+    """is_in_workspace returns False when no .revolver/ exists."""
+    assert is_in_workspace(tmp_path) is False
 
 
 @pytest.mark.unit

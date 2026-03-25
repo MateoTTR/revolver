@@ -33,6 +33,7 @@ from revolver.core.exceptions import (
     EvaluatorLoadError,
     ExternalError,
     IntegrityError,
+    ProjectNotFoundError,
     RevolverError,
 )
 from revolver.infra.db import (
@@ -262,7 +263,7 @@ def _resolve_project_root(project_root: Path | None) -> Path:
     try:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
-        raise RevolverError(str(exc)) from exc
+        raise ProjectNotFoundError(str(exc)) from exc
 
 
 # ── Smart defaults (S8a-10, S8a-11) ──────────────────────────────────────────

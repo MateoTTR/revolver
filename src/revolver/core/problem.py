@@ -15,6 +15,7 @@ import sys
 
 from revolver.core.exceptions import (
     DuplicateNameError,
+    ProjectNotFoundError,
     RevolverError,
     ValidationError,
 )
@@ -65,7 +66,7 @@ def _resolve_project_root(project_root: Path | None) -> Path:
     try:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
-        raise RevolverError(str(exc)) from exc
+        raise ProjectNotFoundError(str(exc)) from exc
 
 
 def test_problem(
