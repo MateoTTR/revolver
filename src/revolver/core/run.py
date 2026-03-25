@@ -22,6 +22,7 @@ from pathlib import Path
 import shutil
 import sys
 import time
+import traceback
 from types import ModuleType
 from typing import Any
 
@@ -809,7 +810,12 @@ def launch_run(
                     re_exc,
                 )
             else:
-                update_run_status(proj_conn, run_id, "interrupted")
+                update_run_status(proj_conn, run_id, "failed")
+                with contextlib.suppress(Exception):
+                    error_log = run_dir / "run-error.log"
+                    error_log.write_text(
+                        f"Run failed at {datetime.now(UTC).isoformat()}:\n{traceback.format_exc()}"
+                    )
                 remove_run_lock(root, run_id)
             raise
         except Exception as exc:
@@ -833,7 +839,12 @@ def launch_run(
                     f"Error details in: {run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                update_run_status(proj_conn, run_id, "interrupted")
+                update_run_status(proj_conn, run_id, "failed")
+                with contextlib.suppress(Exception):
+                    error_log = run_dir / "run-error.log"
+                    error_log.write_text(
+                        f"Run failed at {datetime.now(UTC).isoformat()}:\n{traceback.format_exc()}"
+                    )
                 remove_run_lock(root, run_id)
                 raise ExternalError(f"Run failed: {exc}") from exc
 
@@ -997,11 +1008,16 @@ def resume_run(
 
         # 2. Validate status
         parent_status = parent["status"]
-        if parent_status not in ("completed", "interrupted", "completed_with_errors"):
+        if parent_status not in (
+            "completed",
+            "interrupted",
+            "failed",
+            "completed_with_errors",
+        ):
             raise RevolverError(
                 f"Cannot resume run '{run_id}' with status '{parent_status}'. "
-                f"Only 'completed', 'interrupted', or 'completed_with_errors' "
-                f"runs can be resumed."
+                f"Only 'completed', 'interrupted', 'failed', or "
+                f"'completed_with_errors' runs can be resumed."
             )
 
         # 3. Load parent's problem version, LLM, dataset
@@ -1330,7 +1346,12 @@ def resume_run(
                     re_exc,
                 )
             else:
-                update_run_status(proj_conn, new_run_id, "interrupted")
+                update_run_status(proj_conn, new_run_id, "failed")
+                with contextlib.suppress(Exception):
+                    error_log = new_run_dir / "run-error.log"
+                    error_log.write_text(
+                        f"Run failed at {datetime.now(UTC).isoformat()}:\n{traceback.format_exc()}"
+                    )
                 remove_run_lock(root, new_run_id)
             raise
         except Exception as exc:
@@ -1354,7 +1375,12 @@ def resume_run(
                     f"Error details in: {new_run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                update_run_status(proj_conn, new_run_id, "interrupted")
+                update_run_status(proj_conn, new_run_id, "failed")
+                with contextlib.suppress(Exception):
+                    error_log = new_run_dir / "run-error.log"
+                    error_log.write_text(
+                        f"Run failed at {datetime.now(UTC).isoformat()}:\n{traceback.format_exc()}"
+                    )
                 remove_run_lock(root, new_run_id)
                 raise ExternalError(f"Resumed run failed: {exc}") from exc
 
