@@ -52,6 +52,8 @@ class RunConfig(BaseModel):
         config_overrides: OpenEvolve config override strings
             (e.g. ``["llm.temperature=0.8"]``).
         dry_run: If ``True``, validate inputs and display config without launching.
+        temperature: Sampling temperature for LLM (overrides LLM registry value).
+        parallel: Number of parallel evaluations for OpenEvolve.
     """
 
     problem_version: str
@@ -61,6 +63,8 @@ class RunConfig(BaseModel):
     alias: str | None = None
     config_overrides: list[str] = Field(default_factory=list)
     dry_run: bool = False
+    temperature: float | None = None
+    parallel: int | None = None
 
 
 class ProgramEntry(BaseModel):
