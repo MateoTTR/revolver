@@ -154,6 +154,7 @@ def extract_solution(
     rank: int,
     *,
     alias: str | None = None,
+    force: bool = False,
     project_root: Path | None = None,
 ) -> Solution:
     """Promote a stored program to a new solution DB entry.
@@ -169,6 +170,8 @@ def extract_solution(
         run_id: ID of the run that produced the program.
         rank: Program rank within the run.
         alias: Optional alias for the new solution.
+        force: If ``True``, replace an existing solution for the same
+            ``(run_id, rank)`` pair instead of raising an error.
         project_root: Explicit project root, or ``None`` to auto-detect.
 
     Returns:
@@ -176,7 +179,8 @@ def extract_solution(
 
     Raises:
         RevolverError: If the run is not found or the program file does not exist.
-        DuplicateNameError: If (run_id, rank) already extracted or alias is duplicate.
+        DuplicateNameError: If ``force=False`` and ``(run_id, rank)`` already
+            extracted, or if the alias is already in use.
     """
     if rank <= 0:
         raise ValidationError(f"Rank must be > 0, got {rank}")
@@ -209,7 +213,13 @@ def extract_solution(
         existing = get_solutions_for_run(conn, run_id)
         for s in existing:
             if s.rank == rank:
-                raise DuplicateNameError(f"Solution already exists for run={run_id}, rank={rank}")
+                if force:
+                    # Delete existing solution to allow replacement
+                    db_delete_solution(conn, s.id)
+                else:
+                    raise DuplicateNameError(
+                        f"Solution already exists for run={run_id}, rank={rank}"
+                    )
         if alias:
             existing_alias = get_solution_by_alias(conn, alias)
             if existing_alias is not None:

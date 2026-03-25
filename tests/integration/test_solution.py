@@ -413,47 +413,69 @@ def test_reference_by_alias(project_with_solutions: Path) -> None:
 
 
 @pytest.mark.integration
-def test_extract_promotes_program(project_with_solutions: Path) -> None:
-    """``solution extract`` promotes rank #2 — new solution entry, unique ID.
+def test_extract_promotes_program(tmp_project: Path) -> None:
+    """``solution extract`` promotes rank-1 program — new solution entry, unique ID.
 
     Validates: FR-SOL-011, FR-SOL-013
+
+    Uses a fresh run (without pre-existing solution) so the extract creates
+    the first solution for that run with hardcoded rank=1.
     """
-    # Create rank-2 program file
-    programs_dir = (
-        project_with_solutions / REVOLVER_DIR / RUNS_DIR / "run-20260301-100000" / "programs"
-    )
-    (programs_dir / "rank-2.py").write_text("def solve2(): pass\n", encoding="utf-8")
+    _create_problem_version_in_db(tmp_project, "v1.0")
+    _create_dataset_in_db(tmp_project, "train-small")
+
+    # Create a completed run without any solution extracted yet
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id="run-fresh",
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train-small",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+            generation_time_s=30.0,
+        )
+    finally:
+        conn.close()
+
+    programs_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / "run-fresh" / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
 
     result = _invoke_with_cwd(
         [
             "solution",
             "extract",
             "--run",
-            "run-20260301-100000",
-            "--rank",
-            "2",
+            "run-fresh",
             "--alias",
-            "rank2-solution",
+            "fresh-solution",
         ],
-        project_with_solutions,
+        tmp_project,
     )
     assert result.exit_code == 0  # type: ignore[union-attr]
     output = _get_all_output(result)
-    assert "rank2-solution" in output
+    assert "fresh-solution" in output
 
-    # Verify in DB: new solution exists with correct run_id and rank
-    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    # Verify in DB: new solution exists with correct run_id and rank=1
     conn = get_project_db(db_path)
     try:
         cursor = conn.execute(
-            "SELECT id, run_id, rank, alias FROM solutions WHERE run_id = ? AND rank = 2",
-            ("run-20260301-100000",),
+            "SELECT id, run_id, rank, alias FROM solutions WHERE run_id = ? AND rank = 1",
+            ("run-fresh",),
         )
         row = cursor.fetchone()
         assert row is not None
-        assert row[1] == "run-20260301-100000"
-        assert row[2] == 2
-        assert row[3] == "rank2-solution"
+        assert row[1] == "run-fresh"
+        assert row[2] == 1
+        assert row[3] == "fresh-solution"
         # ID should follow sol-YYYYMMDD-HHMMSS pattern
         assert row[0].startswith("sol-")
     finally:
@@ -473,8 +495,6 @@ def test_extract_duplicate_blocked(project_with_solutions: Path) -> None:
             "extract",
             "--run",
             "run-20260301-100000",
-            "--rank",
-            "1",
         ],
         project_with_solutions,
     )
@@ -516,7 +536,7 @@ def test_extract_rejects_non_completed_run(tmp_project: Path) -> None:
     (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
 
     result = _invoke_with_cwd(
-        ["solution", "extract", "--run", "run-running", "--rank", "1"],
+        ["solution", "extract", "--run", "run-running"],
         tmp_project,
     )
     assert result.exit_code == 1  # type: ignore[union-attr]
@@ -560,7 +580,7 @@ def test_extract_accepts_completed_with_errors(tmp_project: Path) -> None:
     (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
 
     result = _invoke_with_cwd(
-        ["solution", "extract", "--run", "run-cwe", "--rank", "1"],
+        ["solution", "extract", "--run", "run-cwe"],
         tmp_project,
     )
     assert result.exit_code == 0  # type: ignore[union-attr]
@@ -601,7 +621,7 @@ def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
     (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
 
     result = _invoke_with_cwd(
-        ["solution", "extract", "--run", "run-interrupted", "--rank", "1"],
+        ["solution", "extract", "--run", "run-interrupted"],
         tmp_project,
     )
     assert result.exit_code == 1  # type: ignore[union-attr]
@@ -610,18 +630,73 @@ def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
 
 
 @pytest.mark.integration
-def test_extract_rejects_rank_zero(project_with_solutions: Path) -> None:
-    """``solution extract --rank 0`` is rejected with validation error.
+def test_solution_extract_force(project_with_solutions: Path) -> None:
+    """``solution extract --force`` replaces an existing (run_id, rank) extraction.
 
-    Validates: WARNING-4 review finding — rank must be > 0.
+    Validates: FR-SOL-011, FR-SOL-012, S9-06, S9-07.
     """
+    # rank-1 already extracted for run-20260301-100000 (sol-20260301-100000)
+    # Using --force should delete the old solution and insert a new one
     result = _invoke_with_cwd(
-        ["solution", "extract", "--run", "run-20260301-100000", "--rank", "0"],
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-20260301-100000",
+            "--force",
+            "--alias",
+            "replaced-sol",
+        ],
         project_with_solutions,
     )
-    assert result.exit_code == 1  # type: ignore[union-attr]
+    assert result.exit_code == 0  # type: ignore[union-attr]
     output = _get_all_output(result)
-    assert "rank" in output.lower()
+    assert "replaced-sol" in output
+
+    # Verify in DB: old solution is gone, new one exists
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        # Old solution should be deleted
+        cursor = conn.execute(
+            "SELECT id FROM solutions WHERE id = ?",
+            ("sol-20260301-100000",),
+        )
+        assert cursor.fetchone() is None
+
+        # New solution should exist with rank=1
+        cursor = conn.execute(
+            "SELECT id, run_id, rank, alias FROM solutions WHERE run_id = ? AND rank = 1",
+            ("run-20260301-100000",),
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[1] == "run-20260301-100000"
+        assert row[2] == 1
+        assert row[3] == "replaced-sol"
+        assert row[0].startswith("sol-")
+        # New ID should differ from old
+        assert row[0] != "sol-20260301-100000"
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_solution_extract_no_rank_flag(project_with_solutions: Path) -> None:
+    """``--rank`` is absent from ``solution extract --help`` output.
+
+    Validates: S9-07 — rank removed from CLI.
+    """
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--help"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "--rank" not in output
+    # --force and --run should still be present
+    assert "--force" in output
+    assert "--run" in output
 
 
 @pytest.mark.integration

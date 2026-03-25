@@ -176,24 +176,29 @@ def solution_extract(
         str,
         typer.Option("--run", help="Run ID to extract from."),
     ],
-    rank: Annotated[
-        int,
-        typer.Option("--rank", help="Program rank to promote."),
-    ],
     alias: Annotated[
         str | None,
         typer.Option("--alias", help="Optional alias for the new solution."),
     ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Replace existing solution for this run."),
+    ] = False,
 ) -> None:
-    """Promote a stored program to a new solution entry."""
+    """Promote the best program from a run to a solution entry.
+
+    Extracts rank-1 (best) program. Use --force to replace an existing
+    extraction for the same run.
+    """
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
         solution = core_solution.extract_solution(
             run_id=run,
-            rank=rank,
+            rank=1,
             alias=alias,
+            force=force,
         )
 
         sys.stderr.write(
