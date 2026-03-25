@@ -1901,10 +1901,10 @@ def test_launch_run_post_processing_failure_sets_completed_with_errors(
 
 
 @pytest.mark.unit
-def test_launch_run_oe_failure_still_sets_interrupted(
+def test_launch_run_oe_failure_sets_failed(
     project_with_prereqs: dict,
 ) -> None:
-    """launch_run must still set status to interrupted when OE itself fails (regression)."""
+    """launch_run must set status to failed when OE itself fails (FR-RUN-031)."""
     root = project_with_prereqs["root"]
     config = RunConfig(
         problem_version="v1.0",
@@ -1967,16 +1967,197 @@ def test_launch_run_oe_failure_still_sets_interrupted(
         with pytest.raises(ExternalError):
             launch_run(config, project_root=root)
 
-    # Verify run was set to interrupted (OE didn't complete)
+    # Verify run was set to failed (OE execution failure, FR-RUN-031)
     db_path = root / REVOLVER_DIR / "revolver.db"
     conn = get_project_db(db_path)
     try:
         cursor = conn.execute("SELECT status FROM runs")
         rows = cursor.fetchall()
         assert len(rows) == 1
+        assert rows[0][0] == "failed"
+    finally:
+        conn.close()
+
+
+# ── S9-08: OE failure status tracking tests (FR-RUN-031/032) ──────────────────
+
+
+@pytest.mark.integration
+def test_run_oe_failure_marks_failed(project_with_prereqs: dict) -> None:
+    """OE raises Exception -> status 'failed' in DB, run-error.log exists, lock removed."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    run_id = "run-20260325-100000"
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.core.run.eval_run_instance",
+            return_value=preflight_ok,
+        ),
+        patch("revolver.core.run.generate_run_id", return_value=run_id),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage()
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.side_effect = RuntimeError("API key expired")
+        mock_oe_cls.return_value = mock_runner
+
+        with pytest.raises(ExternalError):
+            launch_run(config, project_root=root)
+
+    # 1. Verify run status is "failed" in DB
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,))
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "failed"
+    finally:
+        conn.close()
+
+    # 2. Verify run-error.log exists and contains traceback
+    from revolver.infra.store import get_run_dir
+
+    run_dir = get_run_dir(root, run_id)
+    error_log = run_dir / "run-error.log"
+    assert error_log.exists(), "run-error.log should be written on OE failure"
+    log_content = error_log.read_text()
+    assert "RuntimeError" in log_content
+    assert "API key expired" in log_content
+
+    # 3. Verify lock file was removed
+    lock_file = root / REVOLVER_DIR / "locks" / f"{run_id}.lock"
+    assert not lock_file.exists(), "Lock file should be removed on OE failure"
+
+    # 4. Verify token proxy was stopped
+    mock_proxy.stop.assert_called_once()
+
+
+@pytest.mark.integration
+def test_run_keyboard_interrupt_marks_interrupted(project_with_prereqs: dict) -> None:
+    """KeyboardInterrupt during OE -> status 'interrupted' in DB, lock removed."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    run_id = "run-20260325-100001"
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.core.run.eval_run_instance",
+            return_value=preflight_ok,
+        ),
+        patch("revolver.core.run.generate_run_id", return_value=run_id),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage()
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.side_effect = KeyboardInterrupt()
+        mock_oe_cls.return_value = mock_runner
+
+        with pytest.raises(KeyboardInterrupt):
+            launch_run(config, project_root=root)
+
+    # 1. Verify run status is "interrupted" in DB
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,))
+        rows = cursor.fetchall()
+        assert len(rows) == 1
         assert rows[0][0] == "interrupted"
     finally:
         conn.close()
+
+    # 2. Verify lock file was removed
+    lock_file = root / REVOLVER_DIR / "locks" / f"{run_id}.lock"
+    assert not lock_file.exists(), "Lock file should be removed on KeyboardInterrupt"
+
+    # 3. Verify token proxy was stopped
+    mock_proxy.stop.assert_called_once()
 
 
 # ── S8-11: Post-run evaluation message tests ─────────────────────────────────

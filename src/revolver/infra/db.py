@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS runs (
     resumed_from      TEXT REFERENCES runs(id),
     status            TEXT NOT NULL DEFAULT 'running'
                       CHECK (status IN ('running', 'completed',
-                             'interrupted', 'completed_with_errors')),
+                             'interrupted', 'failed',
+                             'completed_with_errors')),
     valid_iterations  INTEGER,
     created_at        TEXT NOT NULL
 );
@@ -362,6 +363,68 @@ ALTER TABLE dataset_compat_new RENAME TO dataset_compat;
     conn.commit()
 
 
+def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
+    """Migration v6->v7: Add 'failed' to runs.status CHECK constraint.
+
+    SQLite does not support ALTER CHECK, so we recreate the runs table
+    with the updated constraint.  This migration only applies to project
+    databases.  If the runs table does not exist (e.g. global DB), we
+    skip the table recreation and just record the version bump.
+    """
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
+    if cursor.fetchone() is None:
+        # Global DB -- no runs table to migrate.
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (7, now),
+        )
+        conn.commit()
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+
+    conn.executescript("""\
+CREATE TABLE runs_new (
+    id                TEXT PRIMARY KEY,
+    problem_version   TEXT NOT NULL REFERENCES problem_versions(tag),
+    llm               TEXT NOT NULL,
+    dataset           TEXT NOT NULL REFERENCES datasets(name),
+    iterations        INTEGER NOT NULL,
+    generation_time_s REAL,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    config_snapshot   TEXT,
+    problem_hash      TEXT NOT NULL,
+    dataset_hash      TEXT NOT NULL,
+    llm_model         TEXT NOT NULL,
+    resumed_from      TEXT REFERENCES runs_new(id),
+    status            TEXT NOT NULL DEFAULT 'running'
+                      CHECK (status IN ('running', 'completed',
+                             'interrupted', 'failed',
+                             'completed_with_errors')),
+    valid_iterations  INTEGER,
+    created_at        TEXT NOT NULL
+);
+
+INSERT INTO runs_new SELECT * FROM runs;
+DROP TABLE runs;
+ALTER TABLE runs_new RENAME TO runs;
+
+CREATE INDEX IF NOT EXISTS idx_runs_version ON runs(problem_version);
+CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_resumed ON runs(resumed_from);
+""")
+
+    conn.execute("PRAGMA foreign_keys=ON")
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (7, now),
+    )
+    conn.commit()
+
+
 def _configure_connection(conn: sqlite3.Connection) -> None:
     """Apply standard PRAGMAs to a connection."""
     conn.execute("PRAGMA journal_mode=WAL")
@@ -429,6 +492,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             (6, now),
         )
         conn.commit()
+
+    # Migration v7: Add 'failed' to runs.status CHECK constraint (FR-RUN-031).
+    if current < 7:
+        _migrate_v6_to_v7(conn)
 
 
 def get_project_db(path: Path) -> sqlite3.Connection:
@@ -1217,7 +1284,7 @@ def insert_run(
 def update_run_status(
     conn: sqlite3.Connection,
     run_id: str,
-    status: Literal["running", "completed", "interrupted", "completed_with_errors"],
+    status: Literal["running", "completed", "interrupted", "failed", "completed_with_errors"],
 ) -> None:
     """Update the status of a run.
 
@@ -1225,7 +1292,7 @@ def update_run_status(
         conn: An open project database connection.
         run_id: The run ID to update.
         status: New status (``"running"``, ``"completed"``, ``"interrupted"``,
-            or ``"completed_with_errors"``).
+            ``"failed"``, or ``"completed_with_errors"``).
     """
     conn.execute(
         "UPDATE runs SET status = ? WHERE id = ?",

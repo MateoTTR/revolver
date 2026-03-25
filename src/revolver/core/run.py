@@ -22,6 +22,7 @@ from pathlib import Path
 import shutil
 import sys
 import time
+import traceback
 from types import ModuleType
 from typing import Any
 
@@ -833,7 +834,16 @@ def launch_run(
                     f"Error details in: {run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                update_run_status(proj_conn, run_id, "interrupted")
+                # OE execution failure (FR-RUN-031): mark as "failed",
+                # write error log with traceback, and remove lock file.
+                update_run_status(proj_conn, run_id, "failed")
+                error_log_path = run_dir / "run-error.log"
+                with contextlib.suppress(Exception):
+                    error_log_path.write_text(
+                        f"Run execution error at "
+                        f"{datetime.now(UTC).isoformat()}:\n"
+                        f"{traceback.format_exc()}\n"
+                    )
                 remove_run_lock(root, run_id)
                 raise ExternalError(f"Run failed: {exc}") from exc
 
