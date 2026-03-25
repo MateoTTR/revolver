@@ -247,6 +247,28 @@ class TestBuildConfig:
         assert result["disabled"] is False
         assert result["name"] == "hello"
 
+    def test_config_override_json_array(self) -> None:
+        """Config override with JSON array value is parsed as Python list (S9-12)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["feature_dimensions=[0,1]"],
+        )
+        assert result["feature_dimensions"] == [0, 1]
+        assert isinstance(result["feature_dimensions"], list)
+
+    def test_config_override_json_object(self) -> None:
+        """Config override with JSON object value is parsed as Python dict (S9-12)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=['evaluator.params={"key":"val"}'],
+        )
+        assert result["evaluator"]["params"] == {"key": "val"}
+        assert isinstance(result["evaluator"]["params"], dict)
+
     def test_missing_config_file(self) -> None:
         """Missing config file produces empty base config."""
         llm = _make_llm()
@@ -603,3 +625,49 @@ class TestParseValue:
         # Strings
         assert _parse_value("hello") == "hello"
         assert _parse_value("some value") == "some value"
+
+    # ── JSON array/object support (S9-12) ─────────────────────────────────
+
+    def test_config_override_json_array(self) -> None:
+        """_parse_value('[1,2,3]') returns a Python list."""
+        result = _parse_value("[1,2,3]")
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_config_override_json_array_strings(self) -> None:
+        """_parse_value with JSON array of strings."""
+        result = _parse_value('["a","b","c"]')
+        assert result == ["a", "b", "c"]
+
+    def test_config_override_json_object(self) -> None:
+        """_parse_value('{"a":1}') returns a Python dict."""
+        result = _parse_value('{"a":1}')
+        assert result == {"a": 1}
+        assert isinstance(result, dict)
+
+    def test_config_override_json_nested_object(self) -> None:
+        """_parse_value with nested JSON object."""
+        result = _parse_value('{"key":"val","nested":{"x":1}}')
+        assert result == {"key": "val", "nested": {"x": 1}}
+
+    def test_config_override_json_malformed_array(self) -> None:
+        """Malformed JSON array falls back to string (no crash)."""
+        result = _parse_value("[1,2,")
+        assert result == "[1,2,"
+        assert isinstance(result, str)
+
+    def test_config_override_json_malformed_object(self) -> None:
+        """Malformed JSON object falls back to string (no crash)."""
+        result = _parse_value("{bad json}")
+        assert result == "{bad json}"
+        assert isinstance(result, str)
+
+    def test_config_override_json_empty_array(self) -> None:
+        """Empty JSON array parses correctly."""
+        result = _parse_value("[]")
+        assert result == []
+
+    def test_config_override_json_empty_object(self) -> None:
+        """Empty JSON object parses correctly."""
+        result = _parse_value("{}")
+        assert result == {}

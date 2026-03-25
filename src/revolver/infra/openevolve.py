@@ -339,8 +339,16 @@ def _set_nested(d: dict[str, Any], key: str, value: Any) -> None:
 def _parse_value(value: str) -> Any:
     """Parse a string value into the appropriate Python type.
 
-    Supports: None (null/none), int, float, bool, and string fallback.
+    Supports: JSON arrays/objects, None (null/none), int, float, bool,
+    and string fallback.
     """
+    # JSON array or object: try json.loads first
+    if value.startswith("[") or value.startswith("{"):
+        try:
+            return _json.loads(value)
+        except _json.JSONDecodeError:
+            pass  # Fall through to scalar parsing / string fallback
+
     if value.lower() in ("null", "none"):
         return None
     if value.lower() in ("true", "yes"):
