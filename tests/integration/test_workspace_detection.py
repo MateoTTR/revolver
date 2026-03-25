@@ -23,6 +23,8 @@ pytestmark = pytest.mark.integration
 runner = CliRunner()
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Must match _WORKSPACE_MSG in revolver.cli.error_handler (substring is enough).
 _WORKSPACE_MSG = "Not in a Revolver workspace"
 
 

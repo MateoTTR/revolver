@@ -258,7 +258,9 @@ def _resolve_project_root(project_root: Path | None) -> Path:
         The resolved project root path.
 
     Raises:
-        RevolverError: If no project is found.
+        ProjectNotFoundError: If no ``.revolver/`` directory is found
+            in the hierarchy (caught by ``cli_error_boundary`` to show
+            a user-friendly workspace message).
     """
     try:
         return find_project_root(project_root or Path.cwd())

@@ -55,6 +55,17 @@ def cli_error_boundary() -> Generator[None, None, None]:
     """
     try:
         yield
+    # IMPORTANT: This except block MUST come before ``except RevolverError``
+    # because CoreProjectNotFoundError is a subclass of RevolverError.
+    # If the order were reversed, the generic RevolverError handler would
+    # catch it first and the user-friendly workspace message would never
+    # be shown.
+    #
+    # Scope: This guard applies to ALL CLI commands that use
+    # cli_error_boundary(), not just run/solution/benchmark list.  Any
+    # command that calls find_project_root() (directly or via core helpers)
+    # will raise ProjectNotFoundError, which is caught here and mapped to
+    # a clear "not in a workspace" message.
     except (StoreProjectNotFoundError, CoreProjectNotFoundError) as exc:
         sys.stderr.write(f"Error: {_WORKSPACE_MSG}\n")
         raise typer.Exit(code=1) from exc
