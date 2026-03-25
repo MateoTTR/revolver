@@ -114,7 +114,7 @@ def test_migration_v5_to_v6_adds_temperature_column(tmp_path: Path) -> None:
     # Re-open via get_global_db_at which triggers migrations
     conn = get_global_db_at(db_path)
 
-    # Verify schema version is 6
+    # Verify schema version is current (all migrations applied)
     cursor = conn.execute("SELECT MAX(version) FROM schema_version")
     assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
 
