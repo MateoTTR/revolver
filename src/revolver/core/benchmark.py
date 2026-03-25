@@ -24,7 +24,7 @@ from revolver.core.exceptions import (
     BenchmarkNotFoundError,
     EvalError,
     ExportError,
-    RevolverError,
+    ProjectNotFoundError,
 )
 from revolver.infra.db import (
     delete_benchmark as db_delete_benchmark,
@@ -101,7 +101,7 @@ def _resolve_project_root(project_root: Path | None = None) -> Path:
     try:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
-        raise RevolverError(str(exc)) from exc
+        raise ProjectNotFoundError(str(exc)) from exc
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────

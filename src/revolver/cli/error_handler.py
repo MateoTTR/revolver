@@ -2,8 +2,9 @@
 
 Provides a context manager for CLI commands that:
 1. Catches any RevolverError subclass
-2. Renders the error message to stderr
-3. Raises typer.Exit with the appropriate exit code
+2. Catches workspace-not-found errors with a user-friendly message
+3. Renders the error message to stderr
+4. Raises typer.Exit with the appropriate exit code
 """
 
 from __future__ import annotations
@@ -14,7 +15,13 @@ import sys
 
 import typer
 
-from revolver.core.exceptions import RevolverError
+from revolver.core.exceptions import (
+    ProjectNotFoundError as CoreProjectNotFoundError,
+    RevolverError,
+)
+from revolver.infra.store import ProjectNotFoundError as StoreProjectNotFoundError
+
+_WORKSPACE_MSG = "Not in a Revolver workspace. Run `revolver project init` first."
 
 
 def handle_error(exc: RevolverError) -> int:
@@ -33,6 +40,9 @@ def handle_error(exc: RevolverError) -> int:
 def cli_error_boundary() -> Generator[None, None, None]:
     """Context manager that catches RevolverError and exits with the correct code.
 
+    Also catches ``ProjectNotFoundError`` (from both the infra store and
+    core exception layers) and emits a user-friendly workspace message.
+
     Usage::
 
         @app.command()
@@ -45,6 +55,20 @@ def cli_error_boundary() -> Generator[None, None, None]:
     """
     try:
         yield
+    # IMPORTANT: This except block MUST come before ``except RevolverError``
+    # because CoreProjectNotFoundError is a subclass of RevolverError.
+    # If the order were reversed, the generic RevolverError handler would
+    # catch it first and the user-friendly workspace message would never
+    # be shown.
+    #
+    # Scope: This guard applies to ALL CLI commands that use
+    # cli_error_boundary(), not just run/solution/benchmark list.  Any
+    # command that calls find_project_root() (directly or via core helpers)
+    # will raise ProjectNotFoundError, which is caught here and mapped to
+    # a clear "not in a workspace" message.
+    except (StoreProjectNotFoundError, CoreProjectNotFoundError) as exc:
+        sys.stderr.write(f"Error: {_WORKSPACE_MSG}\n")
+        raise typer.Exit(code=1) from exc
     except RevolverError as exc:
         code = handle_error(exc)
         message = str(exc)
