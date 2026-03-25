@@ -2,7 +2,7 @@
 name: spec-reviewer
 description: Reviews specs, design docs (DES-*), and ADRs for cross-document consistency. Use when any spec, DES, or ADR file has been modified.
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 maxTurns: 15
 ---
 

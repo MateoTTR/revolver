@@ -45,7 +45,7 @@ Registers an LLM in the global SQLite database. For local (Ollama) LLMs, optiona
 
 ```
 CLI (cli/llm.py)
-  │ Parse: name, --provider, --model, --source, --api-key-env, --base-url, --pull
+  │ Parse: name, --provider, --model, --source, --api-key-env, --base-url, --pull, --temperature
   │ Validate: mutual exclusivity (--provider vs --source ollama)
   ▼
 Core (core/llm.py) → register_llm()
@@ -333,8 +333,19 @@ def register_llm(
     api_key_env: str | None = None,
     base_url: str | None = None,
     pull: bool = False,
+    temperature: float | None = None,
 ) -> LLMEntry:
     """Register a new LLM in the global database."""
+
+def update_llm(
+    name: str,
+    max_tokens: int | None = None,
+    timeout_s: int | None = None,
+    input_cost_per_mtok: float | None = None,
+    output_cost_per_mtok: float | None = None,
+    temperature: float | None = None,
+) -> LLMEntry:
+    """Update configuration fields of a registered LLM."""
 
 def remove_llm(name: str, delete_model: bool = False) -> None:
     """Unregister an LLM. Optionally delete Ollama model files."""
@@ -372,6 +383,7 @@ def add(
     api_key_env: str = typer.Option(None, "--api-key-env", help="Env var name for API key"),
     base_url: str = typer.Option(None, "--base-url", help="Override API base URL"),
     pull: bool = typer.Option(False, "--pull", help="Pull model immediately (Ollama)"),
+    temperature: float = typer.Option(None, "--temperature", help="Sampling temperature 0.0-2.0"),
 ): ...
 
 @app.command()
@@ -397,6 +409,16 @@ def list_cmd(): ...
 def remove(
     name: str = typer.Argument(..., help="LLM to unregister"),
     delete_model: bool = typer.Option(False, "--delete-model", help="Also delete Ollama files"),
+): ...
+
+@app.command()
+def update(
+    name: str = typer.Argument(..., help="LLM to update"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="Max tokens per response"),
+    timeout: int = typer.Option(None, "--timeout", help="Request timeout in seconds"),
+    input_cost: float = typer.Option(None, "--input-cost", help="Cost per Mtok input (USD)"),
+    output_cost: float = typer.Option(None, "--output-cost", help="Cost per Mtok output (USD)"),
+    temperature: float = typer.Option(None, "--temperature", help="Sampling temperature 0.0-2.0"),
 ): ...
 ```
 

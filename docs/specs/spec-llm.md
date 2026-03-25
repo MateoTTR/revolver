@@ -42,6 +42,7 @@ Register a new LLM in the global registry.
 | `--output-cost <price>` | float | No | Cost per million output tokens in USD (e.g., `15.0` for $15/Mtok). Used for cost estimation. |
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Injected into OpenEvolve config at run time. |
 | `--timeout <seconds>` | int | No | Request timeout in seconds. Injected into OpenEvolve config at run time. |
+| `--temperature <float>` | float | No | Sampling temperature (0.0–2.0). Injected into OpenEvolve config at run time. |
 
 **Output** (human):
 ```
@@ -168,13 +169,13 @@ GPU: RTX 5090 — 19,896 / 32,607 MiB used
 
 ### 2.5 `revolver llm list`
 
-List all registered LLMs (brief format).
+List all registered LLMs (brief format). If any LLM has config fields set (max_tokens, timeout, temperature), additional columns are displayed.
 
 **Output** (human):
 ```
 codestral-local   ollama    codestral:22b
 qwen-7b           ollama    qwen2.5-coder:7b
-claude-opus       anthropic claude-opus-4-6
+claude-opus       anthropic claude-opus-4-6       temperature=0.7
 ```
 
 **Exit codes**: 0 always
@@ -202,6 +203,33 @@ Unregister an LLM from the global registry.
 
 **Exit codes**: 0 success, 1 if name not found
 
+### 2.7 `revolver llm update <name>`
+
+Update configuration fields of a registered LLM. At least one option must be provided.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Registered LLM name |
+
+**Options**:
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `--max-tokens <n>` | int | No | Maximum tokens per LLM response |
+| `--timeout <seconds>` | int | No | Request timeout in seconds |
+| `--input-cost <price>` | float | No | Cost per million input tokens in USD |
+| `--output-cost <price>` | float | No | Cost per million output tokens in USD |
+| `--temperature <float>` | float | No | Sampling temperature (0.0–2.0) |
+
+**Output** (human):
+```
+LLM "claude-opus" updated (max_tokens: 4096, temperature: 0.7)
+```
+
+**Exit codes**: 0 success, 1 if name not found, 1 if no update flags provided
+
 ---
 
 ## 3. Functional Requirements
@@ -226,6 +254,7 @@ Unregister an LLM from the global registry.
 | FR-LLM-016 | SHOULD | Support `--provider openai-compat` for arbitrary OpenAI-compatible endpoints | §3.2 |
 | FR-LLM-017 | MUST | API keys are never stored in Revolver files — only the env var name is stored | NFR-050 |
 | FR-LLM-018 | SHOULD | Support optional `--input-cost` and `--output-cost` pricing (USD per Mtok) for cost estimation in `revolver run` | POC #13 |
+| FR-LLM-019 | SHOULD | LLM temperature stored in registry and injected into OpenEvolve config when present | — |
 
 ---
 
@@ -248,7 +277,7 @@ Unregister an LLM from the global registry.
 
 LLM registrations are stored in the **global SQLite database** (`~/.revolver/revolver.db`, table `llms`). See [DES-001 §4.1](../architecture/design/DES-001-sqlite-data-model.md) for the schema definition.
 
-Using SQLite (rather than individual YAML files) ensures atomic writes and prevents manual edits that could introduce inconsistencies with actual LLM state. All mutations go through `revolver llm add/remove`.
+Using SQLite (rather than individual YAML files) ensures atomic writes and prevents manual edits that could introduce inconsistencies with actual LLM state. All mutations go through `revolver llm add/update/remove`.
 
 **Stored fields per LLM**:
 
@@ -262,6 +291,9 @@ Using SQLite (rather than individual YAML files) ensures atomic writes and preve
 | `api_key_env` | — | `"ANTHROPIC_API_KEY"` |
 | `input_cost_per_mtok` | — (local = free) | `15.0` (USD per million input tokens, optional) |
 | `output_cost_per_mtok` | — (local = free) | `75.0` (USD per million output tokens, optional) |
+| `max_tokens` | Optional | Optional |
+| `timeout_s` | Optional | Optional |
+| `temperature` | Optional (0.0–2.0) | Optional (0.0–2.0) |
 | `registered_at` | ISO 8601 | ISO 8601 |
 
 **Runtime-only fields** (not persisted in the `llms` table, queried live):

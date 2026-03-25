@@ -117,7 +117,7 @@ src/revolver/
 │   ├── dataset.py           # revolver dataset {add,update,remove,list,info}
 │   ├── run.py               # revolver run {<default>,status,resume,list,info,delete}
 │   ├── eval.py              # revolver eval {<default>,results}
-│   ├── solution.py          # revolver solution {list,info,alias,extract,delete}
+│   ├── solution.py          # revolver solution {list,info,alias,extract,delete,show,export,diff}
 │   ├── benchmark.py         # revolver benchmark {<default>,results,export,list,delete}
 │   ├── doctor.py            # revolver doctor
 │   └── setup.py             # revolver setup
@@ -200,7 +200,7 @@ Each module encapsulates the business rules for one command group. Key responsib
 | `dataset` | Register dataset by reference, compute hashes, verify integrity, manage compatibility. See [DES-004](design/DES-004-dataset-registration.md) |
 | `run` | Configure OpenEvolve, set environment variables for instance injection, launch run, store run artifacts, create solution DB references (run_id, rank), record lineage in runs table |
 | `eval` | Iterate instances, invoke evaluator per instance, collect metrics, compute aggregates, store in SQLite |
-| `solution` | Query solutions from SQLite, manage aliases |
+| `solution` | Query solutions from SQLite, manage aliases, `show_solution()`, `diff_solutions()`, `extract_solution(force=True)` |
 | `benchmark` | Orchestrate multi-solution eval, reuse existing results, compute comparison stats, export CSV/JSON |
 | `doctor` | Check Python version, Ollama availability, GPU (nvidia-smi), OpenEvolve importability |
 | `setup` | Install/upgrade Python dependencies (OpenEvolve, etc.) with user confirmation |

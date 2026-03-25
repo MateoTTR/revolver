@@ -1,7 +1,7 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.3 — completed_with_errors status, solution delete cascade
-**Date**: 2026-03-17
+**Version**: 0.4 — migrations v3-v7, failed status, temperature column
+**Date**: 2026-03-25
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
@@ -163,7 +163,8 @@ CREATE TABLE runs (
     llm_model         TEXT NOT NULL,          -- full model ID (e.g., "claude-opus-4-6")
     resumed_from      TEXT REFERENCES runs(id), -- NULL if fresh run, parent run_id if resumed
     status            TEXT NOT NULL DEFAULT 'running'
-                      CHECK (status IN ('running', 'completed', 'interrupted', 'completed_with_errors')),
+                      CHECK (status IN ('running', 'completed', 'interrupted',
+                             'failed', 'completed_with_errors')),
     created_at        TEXT NOT NULL           -- ISO 8601
 );
 
@@ -174,7 +175,7 @@ CREATE INDEX idx_runs_resumed ON runs(resumed_from);
 
 **Constraints**: Fully immutable once completed. A completed run never changes — its programs, lineage, and files are frozen. `resumed_from` links to the parent run whose checkpoint was used to seed this run (resume = new run, not mutation of the old one).
 
-**Status values**: `running` (in progress), `completed` (success), `interrupted` (OE failure or user cancellation), `completed_with_errors` (OE completed but post-processing failed — e.g., program collection, solution creation, or training eval). The `completed_with_errors` status was added in schema version 2 (see §8).
+**Status values**: `running` (in progress), `completed` (success), `interrupted` (OE failure or user cancellation), `failed` (run failed before completing any iterations), `completed_with_errors` (OE completed but post-processing failed — e.g., program collection, solution creation, or training eval). The `completed_with_errors` status was added in schema version 2; `failed` was added in schema version 7 (see §5).
 
 ### 3.6 `solutions`
 
@@ -282,6 +283,7 @@ CREATE TABLE llms (
     api_key_env     TEXT,                   -- env var name (e.g., "ANTHROPIC_API_KEY")
     input_cost_per_mtok  REAL,             -- USD per million input tokens (NULL = no pricing)
     output_cost_per_mtok REAL,             -- USD per million output tokens (NULL = no pricing)
+    temperature     REAL,                   -- default sampling temperature (NULL = use provider default)
     registered_at   TEXT NOT NULL           -- ISO 8601
 );
 ```
@@ -325,6 +327,62 @@ INSERT INTO runs SELECT * FROM _runs_old;
 DROP TABLE _runs_old;
 -- Recreate indexes
 UPDATE schema_version SET version = 2, applied_at = datetime('now');
+```
+
+### 5.2 Migration: v2 → v3 (Sprint 006c)
+
+Schema version 3 adds the `cascade_evaluation` column to the `runs` table:
+
+```sql
+ALTER TABLE runs ADD COLUMN cascade_evaluation INTEGER;
+UPDATE schema_version SET version = 3, applied_at = datetime('now');
+```
+
+### 5.3 Migration: v3 → v4 (Sprint 006c)
+
+Schema version 4 adds `max_tokens` and `timeout_s` columns to the `llms` table:
+
+```sql
+ALTER TABLE llms ADD COLUMN max_tokens INTEGER;
+ALTER TABLE llms ADD COLUMN timeout_s INTEGER;
+UPDATE schema_version SET version = 4, applied_at = datetime('now');
+```
+
+Each `ALTER TABLE` is executed individually with error suppression (SQLite does not support `ADD COLUMN IF NOT EXISTS`).
+
+### 5.4 Migration: v4 → v5 (Sprint 008)
+
+Schema version 5 recreates all tables that have foreign key constraints, adding `ON DELETE CASCADE` to every FK. SQLite does not support `ALTER CONSTRAINT`, so each table is recreated with the updated FK definitions. Affected tables: `solutions`, `eval_metadata`, `eval_instances`, `benchmark_solutions`, `dataset_instances`, `dataset_compat`.
+
+FK enforcement is temporarily disabled (`PRAGMA foreign_keys=OFF`) during the migration.
+
+### 5.5 Migration: v5 → v6 (Sprint 009)
+
+Schema version 6 adds the `temperature` column to the `llms` table:
+
+```sql
+ALTER TABLE llms ADD COLUMN temperature REAL;
+UPDATE schema_version SET version = 6, applied_at = datetime('now');
+```
+
+### 5.6 Migration: v6 → v7 (Sprint 009)
+
+Schema version 7 adds `'failed'` to the `runs.status` CHECK constraint. Because SQLite does not support `ALTER CHECK`, the `runs` table is recreated with the updated constraint:
+
+```sql
+-- Migration v7: Add 'failed' to runs.status CHECK constraint.
+ALTER TABLE runs RENAME TO _runs_old;
+CREATE TABLE runs (
+    -- same columns as v6, with updated CHECK:
+    status TEXT NOT NULL DEFAULT 'running'
+           CHECK (status IN ('running', 'completed', 'interrupted',
+                  'failed', 'completed_with_errors')),
+    -- ... (all other columns unchanged)
+);
+INSERT INTO runs SELECT * FROM _runs_old;
+DROP TABLE _runs_old;
+-- Recreate indexes
+UPDATE schema_version SET version = 7, applied_at = datetime('now');
 ```
 
 ---
@@ -471,6 +529,11 @@ Migrations are **forward-only** (no rollback). Each migration is a Python functi
 MIGRATIONS = {
     1: "initial_schema.sql",    # V1 tables
     2: "add_completed_with_errors_status.sql",  # Add 'completed_with_errors' to runs.status CHECK
+    3: "add_cascade_evaluation.sql",            # Add cascade_evaluation to runs (Sprint 006c)
+    4: "add_llm_max_tokens_timeout.sql",        # Add max_tokens, timeout_s to llms (Sprint 006c)
+    5: "add_fk_on_delete_cascade.sql",          # Recreate FK tables with ON DELETE CASCADE (Sprint 008)
+    6: "add_llm_temperature.sql",               # Add temperature to llms (Sprint 009)
+    7: "add_failed_run_status.sql",             # Add 'failed' to runs.status CHECK (Sprint 009)
 }
 ```
 

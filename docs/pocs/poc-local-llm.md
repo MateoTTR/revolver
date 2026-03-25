@@ -102,6 +102,8 @@ Prompt: A* pathfinding implementation, 512 generated tokens, 3 runs averaged.
 | `revolver llm list` | `ollama list` / local registry |
 | OpenEvolve integration | `http://localhost:11434/v1` as OpenAI base URL |
 
+> **Note**: The final implementation uses `POST /api/chat` with `keep_alive` (see DES-002 DD-01).
+
 ### VRAM Management (V1)
 
 - Single model at a time (ConOps §3.3 concurrency model confirmed)

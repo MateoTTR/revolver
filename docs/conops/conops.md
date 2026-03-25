@@ -277,7 +277,8 @@ LLM management is **global** (not per-project), since models are shared resource
 # Register a remote LLM
 revolver llm add claude-opus \
   --provider anthropic \
-  --model claude-opus-4-6
+  --model claude-opus-4-6 \
+  --temperature 0.7
 
 # Register and deploy a local LLM
 revolver llm add codestral-local \

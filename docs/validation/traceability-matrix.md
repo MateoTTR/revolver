@@ -1,7 +1,7 @@
 # Revolver — Traceability Matrix
 
-**Version**: 0.2 — Post-Sprint 008a update
-**Date**: 2026-03-22
+**Version**: 0.3 — Post-Sprint 009 update
+**Date**: 2026-03-25
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Validation Overview](validation.md)
 
@@ -67,6 +67,7 @@ Design: [DES-002](../architecture/design/DES-002-llm-subcommands.md), [DES-001 �
 | FR-LLM-016 | SHOULD | DES-002 §add | L2 | `integration/test_llm::test_llm_add_openai_compat` | Implemented |
 | FR-LLM-017 | MUST | DES-002, NFR-050 | L1 | `test_db_llm::test_api_key_env_stored_not_value` | Implemented |
 | FR-LLM-018 | SHOULD | DES-002, DES-005 §4.5 | L2 | `integration/test_llm::test_llm_add_remote_with_pricing` | Implemented |
+| FR-LLM-019 | SHOULD | DES-002, DES-005 | L2 | `integration/test_llm::test_llm_add_temperature` | Implemented |
 
 ---
 
@@ -165,7 +166,8 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_default` | Implemented |
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_user_override` | Implemented |
 | FR-RUN-008 | MUST | DES-005 §post-run | L1 | `unit/infra/test_openevolve::test_best_score_from_program_object` | Implemented |
-| FR-RUN-031 | MUST | DES-005 §post-run | L1 | `test_core_run::test_launch_run_post_processing_failure_sets_completed_with_errors` | Implemented |
+| FR-RUN-031 | MUST | DES-005 | L2 | `integration/test_run::test_run_oe_failure_marks_failed` | Implemented |
+| FR-RUN-043 | MUST | DES-005 §post-run | L1 | `test_core_run::test_launch_run_post_processing_failure_sets_completed_with_errors` | Implemented |
 | FR-RUN-032 | MUST | DES-005 §post-run | L1 | `test_core_run::test_handle_post_run_failure_sets_completed_with_errors` | Implemented |
 | FR-RUN-033 | MUST | DES-005 §extract | L2 | `integration/test_solution::test_extract_accepts_completed_with_errors` | Implemented |
 | FR-RUN-034 | MUST | DES-005 §resume | L1, L2 | `test_core_run::test_resume_run_creates_new_run`, `integration/test_run::test_run_resume` | Implemented |
@@ -180,6 +182,8 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_json_mode_with_force` | Implemented |
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_missing_directory` | Implemented |
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_user_cancels` | Implemented |
+| FR-RUN-040 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_temperature_flag` | Implemented |
+| FR-RUN-041 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_parallel_flag` | Implemented |
 
 ---
 
@@ -238,6 +242,9 @@ Design: [DES-005 §post-run](../architecture/design/DES-005-run-orchestration.md
 | FR-SOL-015 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_delete_by_id_force` | Implemented |
 | FR-SOL-016 | MUST | DES-005 | L1 | `unit/test_db_solution::test_delete_solution_cascades_eval` | Implemented |
 | FR-SOL-017 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_delete_json_mode_requires_force` | Implemented |
+| FR-SOL-018 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_show_stdout` | Implemented |
+| FR-SOL-019 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_export_default` | Implemented |
+| FR-SOL-020 | SHOULD | DES-005 | L2 | `integration/test_solution::test_solution_diff_different` | Implemented |
 
 ---
 
@@ -363,17 +370,17 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
 | spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
-| spec-llm | 18 | 11 | 6 | 0 | 4 | 8 | via Sc.1 | 6 |
+| spec-llm | 19 | 11 | 7 | 0 | 4 | 9 | via Sc.1 | 6 |
 | spec-problem | 15 | 10 | 4 | 1 | 1 | 10 | via Sc.1 | 3 |
 | spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
-| spec-run | 46 | 35 | 9 | 0 | 28 | 10 | via Sc.1 | 6 |
+| spec-run | 49 | 36 | 11 | 0 | 28 | 13 | via Sc.1 | 6 |
 | spec-eval | 23 | 17 | 3 | 1 | 7 | 9 | via Sc.1 | 5 (incl. 1 deferred) |
-| spec-solution | 17 | 16 | 1 | 0 | 2 | 13 | via Sc.1 | 2 |
+| spec-solution | 20 | 18 | 2 | 0 | 2 | 16 | via Sc.1 | 2 |
 | spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
 | NFR (direct) | 27 | 19 | 8 | 0 | 6 | 11 | — | 5 (3 perf manual + 2 planned) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **220** | **159** | **49** | **2** | **71** | **116** | **2 scenarios** | **28** |
+| **Total** | **227** | **162** | **53** | **2** | **71** | **123** | **2 scenarios** | **28** |
 
 Notes:
 - Run delete (FR-RUN-035) adds 11 new test entries covering DB layer, core logic, CLI, and edge cases.

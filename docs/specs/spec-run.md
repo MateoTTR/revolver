@@ -28,6 +28,8 @@ Launch an OpenEvolve evolution run.
 | `--alias <name>` | string | No | User-friendly name for the generated solution |
 | `--config-override <key=value>` | string[] | No | Override specific OpenEvolve config values |
 | `--dry-run` | flag | No | Validate all inputs and display resolved OpenEvolve config without launching the run |
+| `--temperature <float>` | float | No | Override `llm.temperature` in the OpenEvolve config (range: 0.0–2.0) |
+| `--parallel <int>` | int | No | Override `evaluator.parallel_evaluations` in the OpenEvolve config (positive integer) |
 
 **Behavior**:
 1. **Validate inputs**:
@@ -151,7 +153,7 @@ List all runs in the current project.
 |---|---|---|---|
 | `--version <tag>` | string | — | Filter by problem version |
 | `--llm <name>` | string | — | Filter by LLM used |
-| `--status <status>` | string | — | Filter by status: `running`, `completed`, `completed_with_errors`, `interrupted` |
+| `--status <status>` | string | — | Filter by status: `running`, `completed`, `completed_with_errors`, `failed`, `interrupted` |
 
 **Output** (human):
 ```
@@ -278,7 +280,7 @@ Deleted run "run-20260310-143000"
 | FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run by intercepting LLM API responses | §4.6, POC #13 |
 | FR-RUN-029 | SHOULD | Display token usage in run completion output and `run info` | §4.6 |
 | FR-RUN-030 | SHOULD | Estimate cost from token usage and optional LLM pricing (if configured). Display in run output when pricing is available. | §4.6, POC #13 |
-| FR-RUN-031 | MUST | If OpenEvolve completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
+| FR-RUN-031 | MUST | If OpenEvolve throws an exception during execution, run status is set to `failed` in DB, `run-error.log` is written to the run directory, and the lock file is removed | — |
 | FR-RUN-032 | MUST | Post-processing errors are logged to `run-error.log` in the run directory | — |
 | FR-RUN-033 | MUST | `solution extract` accepts runs with status `completed_with_errors` if the program file exists | — |
 | FR-RUN-034 | MUST | `resume` accepts `completed_with_errors` as a valid parent run status | — |
@@ -287,6 +289,9 @@ Deleted run "run-20260310-143000"
 | FR-RUN-037 | MUST | Deleting a run cascade-deletes associated solutions and their evaluation data | — |
 | FR-RUN-038 | MUST | Deleting a run removes the run directory from the filesystem | — |
 | FR-RUN-039 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error | NFR-003 |
+| FR-RUN-040 | SHOULD | `--temperature` overrides `llm.temperature` in the resolved OpenEvolve config (range: 0.0–2.0) | — |
+| FR-RUN-041 | SHOULD | `--parallel` overrides `evaluator.parallel_evaluations` in the resolved OpenEvolve config (positive integer) | — |
+| FR-RUN-043 | MUST | If OpenEvolve completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
 
 ---
 
@@ -302,7 +307,7 @@ Deleted run "run-20260310-143000"
 | Dataset split is not `train` | Warning: "Dataset '<name>' has split 'eval'. Consider using a training dataset." | 0 (continue) |
 | Dataset hash mismatch | Warning: "Dataset '<name>' has been modified since registration. Results may not be reproducible." | 0 (continue) |
 | Dataset incompatible with problem version | Warning: "Dataset '<name>' is not declared compatible with version '<tag>'." | 0 (continue) |
-| OpenEvolve crashes during run | Error: "OpenEvolve failed: <error>". Preserve partial results if any. | 4 |
+| OpenEvolve crashes during run | Error: "OpenEvolve failed: <error>". Run status set to `failed`, `run-error.log` written, lock removed. Preserve partial results if any. | 4 |
 | Resume with no checkpoint | Error: "No checkpoint found for run '<run-id>'" | 1 |
 | Another local run already in progress | Error: "A local LLM run is already in progress (see `.revolver/runs/locks/`). Wait for it to complete or cancel it." | 3 |
 | `--dry-run` with missing or invalid inputs | Error reported as normal (exit 1), no run launched | 1 |

@@ -49,6 +49,8 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `llm start` | Mock Ollama load | Success message, VRAM info, health check | FR-LLM-006, 013 |
 | `llm start` | Another model already loaded | Previous model unloaded first | FR-LLM-008 |
 | `llm stop` | Mock Ollama unload | Success message | FR-LLM-007 |
+| `llm add --temperature 0.7` | Temperature stored in DB | DB entry includes temperature=0.7 | FR-LLM-019 |
+| `llm update --temperature 1.0` | Temperature updated in DB | DB entry updated to temperature=1.0 | FR-LLM-019 |
 
 ### 2.3 `revolver problem`
 
@@ -107,8 +109,10 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `run list` | After 2 runs | Both listed with status, filterable | FR-RUN-021 |
 | `run info` | Existing run | Full details: lineage, tokens, solution, stored programs | FR-RUN-022 |
 | `run resume` | Existing checkpoint | New run from parent, wrapper copied | FR-RUN-013, 024 |
-| `run` (internal) | Post-processing failure | Status set to `completed_with_errors`, `run-error.log` written | FR-RUN-031, 032 |
-| `run` (internal) | OE failure (regression) | Status set to `interrupted` | FR-RUN-031 |
+| `run --temperature 0.5` | Temperature injected into OE config | OE config contains temperature=0.5 | FR-RUN-040 |
+| `run --parallel 4` | Parallel evaluations injected into OE config | OE config contains num_parallel=4 | FR-RUN-041 |
+| `run` (internal) | Post-processing failure | Status set to `completed_with_errors`, `run-error.log` written | FR-RUN-043, 032 |
+| `run` (internal) | OE failure (regression) | Status set to `failed` | FR-RUN-031 |
 
 ### 2.6 `revolver eval`
 
@@ -149,6 +153,15 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `solution delete` | Cascade-deletes eval data | Eval entries removed with solution | FR-SOL-016 |
 | `solution extract` | `completed_with_errors` run with program | Extraction succeeds | FR-RUN-033 |
 | `solution extract` | `interrupted` run | Extraction rejected | FR-RUN-033 |
+| `solution show` | Display source code of existing solution on stdout | Source code printed to stdout | FR-SOL-018 |
+| `solution show --json` | JSON output with alias and code fields | Valid JSON with alias and code keys | FR-SOL-018 |
+| `solution show` | Exit 1 if alias not found | Exit code 1, error message | FR-SOL-018 |
+| `solution export` | Copy program file to default path (`<alias>.py`) | File created at `<alias>.py` | FR-SOL-019 |
+| `solution export -o <path>` | Copy to explicit path | File created at specified path | FR-SOL-019 |
+| `solution export` | Exit 1 if alias not found | Exit code 1, error message | FR-SOL-019 |
+| `solution diff` | Unified diff between two different solutions | Diff output on stdout | FR-SOL-020 |
+| `solution diff` | Empty diff, exit 0 for identical solutions | No output, exit code 0 | FR-SOL-020 |
+| `solution diff --json` | JSON with diff text and identical flag | Valid JSON with diff and identical fields | FR-SOL-020 |
 
 ### 2.8 `revolver benchmark`
 

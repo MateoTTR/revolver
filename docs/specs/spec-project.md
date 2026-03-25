@@ -55,7 +55,7 @@ Created: .revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml
 
 | ID | Priority | Requirement | ConOps Ref |
 |---|---|---|---|
-| FR-PRJ-001 | MUST | Create a `.revolver/` directory with an empty SQLite database (`revolver.db`) and subdirectories (`problem/`, `datasets/`, `solutions/`, `benchmarks/`) | §4.1 |
+| FR-PRJ-001 | MUST | Create a `.revolver/` directory with an empty SQLite database (`revolver.db`) and subdirectories (`problem/`, `datasets/`) | §4.1 |
 | FR-PRJ-002 | MUST | Generate a `project.yaml` file with project name, description, and creation timestamp | §4.1 |
 | FR-PRJ-003 | MUST | Generate a template `initial_program.py` with `EVOLVE-BLOCK` markers and inline comments explaining the pattern | §4.2, Appendix A |
 | FR-PRJ-004 | MUST | Generate a template `evaluator.py` implementing `evaluate_instance(program_path: str, instance_path: str)` with the correct 2-argument signature. The template includes only the per-instance function (recommended mode). Legacy aggregated mode (`evaluate(program_path)` with `REVOLVER_DATASET_DIR`) is documented in the template docstring as an opt-in for advanced users. | §4.4 |

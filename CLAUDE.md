@@ -68,6 +68,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | code-reviewer | [.claude/agents/code-reviewer/agent.md](.claude/agents/code-reviewer/agent.md) | Auto after `gh pr create` (PostToolUse hook) |
 | spec-reviewer | [.claude/agents/spec-reviewer/agent.md](.claude/agents/spec-reviewer/agent.md) | When spec/DES/ADR files are modified |
 | validation-reviewer | [.claude/agents/validation-reviewer/agent.md](.claude/agents/validation-reviewer/agent.md) | When validation docs or specs change |
+| doc-reviewer | [.claude/agents/doc-reviewer/agent.md](.claude/agents/doc-reviewer/agent.md) | After release, or when README/guides/user-story-e2e change. Run AFTER spec-reviewer and validation-reviewer |
 | scrum-master | [.claude/agents/scrum-master/agent.md](.claude/agents/scrum-master/agent.md) | At sprint planning/review boundaries |
 
 ### Sprint Planning
@@ -103,7 +104,7 @@ Before starting any work in a session:
 | Phase 2 | Architecture, tech choices (ADRs), data model | **Done** |
 | Phase 3 | POCs for critical aspects | **Done** (covered by POC #11/12/13) |
 | Phase 4 | Validation strategy, test plan, traceability | **Done** |
-| Phase 5 | Implementation | **In progress** — Sprint 008a complete (v0.8.1), Sprint 009 planned |
+| Phase 5 | Implementation | **In progress** — Sprint 009 complete (v0.9.0 pending release) |
 
 ---
 

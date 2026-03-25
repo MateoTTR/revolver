@@ -7,7 +7,7 @@
 
 ## 1. Scope
 
-This spec covers solution browsing, metadata management, on-demand extraction, and deletion. Solutions are lightweight DB references to (`run_id`, `rank`) — they do NOT own filesystem directories. The program file for a solution is located at `.revolver/runs/<run_id>/programs/rank-<N>.py`. The rank-1 solution is auto-created by `revolver run` ([spec-run.md](spec-run.md)). Additional solutions can be extracted from a run's stored programs via `solution extract`.
+This spec covers solution browsing, metadata management, on-demand extraction, source inspection, file export, comparison, and deletion. Solutions are lightweight DB references to (`run_id`, `rank`) — they do NOT own filesystem directories. The program file for a solution is located at `.revolver/runs/<run_id>/programs/rank-<N>.py`. The rank-1 solution is auto-created by `revolver run` ([spec-run.md](spec-run.md)). Additional solutions can be extracted from a run's stored programs via `solution extract`. Source code can be viewed (`show`), exported (`export`), or compared (`diff`).
 
 ---
 
@@ -110,33 +110,34 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 
 ### 2.4 `revolver solution extract`
 
-Promote a lower-ranked program from a run into a first-class solution. This enables on-demand inspection: the user runs `revolver run info` to see all stored programs with scores, then extracts the ones worth evaluating.
+Promote the rank-1 program from a run into a first-class solution. This enables on-demand inspection: the user runs `revolver run info` to see all stored programs with scores, then extracts the best one for evaluation.
 
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `--run <run-id>` | string | Yes | Run containing the program to extract |
-| `--rank <n>` | int | Yes | Rank of the program to promote (e.g., 2, 3) |
 | `--alias <name>` | string | No | User-friendly name for the new solution |
+| `--force` / `-f` | flag | No | Replace an existing extraction for the same `(run_id, rank=1)` instead of erroring |
 
 **Behavior**:
 1. Verify the run exists and has status `completed`
-2. Verify a program file `rank-<N>.py` exists in the run's `programs/` directory
-3. Verify no solution already exists for `(run_id, rank)` — prevent duplicates
-4. Generate a new solution ID (`sol-YYYYMMDD-HHMMSS`)
-5. Insert a solution DB row referencing `(run_id, rank)`
-6. Evaluate the program on the training dataset (same as post-run eval for rank-1) and store results
-7. Set alias if provided
+2. Verify a program file `rank-1.py` exists in the run's `programs/` directory
+3. If `--force` is not set: verify no solution already exists for `(run_id, rank=1)` — prevent duplicates
+4. If `--force` is set and a solution already exists for `(run_id, rank=1)`: delete the existing solution and its evaluation data before proceeding
+5. Generate a new solution ID (`sol-YYYYMMDD-HHMMSS`)
+6. Insert a solution DB row referencing `(run_id, rank=1)`
+7. Evaluate the program on the training dataset (same as post-run eval for rank-1) and store results
+8. Set alias if provided
 
 **Output** (human):
 ```
 Solution extracted: sol-20260311-091500
   Run: run-20260310-143000
-  Rank: #2
-  Score: 0.85
-  Alias: claude-v1.1-rank2
-  Training eval: 50 instances, mean combined_score=0.83
+  Rank: #1
+  Score: 0.91
+  Alias: claude-v1.1-best
+  Training eval: 50 instances, mean combined_score=0.89
 ```
 
 **Output** (JSON):
@@ -144,17 +145,17 @@ Solution extracted: sol-20260311-091500
 {
   "solution_id": "sol-20260311-091500",
   "run_id": "run-20260310-143000",
-  "rank": 2,
-  "best_score": 0.85,
-  "alias": "claude-v1.1-rank2",
+  "rank": 1,
+  "best_score": 0.91,
+  "alias": "claude-v1.1-best",
   "training_eval": {
     "instance_count": 50,
-    "mean_combined_score": 0.83
+    "mean_combined_score": 0.89
   }
 }
 ```
 
-**Exit codes**: 0 success, 1 if run not found, 1 if rank not found, 1 if solution already exists for this (run, rank)
+**Exit codes**: 0 success, 1 if run not found, 1 if rank-1 program not found, 1 if solution already exists for this (run, rank=1) and `--force` not set
 
 ### 2.5 `revolver solution delete <id-or-alias>`
 
@@ -197,6 +198,102 @@ Deleted solution "sol-20260310-143000" (alias: claude-small-v1.1)
 
 **Exit codes**: 0 success, 1 if not found or confirmation declined
 
+### 2.6 `revolver solution show <id-or-alias>`
+
+Print the source code of a solution's program to stdout.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `id-or-alias` | Yes | Solution ID or alias |
+
+**Output** (human):
+```
+# rank-1.py from run-20260310-143000
+def solve(instance):
+    ...
+```
+
+**Output** (JSON):
+```json
+{
+  "alias": "claude-small-v1.1",
+  "code": "def solve(instance):\n    ..."
+}
+```
+
+**Exit codes**: 0 success, 1 if solution not found or program file missing
+
+### 2.7 `revolver solution export <id-or-alias>`
+
+Copy a solution's program file to a specified path.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `id-or-alias` | Yes | Solution ID or alias |
+
+**Options**:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `-o` / `--output <path>` | string | `<alias>.py` (or `<id>.py` if no alias) | Destination file path |
+
+**Behavior**:
+1. Resolve the solution by ID or alias
+2. Locate the program file at `.revolver/runs/<run_id>/programs/rank-<N>.py`
+3. Copy the file to the output path
+4. If the output file already exists, overwrite it
+
+**Output** (human):
+```
+Exported "claude-small-v1.1" → claude-small-v1.1.py
+```
+
+**Output** (JSON):
+```json
+{
+  "solution_id": "sol-20260310-143000",
+  "alias": "claude-small-v1.1",
+  "output_path": "claude-small-v1.1.py"
+}
+```
+
+**Exit codes**: 0 success, 1 if solution not found or program file missing
+
+### 2.8 `revolver solution diff <a> <b>`
+
+Show a unified diff between two solutions' program files.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `a` | Yes | First solution (ID or alias) |
+| `b` | Yes | Second solution (ID or alias) |
+
+**Output** (human):
+```
+--- claude-small-v1.1 (sol-20260310-143000, rank #1)
++++ gemma-small-v1.1 (sol-20260310-160000, rank #1)
+@@ -1,5 +1,5 @@
+ def solve(instance):
+-    return greedy(instance)
++    return beam_search(instance)
+```
+
+**Output** (JSON):
+```json
+{
+  "diff": "--- claude-small-v1.1 ...\n+++ gemma-small-v1.1 ...\n@@ ...",
+  "identical": false
+}
+```
+
+**Exit codes**: 0 success (including when files are identical), 1 if either solution not found or program file missing
+
 ---
 
 ## 3. Functional Requirements
@@ -213,13 +310,16 @@ Deleted solution "sol-20260310-143000" (alias: claude-small-v1.1)
 | FR-SOL-008 | MUST | Solutions can be referenced by either ID or alias in all commands | — |
 | FR-SOL-009 | SHOULD | `info` shows other solutions from the same run (if any were extracted) | §4.6 |
 | FR-SOL-010 | MUST | Solutions reference their parent run via `run_id`. All lineage data is accessed through the run. | §4.6 |
-| FR-SOL-011 | MUST | `extract` promotes a stored program from a completed run into a solution with post-extraction training eval | — |
-| FR-SOL-012 | MUST | `extract` prevents duplicate solutions for the same `(run_id, rank)` | — |
+| FR-SOL-011 | MUST | `extract` promotes the rank-1 program from a completed run into a solution with post-extraction training eval | — |
+| FR-SOL-012 | MUST | `extract` prevents duplicate solutions for the same `(run_id, rank=1)` unless `--force` is set | — |
 | FR-SOL-013 | MUST | `extract` generates a unique solution ID and inserts a solution DB row | — |
 | FR-SOL-014 | MUST | `delete` removes a solution by ID or alias with interactive confirmation prompt | §4.6 |
 | FR-SOL-015 | MUST | `delete --force` bypasses the interactive confirmation prompt | — |
 | FR-SOL-016 | MUST | Deleting a solution cascade-deletes associated evaluation data (`eval_metadata` + `eval_instances`) | — |
 | FR-SOL-017 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error (no interactive prompt possible) | NFR-003 |
+| FR-SOL-018 | MUST | `show` displays the source code of a solution's program to stdout; `--json` outputs `{"alias":..., "code":...}` | §4.6 |
+| FR-SOL-019 | MUST | `export` copies a solution's program file to a local path (default `<alias>.py`) | §4.6 |
+| FR-SOL-020 | MUST | `diff` shows a unified diff between two solutions' programs; `--json` returns `{"diff":..., "identical": bool}` | §4.6 |
 
 ---
 
@@ -230,11 +330,14 @@ Deleted solution "sol-20260310-143000" (alias: claude-small-v1.1)
 | Solution ID or alias not found | Error: "Solution '<id>' not found" | 1 |
 | Alias already in use by another solution | Error: "Alias '<alias>' already in use by solution '<other-id>'" | 1 |
 | Empty alias string | Error: "Alias cannot be empty" | 1 |
-| `--rank` value <= 0 | Error: "Rank must be a positive integer" | 1 |
 | `extract` with non-existent run | Error: "Run '<run-id>' not found" | 1 |
 | `extract` with run not completed | Error: "Run '<run-id>' is not completed (status: '<status>')" | 1 |
-| `extract` with non-existent rank file | Error: "No program found at rank <N> for run '<run-id>'" | 1 |
-| `extract` with already extracted rank | Error: "Solution already exists for run '<run-id>' rank <N>: '<sol-id>'" | 1 |
+| `extract` with missing rank-1 file | Error: "No program found at rank 1 for run '<run-id>'" | 1 |
+| `extract` with already extracted rank (no `--force`) | Error: "Solution already exists for run '<run-id>' rank 1: '<sol-id>'. Use --force to replace." | 1 |
+| `show` with missing program file | Error: "Program file not found for solution '<id>'" | 1 |
+| `export` with missing program file | Error: "Program file not found for solution '<id>'" | 1 |
+| `diff` with either solution not found | Error: "Solution '<id>' not found" | 1 |
+| `diff` with missing program file | Error: "Program file not found for solution '<id>'" | 1 |
 | `delete` with non-existent solution | Error: "Solution '<id>' not found" | 1 |
 | `delete` in JSON mode without `--force` | Error: "Use --force to delete in JSON mode (no interactive prompt)" | 1 |
 | `delete` confirmation declined by user | No deletion, exit silently | 1 |

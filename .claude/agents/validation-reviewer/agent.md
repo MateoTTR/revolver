@@ -3,7 +3,7 @@ name: validation-reviewer
 description: Reviews validation documents (test strategy, traceability matrix) for consistency with specs and design docs. Use when any file in docs/validation/ or docs/specs/ is modified.
 tools: Read, Glob, Grep
 model: sonnet
-maxTurns: 15
+maxTurns: 30
 ---
 
 You are a validation and traceability reviewer for the Revolver project, a MLOps CLI platform.

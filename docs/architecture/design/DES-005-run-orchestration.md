@@ -339,6 +339,8 @@ def generate_wrapper(
 
 ### 3.4 Legacy Mode
 
+> See [DES-006 §3.3](DES-006-eval-loop.md#33-evaluator-resolution) for detailed dual-mode detection logic used by `revolver eval`.
+
 If the user's evaluator already defines `evaluate(program_path)`, Revolver uses it directly without generating a wrapper. This supports advanced users who want full control over the aggregation strategy and maintains backward compatibility with standard OpenEvolve evaluators. The user may also define both `evaluate()` and `evaluate_instance()` in the same file; Revolver only checks for `evaluate()` first.
 
 Detection order (D-005-a):
@@ -768,7 +770,7 @@ class RunManifest(BaseModel):
     created_at: datetime
     generation_time_s: float | None = None
     iterations: int
-    status: str = "running"  # running | completed | interrupted | completed_with_errors
+    status: str = "running"  # running | completed | interrupted | completed_with_errors | failed
 
     # Lineage
     problem_version: str
@@ -995,6 +997,8 @@ def run_default(
     iterations: int | None = typer.Option(None, "--iterations", help="Override iteration count"),
     alias: str | None = typer.Option(None, "--alias", help="Solution alias"),
     config_override: list[str] | None = typer.Option(None, "--config-override", help="key=value overrides"),
+    temperature: float | None = typer.Option(None, "--temperature", help="Override LLM sampling temperature"),
+    parallel: int | None = typer.Option(None, "--parallel", help="Override number of parallel evaluations"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate inputs and show config without launching"),
 ): ...
 
