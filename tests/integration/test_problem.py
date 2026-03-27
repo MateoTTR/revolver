@@ -301,7 +301,7 @@ def test_problem_version_includes_problem_md(tmp_project: Path) -> None:
 
     from revolver.core.problem import create_version
 
-    pv = create_version(tag="v1.0", message="With problem.md", project_root=tmp_project)
+    pv, _warnings = create_version(tag="v1.0", message="With problem.md", project_root=tmp_project)
 
     snapshot_dir = tmp_project / ".revolver" / "problem" / "v1.0"
     assert (snapshot_dir / "problem.md").is_file()
