@@ -309,6 +309,20 @@
 | 209 | New guide `docs/guides/tuning-oe-config.md` — MAP-Elites, islands, parallel_evaluations, iteration profiles, multi-objective (Bloc D1) | [x] | S9 — session 040, PR #131 |
 | 210 | Update `docs/guides/initial-program-structure.md` — beamforming learnings, baseline calibration, scipy guidance (Bloc D2) | [x] | S9 — session 040, PR #132 |
 
+### Sprint 009a — Delta bugfix: Resume, Config validation, UX polish (v0.9.1)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 211 | Fix checkpoint path resolution in `resume_run()` — search `oe-output/checkpoints/checkpoint_N/` | [x] | S9a — session 042, PR #139 |
+| 212 | Checkpoint interval guard in `build_config()` — warn + override when interval > iterations | [x] | S9a — session 042, PR #139 |
+| 213 | New `validate_oe_config()` — dacite strict parse, detect misplaced config keys | [x] | S9a — session 042, PR #141 |
+| 214 | Call validation at `problem version` (conditional import, skip if OE absent) | [x] | S9a — session 042, PR #141 |
+| 215 | Add `--iterations`, `--temperature`, `--parallel` flags to `run resume` CLI | [x] | S9a — session 042, PR #142 |
+| 216 | Pass `temperature` and `parallel` through `resume_run()` to `build_config()` | [x] | S9a — session 042, PR #142 |
+| 217 | Dry-run shows resolved OE config (iterations, checkpoint_interval, num_islands, etc.) | [x] | S9a — session 042, PR #140 |
+| 218 | Fix tuning guide: all examples use `database:` namespace | [x] | S9a — session 042, PR #143 |
+| 219 | L2 integration tests for Sprint 009a (11 new tests) | [x] | S9a — session 042, PR #143 |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
