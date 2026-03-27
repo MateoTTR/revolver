@@ -1194,10 +1194,9 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
     parent_run_dir = create_run_dir(root, parent_id)
     (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
 
-    # Create a checkpoint dir
-    checkpoint_dir = parent_run_dir / "oe-checkpoint"
-    checkpoint_dir.mkdir()
-    (checkpoint_dir / "state.bin").write_bytes(b"checkpoint")
+    # Create the expected checkpoint directory structure
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
 
     # Insert parent run in DB
     conn = get_project_db(db_path)
@@ -1308,10 +1307,9 @@ def test_resume_run_preflight_crash(project_with_prereqs: dict) -> None:
     parent_run_dir = create_run_dir(root, parent_id)
     (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
 
-    # Create a checkpoint dir
-    checkpoint_dir = parent_run_dir / "oe-checkpoint"
-    checkpoint_dir.mkdir()
-    (checkpoint_dir / "state.bin").write_bytes(b"checkpoint")
+    # Create the expected checkpoint directory structure
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
 
     # Insert parent run in DB
     conn = get_project_db(db_path)

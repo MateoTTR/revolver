@@ -860,11 +860,10 @@ def test_run_resume(project_with_prereqs: dict[str, Path]) -> None:
     parent_data = _parse_json_output(result)
     parent_run_id = parent_data["run_id"]
 
-    # Create a checkpoint dir in the parent run to simulate a resumable run
+    # Create the expected checkpoint directory structure
     parent_run_dir = root / REVOLVER_DIR / "runs" / parent_run_id
-    checkpoint_dir = parent_run_dir / "oe-checkpoint"
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    (checkpoint_dir / "checkpoint.pkl").write_text("fake checkpoint data")
 
     # Resume the run with unique IDs
     mock_runner = _make_mock_runner()

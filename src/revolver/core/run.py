@@ -67,6 +67,7 @@ from revolver.infra.openevolve import (
     RunOutput,
     build_config,
     count_valid_programs,
+    find_latest_checkpoint,
     resolve_api_keys,
     revolver_env,
 )
@@ -692,9 +693,9 @@ def launch_run(
 
             # Count valid iterations from checkpoint database
             valid_iters: int | None = None
-            oe_checkpoint_dir = run_dir / "oe-checkpoint"
-            if oe_checkpoint_dir.exists():
-                valid_iters = count_valid_programs(oe_checkpoint_dir)
+            latest_ckpt = find_latest_checkpoint(run_dir)
+            if latest_ckpt is not None:
+                valid_iters = count_valid_programs(latest_ckpt)
             if valid_iters is None and oe_output_dir.exists():
                 valid_iters = count_valid_programs(oe_output_dir)
             if valid_iters is not None:
@@ -1052,11 +1053,16 @@ def resume_run(
             copy_run_file(parent_wrapper, new_run_dir / WRAPPER_FILENAME)
 
         # 6. Copy checkpoint from parent run dir
-        parent_checkpoint = parent_run_dir / "oe-checkpoint"
-        new_checkpoint: Path | None = None
-        if parent_checkpoint.exists():
-            new_checkpoint = new_run_dir / "oe-checkpoint"
-            copy_run_file(parent_checkpoint, new_checkpoint)
+        parent_checkpoint = find_latest_checkpoint(parent_run_dir)
+        if parent_checkpoint is None:
+            raise RevolverError(
+                f"No checkpoint found in parent run '{run_id}'. "
+                "The run may have been too short to produce a checkpoint."
+            )
+        # oe-checkpoint is the *input* checkpoint fed to OE for resume.
+        # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
+        new_checkpoint: Path = new_run_dir / "oe-checkpoint"
+        copy_run_file(parent_checkpoint, new_checkpoint)
 
         # Resolve paths
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version
@@ -1232,9 +1238,9 @@ def resume_run(
 
             # Count valid iterations from checkpoint database
             valid_iters: int | None = None
-            resume_oe_checkpoint = new_run_dir / "oe-checkpoint"
-            if resume_oe_checkpoint.exists():
-                valid_iters = count_valid_programs(resume_oe_checkpoint)
+            latest_ckpt_resume = find_latest_checkpoint(new_run_dir)
+            if latest_ckpt_resume is not None:
+                valid_iters = count_valid_programs(latest_ckpt_resume)
             if valid_iters is None and oe_output_dir.exists():
                 valid_iters = count_valid_programs(oe_output_dir)
             if valid_iters is not None:
