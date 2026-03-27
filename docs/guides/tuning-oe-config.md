@@ -52,8 +52,13 @@ dimensions:
 ```bash
 # Use two feature dimensions (e.g., score and execution_time)
 revolver run --llm my-llm \
-  --config-override feature_dimensions=[0,1]
+  --config-override database.feature_dimensions=[0,1]
 ```
+
+> **Note**: OpenEvolve organizes these parameters under the `database` namespace
+> in its configuration. Always use `database:` in YAML or `database.` prefix
+> with `--config-override`. If you place them at the top level, Revolver will
+> warn you at `problem version` time.
 
 The integers refer to the *index* of metrics returned by your evaluator's
 `evaluate()` function. If your evaluator returns:
@@ -66,7 +71,7 @@ return {
 }
 ```
 
-Then `feature_dimensions=[0,1]` creates a 2D map indexed by `score` and
+Then `database.feature_dimensions=[0,1]` creates a 2D map indexed by `score` and
 `execution_time`. This encourages OpenEvolve to find diverse programs: some
 that are fast, some that score high, and some that balance both.
 
@@ -95,8 +100,8 @@ solutions periodically via *migration*.
 
 | Parameter | Default | Config key |
 |-----------|---------|------------|
-| Number of islands | 5 | `num_islands` |
-| Migration interval | 50 iterations | `migration_interval` |
+| Number of islands | 5 | `database.num_islands` |
+| Migration interval | 50 iterations | `database.migration_interval` |
 | Topology | Ring | (hardcoded in OpenEvolve) |
 
 In ring topology, island 0 migrates to island 1, island 1 to island 2, and
@@ -114,15 +119,15 @@ premature convergence.
 ```bash
 # Reduce to 2 islands for short runs
 revolver run --llm my-llm --iterations 50 \
-  --config-override num_islands=2
+  --config-override database.num_islands=2
 
 # Increase to 8 islands for long runs with diverse exploration
 revolver run --llm my-llm --iterations 2000 \
-  --config-override num_islands=8
+  --config-override database.num_islands=8
 
 # Adjust migration frequency
 revolver run --llm my-llm \
-  --config-override migration_interval=100
+  --config-override database.migration_interval=100
 ```
 
 | Scenario | Islands | Migration interval | Rationale |
@@ -248,8 +253,8 @@ significant optimization at this scale.
 
 ```bash
 revolver run --llm my-llm --iterations 50 \
-  --config-override num_islands=2 \
-  --config-override migration_interval=25 \
+  --config-override database.num_islands=2 \
+  --config-override database.migration_interval=25 \
   --temperature 0.5 \
   --parallel 1
 ```
@@ -266,8 +271,8 @@ with a new problem.
 
 ```bash
 revolver run --llm my-llm --iterations 500 \
-  --config-override num_islands=5 \
-  --config-override migration_interval=50 \
+  --config-override database.num_islands=5 \
+  --config-override database.migration_interval=50 \
   --temperature 0.7 \
   --parallel 4
 ```
@@ -284,9 +289,9 @@ the population. Best for complex problems where the solution space is large.
 
 ```bash
 revolver run --llm my-llm --iterations 2000 \
-  --config-override num_islands=8 \
-  --config-override migration_interval=100 \
-  --config-override feature_dimensions=[0,1] \
+  --config-override database.num_islands=8 \
+  --config-override database.migration_interval=100 \
+  --config-override database.feature_dimensions=[0,1] \
   --temperature 0.8 \
   --parallel 8
 ```
@@ -301,9 +306,9 @@ simulated annealing for TSP). With API models at `--parallel 8`, expect
 
 | Parameter | 50 iters | 500 iters | 2000+ iters |
 |-----------|----------|-----------|-------------|
-| `num_islands` | 2 | 5 | 5-8 |
-| `migration_interval` | 25 | 50 | 50-100 |
-| `feature_dimensions` | `[0]` | `[0]` | `[0,1]` |
+| `database.num_islands` | 2 | 5 | 5-8 |
+| `database.migration_interval` | 25 | 50 | 50-100 |
+| `database.feature_dimensions` | `[0]` | `[0]` | `[0,1]` |
 | `temperature` | 0.5 | 0.7 | 0.8 |
 | `parallel` | 1 | 4 | 4-8 |
 | Expected improvement | Negligible | Moderate | Significant |
@@ -343,7 +348,7 @@ Use `feature_dimensions` to tell MAP-Elites which metrics define the map:
 ```bash
 # Optimize score while exploring execution_time trade-offs
 revolver run --llm my-llm --iterations 500 \
-  --config-override feature_dimensions=[0,1]
+  --config-override database.feature_dimensions=[0,1]
 ```
 
 This creates a 2D map where:
@@ -368,8 +373,8 @@ revolver llm add claude-sonnet --provider anthropic \
 
 # Run with multi-objective configuration
 revolver run --llm claude-sonnet --iterations 500 \
-  --config-override feature_dimensions=[0,1] \
-  --config-override num_islands=5 \
+  --config-override database.feature_dimensions=[0,1] \
+  --config-override database.num_islands=5 \
   --parallel 4
 ```
 
@@ -401,13 +406,14 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 
 | Parameter | Config key | CLI shorthand | Default |
 |-----------|-----------|---------------|---------|
-| Islands | `num_islands` | `--config-override num_islands=N` | 5 |
-| Migration interval | `migration_interval` | `--config-override migration_interval=N` | 50 |
-| Feature dimensions | `feature_dimensions` | `--config-override feature_dimensions=[0,1]` | `[0]` |
+| Islands | `database.num_islands` | `--config-override database.num_islands=N` | 5 |
+| Migration interval | `database.migration_interval` | `--config-override database.migration_interval=N` | 50 |
+| Feature dimensions | `database.feature_dimensions` | `--config-override database.feature_dimensions=[0,1]` | `[0]` |
+| Population size | `database.population_size` | `--config-override database.population_size=N` | 20 |
 | Parallel evaluations | `evaluator.parallel_evaluations` | `--parallel N` | 1 |
 | Temperature | `llm.temperature` | `--temperature F` | Model default |
 | Iterations | `max_iterations` | `--iterations N` | From config.yaml |
-| Population size | `population_size` | `--config-override population_size=N` | 20 |
+| Checkpoint interval | `checkpoint_interval` | `--config-override checkpoint_interval=N` | 100 |
 | Cascade evaluation | `evaluator.cascade_evaluation` | `--config-override evaluator.cascade_evaluation=true` | `false` (Revolver default) |
 
 ---
