@@ -286,15 +286,44 @@ def run_resume(
         str,
         typer.Option("--run", help="Run ID to resume from."),
     ],
+    iterations: Annotated[
+        int | None,
+        typer.Option("--iterations", help="Number of iterations for the resumed run."),
+    ] = None,
+    temperature: Annotated[
+        float | None,
+        typer.Option(
+            "--temperature",
+            help="LLM temperature override (0.0-2.0).",
+        ),
+    ] = None,
+    parallel: Annotated[
+        int | None,
+        typer.Option(
+            "--parallel",
+            help="Number of parallel evaluations.",
+        ),
+    ] = None,
 ) -> None:
     """Resume an interrupted or completed run from its checkpoint."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
+        # Validate temperature range (same as run_start)
+        if temperature is not None and not (0.0 <= temperature <= 2.0):
+            sys.stderr.write("Error: --temperature must be between 0.0 and 2.0\n")
+            raise typer.Exit(1)
+
         sys.stderr.write(f"Resuming run from: {run}\n")
 
-        result = core_run.resume_run(run_id=run, quiet=(json_mode or quiet))
+        result = core_run.resume_run(
+            run_id=run,
+            iterations=iterations,
+            temperature=temperature,
+            parallel=parallel,
+            quiet=(json_mode or quiet),
+        )
 
         # Display token usage on stderr
         if result.token_usage is not None:
