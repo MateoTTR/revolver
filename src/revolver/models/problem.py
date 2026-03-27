@@ -37,6 +37,8 @@ class ProblemVersion(BaseModel):
         message: Optional commit-style message describing the version.
         created_at: Timestamp of version creation.
         files: List of file snapshots included in this version.
+        config_warnings: Validation warnings from OE config checking
+            (empty when config is valid or OE is not installed).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -46,6 +48,7 @@ class ProblemVersion(BaseModel):
     message: str = ""
     created_at: datetime
     files: list[FileSnapshot] = []
+    config_warnings: list[str] = []
 
 
 class InstanceTestResult(BaseModel):

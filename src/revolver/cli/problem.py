@@ -193,6 +193,14 @@ def problem_version_create(
                 quiet=quiet,
             )
 
+        # S9a-04: Display OE config validation warnings
+        if pv.config_warnings and not quiet:
+            from rich.console import Console
+
+            console = Console(stderr=True)
+            for w in pv.config_warnings:
+                console.print(f"[yellow]Warning: {w}[/yellow]")
+
 
 @version_app.command("list")
 def problem_version_list(

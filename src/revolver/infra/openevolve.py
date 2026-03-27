@@ -14,8 +14,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+import copy
 from dataclasses import dataclass
 import json as _json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,8 @@ import yaml
 
 from revolver.core.exceptions import ExternalError, ValidationError
 from revolver.models.llm import LLMEntry
+
+logger = logging.getLogger(__name__)
 
 # ── System prompt template (DES-005 §4.4) ────────────────────────────────────
 
@@ -76,6 +80,102 @@ class ProgressInfo:
     elapsed_s: float = 0.0
 
 
+# ── Known misplaced database keys ─────────────────────────────────────────────
+# Keys that users commonly place at top level but belong under ``database:``.
+
+_DATABASE_KEYS = frozenset(
+    {
+        "num_islands",
+        "migration_interval",
+        "population_size",
+        "feature_dimensions",
+        "feature_bins",
+        "migration_rate",
+    }
+)
+
+
+def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
+    """Validate a config dict or YAML file against the OpenEvolve Config schema.
+
+    Attempts a strict dacite parse.  Returns warning messages for unknown
+    keys (empty list means the config is valid).
+
+    Before the strict parse, known Revolver-injected keys that are not part
+    of the OpenEvolve schema are stripped so they do not trigger false
+    positives:
+
+    - ``output_dir`` at top level (Revolver passes it to OEController, not Config)
+    - ``api_key_env`` inside ``llm`` (Revolver resolves it to ``api_key`` at runtime)
+
+    Args:
+        config: Path to a YAML config file **or** an already-loaded dict.
+
+    Returns:
+        A (possibly empty) list of human-readable warning strings.
+    """
+    try:
+        import dacite
+        from openevolve.config import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
+            Config as OEConfig,
+        )
+    except ImportError:
+        # OpenEvolve or dacite not installed — skip validation gracefully
+        return []
+
+    # Load YAML if a path was given
+    data: dict[str, Any]
+    if isinstance(config, Path):
+        try:
+            with open(config) as f:
+                loaded = yaml.safe_load(f)
+            if not isinstance(loaded, dict):
+                return []
+            data = loaded
+        except Exception:
+            return []
+    else:
+        data = config
+
+    # Deep-copy to avoid mutating the caller's dict
+    data = copy.deepcopy(data)
+
+    # Strip Revolver-injected keys that are NOT part of OEConfig
+    data.pop("output_dir", None)
+    llm_section = data.get("llm")
+    if isinstance(llm_section, dict):
+        llm_section.pop("api_key_env", None)
+
+    # Attempt strict parse
+    try:
+        dacite.from_dict(
+            data_class=OEConfig,
+            data=data,
+            config=dacite.Config(
+                cast=[list, type(None)],
+                strict=True,
+                forward_references={"LLMInterface": Any},
+            ),
+        )
+        return []  # Config is valid
+    except dacite.UnexpectedDataError as exc:
+        # exc.keys is a set of unknown key names
+        warnings: list[str] = []
+        for key in sorted(exc.keys):
+            if key in _DATABASE_KEYS:
+                warnings.append(
+                    f"Unknown OE config key '{key}' at top level. Did you mean 'database.{key}'?"
+                )
+            else:
+                warnings.append(
+                    f"Unknown OE config key '{key}' (not in OpenEvolve Config schema)."
+                )
+        return warnings
+    except Exception:
+        # Any other parse error (type mismatch, etc.) — graceful degradation
+        return []
+
+
 # ── OpenEvolve runner ─────────────────────────────────────────────────────────
 
 
@@ -119,6 +219,11 @@ class OpenEvolveRunner:
             raise ExternalError(
                 "OpenEvolve is not installed. Install it with: pip install 'revolver[openevolve]'"
             ) from exc
+
+        # S9a-05: Validate config before passing to OpenEvolve
+        config_warnings = validate_oe_config(self.config)
+        for w in config_warnings:
+            logger.warning(w)
 
         # Convert dict to Config dataclass (OpenEvolve expects Config, not dict)
         config_obj = OEConfig.from_dict(self.config)
@@ -488,4 +593,5 @@ __all__ = [
     "count_valid_programs",
     "resolve_api_keys",
     "revolver_env",
+    "validate_oe_config",
 ]

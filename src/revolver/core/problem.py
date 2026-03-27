@@ -217,6 +217,17 @@ def create_version(
         for fname in files_to_copy:
             (snapshot_dir / fname).chmod(0o444)
 
+        # S9a-04: Validate OE config if config.yaml exists in snapshot
+        config_warnings: list[str] = []
+        config_path = snapshot_dir / "config.yaml"
+        if config_path.exists():
+            try:
+                from revolver.infra.openevolve import validate_oe_config
+
+                config_warnings = validate_oe_config(config_path)
+            except ImportError:
+                pass  # OpenEvolve not installed, skip validation
+
         # Compute per-file SHA-256 on the SNAPSHOT copies
         file_snapshots: list[FileSnapshot] = []
         file_hash_pairs: list[tuple[str, str]] = []
@@ -258,6 +269,7 @@ def create_version(
             message=message,
             created_at=now,
             files=file_snapshots,
+            config_warnings=config_warnings,
         )
 
         # Insert into DB
