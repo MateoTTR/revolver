@@ -17,7 +17,15 @@ fi
 
 # Remove stale config from previous ephemeral run (the container is
 # restarted by Docker after each job, but the filesystem persists).
-./config.sh remove --token "dummy" 2>/dev/null || true
+if [ -f ".runner" ]; then
+    echo "Removing stale runner config..."
+    REMOVE_TOKEN=$(curl -s -X POST \
+        -H "Authorization: token ${GITHUB_PAT}" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runners/remove-token" \
+        | jq -r .token)
+    ./config.sh remove --token "${REMOVE_TOKEN}" 2>/dev/null || true
+fi
 
 # Configure the runner (ephemeral = de-registers after one job)
 ./config.sh \

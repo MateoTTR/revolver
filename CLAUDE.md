@@ -104,7 +104,7 @@ Before starting any work in a session:
 | Phase 2 | Architecture, tech choices (ADRs), data model | **Done** |
 | Phase 3 | POCs for critical aspects | **Done** (covered by POC #11/12/13) |
 | Phase 4 | Validation strategy, test plan, traceability | **Done** |
-| Phase 5 | Implementation | **In progress** — Sprint 009 complete (v0.9.0 pending release) |
+| Phase 5 | Implementation | **In progress** — Sprint 009 complete (v0.9.0 released) |
 
 ---
 
@@ -129,17 +129,30 @@ Before starting any work in a session:
   - `feature/*` — one branch per PR (e.g. `feature/s1-scaffold-ci`)
   - `release/*`, `hotfix/*` — as needed
 - CI pipeline: `.github/workflows/ci.yml` — ruff, mypy, pytest + coverage (≥80%), runs on push/PR to main/develop
+- **Irreversible actions require explicit user approval**: never execute `gh pr merge`, `git merge` into main, `git tag`, or version bumps without the user's go-ahead. Always create the PR or propose the action, then wait for confirmation.
 
 ### Release Checklist
 
 Before tagging a release (`vX.Y.Z`):
 
+0. **(Optional) Documentation audit cascade** — Run before the release to catch spec/doc drift accumulated during the sprint. Skip for hotfixes or when the sprint had no spec changes.
+   - **spec-reviewer** → fix all FAIL/WARN findings → commit on `develop`
+   - **validation-reviewer** → fix all FAIL/WARN findings → commit on `develop`
+   - *(release steps 1–6 below)*
+   - **doc-reviewer** → fix all FAIL/WARN findings → commit + push (runs post-release because it checks version numbers in README/guides)
 1. **Version bump** — Update `version` in **both** `pyproject.toml` and `src/revolver/__init__.py`
 2. **Merge completeness** — Ensure ALL sprint PRs are merged into `develop`
 3. **Commit + push** — Commit the version bump on `develop`, push
 4. **Merge `develop` → `main`** — `git checkout main && git merge develop`
 5. **Tag on `main`** — `git tag vX.Y.Z && git push origin main --tags`
 6. **Verify install** — `pip install "revolver @ git+file:///home/mathi/revolver@vX.Y.Z"` then `revolver --version`
+7. **Post-release verification** — Before declaring the release complete, run these checks and report any failures:
+   - `git tag -l vX.Y.Z` → tag exists
+   - `grep 'version' pyproject.toml` and `grep '__version__' src/revolver/__init__.py` → both match `X.Y.Z`
+   - `git log main --oneline -1` → tip of main is the merge commit
+   - Session report exists in `docs/sessions/`
+   - `docs/sessions/cost-tracker.md` updated
+   - `docs/tasks/backlog.md` updated
 
 ### Hotfix Process
 
@@ -176,14 +189,3 @@ Independent PRs are developed in parallel using separate worktree agents. Depend
 - **Full traceability**: every solution must trace back to problem version, dataset, LLM, and config
 - **Reproducibility**: runs must be reproducible given the same config and seed
 
----
-
-## Open Questions / Decisions Pending
-
-- [x] Primary programming language → **Python >= 3.11** (ADR-002)
-- [x] Project/problem versioning strategy → **Internal manifest-based** (DES-003 DD-06)
-- [x] Dataset storage format and management → **Reference + optional snapshot** (DES-004)
-- [x] Local LLM deployment tool → **Ollama** (ADR-001)
-- [x] CLI framework choice → **Typer >= 0.21** (ADR-003)
-- [x] OpenEvolve instance injection strategy → **A+B hybrid** (env var + optional SQLite side-channel) (ADR-006)
-- [x] Benchmark output format and visualization → **CSV + JSON** (DES-007 DD-03, no Parquet in v1)

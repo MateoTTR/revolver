@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "github": {
-      "command": "npx",
-      "args": ["-y", "github-mcp-server"]
+      "command": ".claude/scripts/github-mcp.sh",
+      "args": []
     }
   }
 }
