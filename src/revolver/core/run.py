@@ -67,6 +67,7 @@ from revolver.infra.openevolve import (
     RunOutput,
     build_config,
     count_valid_programs,
+    find_latest_checkpoint,
     resolve_api_keys,
     revolver_env,
 )
@@ -267,39 +268,6 @@ def _resolve_project_root(project_root: Path | None) -> Path:
         return find_project_root(project_root or Path.cwd())
     except StoreProjectNotFoundError as exc:
         raise ProjectNotFoundError(str(exc)) from exc
-
-
-def _find_latest_checkpoint(run_dir: Path) -> Path | None:
-    """Find the latest OpenEvolve checkpoint in a run directory.
-
-    OpenEvolve saves checkpoints to ``oe-output/checkpoints/checkpoint_N/``.
-    This helper scans that directory, sorts by numeric suffix, and returns
-    the path with the highest iteration number.
-
-    Args:
-        run_dir: Path to the run directory (e.g. ``.revolver/runs/<run_id>``).
-
-    Returns:
-        Path to the latest ``checkpoint_N`` directory, or ``None`` if no
-        checkpoint directory exists.
-    """
-    checkpoints_dir = run_dir / "oe-output" / "checkpoints"
-    if not checkpoints_dir.exists():
-        return None
-
-    checkpoint_dirs: list[tuple[int, Path]] = []
-    for child in checkpoints_dir.iterdir():
-        if child.is_dir() and child.name.startswith("checkpoint_"):
-            suffix = child.name.removeprefix("checkpoint_")
-            with contextlib.suppress(ValueError):
-                checkpoint_dirs.append((int(suffix), child))
-
-    if not checkpoint_dirs:
-        return None
-
-    # Return the checkpoint with the highest iteration number
-    checkpoint_dirs.sort(key=lambda t: t[0])
-    return checkpoint_dirs[-1][1]
 
 
 # ── Smart defaults (S8a-10, S8a-11) ──────────────────────────────────────────
@@ -725,7 +693,7 @@ def launch_run(
 
             # Count valid iterations from checkpoint database
             valid_iters: int | None = None
-            latest_ckpt = _find_latest_checkpoint(run_dir)
+            latest_ckpt = find_latest_checkpoint(run_dir)
             if latest_ckpt is not None:
                 valid_iters = count_valid_programs(latest_ckpt)
             if valid_iters is None and oe_output_dir.exists():
@@ -1085,12 +1053,14 @@ def resume_run(
             copy_run_file(parent_wrapper, new_run_dir / WRAPPER_FILENAME)
 
         # 6. Copy checkpoint from parent run dir
-        parent_checkpoint = _find_latest_checkpoint(parent_run_dir)
+        parent_checkpoint = find_latest_checkpoint(parent_run_dir)
         if parent_checkpoint is None:
             raise RevolverError(
                 f"No checkpoint found in parent run '{run_id}'. "
                 "The run may have been too short to produce a checkpoint."
             )
+        # oe-checkpoint is the *input* checkpoint fed to OE for resume.
+        # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
         new_checkpoint: Path = new_run_dir / "oe-checkpoint"
         copy_run_file(parent_checkpoint, new_checkpoint)
 
@@ -1268,7 +1238,7 @@ def resume_run(
 
             # Count valid iterations from checkpoint database
             valid_iters: int | None = None
-            latest_ckpt_resume = _find_latest_checkpoint(new_run_dir)
+            latest_ckpt_resume = find_latest_checkpoint(new_run_dir)
             if latest_ckpt_resume is not None:
                 valid_iters = count_valid_programs(latest_ckpt_resume)
             if valid_iters is None and oe_output_dir.exists():

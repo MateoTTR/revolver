@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterator
+import contextlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json as _json
 import logging
 import os
 from pathlib import Path
+import sys
 from typing import Any
 
 import yaml
@@ -333,8 +335,14 @@ def build_config(
         effective_iters is not None
         and isinstance(effective_interval, int)
         and isinstance(effective_iters, int)
+        and effective_iters > 0
         and effective_interval > effective_iters
     ):
+        msg = (
+            f"Warning: checkpoint_interval ({effective_interval}) > "
+            f"iterations ({effective_iters}) — no checkpoint would be saved. "
+            f"Overriding to checkpoint_interval={effective_iters}.\n"
+        )
         logger.warning(
             "checkpoint_interval (%d) > iterations (%d) — no checkpoint would be saved. "
             "Overriding to checkpoint_interval=%d to ensure a final checkpoint.",
@@ -342,6 +350,7 @@ def build_config(
             effective_iters,
             effective_iters,
         )
+        sys.stderr.write(msg)
         config["checkpoint_interval"] = effective_iters
 
     # 6. Output directory
@@ -463,6 +472,42 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def find_latest_checkpoint(run_dir: Path) -> Path | None:
+    """Find the latest OpenEvolve checkpoint in a run directory.
+
+    OpenEvolve saves checkpoints to ``oe-output/checkpoints/checkpoint_N/``.
+    This helper scans that directory, sorts by numeric suffix, and returns
+    the path with the highest iteration number.
+
+    This function encodes knowledge of OpenEvolve's internal directory layout
+    and belongs in the infrastructure layer (alongside ``count_valid_programs``).
+
+    Args:
+        run_dir: Path to the run directory (e.g. ``.revolver/runs/<run_id>``).
+
+    Returns:
+        Path to the latest ``checkpoint_N`` directory, or ``None`` if no
+        checkpoint directory exists.
+    """
+    checkpoints_dir = run_dir / "oe-output" / "checkpoints"
+    if not checkpoints_dir.is_dir():
+        return None
+
+    checkpoint_dirs: list[tuple[int, Path]] = []
+    for child in checkpoints_dir.iterdir():
+        if child.is_dir() and child.name.startswith("checkpoint_"):
+            suffix = child.name.removeprefix("checkpoint_")
+            with contextlib.suppress(ValueError):
+                checkpoint_dirs.append((int(suffix), child))
+
+    if not checkpoint_dirs:
+        return None
+
+    # Return the checkpoint with the highest iteration number
+    checkpoint_dirs.sort(key=lambda t: t[0])
+    return checkpoint_dirs[-1][1]
+
+
 def count_valid_programs(checkpoint_dir: Path) -> int | None:
     """Count valid program entries in an OpenEvolve checkpoint database.
 
@@ -507,6 +552,7 @@ __all__ = [
     "RunOutput",
     "build_config",
     "count_valid_programs",
+    "find_latest_checkpoint",
     "resolve_api_keys",
     "revolver_env",
 ]
