@@ -115,7 +115,7 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
         A (possibly empty) list of human-readable warning strings.
     """
     try:
-        import dacite
+        import dacite  # type: ignore[import-not-found,unused-ignore]
         from openevolve.config import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
             Config as OEConfig,
         )
