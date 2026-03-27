@@ -156,6 +156,31 @@ class RunManifest(BaseModel):
     config_file: str = "config.yaml"
 
 
+class ResolvedOEConfig(BaseModel):
+    """Resolved OpenEvolve configuration parameters for dry-run display.
+
+    Extracted from the merged OE config dict to show the user what
+    values would be used if the run were actually launched.
+
+    Attributes:
+        iterations: Maximum iterations (from ``max_iterations``).
+        checkpoint_interval: Checkpoint save interval.
+        num_islands: Number of MAP-Elites islands.
+        feature_dimensions: Feature dimension names for MAP-Elites.
+        feature_bins: Number of bins per feature dimension.
+        temperature: LLM sampling temperature.
+        parallel_evaluations: Number of parallel evaluations.
+    """
+
+    iterations: int | None = None
+    checkpoint_interval: int | None = None
+    num_islands: int | None = None
+    feature_dimensions: list[str] | None = None
+    feature_bins: int | None = None
+    temperature: float | None = None
+    parallel_evaluations: int | None = None
+
+
 class RunResult(BaseModel):
     """Result returned to the CLI after a run completes.
 
@@ -171,6 +196,7 @@ class RunResult(BaseModel):
         generation_time_s: Wall-clock generation time in seconds.
         token_usage: Token counts from the proxy (``None`` if unavailable).
         resumed_from: Parent run ID if this is a resumed run.
+        resolved_config: Resolved OE configuration (populated in dry-run mode).
     """
 
     run_id: str
@@ -184,6 +210,7 @@ class RunResult(BaseModel):
     generation_time_s: float
     token_usage: TokenUsage | None = None
     resumed_from: str | None = None
+    resolved_config: ResolvedOEConfig | None = None
 
 
 class RunStatus(BaseModel):

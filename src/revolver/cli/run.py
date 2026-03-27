@@ -145,6 +145,27 @@ def run_launch(
                     },
                     json_mode=False,
                 )
+                # Display resolved OE config section (S9a-08)
+                if result.resolved_config is not None:
+                    rc = result.resolved_config
+                    config_data: dict[str, object] = {}
+                    if rc.iterations is not None:
+                        config_data["iterations"] = rc.iterations
+                    if rc.checkpoint_interval is not None:
+                        config_data["checkpoint_interval"] = rc.checkpoint_interval
+                    if rc.num_islands is not None:
+                        config_data["num_islands"] = rc.num_islands
+                    if rc.feature_dimensions is not None:
+                        config_data["feature_dimensions"] = rc.feature_dimensions
+                    if rc.feature_bins is not None:
+                        config_data["feature_bins"] = rc.feature_bins
+                    if rc.temperature is not None:
+                        config_data["temperature"] = rc.temperature
+                    if rc.parallel_evaluations is not None:
+                        config_data["parallel_evaluations"] = rc.parallel_evaluations
+                    if config_data:
+                        sys.stderr.write("\nResolved OpenEvolve config:\n")
+                        render(config_data, json_mode=False)
             return
 
         # Display token usage on stderr if available

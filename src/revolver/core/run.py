@@ -89,6 +89,7 @@ from revolver.infra.store import (
 from revolver.infra.token_proxy import TokenCountingProxy, estimate_cost
 from revolver.models.run import (
     ProgramEntry,
+    ResolvedOEConfig,
     RunConfig,
     RunInfo,
     RunManifest,
@@ -245,6 +246,42 @@ def generate_solution_id() -> str:
     """
     now = datetime.now(UTC)
     return f"sol-{now.strftime('%Y%m%d-%H%M%S')}"
+
+
+# ── Resolved OE config extraction ─────────────────────────────────────────────
+
+
+def _extract_resolved_config(oe_config: dict[str, Any]) -> ResolvedOEConfig:
+    """Extract key parameters from a merged OE config dict.
+
+    Used in dry-run mode to show the user what values would be used
+    if the run were actually launched.
+
+    Args:
+        oe_config: The merged OpenEvolve configuration dictionary.
+
+    Returns:
+        A :class:`ResolvedOEConfig` with the extracted parameters.
+    """
+    db_section = oe_config.get("database", {})
+    if not isinstance(db_section, dict):
+        db_section = {}
+    llm_section = oe_config.get("llm", {})
+    if not isinstance(llm_section, dict):
+        llm_section = {}
+    eval_section = oe_config.get("evaluator", {})
+    if not isinstance(eval_section, dict):
+        eval_section = {}
+
+    return ResolvedOEConfig(
+        iterations=oe_config.get("max_iterations"),
+        checkpoint_interval=oe_config.get("checkpoint_interval"),
+        num_islands=db_section.get("num_islands"),
+        feature_dimensions=db_section.get("feature_dimensions"),
+        feature_bins=db_section.get("feature_bins"),
+        temperature=llm_section.get("temperature"),
+        parallel_evaluations=eval_section.get("parallel_evaluations"),
+    )
 
 
 # ── Project root resolution ──────────────────────────────────────────────────
@@ -490,6 +527,7 @@ def launch_run(
 
         # 8. If dry_run: return early with config, no side effects
         if config.dry_run:
+            resolved = _extract_resolved_config(oe_config)
             return RunResult(
                 run_id="dry-run",
                 solution=SolutionResult(
@@ -505,6 +543,7 @@ def launch_run(
                 iterations=config.iterations or oe_config.get("max_iterations", 10),
                 generation_time_s=0.0,
                 token_usage=None,
+                resolved_config=resolved,
             )
 
         # 9. Generate run_id, create run dir
