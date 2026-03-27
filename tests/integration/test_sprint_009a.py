@@ -109,7 +109,19 @@ def test_build_config_checkpoint_interval_ok() -> None:
 # ── validate_oe_config ────────────────────────────────────────────────────────
 
 
+def _has_dacite_and_openevolve() -> bool:
+    """Check if dacite and openevolve are installed (required for config validation)."""
+    try:
+        import dacite  # noqa: F401
+        from openevolve.config import Config  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 @pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
 def test_validate_oe_config_misplaced_num_islands() -> None:
     """Top-level num_islands -> warning about database.num_islands."""
     config = {
@@ -124,6 +136,7 @@ def test_validate_oe_config_misplaced_num_islands() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
 def test_validate_oe_config_valid() -> None:
     """Correct database: namespace -> empty list."""
     config = {
