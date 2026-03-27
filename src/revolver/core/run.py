@@ -975,6 +975,8 @@ def _post_run_evaluation(
 def resume_run(
     run_id: str,
     iterations: int | None = None,
+    temperature: float | None = None,
+    parallel: int | None = None,
     project_root: Path | None = None,
     *,
     quiet: bool = False,
@@ -987,6 +989,8 @@ def resume_run(
     Args:
         run_id: ID of the parent run to resume from.
         iterations: Override iteration count for the resumed run.
+        temperature: LLM temperature override (0.0--2.0).
+        parallel: Number of parallel evaluations.
         project_root: Explicit project root, or ``None`` to auto-detect.
         quiet: Suppress informational stderr messages (e.g. in --quiet/--json mode).
 
@@ -1078,6 +1082,8 @@ def resume_run(
             llm=llm,
             iterations=actual_iterations,
             problem_description=problem_description,
+            temperature=temperature,
+            parallel=parallel,
         )
 
         # Set output dir
