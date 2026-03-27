@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json as _json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ import yaml
 
 from revolver.core.exceptions import ExternalError, ValidationError
 from revolver.models.llm import LLMEntry
+
+logger = logging.getLogger(__name__)
 
 # ── System prompt template (DES-005 §4.4) ────────────────────────────────────
 
@@ -322,6 +325,24 @@ def build_config(
                 )
             key, value = override.split("=", 1)
             _set_nested(config, key.strip(), _parse_value(value.strip()))
+
+    # 5b. Guard: ensure checkpoint_interval <= iterations for resume capability
+    effective_interval = config.get("checkpoint_interval", 100)  # OE default
+    effective_iters = config.get("max_iterations")
+    if (
+        effective_iters is not None
+        and isinstance(effective_interval, int)
+        and isinstance(effective_iters, int)
+        and effective_interval > effective_iters
+    ):
+        logger.warning(
+            "checkpoint_interval (%d) > iterations (%d) — no checkpoint would be saved. "
+            "Overriding to checkpoint_interval=%d to ensure a final checkpoint.",
+            effective_interval,
+            effective_iters,
+            effective_iters,
+        )
+        config["checkpoint_interval"] = effective_iters
 
     # 6. Output directory
     if output_dir is not None:
