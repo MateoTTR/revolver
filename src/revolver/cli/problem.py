@@ -169,7 +169,7 @@ def problem_version_create(
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
-        pv = core_problem.create_version(tag=tag, message=message)
+        pv, config_warnings = core_problem.create_version(tag=tag, message=message)
 
         if json_mode:
             render(
@@ -194,11 +194,11 @@ def problem_version_create(
             )
 
         # S9a-04: Display OE config validation warnings
-        if pv.config_warnings and not quiet:
+        if config_warnings and not quiet:
             from rich.console import Console
 
             console = Console(stderr=True)
-            for w in pv.config_warnings:
+            for w in config_warnings:
                 console.print(f"[yellow]Warning: {w}[/yellow]")
 
 

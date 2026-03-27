@@ -162,7 +162,7 @@ def create_version(
     tag: str,
     message: str = "",
     project_root: Path | None = None,
-) -> ProblemVersion:
+) -> tuple[ProblemVersion, list[str]]:
     """Create a new problem version snapshot.
 
     Copies required files into ``.revolver/problem/<tag>/``, computes
@@ -174,7 +174,9 @@ def create_version(
         project_root: Explicit project root, or ``None`` to auto-detect.
 
     Returns:
-        The created :class:`ProblemVersion` with file list.
+        A tuple of (ProblemVersion, config_warnings) where config_warnings
+        is a list of validation warning strings from OE config checking
+        (empty when config is valid or OpenEvolve is not installed).
 
     Raises:
         ValidationError: If required files are missing (FR-PRB-010).
@@ -221,12 +223,9 @@ def create_version(
         config_warnings: list[str] = []
         config_path = snapshot_dir / "config.yaml"
         if config_path.exists():
-            try:
-                from revolver.infra.openevolve import validate_oe_config
+            from revolver.infra.openevolve import validate_oe_config
 
-                config_warnings = validate_oe_config(config_path)
-            except ImportError:
-                pass  # OpenEvolve not installed, skip validation
+            config_warnings = validate_oe_config(config_path)
 
         # Compute per-file SHA-256 on the SNAPSHOT copies
         file_snapshots: list[FileSnapshot] = []
@@ -269,13 +268,12 @@ def create_version(
             message=message,
             created_at=now,
             files=file_snapshots,
-            config_warnings=config_warnings,
         )
 
         # Insert into DB
         insert_problem_version(conn, pv)
 
-        return pv
+        return pv, config_warnings
     finally:
         conn.close()
 

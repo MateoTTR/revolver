@@ -220,10 +220,12 @@ class OpenEvolveRunner:
                 "OpenEvolve is not installed. Install it with: pip install 'revolver[openevolve]'"
             ) from exc
 
-        # S9a-05: Validate config before passing to OpenEvolve
-        config_warnings = validate_oe_config(self.config)
-        for w in config_warnings:
-            logger.warning(w)
+        # NOTE: Config validation is intentionally NOT done here.
+        # The raw config.yaml is validated at `problem version create` time
+        # and at `launch_run`/`resume_run` entry. The config dict here is the
+        # fully merged runtime config containing Revolver-injected keys
+        # (api_key, api_base, prompt.system_message, etc.) which would
+        # produce spurious unknown-key warnings in dacite strict mode.
 
         # Convert dict to Config dataclass (OpenEvolve expects Config, not dict)
         config_obj = OEConfig.from_dict(self.config)
