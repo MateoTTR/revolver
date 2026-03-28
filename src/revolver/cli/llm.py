@@ -13,11 +13,17 @@ from typing import Annotated
 import typer
 
 from revolver.cli import llm_app
+from revolver.cli._global_options import GlobalOptionGroup
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import llm as llm_core
 from revolver.infra.db import get_global_db
 from revolver.infra.ollama import OllamaClient
 from revolver.infra.output import print_confirmation, render
+
+# ── Ensemble sub-app ──────────────────────────────────────────────────────
+
+ensemble_app = typer.Typer(cls=GlobalOptionGroup, help="LLM ensemble management.")
+llm_app.add_typer(ensemble_app, name="ensemble")
 
 
 @llm_app.command("add")
@@ -564,6 +570,259 @@ def llm_remove(
             render({"status": "removed", "name": name}, json_mode=False)
             print_confirmation(
                 f"Done: LLM '{name}' removed",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
+
+
+# ── Ensemble CLI commands ──────────────────────────────────────────────────
+
+
+@ensemble_app.command("create")
+def ensemble_create(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Unique name for the ensemble.")],
+) -> None:
+    """Create an empty LLM ensemble."""
+    with cli_error_boundary():
+        conn = get_global_db()
+        try:
+            entry = llm_core.create_ensemble(name=name, conn=conn)
+        finally:
+            conn.close()
+
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        if json_mode:
+            render(
+                {
+                    "name": entry.name,
+                    "members": [],
+                    "created_at": entry.created_at.isoformat(),
+                },
+                json_mode=True,
+            )
+        else:
+            render(
+                {"status": "created", "name": entry.name},
+                json_mode=False,
+            )
+            print_confirmation(
+                f"Done: ensemble '{entry.name}' created",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
+
+
+@ensemble_app.command("add")
+def ensemble_add(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the ensemble.")],
+    llm: Annotated[
+        str,
+        typer.Option("--llm", help="Name of the registered LLM to add."),
+    ],
+    weight: Annotated[
+        float,
+        typer.Option("--weight", help="Sampling weight for this member."),
+    ],
+    temperature: Annotated[
+        float | None,
+        typer.Option("--temperature", help="Per-member temperature override."),
+    ] = None,
+    max_tokens: Annotated[
+        int | None,
+        typer.Option("--max-tokens", help="Per-member max_tokens override."),
+    ] = None,
+) -> None:
+    """Add a member LLM to an ensemble."""
+    with cli_error_boundary():
+        conn = get_global_db()
+        try:
+            llm_core.add_ensemble_member(
+                ensemble_name=name,
+                llm_name=llm,
+                weight=weight,
+                conn=conn,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            # Fetch updated ensemble for display
+            entry = llm_core.get_ensemble_info(name=name, conn=conn)
+        finally:
+            conn.close()
+
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        if json_mode:
+            render(
+                {
+                    "ensemble": name,
+                    "added": llm,
+                    "weight": weight,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "total_weight": sum(m.weight for m in entry.members),
+                    "member_count": len(entry.members),
+                },
+                json_mode=True,
+            )
+        else:
+            total_weight = sum(m.weight for m in entry.members)
+            render(
+                {
+                    "status": "added",
+                    "ensemble": name,
+                    "llm": llm,
+                    "weight": str(weight),
+                    "total_weight": f"{total_weight:.2f}",
+                },
+                json_mode=False,
+            )
+            print_confirmation(
+                f"Done: LLM '{llm}' added to ensemble '{name}'",
+                json_mode=json_mode,
+                quiet=quiet,
+            )
+
+
+@ensemble_app.command("list")
+def ensemble_list(
+    ctx: typer.Context,
+) -> None:
+    """List all LLM ensembles."""
+    with cli_error_boundary():
+        conn = get_global_db()
+        try:
+            entries = llm_core.list_ensembles(conn)
+        finally:
+            conn.close()
+
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        if json_mode:
+            render(
+                [
+                    {
+                        "name": e.name,
+                        "member_count": len(e.members),
+                        "total_weight": sum(m.weight for m in e.members),
+                        "created_at": e.created_at.isoformat(),
+                    }
+                    for e in entries
+                ],
+                json_mode=True,
+            )
+        else:
+            if entries:
+                rows = [
+                    {
+                        "name": e.name,
+                        "members": str(len(e.members)),
+                        "total_weight": f"{sum(m.weight for m in e.members):.2f}",
+                        "created_at": e.created_at.isoformat(),
+                    }
+                    for e in entries
+                ]
+                render(rows, json_mode=False)
+            else:
+                render({"info": "No ensembles registered"}, json_mode=False)
+
+
+@ensemble_app.command("info")
+def ensemble_info(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the ensemble.")],
+) -> None:
+    """Show detailed information about an ensemble."""
+    with cli_error_boundary():
+        conn = get_global_db()
+        try:
+            entry = llm_core.get_ensemble_info(name=name, conn=conn)
+        finally:
+            conn.close()
+
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        if json_mode:
+            render(
+                {
+                    "name": entry.name,
+                    "created_at": entry.created_at.isoformat(),
+                    "members": [
+                        {
+                            "llm_name": m.llm_name,
+                            "weight": m.weight,
+                            "temperature": m.temperature,
+                            "max_tokens": m.max_tokens,
+                        }
+                        for m in entry.members
+                    ],
+                    "total_weight": sum(m.weight for m in entry.members),
+                },
+                json_mode=True,
+            )
+        else:
+            # Show ensemble header
+            render(
+                {
+                    "name": entry.name,
+                    "members": str(len(entry.members)),
+                    "total_weight": f"{sum(m.weight for m in entry.members):.2f}",
+                    "created_at": entry.created_at.isoformat(),
+                },
+                json_mode=False,
+            )
+            # Show member table
+            if entry.members:
+                member_rows = [
+                    {
+                        "llm_name": m.llm_name,
+                        "weight": str(m.weight),
+                        "temperature": str(m.temperature) if m.temperature is not None else "-",
+                        "max_tokens": str(m.max_tokens) if m.max_tokens is not None else "-",
+                    }
+                    for m in entry.members
+                ]
+                render(member_rows, json_mode=False)
+
+
+@ensemble_app.command("remove")
+def ensemble_remove(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the ensemble to remove.")],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """Remove an ensemble from the database."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        if not force:
+            if json_mode:
+                from revolver.core.exceptions import ValidationError
+
+                raise ValidationError("Use --force to remove in JSON mode (no interactive prompt)")
+            typer.confirm(f"Remove ensemble '{name}'?", abort=True)
+
+        conn = get_global_db()
+        try:
+            llm_core.remove_ensemble(name=name, conn=conn)
+        finally:
+            conn.close()
+
+        quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        if json_mode:
+            render({"name": name, "removed": True}, json_mode=True)
+        else:
+            render({"status": "removed", "name": name}, json_mode=False)
+            print_confirmation(
+                f"Done: ensemble '{name}' removed",
                 json_mode=json_mode,
                 quiet=quiet,
             )
