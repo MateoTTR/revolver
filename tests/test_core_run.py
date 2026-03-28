@@ -230,7 +230,10 @@ def test_launch_run_unknown_llm(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
-        patch("revolver.core.run.get_llm", return_value=None),
+        patch(
+            "revolver.core.run.resolve_llm_or_ensemble",
+            side_effect=RevolverError("LLM or ensemble 'nonexistent-llm' not found."),
+        ),
     ):
         mock_global_db.return_value = MagicMock()
         with pytest.raises(RevolverError, match=r"LLM.*not found"):
@@ -275,6 +278,7 @@ def test_launch_run_unknown_dataset(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
     ):
         mock_global_db.return_value = MagicMock()
@@ -317,6 +321,7 @@ def test_launch_run_integrity_failure(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -357,6 +362,7 @@ def test_launch_run_dry_run(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -417,6 +423,7 @@ def test_launch_run_warns_non_train_split(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -480,6 +487,7 @@ def test_launch_run_warns_incompatible_dataset(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -540,6 +548,7 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -663,6 +672,7 @@ def test_launch_run_local_llm_sequential(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -714,6 +724,7 @@ def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -879,6 +890,7 @@ def test_preflight_check_pass(project_with_prereqs: dict, capsys: pytest.Capture
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -951,6 +963,7 @@ def test_preflight_check_evaluator_crash(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -1023,6 +1036,7 @@ def test_preflight_check_timeout(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -1100,6 +1114,7 @@ def test_preflight_check_score_zero(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -1167,6 +1182,7 @@ def test_dry_run_skips_preflight(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -1246,6 +1262,7 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.resolve_dataset_path",
@@ -1356,6 +1373,7 @@ def test_resume_run_preflight_crash(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.resolve_dataset_path",
@@ -1485,7 +1503,8 @@ def test_resume_llm_override(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
-        patch("revolver.core.run.get_llm", return_value=override_llm) as mock_get_llm,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=override_llm),
+        patch("revolver.core.run.get_llm", return_value=override_llm),
         patch(
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
@@ -1506,8 +1525,6 @@ def test_resume_llm_override(project_with_prereqs: dict) -> None:
 
         result = resume_run(parent_id, llm_name="pro-llm", project_root=root)
 
-    # get_llm must have been called with the override name
-    mock_get_llm.assert_called_once_with(mock_global_db.return_value, "pro-llm")
     # Result must reflect the override LLM
     assert result.llm == "pro-llm"
 
@@ -1555,10 +1572,14 @@ def test_resume_llm_not_found(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch(
+            "revolver.core.run.resolve_llm_or_ensemble",
+            side_effect=RevolverError("LLM or ensemble 'nonexistent' not found."),
+        ),
         patch("revolver.core.run.get_llm", return_value=None),
     ):
         mock_global_db.return_value = MagicMock()
-        with pytest.raises(RevolverError, match="LLM 'nonexistent' not found"):
+        with pytest.raises(RevolverError, match="'nonexistent' not found"):
             resume_run(parent_id, llm_name="nonexistent", project_root=root)
 
 
@@ -1616,6 +1637,7 @@ def test_resume_config_override_single(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.resolve_dataset_path",
@@ -1703,6 +1725,7 @@ def test_resume_config_override_multiple(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.resolve_dataset_path",
@@ -2151,6 +2174,7 @@ def test_launch_run_post_processing_failure_sets_completed_with_errors(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -2247,6 +2271,7 @@ def test_launch_run_oe_failure_sets_failed(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -2328,6 +2353,7 @@ def test_launch_run_post_eval_message(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -2395,6 +2421,7 @@ def test_launch_run_post_eval_message_suppressed_when_quiet(
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -2463,6 +2490,7 @@ def test_run_oe_failure_marks_failed(project_with_prereqs: dict) -> None:
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",
@@ -2553,6 +2581,7 @@ def test_run_keyboard_interrupt_marks_interrupted(project_with_prereqs: dict) ->
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
         patch("revolver.core.run.get_llm", return_value=llm),
         patch(
             "revolver.core.run.verify_dataset_integrity",

@@ -44,6 +44,64 @@ _PROVIDER_BASE_URLS: dict[str, str] = {
 _KNOWN_PROVIDERS = {"anthropic", "openai", "google", "openai-compat"}
 
 
+# ── resolve_llm_or_ensemble (S11-06) ──────────────────────────────────────
+
+
+def resolve_llm_or_ensemble(
+    name: str,
+    conn: sqlite3.Connection,
+) -> LLMEntry | EnsembleEntry:
+    """Resolve a name to either a single LLM or an ensemble.
+
+    Tries ``get_llm()`` first, then ``get_ensemble()`` + ``get_ensemble_members()``.
+    Raises :class:`RevolverError` if neither is found.
+
+    Args:
+        name: The LLM or ensemble name to resolve.
+        conn: A connection to the global database.
+
+    Returns:
+        An :class:`LLMEntry` if a single LLM matches, or an :class:`EnsembleEntry`
+        if an ensemble matches.
+
+    Raises:
+        RevolverError: If neither an LLM nor an ensemble with *name* exists.
+    """
+    # Try single LLM first
+    llm = db.get_llm(conn, name)
+    if llm is not None:
+        return llm
+
+    # Try ensemble
+    ensemble_row = db.get_ensemble(conn, name)
+    if ensemble_row is not None:
+        member_rows = db.get_ensemble_members(conn, name)
+        members = [
+            EnsembleMember(
+                llm_name=str(m["llm_name"]),
+                weight=float(m["weight"]),  # type: ignore[arg-type]
+                temperature=(
+                    float(m["temperature_override"])  # type: ignore[arg-type]
+                    if m.get("temperature_override") is not None
+                    else None
+                ),
+                max_tokens=(
+                    int(str(m["max_tokens_override"]))
+                    if m.get("max_tokens_override") is not None
+                    else None
+                ),
+            )
+            for m in member_rows
+        ]
+        return EnsembleEntry(
+            name=str(ensemble_row["name"]),
+            members=members,
+            created_at=datetime.fromisoformat(str(ensemble_row["created_at"])),
+        )
+
+    raise RevolverError(f"LLM or ensemble '{name}' not found.")
+
+
 def _ensure_client(client: OllamaClient | None) -> tuple[OllamaClient, bool]:
     """Return a guaranteed non-None client and whether we own it.
 

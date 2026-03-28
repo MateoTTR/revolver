@@ -263,6 +263,7 @@ class RunSummary(BaseModel):
         created_at: Timestamp of run creation.
         best_score: Best score achieved (from rank-1 solution).
         alias: Alias of the rank-1 solution (if set).
+        llm_type: ``"single"`` or ``"ensemble"``.
     """
 
     run_id: str
@@ -278,6 +279,7 @@ class RunSummary(BaseModel):
     created_at: datetime
     best_score: float | None = None
     alias: str | None = None
+    llm_type: str = "single"
 
 
 class RunInfo(BaseModel):
@@ -301,6 +303,8 @@ class RunInfo(BaseModel):
         solutions: All solutions (auto-created + extracted) for this run.
         programs: All stored programs from OpenEvolve output.
         resume_chain: Ordered list of ancestor run IDs.
+        llm_type: ``"single"`` or ``"ensemble"``.
+        llm_snapshot: JSON string with LLM/ensemble configuration snapshot.
     """
 
     run_id: str
@@ -320,6 +324,8 @@ class RunInfo(BaseModel):
     solutions: list[SolutionResult] = []
     programs: list[ProgramEntry] = []
     resume_chain: list[str] = []
+    llm_type: str = "single"
+    llm_snapshot: str | None = None
 
 
 class ProgressInfo(BaseModel):

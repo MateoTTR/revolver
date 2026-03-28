@@ -27,7 +27,7 @@ from typing import Any
 import yaml
 
 from revolver.core.exceptions import ExternalError, ValidationError
-from revolver.models.llm import LLMEntry
+from revolver.models.llm import EnsembleEntry, LLMEntry
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +315,77 @@ class OpenEvolveRunner:
 # ── Config builder (DES-005 §4.2) ────────────────────────────────────────────
 
 
+def _build_ensemble_llm_config(
+    config: dict[str, Any],
+    ensemble: EnsembleEntry,
+    primary_llm: LLMEntry,
+    conn: Any | None,
+) -> None:
+    """Build the ``llm.models`` array for ensemble mode (S11-07).
+
+    Each ensemble member is resolved to its registered LLM entry, and the
+    OE field mapping is applied:
+
+    - ``LLMEntry.model`` → ``models[].name`` (NOT ``model``)
+    - ``LLMEntry.base_url`` → ``models[].api_base`` (NOT ``base_url``)
+    - ``LLMEntry.api_key_env`` → ``models[].api_key`` as ``${ENV_NAME}``
+    - ``EnsembleMember.weight`` → ``models[].weight``
+    - ``EnsembleMember.temperature`` → ``models[].temperature`` (optional)
+    - ``EnsembleMember.max_tokens`` → ``models[].max_tokens`` (optional)
+
+    Falls back to the member's LLM registry defaults for temperature and
+    max_tokens when no per-member override is set.
+
+    Args:
+        config: The OE config dict to mutate (adds ``llm.models``).
+        ensemble: The ensemble entry with member definitions.
+        primary_llm: The first member's LLM entry, used for shared defaults.
+        conn: Global DB connection for resolving member LLM details.
+    """
+    from revolver.infra.db import get_llm
+
+    config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
+
+    models: list[dict[str, Any]] = []
+    for member in ensemble.members:
+        # Resolve member LLM details
+        member_llm: LLMEntry | None = None
+        if conn is not None:
+            member_llm = get_llm(conn, member.llm_name)
+        if member_llm is None:
+            raise ValidationError(
+                f"Ensemble member LLM '{member.llm_name}' not found in registry."
+            )
+
+        entry: dict[str, Any] = {
+            "name": member_llm.model,
+            "weight": member.weight,
+        }
+
+        if member_llm.base_url:
+            entry["api_base"] = member_llm.base_url
+
+        if member_llm.api_key_env:
+            entry["api_key"] = f"${{{member_llm.api_key_env}}}"
+
+        # Per-member overrides take precedence over LLM registry defaults
+        effective_temperature = (
+            member.temperature if member.temperature is not None else member_llm.temperature
+        )
+        if effective_temperature is not None:
+            entry["temperature"] = effective_temperature
+
+        effective_max_tokens = (
+            member.max_tokens if member.max_tokens is not None else member_llm.max_tokens
+        )
+        if effective_max_tokens is not None:
+            entry["max_tokens"] = effective_max_tokens
+
+        models.append(entry)
+
+    config["llm"]["models"] = models
+
+
 def build_config(
     problem_config: Path | None,
     llm: LLMEntry,
@@ -325,6 +396,8 @@ def build_config(
     temperature: float | None = None,
     parallel: int | None = None,
     rewrite_mode: bool = False,
+    ensemble: EnsembleEntry | None = None,
+    conn: Any | None = None,
 ) -> dict[str, Any]:
     """Build the OpenEvolve config dict.
 
@@ -339,9 +412,16 @@ def build_config(
         5. --config-override key=value pairs
         6. Output directory (always Revolver-controlled)
 
+    When *ensemble* is provided, ``llm.models`` (array) is emitted instead of
+    ``llm.model`` (singular). Each member is resolved via ``get_llm()`` and
+    mapped to OpenEvolve field names: ``name`` (model), ``api_base`` (base_url),
+    ``api_key`` (``${API_KEY_ENV}`` syntax), ``weight``, and optional
+    ``temperature``/``max_tokens``.
+
     Args:
         problem_config: Path to the problem's config.yaml file (optional).
-        llm: Registered LLM entry with endpoint details.
+        llm: Registered LLM entry with endpoint details. For ensemble mode,
+            this is used as the "primary" LLM for shared settings.
         iterations: Override for iteration count (optional).
         config_overrides: List of ``key=value`` override strings (optional).
         output_dir: Revolver-controlled output directory (optional).
@@ -354,6 +434,9 @@ def build_config(
         rewrite_mode: Full-rewrite mode shortcut (optional). When ``True``, sets
             ``diff_based_evolution=false`` and ``max_code_length=50000``.
             Overridable by ``--config-override`` (step 5).
+        ensemble: Ensemble entry for multi-model mode (optional).
+        conn: Global database connection, required when *ensemble* is provided
+            to resolve member LLM details.
 
     Returns:
         Merged configuration dictionary.
@@ -381,23 +464,29 @@ def build_config(
         config.pop("num_generations", None)
 
     # 2. LLM endpoint injection (DES-005 §4.3)
-    llm_config: dict[str, Any] = {}
-    if llm.base_url:
-        llm_config["api_base"] = llm.base_url
-    llm_config["primary_model"] = llm.model
-    if llm.api_key_env:
-        llm_config["api_key_env"] = llm.api_key_env
+    if ensemble is not None:
+        # Ensemble mode: emit llm.models array (S11-07)
+        _build_ensemble_llm_config(config, ensemble, llm, conn)
+    else:
+        # Single-LLM mode (unchanged)
+        llm_config: dict[str, Any] = {}
+        if llm.base_url:
+            llm_config["api_base"] = llm.base_url
+        llm_config["primary_model"] = llm.model
+        if llm.api_key_env:
+            llm_config["api_key_env"] = llm.api_key_env
 
-    # Local LLMs (Ollama) require an api_key for the OpenAI SDK
-    # but don't have a real key — inject a placeholder.
-    if llm.source == "local" and "api_key" not in llm_config:
-        llm_config["api_key"] = "ollama"
+        # Local LLMs (Ollama) require an api_key for the OpenAI SDK
+        # but don't have a real key — inject a placeholder.
+        if llm.source == "local" and "api_key" not in llm_config:
+            llm_config["api_key"] = "ollama"
 
-    if llm_config:
-        config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
-        config["llm"].update(llm_config)
+        if llm_config:
+            config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
+            config["llm"].update(llm_config)
 
     # 2b. LLM per-model config (max_tokens, timeout, temperature) from registry
+    # In ensemble mode these act as shared defaults in the top-level llm section.
     if llm.max_tokens is not None:
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
@@ -591,6 +680,9 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
     environment variable at call time.  This keeps secrets out of stored
     config snapshots while allowing runtime resolution.
 
+    Also resolves ``${ENV_NAME}`` syntax in ``llm.models[].api_key`` entries
+    for ensemble configurations.
+
     Args:
         config: OpenEvolve config dict (mutated in place and returned).
 
@@ -599,6 +691,7 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
     """
     llm_section = config.get("llm")
     if isinstance(llm_section, dict):
+        # Single-LLM mode: resolve api_key_env
         env_name = llm_section.pop("api_key_env", None)
         if env_name:
             key = os.environ.get(env_name, "")
@@ -606,6 +699,26 @@ def resolve_api_keys(config: dict[str, Any]) -> dict[str, Any]:
                 llm_section["api_key"] = key
             else:
                 raise ValidationError(f"API key environment variable '{env_name}' is not set")
+
+        # Ensemble mode: resolve ${ENV_NAME} syntax in models[].api_key
+        models = llm_section.get("models")
+        if isinstance(models, list):
+            for model_entry in models:
+                if isinstance(model_entry, dict):
+                    api_key_ref = model_entry.get("api_key", "")
+                    if (
+                        isinstance(api_key_ref, str)
+                        and api_key_ref.startswith("${")
+                        and api_key_ref.endswith("}")
+                    ):
+                        env_var = api_key_ref[2:-1]
+                        resolved = os.environ.get(env_var, "")
+                        if resolved:
+                            model_entry["api_key"] = resolved
+                        else:
+                            raise ValidationError(
+                                f"API key environment variable '{env_var}' is not set"
+                            )
     return config
 
 
