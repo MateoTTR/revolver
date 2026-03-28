@@ -1442,6 +1442,8 @@ def insert_run(
     completion_tokens: int | None = None,
     config_snapshot: str | None = None,
     valid_iterations: int | None = None,
+    llm_type: str = "single",
+    llm_snapshot: str | None = None,
 ) -> None:
     """Insert a run record into the project database.
 
@@ -1463,6 +1465,10 @@ def insert_run(
         completion_tokens: Total output tokens consumed.
         config_snapshot: Verbatim OpenEvolve YAML config.
         valid_iterations: Number of iterations that produced valid programs.
+        llm_type: ``"single"`` for a single LLM or ``"ensemble"`` for a
+            multi-model ensemble.
+        llm_snapshot: JSON snapshot of LLM/ensemble configuration for
+            traceability.
     """
     conn.execute(
         """\
@@ -1470,8 +1476,9 @@ def insert_run(
             id, problem_version, llm, dataset, iterations,
             generation_time_s, prompt_tokens, completion_tokens,
             config_snapshot, problem_hash, dataset_hash, llm_model,
-            resumed_from, status, valid_iterations, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            resumed_from, status, valid_iterations, llm_type,
+            llm_snapshot, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -1489,6 +1496,8 @@ def insert_run(
             resumed_from,
             status,
             valid_iterations,
+            llm_type,
+            llm_snapshot,
             created_at.isoformat(),
         ),
     )

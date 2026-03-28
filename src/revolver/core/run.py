@@ -17,6 +17,7 @@ import contextlib
 import copy
 from datetime import UTC, datetime
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -37,6 +38,7 @@ from revolver.core.exceptions import (
     ProjectNotFoundError,
     RevolverError,
 )
+from revolver.core.llm import resolve_llm_or_ensemble
 from revolver.infra.db import (
     count_evals_for_run,
     count_solutions_for_run,
@@ -88,6 +90,7 @@ from revolver.infra.store import (
     write_run_manifest,
 )
 from revolver.infra.token_proxy import TokenCountingProxy, estimate_cost
+from revolver.models.llm import EnsembleEntry, LLMEntry
 from revolver.models.run import (
     ProgramEntry,
     ResolvedOEConfig,
@@ -315,6 +318,60 @@ def _extract_resolved_config(oe_config: dict[str, Any]) -> ResolvedOEConfig:
     )
 
 
+# ── LLM/Ensemble snapshot helpers (S11-08) ──────────────────────────────────
+
+
+def _build_llm_snapshot(
+    llm_or_ensemble: LLMEntry | EnsembleEntry,
+    global_conn: Any,
+) -> tuple[str, str, str]:
+    """Build llm_type, llm_model, and llm_snapshot JSON for a run record.
+
+    Args:
+        llm_or_ensemble: Resolved LLM or ensemble entry.
+        global_conn: Global DB connection (for resolving ensemble member LLMs).
+
+    Returns:
+        A tuple of ``(llm_type, llm_model, llm_snapshot_json)``.
+    """
+    if isinstance(llm_or_ensemble, EnsembleEntry):
+        members_snapshot: list[dict[str, Any]] = []
+        model_names: list[str] = []
+        for member in llm_or_ensemble.members:
+            member_llm = get_llm(global_conn, member.llm_name)
+            entry: dict[str, Any] = {
+                "name": member.llm_name,
+                "model": member_llm.model if member_llm else member.llm_name,
+                "weight": member.weight,
+            }
+            if member.temperature is not None:
+                entry["temperature"] = member.temperature
+            if member.max_tokens is not None:
+                entry["max_tokens"] = member.max_tokens
+            members_snapshot.append(entry)
+            model_names.append(member_llm.model if member_llm else member.llm_name)
+
+        snapshot = {
+            "type": "ensemble",
+            "name": llm_or_ensemble.name,
+            "members": members_snapshot,
+        }
+        llm_model_str = ",".join(model_names)
+        return "ensemble", llm_model_str, json.dumps(snapshot)
+
+    # Single LLM
+    snapshot_single: dict[str, Any] = {
+        "type": "single",
+        "name": llm_or_ensemble.name,
+        "model": llm_or_ensemble.model,
+    }
+    if llm_or_ensemble.temperature is not None:
+        snapshot_single["temperature"] = llm_or_ensemble.temperature
+    if llm_or_ensemble.max_tokens is not None:
+        snapshot_single["max_tokens"] = llm_or_ensemble.max_tokens
+    return "single", llm_or_ensemble.model, json.dumps(snapshot_single)
+
+
 # ── Project root resolution ──────────────────────────────────────────────────
 
 
@@ -496,10 +553,20 @@ def launch_run(
         if pv is None:
             raise RevolverError(f"Problem version '{config.problem_version}' not found.")
 
-        # 3. Validate LLM exists (global DB)
-        llm = get_llm(global_conn, config.llm_name)
-        if llm is None:
-            raise RevolverError(f"LLM '{config.llm_name}' not found.")
+        # 3. Resolve LLM or ensemble (global DB) — S11-08
+        llm_or_ensemble = resolve_llm_or_ensemble(config.llm_name, global_conn)
+        ensemble: EnsembleEntry | None = None
+        if isinstance(llm_or_ensemble, EnsembleEntry):
+            ensemble = llm_or_ensemble
+            # Use the first member's LLM as the "primary" for shared config
+            first_member_llm = get_llm(global_conn, ensemble.members[0].llm_name)
+            if first_member_llm is None:
+                raise RevolverError(
+                    f"Ensemble member LLM '{ensemble.members[0].llm_name}' not found."
+                )
+            llm: LLMEntry = first_member_llm
+        else:
+            llm = llm_or_ensemble
 
         # 4. Validate dataset exists
         ds = get_dataset(proj_conn, config.dataset_name)
@@ -555,6 +622,13 @@ def launch_run(
             temperature=config.temperature,
             parallel=config.parallel,
             rewrite_mode=config.rewrite_mode,
+            ensemble=ensemble,
+            conn=global_conn,
+        )
+
+        # Build LLM snapshot for traceability (S11-08)
+        llm_type, llm_model_str, llm_snapshot_json = _build_llm_snapshot(
+            llm_or_ensemble, global_conn
         )
 
         # 8. If dry_run: return early with config, no side effects
@@ -628,10 +702,12 @@ def launch_run(
             iterations=iterations,
             problem_hash=pv.hash,
             dataset_hash=ds.global_hash,
-            llm_model=llm.model,
+            llm_model=llm_model_str,
             created_at=now,
             status="running",
             config_snapshot=config_snapshot_str,
+            llm_type=llm_type,
+            llm_snapshot=llm_snapshot_json,
         )
 
         # Resolve api_key_env → api_key on a deep copy for runtime use only.
@@ -831,7 +907,7 @@ def launch_run(
                 dataset=config.dataset_name,
                 dataset_hash=ds.global_hash,
                 llm=config.llm_name,
-                llm_model=llm.model,
+                llm_model=llm_model_str,
                 token_usage=token_usage_model,
                 solution=solution_result,
                 programs=programs,
@@ -1118,11 +1194,20 @@ def resume_run(
         if pv is None:
             raise RevolverError(f"Problem version '{parent_version}' not found.")
 
-        # Determine effective LLM: use override if provided, otherwise parent's
+        # Determine effective LLM/ensemble: use override if provided, otherwise parent's
         effective_llm_name = llm_name if llm_name is not None else parent_llm_name
-        llm = get_llm(global_conn, effective_llm_name)
-        if llm is None:
-            raise RevolverError(f"LLM '{effective_llm_name}' not found.")
+        llm_or_ensemble = resolve_llm_or_ensemble(effective_llm_name, global_conn)
+        ensemble: EnsembleEntry | None = None
+        if isinstance(llm_or_ensemble, EnsembleEntry):
+            ensemble = llm_or_ensemble
+            first_member_llm = get_llm(global_conn, ensemble.members[0].llm_name)
+            if first_member_llm is None:
+                raise RevolverError(
+                    f"Ensemble member LLM '{ensemble.members[0].llm_name}' not found."
+                )
+            llm: LLMEntry = first_member_llm
+        else:
+            llm = llm_or_ensemble
 
         ds = get_dataset(proj_conn, parent_dataset_name)
         if ds is None:
@@ -1175,6 +1260,13 @@ def resume_run(
             temperature=temperature,
             parallel=parallel,
             rewrite_mode=rewrite_mode,
+            ensemble=ensemble,
+            conn=global_conn,
+        )
+
+        # Build LLM snapshot for traceability (S11-08)
+        llm_type, llm_model_str, llm_snapshot_json = _build_llm_snapshot(
+            llm_or_ensemble, global_conn
         )
 
         # Set output dir
@@ -1194,11 +1286,13 @@ def resume_run(
             iterations=actual_iterations,
             problem_hash=pv.hash,
             dataset_hash=ds.global_hash,
-            llm_model=llm.model,
+            llm_model=llm_model_str,
             created_at=now,
             resumed_from=run_id,
             status="running",
             config_snapshot=config_snapshot_str,
+            llm_type=llm_type,
+            llm_snapshot=llm_snapshot_json,
         )
 
         # Resolve api_key_env → api_key on a deep copy for runtime use only.
@@ -1395,7 +1489,7 @@ def resume_run(
                 dataset=parent_dataset_name,
                 dataset_hash=ds.global_hash,
                 llm=effective_llm_name,
-                llm_model=llm.model,
+                llm_model=llm_model_str,
                 resumed_from=run_id,
                 token_usage=token_usage_model,
                 solution=solution_result,
@@ -1640,6 +1734,7 @@ def list_runs(
                         else None
                     ),
                     alias=(str(row["alias"]) if row.get("alias") else None),
+                    llm_type=str(row.get("llm_type", "single")),
                 )
             )
         return summaries
@@ -1798,6 +1893,8 @@ def get_run_info(
             solutions=solution_results,
             programs=programs,
             resume_chain=chain,
+            llm_type=str(run_data.get("llm_type", "single")),
+            llm_snapshot=(str(run_data["llm_snapshot"]) if run_data.get("llm_snapshot") else None),
         )
     finally:
         conn.close()

@@ -454,7 +454,7 @@ def run_list(
                     {
                         "run_id": s.run_id,
                         "version": s.problem_version,
-                        "llm": s.llm,
+                        "llm": (f"{s.llm} (E)" if s.llm_type == "ensemble" else s.llm),
                         "dataset": s.dataset,
                         "status": s.status,
                         "iterations": s.iterations,
@@ -492,11 +492,28 @@ def run_info(
                 json_mode=True,
             )
         else:
+            # Build LLM display string — enriched for ensemble runs (S11-09)
+            llm_display: str = info.llm
+            if info.llm_type == "ensemble" and info.llm_snapshot:
+                try:
+                    import json
+
+                    snap = json.loads(info.llm_snapshot)
+                    if snap.get("type") == "ensemble" and "members" in snap:
+                        parts = []
+                        for m in snap["members"]:
+                            name = m.get("name", "?")
+                            weight = m.get("weight", 1.0)
+                            parts.append(f"{name}\u00d7{weight}")
+                        llm_display = f"{info.llm} (ensemble: {', '.join(parts)})"
+                except (ValueError, KeyError):
+                    llm_display = f"{info.llm} (ensemble)"
+
             data: dict[str, object] = {
                 "run_id": info.run_id,
                 "problem_version": info.problem_version,
                 "problem_hash": info.problem_hash,
-                "llm": info.llm,
+                "llm": llm_display,
                 "llm_model": info.llm_model,
                 "dataset": info.dataset,
                 "dataset_hash": info.dataset_hash,
