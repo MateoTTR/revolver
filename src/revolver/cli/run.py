@@ -425,6 +425,16 @@ def run_list(
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
 
+        # Auto-detect zombie runs (S10-14)
+        try:
+            zombies = core_run.detect_zombie_runs()
+            if zombies:
+                sys.stderr.write(
+                    f"Warning: {len(zombies)} zombie run(s) detected and marked as interrupted\n"
+                )
+        except Exception:
+            pass  # Don't let zombie detection crash listing
+
         summaries = core_run.list_runs(
             version=version,
             llm=llm,
@@ -641,3 +651,55 @@ def run_delete(
                 f"{summary['evals_deleted']} evals removed)",
                 quiet=quiet,
             )
+
+
+# ── run cleanup (S10-15) ──────────────────────────────────────────────────────
+
+
+@run_app.command("cleanup")
+def run_cleanup(
+    ctx: typer.Context,
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """Detect and mark zombie runs as interrupted."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        # Check how many running runs exist before prompting
+        if not force:
+            running = core_run.list_runs(status="running")
+            if not running:
+                if json_mode:
+                    render({"zombies_cleaned": 0}, json_mode=True)
+                else:
+                    sys.stderr.write("No zombie runs found.\n")
+                return
+
+            if json_mode:
+                raise ValidationError(
+                    "Use --force to cleanup in JSON mode (no interactive prompt)"
+                )
+            typer.confirm(
+                f"Scan and clean up to {len(running)} running run(s)?",
+                abort=True,
+            )
+
+        zombies = core_run.detect_zombie_runs()
+
+        if not zombies:
+            if json_mode:
+                render({"zombies_cleaned": 0}, json_mode=True)
+            else:
+                sys.stderr.write("No zombie runs found.\n")
+            return
+
+        if json_mode:
+            render(
+                {"zombies_cleaned": len(zombies), "run_ids": zombies},
+                json_mode=True,
+            )
+        else:
+            sys.stderr.write(f"Marked {len(zombies)} zombie run(s) as interrupted.\n")
