@@ -1348,7 +1348,9 @@ def update_run_generation_time(
     conn: sqlite3.Connection,
     run_id: str,
     generation_time_s: float,
-    status: Literal["running", "completed", "interrupted", "completed_with_errors"] = "completed",
+    status: Literal[
+        "running", "completed", "interrupted", "completed_with_errors", "failed"
+    ] = "completed",
 ) -> None:
     """Atomically update generation time and status for a run.
 

@@ -21,7 +21,9 @@ import pytest
 
 from revolver.core.exceptions import ExternalError, IntegrityError, RevolverError
 from revolver.core.run import (
+    MIN_VALID_ITERATION_RATIO,
     _collect_programs,
+    _determine_run_status,
     _handle_post_run_failure,
     _is_pid_alive,
     _post_run_evaluation,
@@ -554,6 +556,7 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
             "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
+        patch("revolver.core.run.count_valid_programs", return_value=5),
     ):
         mock_global_db.return_value = MagicMock()
 
@@ -1255,6 +1258,7 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
             "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
+        patch("revolver.core.run.count_valid_programs", return_value=5),
     ):
         mock_global_db.return_value = MagicMock()
 
@@ -2285,3 +2289,47 @@ def test_run_keyboard_interrupt_marks_interrupted(project_with_prereqs: dict) ->
     # Verify lock file was removed
     lock_files = list((root / REVOLVER_DIR / "locks").glob("*.lock"))
     assert len(lock_files) == 0, "Lock file must be removed on interrupt"
+
+
+# ── _determine_run_status tests ──────────────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestDetermineRunStatus:
+    """L2 tests for _determine_run_status() helper."""
+
+    def test_run_all_errors_status_failed_zero_valid(self) -> None:
+        """A run with valid_iterations=0 should be 'failed'."""
+        assert _determine_run_status(valid_iters=0, total_iters=3) == "failed"
+
+    def test_run_all_errors_status_failed_none_valid(self) -> None:
+        """A run with valid_iterations=None should be 'failed'."""
+        assert _determine_run_status(valid_iters=None, total_iters=3) == "failed"
+
+    def test_run_all_errors_status_failed_zero_total(self) -> None:
+        """A run with valid_iterations=0 and total_iterations=0 should be 'failed'."""
+        assert _determine_run_status(valid_iters=0, total_iters=0) == "failed"
+
+    def test_run_low_valid_ratio_status_completed_with_errors(self) -> None:
+        """A run with valid_iterations=1 out of 20 (5%) should be 'completed_with_errors'."""
+        assert _determine_run_status(valid_iters=1, total_iters=20) == "completed_with_errors"
+
+    def test_run_normal_valid_ratio_status_completed(self) -> None:
+        """A run with valid_iterations=15 out of 20 (75%) should be 'completed'."""
+        assert _determine_run_status(valid_iters=15, total_iters=20) == "completed"
+
+    def test_run_exactly_at_threshold_status_completed(self) -> None:
+        """A run at exactly MIN_VALID_ITERATION_RATIO should be 'completed'."""
+        # 10% = exactly at threshold → completed (not strictly less)
+        total = 100
+        valid = int(total * MIN_VALID_ITERATION_RATIO)  # 10
+        assert _determine_run_status(valid_iters=valid, total_iters=total) == "completed"
+
+    def test_run_just_below_threshold_status_completed_with_errors(self) -> None:
+        """A run just below MIN_VALID_ITERATION_RATIO should be 'completed_with_errors'."""
+        # 9/100 = 9% < 10%
+        assert _determine_run_status(valid_iters=9, total_iters=100) == "completed_with_errors"
+
+    def test_run_all_valid_status_completed(self) -> None:
+        """A run where all iterations are valid should be 'completed'."""
+        assert _determine_run_status(valid_iters=20, total_iters=20) == "completed"
