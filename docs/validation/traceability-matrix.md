@@ -68,6 +68,12 @@ Design: [DES-002](../architecture/design/DES-002-llm-subcommands.md), [DES-001 �
 | FR-LLM-017 | MUST | DES-002, NFR-050 | L1 | `test_db_llm::test_api_key_env_stored_not_value` | Implemented |
 | FR-LLM-018 | SHOULD | DES-002, DES-005 §4.5 | L2 | `integration/test_llm::test_llm_add_remote_with_pricing` | Implemented |
 | FR-LLM-019 | SHOULD | DES-002, DES-005 | L2 | `integration/test_llm::test_llm_add_temperature` | Implemented |
+| FR-LLM-020 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_create` | Implemented |
+| FR-LLM-021 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_add_member` | Implemented |
+| FR-LLM-022 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_list` | Implemented |
+| FR-LLM-023 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_info` | Implemented |
+| FR-LLM-024 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_remove_cascade` | Implemented |
+| FR-LLM-025 | SHOULD | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_weight_sum_warning` | Implemented |
 
 ---
 
@@ -184,6 +190,9 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_user_cancels` | Implemented |
 | FR-RUN-040 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_temperature_flag` | Implemented |
 | FR-RUN-041 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_parallel_flag` | Implemented |
+| FR-RUN-044 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_type_stored` | Implemented |
+| FR-RUN-045 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_snapshot_stored` | Implemented |
+| FR-RUN-046 | MUST | DES-005 §4.3 | L2 | `integration/test_run::test_run_with_ensemble` | Implemented |
 
 ---
 
@@ -370,17 +379,17 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
 | spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
-| spec-llm | 19 | 11 | 7 | 0 | 4 | 9 | via Sc.1 | 6 |
+| spec-llm | 25 | 16 | 9 | 0 | 4 | 15 | via Sc.1 | 6 |
 | spec-problem | 15 | 10 | 4 | 1 | 1 | 10 | via Sc.1 | 3 |
 | spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
-| spec-run | 49 | 36 | 11 | 0 | 28 | 13 | via Sc.1 | 6 |
+| spec-run | 52 | 39 | 11 | 0 | 30 | 14 | via Sc.1 | 6 |
 | spec-eval | 23 | 17 | 3 | 1 | 7 | 9 | via Sc.1 | 5 (incl. 1 deferred) |
 | spec-solution | 20 | 18 | 2 | 0 | 2 | 16 | via Sc.1 | 2 |
 | spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
 | NFR (direct) | 27 | 19 | 8 | 0 | 6 | 11 | — | 5 (3 perf manual + 2 planned) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **227** | **162** | **53** | **2** | **71** | **123** | **2 scenarios** | **28** |
+| **Total** | **236** | **170** | **55** | **2** | **73** | **130** | **2 scenarios** | **28** |
 
 Notes:
 - Run delete (FR-RUN-035) adds 11 new test entries covering DB layer, core logic, CLI, and edge cases.

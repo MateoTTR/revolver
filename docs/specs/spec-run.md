@@ -22,7 +22,7 @@ Launch an OpenEvolve evolution run.
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `--version <tag>` | string | Yes | Problem version to use |
-| `--llm <name>` | string | Yes | Registered LLM to use |
+| `--llm <name>` | string | Yes | Registered LLM or ensemble name |
 | `--dataset <name>` | string | Yes | Registered training dataset |
 | `--iterations <n>` | int | No | Number of evolution iterations. Overrides config.yaml value. |
 | `--alias <name>` | string | No | User-friendly name for the generated solution |
@@ -132,14 +132,16 @@ Resume an interrupted run from its checkpoint. Creates a NEW run from the parent
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `--run <run-id>` | string | Yes | Run whose checkpoint to resume from |
+| `--llm <name>` | string | No | Override the LLM or ensemble used for the resumed run. Accepts both single LLM and ensemble names, allowing switching between single and ensemble mode. |
 
 **Behavior**:
 1. Locate the OpenEvolve checkpoint in the parent run's directory
 2. Verify the checkpoint is valid and resumable
 3. Create a new run (`resumed_from: <parent-run-id>`). The parent run's checkpoint is READ but not modified
-4. Copy the wrapper evaluator from the parent run (no regeneration)
-5. Re-launch OpenEvolve from the checkpoint with the same configuration
-6. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
+4. If `--llm` is provided, use the specified LLM or ensemble instead of the parent run's LLM
+5. Copy the wrapper evaluator from the parent run (no regeneration)
+6. Re-launch OpenEvolve from the checkpoint with the (optionally overridden) configuration
+7. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
 
 **Exit codes**: 0 success, 1 if run or checkpoint not found, 4 if OpenEvolve fails
 
@@ -160,7 +162,10 @@ List all runs in the current project.
 ID                    Version  LLM              Dataset      Iter  Score   Status      Date
 run-20260310-143000   v1.0     codestral-local  train-small  100   0.74    completed   2026-03-10
 run-20260310-173000   v1.0     claude-opus      train-small  100   0.82    completed   2026-03-10
+run-20260310-190000   v1.0     multi-model-v1*  train-small  200   0.91    completed   2026-03-10
 ```
+
+Note: Ensemble names are marked with `*` in the LLM column.
 
 **Exit codes**: 0 always
 
@@ -174,7 +179,7 @@ Show detailed information about a run.
 |---|---|---|
 | `run-id` | Yes | Run ID |
 
-**Output** (human):
+**Output** (human, single LLM):
 ```
 Run: run-20260310-143000
   Status: completed
@@ -198,6 +203,19 @@ Programs (from OpenEvolve output):
   Use `revolver solution extract --run run-20260310-143000 --rank <N>` to promote.
 
 Resume chain: (none)
+```
+
+**Output** (human, ensemble):
+```
+Run: run-20260310-190000
+  Status: completed
+  Problem version: v1.1 (sha256:e5f6g7h8...)
+  LLM: multi-model-v1 (ensemble: 2 members)
+    claude-opus (weight: 0.7)
+    gemini-pro (weight: 0.3)
+  Dataset: train-small (sha256:f1e2d3c4...)
+  Iterations: 200
+  ...
 ```
 
 **Exit codes**: 0 success, 1 if not found
@@ -292,6 +310,9 @@ Deleted run "run-20260310-143000"
 | FR-RUN-040 | SHOULD | `--temperature` overrides `llm.temperature` in the resolved OpenEvolve config (range: 0.0–2.0) | — |
 | FR-RUN-041 | SHOULD | `--parallel` overrides `evaluator.parallel_evaluations` in the resolved OpenEvolve config (positive integer) | — |
 | FR-RUN-043 | MUST | If OpenEvolve completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
+| FR-RUN-044 | MUST | Run metadata stores `llm_type` (`single` or `ensemble`) indicating whether a single LLM or an ensemble was used | — |
+| FR-RUN-045 | MUST | Run metadata stores `llm_snapshot` (JSON) capturing the full LLM or ensemble configuration at run time for traceability | NFR-020 |
+| FR-RUN-046 | MUST | `--llm` accepts ensemble names; when an ensemble is used, OpenEvolve is configured with multiple models via `llm.models` array | — |
 
 ---
 

@@ -1,6 +1,6 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.4 — migrations v3-v7, failed status, temperature column
+**Version**: 0.5 — migrations v3-v8, ensemble tables, llm_type/llm_snapshot columns
 **Date**: 2026-03-25
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
@@ -75,8 +75,20 @@ Both databases use **WAL mode** (NFR-016) for concurrent read access.
                               ~/.revolver/ │            │
                               ┌────────────┘            │
                               │  ┌───────────────┐      │
-                              └──│     llms      │      │
-                                 │ (PK: name)    │      │
+                              └──│     llms      │◄──┐  │
+                                 │ (PK: name)    │   │  │
+                                 └───────────────┘   │  │
+                                                     │  │
+                                 ┌───────────────┐   │  │
+                                 │  ensembles    │   │  │
+                                 │ (PK: name)    │   │  │
+                                 └──────┬────────┘   │  │
+                                        │ 1          │  │
+                                        │            │  │
+                                 ┌──────▼────────┐   │  │
+                                 │  ensemble_    │   │  │
+                                 │  members      ├───┘  │
+                                 │ (ensemble,llm)│      │
                                  └───────────────┘      │
 ```
 
@@ -165,6 +177,8 @@ CREATE TABLE runs (
     status            TEXT NOT NULL DEFAULT 'running'
                       CHECK (status IN ('running', 'completed', 'interrupted',
                              'failed', 'completed_with_errors')),
+    llm_type          TEXT NOT NULL DEFAULT 'single', -- 'single' or 'ensemble'
+    llm_snapshot      TEXT,                   -- JSON snapshot of LLM/ensemble config for traceability
     created_at        TEXT NOT NULL           -- ISO 8601
 );
 
@@ -288,6 +302,34 @@ CREATE TABLE llms (
 );
 ```
 
+### 4.2 `ensembles`
+
+Named LLM ensembles for multi-model evolution runs. Shared across all projects (global DB).
+
+```sql
+CREATE TABLE ensembles (
+    name            TEXT PRIMARY KEY,       -- "multi-model-v1"
+    created_at      TEXT NOT NULL           -- ISO 8601
+);
+```
+
+### 4.3 `ensemble_members`
+
+Members of an ensemble, each referencing a registered LLM with a sampling weight.
+
+```sql
+CREATE TABLE ensemble_members (
+    ensemble_name   TEXT NOT NULL REFERENCES ensembles(name) ON DELETE CASCADE,
+    llm_name        TEXT NOT NULL REFERENCES llms(name),
+    weight          REAL NOT NULL,          -- sampling weight (0.0–1.0)
+    temperature     REAL,                   -- per-member temperature override (optional)
+    max_tokens      INTEGER,               -- per-member max tokens override (optional)
+    UNIQUE(ensemble_name, llm_name)
+);
+```
+
+**Constraints**: `ON DELETE CASCADE` ensures removing an ensemble deletes all its members. The `UNIQUE(ensemble_name, llm_name)` constraint prevents duplicate members.
+
 ---
 
 ## 5. Initialization SQL
@@ -384,6 +426,38 @@ DROP TABLE _runs_old;
 -- Recreate indexes
 UPDATE schema_version SET version = 7, applied_at = datetime('now');
 ```
+
+### 5.7 Migration: v7 → v8 (Sprint 011)
+
+Schema version 8 adds ensemble support (global DB) and run-level LLM traceability columns (project DB).
+
+**Global DB**: Creates `ensembles` and `ensemble_members` tables (idempotent via `IF NOT EXISTS`):
+
+```sql
+CREATE TABLE IF NOT EXISTS ensembles (
+    name            TEXT PRIMARY KEY,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ensemble_members (
+    ensemble_name   TEXT NOT NULL REFERENCES ensembles(name) ON DELETE CASCADE,
+    llm_name        TEXT NOT NULL REFERENCES llms(name),
+    weight          REAL NOT NULL,
+    temperature     REAL,
+    max_tokens      INTEGER,
+    UNIQUE(ensemble_name, llm_name)
+);
+```
+
+**Project DB**: Adds `llm_type` and `llm_snapshot` columns to the `runs` table:
+
+```sql
+ALTER TABLE runs ADD COLUMN llm_type TEXT NOT NULL DEFAULT 'single';
+ALTER TABLE runs ADD COLUMN llm_snapshot TEXT;
+UPDATE schema_version SET version = 8, applied_at = datetime('now');
+```
+
+Each `ALTER TABLE` is executed individually with error suppression (SQLite does not support `ADD COLUMN IF NOT EXISTS`).
 
 ---
 
@@ -534,6 +608,7 @@ MIGRATIONS = {
     5: "add_fk_on_delete_cascade.sql",          # Recreate FK tables with ON DELETE CASCADE (Sprint 008)
     6: "add_llm_temperature.sql",               # Add temperature to llms (Sprint 009)
     7: "add_failed_run_status.sql",             # Add 'failed' to runs.status CHECK (Sprint 009)
+    8: "add_ensemble_tables_and_llm_snapshot.sql",  # Ensemble tables (global) + llm_type/llm_snapshot (project) (Sprint 011)
 }
 ```
 

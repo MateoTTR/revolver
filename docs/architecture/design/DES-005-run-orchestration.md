@@ -464,12 +464,17 @@ OpenEvolve is configured programmatically by merging the problem version's `conf
 
 ```python
 def build_config(
-    problem_config: Path,
+    problem_config: Path | None,
     llm: LLMEntry,
-    iterations: int | None,
-    config_overrides: list[str] | None,
-    output_dir: Path,
+    iterations: int | None = None,
+    config_overrides: list[str] | None = None,
+    output_dir: Path | None = None,
     problem_description: str | None = None,
+    temperature: float | None = None,
+    parallel: int | None = None,
+    rewrite_mode: bool = False,
+    ensemble: EnsembleEntry | None = None,
+    conn: Any | None = None,
 ) -> dict:
     """
     Build the OpenEvolve config dict.
@@ -477,6 +482,9 @@ def build_config(
     Merge order (last wins):
         1. Problem version's config.yaml (base)
         2. LLM endpoint configuration (api_base, primary_model, api_key_env)
+           — or multi-model ``llm.models`` array for ensemble mode
+        2b. LLM per-model config (max_tokens, timeout, temperature) from LLM registry
+        2c. CLI flags: --temperature, --parallel (override LLM registry values)
         3. Evaluator defaults — Force evaluator.cascade_evaluation: false
            unless explicitly set in the problem's config.yaml. OpenEvolve
            defaults to cascade_evaluation: true which requires
@@ -485,6 +493,12 @@ def build_config(
         5. --iterations override
         6. --config-override key=value pairs
         7. Output directory (always Revolver-controlled)
+
+    Args:
+        ensemble: If provided, configures multi-model mode via ``llm.models``
+            array instead of a single ``llm.primary_model``.
+        conn: Global DB connection, required when ``ensemble`` is provided
+            to resolve member LLM details.
 
     Security (F1): The config stores ``api_key_env`` (the env var name,
     e.g. "ANTHROPIC_API_KEY") instead of the resolved API key value.
@@ -497,7 +511,9 @@ def build_config(
 
 ### 4.3 LLM Endpoint Injection
 
-OpenEvolve expects LLM configuration in its config. Revolver injects it based on the registered LLM:
+OpenEvolve expects LLM configuration in its config. Revolver injects it based on the registered LLM.
+
+#### Single-LLM Mode
 
 | LLM field | OpenEvolve config key | Source |
 |---|---|---|
@@ -505,9 +521,71 @@ OpenEvolve expects LLM configuration in its config. Revolver injects it based on
 | `model` | `llm.primary_model` | LLM registry (`llms.model`) |
 | `api_key_env` | `llm.api_key_env` | LLM registry (`llms.api_key_env`) — env var **name**, not the resolved value |
 
-**Security (F1)**: `build_config()` stores the env var name (`api_key_env: "ANTHROPIC_API_KEY"`) in the config dict, not the resolved API key. This means the `config_snapshot` stored in SQLite (NFR-023) and `manifest.yaml` never contain secrets. A separate `resolve_api_keys()` function is called at runtime to create a deep copy of the config with `llm.api_key_env` replaced by `llm.api_key` (the actual key read from the environment). This resolved copy is passed to OpenEvolve but never persisted.
+#### Ensemble Mode (multi-model)
+
+When an ensemble is used (`--llm <ensemble-name>`), `build_config()` emits a `llm.models` array instead of a single `llm.primary_model`. Each member LLM is resolved from the global DB and mapped to OpenEvolve's expected field names:
+
+| Revolver field | OpenEvolve `models[]` key | Note |
+|---|---|---|
+| `llm.model` | `name` | OE uses `name`, not `model` |
+| `llm.base_url` | `api_base` | OE uses `api_base`, not `base_url` |
+| `llm.api_key_env` | `api_key_env` | Env var name, resolved at runtime |
+| `member.weight` | `weight` | Sampling weight from ensemble_members |
+| `member.temperature` | `temperature` | Per-member override (optional) |
+| `member.max_tokens` | `max_tokens` | Per-member override (optional) |
+
+Example generated config for an ensemble:
+
+```yaml
+llm:
+  models:
+    - name: "claude-opus-4-6"
+      api_base: "https://api.anthropic.com/v1"
+      api_key_env: "ANTHROPIC_API_KEY"
+      weight: 0.7
+    - name: "gemini-2.5-pro"
+      api_base: "https://generativelanguage.googleapis.com/v1beta"
+      api_key_env: "GOOGLE_API_KEY"
+      weight: 0.3
+      temperature: 0.9
+```
+
+**Security (F1)**: `build_config()` stores the env var name (`api_key_env: "ANTHROPIC_API_KEY"`) in the config dict, not the resolved API key. This means the `config_snapshot` stored in SQLite (NFR-023) and `manifest.yaml` never contain secrets. A separate `resolve_api_keys()` function is called at runtime to create a deep copy of the config with `llm.api_key_env` replaced by `llm.api_key` (the actual key read from the environment). This resolved copy is passed to OpenEvolve but never persisted. In ensemble mode, each member's `api_key_env` is resolved independently.
 
 For local LLMs (Ollama), `base_url` is typically `http://localhost:11434/v1` and no API key is needed. However, for local LLMs (`source == "local"`) without an `api_key_env`, Revolver injects `api_key: "ollama"` as a placeholder. The OpenAI SDK used by OpenEvolve requires a non-empty `api_key` even for local endpoints.
+
+### 4.3.1 `llm_type` and `llm_snapshot` Columns
+
+Each run records two additional traceability fields:
+
+- **`llm_type`** (`TEXT NOT NULL DEFAULT 'single'`): Either `"single"` for a single-LLM run or `"ensemble"` for a multi-model run.
+- **`llm_snapshot`** (`TEXT`): JSON string capturing the full LLM configuration at run time.
+
+**Single-LLM snapshot format**:
+
+```json
+{
+  "name": "claude-opus",
+  "provider": "anthropic",
+  "model": "claude-opus-4-6",
+  "base_url": "https://api.anthropic.com/v1",
+  "temperature": 0.7
+}
+```
+
+**Ensemble snapshot format**:
+
+```json
+{
+  "ensemble_name": "multi-model-v1",
+  "members": [
+    {"llm_name": "claude-opus", "model": "claude-opus-4-6", "weight": 0.7, "temperature": null},
+    {"llm_name": "gemini-pro", "model": "gemini-2.5-pro", "weight": 0.3, "temperature": 0.9}
+  ]
+}
+```
+
+These fields enable full traceability: even if the ensemble definition changes after a run, the snapshot preserves the exact configuration used.
 
 #### Google Provider Seed Handling (F2)
 
