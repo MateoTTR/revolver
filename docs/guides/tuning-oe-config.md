@@ -417,6 +417,8 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 | Cascade evaluation | `evaluator.cascade_evaluation` | `--config-override evaluator.cascade_evaluation=true` | `false` (Revolver default) |
 | Diff-based evolution | `diff_based_evolution` | `--rewrite-mode` (sets to `false`) | `true` |
 | Max code length | `max_code_length` | `--rewrite-mode` (sets to `50000`) | 10000 |
+| Ensemble models | `llm.models` | `--llm <ensemble-name>` | N/A (auto-generated) |
+| Reasoning effort | `llm.reasoning_effort` | `--config-override llm.reasoning_effort=low` | Model default |
 
 ---
 
@@ -546,6 +548,147 @@ with the efficiency of diff-based tuning.
 
 ---
 
+## Ensemble strategies
+
+OpenEvolve supports multi-model ensembles via its `llm.models` array.
+Instead of using a single LLM for all code generation requests, an
+ensemble distributes requests across multiple models weighted by sampling
+probability. Revolver manages ensembles as named entities in the LLM
+registry, making them reusable and traceable.
+
+### The AlphaEvolve pattern: Flash 80% + Pro 20%
+
+The AlphaEvolve paper demonstrated that mixing a fast, cheap model with
+a slower, more capable model produces better results than either model
+alone. The cheap model handles the majority of iterations (broad
+exploration), while the expensive model contributes occasional
+high-quality breakthroughs (targeted exploitation).
+
+A typical Revolver setup mirrors this pattern:
+
+```bash
+# Register the individual LLMs
+revolver llm add flash-lite --provider google \
+  --model gemini-2.5-flash-lite \
+  --api-key-env GEMINI_API_KEY
+
+revolver llm add pro --provider google \
+  --model gemini-2.5-pro \
+  --api-key-env GEMINI_API_KEY
+
+# Create the ensemble
+revolver llm ensemble create alphevo
+revolver llm ensemble add alphevo --llm flash-lite --weight 0.8
+revolver llm ensemble add alphevo --llm pro --weight 0.2 --temperature 0.5
+
+# Launch a run with the ensemble
+revolver run start --llm alphevo --iterations 100
+```
+
+### Weight recommendations
+
+Weights control how often each model is sampled. OpenEvolve
+auto-normalizes weights, so `0.8 + 0.2` and `4 + 1` are equivalent.
+Revolver warns (but does not error) if weights do not sum to 1.0.
+
+| Strategy | Cheap model weight | Expensive model weight | When to use |
+|----------|-------------------|----------------------|-------------|
+| Exploration-heavy | 0.8-0.9 | 0.1-0.2 | Most scenarios; maximize iterations per dollar |
+| Balanced | 0.5-0.6 | 0.4-0.5 | When the cheap model produces too many invalid diffs |
+| Quality-focused | 0.2-0.3 | 0.7-0.8 | Short runs where every iteration counts |
+
+**Start with 80/20** and adjust based on the valid-diff rate. If the
+cheap model's diffs are mostly invalid (e.g., < 30% valid), shift weight
+toward the expensive model.
+
+### Per-model configuration
+
+Each ensemble member can have its own `temperature` and `max_tokens`
+overrides. These override the LLM registry defaults for that model
+within the ensemble context only.
+
+```bash
+# Pro model with low reasoning_effort-friendly temperature
+revolver llm ensemble add alphevo --llm pro --weight 0.2 \
+  --temperature 0.5 --max-tokens 16384
+```
+
+Common per-model settings:
+
+| Model type | Temperature | Max tokens | Notes |
+|-----------|-------------|-----------|-------|
+| Flash-Lite (cheap) | 0.7-1.0 | Default | Higher temperature for diversity |
+| Pro (expensive) | 0.3-0.5 | 16384 | Lower temperature for reliable output |
+| Thinking models | 0.5 | 32768 | Needs high `max_tokens` for reasoning budget |
+
+> **Gemini Pro tip**: When using Gemini Pro in an ensemble, set
+> `reasoning_effort=low` via `--config-override llm.reasoning_effort=low`
+> to prevent the model from consuming its token budget on internal
+> reasoning instead of generating code.
+
+### Cost implications
+
+Ensemble runs can dramatically reduce cost by routing most iterations
+through cheap models. Approximate Gemini pricing as of early 2026:
+
+| Model | Input cost (per 1M tokens) | Output cost (per 1M tokens) | Relative cost |
+|-------|---------------------------|----------------------------|---------------|
+| Flash-Lite | $0.075 | $0.30 | 1x (baseline) |
+| Flash | $0.15 | $0.60 | 2x |
+| Pro | $1.25 | $10.00 | ~36x |
+
+With an 80/20 Flash-Lite/Pro ensemble over 500 iterations:
+- ~400 iterations at Flash-Lite cost + ~100 at Pro cost
+- Estimated 5-7x cheaper than running all 500 on Pro alone
+- Quality benefit: Pro's occasional contributions lift the population
+
+Use `revolver llm update <name> --input-cost <X> --output-cost <Y>` to
+register per-model costs, then `revolver run info` will report estimated
+run cost.
+
+### Ensemble vs sequential resume
+
+There are two ways to combine cheap and expensive models:
+
+**Ensemble** (concurrent within a single run):
+- Both models contribute to the same population simultaneously
+- Pro injects high-quality solutions while Flash explores broadly
+- Best for: single-phase optimization where you want continuous
+  cross-pollination between model capabilities
+
+```bash
+revolver run start --llm alphevo --iterations 500
+```
+
+**Sequential resume** (phased, separate runs):
+- Phase 1: cheap model explores broadly, filling the MAP-Elites map
+- Phase 2: expensive model refines the best solutions found in Phase 1
+- Best for: budget-constrained optimization where you want to maximize
+  cheap exploration before spending on expensive refinement
+
+```bash
+# Phase 1: broad exploration with cheap model
+revolver run start --llm flash-lite --iterations 500
+
+# Phase 2: refine with expensive model, resuming from Phase 1
+revolver run resume --run <run-id> --llm pro --iterations 100
+```
+
+| Aspect | Ensemble | Sequential resume |
+|--------|----------|-------------------|
+| Model interaction | Concurrent, same population | Sequential, inherited population |
+| Cost control | Controlled by weights | Controlled by iteration count per phase |
+| Exploration/exploitation | Balanced throughout | Exploration-first, exploitation-second |
+| Complexity | One run, one command | Two runs, manual phase transition |
+| Traceability | Single run record with ensemble snapshot | Two run records with resume chain |
+
+**Recommendation**: start with ensemble (simpler) unless you need
+fine-grained budget control per phase. Sequential resume is particularly
+useful when you want to explore with full-rewrite mode first, then
+switch to diff-based mode for refinement.
+
+---
+
 ## Checklist
 
 Before launching a tuned run:
@@ -556,3 +699,5 @@ Before launching a tuned run:
 - [ ] Iteration count gives at least 5 migrations per island
 - [ ] `feature_dimensions` count is appropriate for the iteration budget
 - [ ] A quick sanity run (50 iters) passed without errors
+- [ ] Ensemble weights sum to ~1.0 (`revolver llm ensemble info` to verify)
+- [ ] Each ensemble member LLM is registered and has valid API key env var

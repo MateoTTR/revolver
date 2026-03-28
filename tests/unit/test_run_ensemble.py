@@ -32,7 +32,7 @@ from revolver.infra.db import (
 from revolver.infra.openevolve import build_config
 from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
