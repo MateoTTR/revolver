@@ -324,6 +324,7 @@ def build_config(
     problem_description: str | None = None,
     temperature: float | None = None,
     parallel: int | None = None,
+    rewrite_mode: bool = False,
 ) -> dict[str, Any]:
     """Build the OpenEvolve config dict.
 
@@ -334,6 +335,7 @@ def build_config(
         2c. CLI flags: --temperature, --parallel (override LLM registry values)
         3. Problem description injection into prompt.system_message
         4. --iterations override
+        4b. --rewrite-mode shortcut (diff_based_evolution=false, max_code_length=50000)
         5. --config-override key=value pairs
         6. Output directory (always Revolver-controlled)
 
@@ -349,6 +351,9 @@ def build_config(
             ``--config-override llm.temperature=X`` (step 5).
         parallel: CLI ``--parallel`` override for ``evaluator.parallel_evaluations``
             (optional).
+        rewrite_mode: Full-rewrite mode shortcut (optional). When ``True``, sets
+            ``diff_based_evolution=false`` and ``max_code_length=50000``.
+            Overridable by ``--config-override`` (step 5).
 
     Returns:
         Merged configuration dictionary.
@@ -444,6 +449,11 @@ def build_config(
     # 4. Iterations override
     if iterations is not None:
         config["max_iterations"] = iterations
+
+    # 4b. Rewrite mode (full-rewrite shortcut)
+    if rewrite_mode:
+        config["diff_based_evolution"] = False
+        config["max_code_length"] = 50000
 
     # 5. Config overrides (key=value pairs, dotted keys supported)
     if config_overrides:

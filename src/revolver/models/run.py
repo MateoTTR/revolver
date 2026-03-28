@@ -54,6 +54,8 @@ class RunConfig(BaseModel):
         dry_run: If ``True``, validate inputs and display config without launching.
         temperature: Sampling temperature for LLM (overrides LLM registry value).
         parallel: Number of parallel evaluations for OpenEvolve.
+        rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
+            ``diff_based_evolution=false`` and ``max_code_length=50000``.
     """
 
     problem_version: str
@@ -65,6 +67,7 @@ class RunConfig(BaseModel):
     dry_run: bool = False
     temperature: float | None = None
     parallel: int | None = None
+    rewrite_mode: bool = False
 
 
 class ProgramEntry(BaseModel):
