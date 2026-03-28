@@ -645,6 +645,60 @@ def find_latest_checkpoint(run_dir: Path) -> Path | None:
     return checkpoint_dirs[-1][1]
 
 
+def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
+    """Parse OE checkpoint programs into a ranked population list.
+
+    Scans ``checkpoint_dir/programs/*.json``, loads each program,
+    extracts key fields and computes combined_score (sum of numeric
+    metric values, matching OpenEvolve's ``_safe_sum_metrics`` convention).
+
+    Args:
+        checkpoint_dir: Path to the OpenEvolve checkpoint directory
+            (e.g. ``checkpoint_N/``).
+
+    Returns:
+        List of dicts sorted by combined_score descending, each with
+        keys: ``rank``, ``id``, ``score``, ``metrics``, ``generation``,
+        ``iteration_found``, ``parent_id``.
+    """
+    programs_dir = checkpoint_dir / "programs"
+    if not programs_dir.is_dir():
+        return []
+
+    population: list[dict[str, Any]] = []
+    for prog_file in sorted(programs_dir.glob("*.json")):
+        try:
+            data = _json.loads(prog_file.read_text(encoding="utf-8"))
+            metrics = data.get("metrics", {})
+            # Combined score = sum of numeric metric values (OE convention)
+            numeric_vals = [
+                v
+                for v in metrics.values()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            ]
+            combined_score = sum(numeric_vals) if numeric_vals else 0.0
+
+            population.append(
+                {
+                    "id": data.get("id", prog_file.stem),
+                    "score": combined_score,
+                    "metrics": metrics,
+                    "generation": data.get("generation", 0),
+                    "iteration_found": data.get("iteration_found", 0),
+                    "parent_id": data.get("parent_id"),
+                }
+            )
+        except (OSError, ValueError, KeyError):
+            continue  # Skip unparseable files
+
+    # Sort by score descending, assign rank
+    population.sort(key=lambda p: p["score"], reverse=True)
+    for i, prog in enumerate(population, 1):
+        prog["rank"] = i
+
+    return population
+
+
 def count_valid_programs(checkpoint_dir: Path) -> int | None:
     """Count valid program entries in an OpenEvolve checkpoint database.
 
@@ -691,6 +745,7 @@ __all__ = [
     "build_config",
     "count_valid_programs",
     "find_latest_checkpoint",
+    "parse_population",
     "resolve_api_keys",
     "revolver_env",
     "validate_oe_config",

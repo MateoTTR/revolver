@@ -68,6 +68,7 @@ from revolver.infra.openevolve import (
     build_config,
     count_valid_programs,
     find_latest_checkpoint,
+    parse_population,
     resolve_api_keys,
     revolver_env,
 )
@@ -1875,6 +1876,50 @@ def generate_wrapper(
         "Evaluator must define either 'evaluate(program_path)' or "
         "'evaluate_instance(program_path, instance_path)'"
     )
+
+
+# ── Population inspection ──────────────────────────────────────────────────────
+
+
+def get_population(
+    run_id: str,
+    project_root: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Get the MAP-Elites population for a run.
+
+    Finds the latest checkpoint, parses programs from
+    ``checkpoint_N/programs/*.json``, and returns them sorted by score.
+
+    Args:
+        run_id: ID of the run to inspect.
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A list of dicts with program data, sorted by score descending.
+
+    Raises:
+        RevolverError: If the run is not found or has no checkpoint.
+    """
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+
+    proj_conn = get_project_db(db_path)
+    try:
+        run_data = get_run(proj_conn, run_id)
+        if run_data is None:
+            raise RevolverError(f"Run '{run_id}' not found.")
+    finally:
+        proj_conn.close()
+
+    run_dir = get_run_dir(root, run_id)
+    checkpoint = find_latest_checkpoint(run_dir)
+    if checkpoint is None:
+        raise RevolverError(
+            f"No checkpoint found for run '{run_id}'. "
+            "The run may not have completed any iterations."
+        )
+
+    return parse_population(checkpoint)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
