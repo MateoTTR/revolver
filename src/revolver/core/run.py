@@ -1050,6 +1050,8 @@ def resume_run(
     iterations: int | None = None,
     temperature: float | None = None,
     parallel: int | None = None,
+    llm_name: str | None = None,
+    config_overrides: list[str] | None = None,
     project_root: Path | None = None,
     *,
     quiet: bool = False,
@@ -1064,6 +1066,8 @@ def resume_run(
         iterations: Override iteration count for the resumed run.
         temperature: LLM temperature override (0.0--2.0).
         parallel: Number of parallel evaluations.
+        llm_name: Override LLM for the resumed run (must be registered).
+        config_overrides: OpenEvolve config overrides (key=value strings).
         project_root: Explicit project root, or ``None`` to auto-detect.
         quiet: Suppress informational stderr messages (e.g. in --quiet/--json mode).
 
@@ -1109,9 +1113,11 @@ def resume_run(
         if pv is None:
             raise RevolverError(f"Problem version '{parent_version}' not found.")
 
-        llm = get_llm(global_conn, parent_llm_name)
+        # Determine effective LLM: use override if provided, otherwise parent's
+        effective_llm_name = llm_name if llm_name is not None else parent_llm_name
+        llm = get_llm(global_conn, effective_llm_name)
         if llm is None:
-            raise RevolverError(f"LLM '{parent_llm_name}' not found.")
+            raise RevolverError(f"LLM '{effective_llm_name}' not found.")
 
         ds = get_dataset(proj_conn, parent_dataset_name)
         if ds is None:
@@ -1159,6 +1165,7 @@ def resume_run(
             problem_config=problem_config_path,
             llm=llm,
             iterations=actual_iterations,
+            config_overrides=config_overrides,
             problem_description=problem_description,
             temperature=temperature,
             parallel=parallel,
@@ -1176,7 +1183,7 @@ def resume_run(
             proj_conn,
             run_id=new_run_id,
             problem_version=parent_version,
-            llm=parent_llm_name,
+            llm=effective_llm_name,
             dataset=parent_dataset_name,
             iterations=actual_iterations,
             problem_hash=pv.hash,
@@ -1196,7 +1203,7 @@ def resume_run(
             "run_id": new_run_id,
             "pid": os.getpid(),
             "llm_source": llm.source,
-            "llm_name": parent_llm_name,
+            "llm_name": effective_llm_name,
             "started_at": now.isoformat(),
         }
         write_run_lock(root, new_run_id, lock_data_dict)
@@ -1381,7 +1388,7 @@ def resume_run(
                 problem_hash=pv.hash,
                 dataset=parent_dataset_name,
                 dataset_hash=ds.global_hash,
-                llm=parent_llm_name,
+                llm=effective_llm_name,
                 llm_model=llm.model,
                 resumed_from=run_id,
                 token_usage=token_usage_model,
@@ -1397,7 +1404,7 @@ def resume_run(
                 solution=solution_result,
                 programs_stored=len(programs),
                 problem_version=parent_version,
-                llm=parent_llm_name,
+                llm=effective_llm_name,
                 dataset=parent_dataset_name,
                 iterations=actual_iterations,
                 valid_iterations=valid_iters,

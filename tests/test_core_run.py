@@ -1429,6 +1429,318 @@ def test_resume_run_not_found(project_with_prereqs: dict) -> None:
             resume_run("nonexistent-run", project_root=root)
 
 
+@pytest.mark.unit
+def test_resume_llm_override(project_with_prereqs: dict) -> None:
+    """resume_run with llm_name must use the override LLM, not the parent's."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    # Create a parent run using test-llm
+    parent_id = "run-20260310-160000"
+    parent_run_dir = create_run_dir(root, parent_id)
+    (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    # The override LLM entry
+    override_llm = LLMEntry(
+        name="pro-llm",
+        model="gemini-pro",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=5.0,
+        output_cost_per_mtok=25.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    mock_run_output = RunOutput(best_score=0.95, output_dir=None)
+    mock_proxy_usage = ProxyTokenUsage(prompt_tokens=300, completion_tokens=100)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=override_llm) as mock_get_llm,
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+    ):
+        mock_global_db.return_value = MagicMock()
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = mock_proxy_usage
+        mock_proxy_cls.return_value = mock_proxy
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        result = resume_run(parent_id, llm_name="pro-llm", project_root=root)
+
+    # get_llm must have been called with the override name
+    mock_get_llm.assert_called_once_with(mock_global_db.return_value, "pro-llm")
+    # Result must reflect the override LLM
+    assert result.llm == "pro-llm"
+
+    # DB record must also store the override LLM
+    conn = get_project_db(db_path)
+    try:
+        from revolver.infra.db import get_run as db_get_run
+
+        new_run = db_get_run(conn, result.run_id)
+        assert new_run is not None
+        assert new_run["llm"] == "pro-llm"
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_resume_llm_not_found(project_with_prereqs: dict) -> None:
+    """resume_run with llm_name pointing to nonexistent LLM must raise RevolverError."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    parent_id = "run-20260310-161000"
+    parent_run_dir = create_run_dir(root, parent_id)
+    (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=None),
+    ):
+        mock_global_db.return_value = MagicMock()
+        with pytest.raises(RevolverError, match="LLM 'nonexistent' not found"):
+            resume_run(parent_id, llm_name="nonexistent", project_root=root)
+
+
+@pytest.mark.unit
+def test_resume_config_override_single(project_with_prereqs: dict) -> None:
+    """resume_run with config_overrides must pass them to build_config."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    parent_id = "run-20260310-162000"
+    parent_run_dir = create_run_dir(root, parent_id)
+    (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    mock_run_output = RunOutput(best_score=0.90, output_dir=None)
+    mock_proxy_usage = ProxyTokenUsage(prompt_tokens=400, completion_tokens=150)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.build_config", return_value={}) as mock_build_config,
+        patch("revolver.core.run.resolve_api_keys", return_value={}),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+    ):
+        mock_global_db.return_value = MagicMock()
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = mock_proxy_usage
+        mock_proxy_cls.return_value = mock_proxy
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        resume_run(
+            parent_id,
+            config_overrides=["reasoning_effort=low"],
+            project_root=root,
+        )
+
+    # Verify build_config was called with config_overrides
+    mock_build_config.assert_called_once()
+    call_kwargs = mock_build_config.call_args
+    assert call_kwargs.kwargs.get("config_overrides") == ["reasoning_effort=low"] or (
+        len(call_kwargs.args) > 3 and call_kwargs.args[3] == ["reasoning_effort=low"]
+    )
+
+
+@pytest.mark.unit
+def test_resume_config_override_multiple(project_with_prereqs: dict) -> None:
+    """resume_run with multiple config_overrides must pass all to build_config."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    parent_id = "run-20260310-163000"
+    parent_run_dir = create_run_dir(root, parent_id)
+    (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        input_cost_per_mtok=3.0,
+        output_cost_per_mtok=15.0,
+        registered_at=datetime.now(UTC),
+    )
+
+    mock_run_output = RunOutput(best_score=0.85, output_dir=None)
+    mock_proxy_usage = ProxyTokenUsage(prompt_tokens=350, completion_tokens=120)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.core.run.build_config", return_value={}) as mock_build_config,
+        patch("revolver.core.run.resolve_api_keys", return_value={}),
+        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+    ):
+        mock_global_db.return_value = MagicMock()
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = mock_proxy_usage
+        mock_proxy_cls.return_value = mock_proxy
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        overrides = ["reasoning_effort=low", "num_islands=3"]
+        resume_run(
+            parent_id,
+            config_overrides=overrides,
+            project_root=root,
+        )
+
+    # Verify build_config was called with both overrides
+    mock_build_config.assert_called_once()
+    call_kwargs = mock_build_config.call_args
+    assert call_kwargs.kwargs.get("config_overrides") == overrides or (
+        len(call_kwargs.args) > 3 and call_kwargs.args[3] == overrides
+    )
+
+
 # ── list_runs tests ──────────────────────────────────────────────────────────
 
 

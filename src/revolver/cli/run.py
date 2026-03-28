@@ -304,6 +304,17 @@ def run_resume(
             help="Number of parallel evaluations.",
         ),
     ] = None,
+    llm: Annotated[
+        str | None,
+        typer.Option("--llm", help="Override LLM for the resumed run (must be registered)."),
+    ] = None,
+    config_override: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--config-override",
+            help="OpenEvolve config override (key=value). Repeatable.",
+        ),
+    ] = None,
 ) -> None:
     """Resume an interrupted or completed run from its checkpoint."""
     with cli_error_boundary():
@@ -322,6 +333,8 @@ def run_resume(
             iterations=iterations,
             temperature=temperature,
             parallel=parallel,
+            llm_name=llm,
+            config_overrides=config_override or [],
             quiet=(json_mode or quiet),
         )
 
