@@ -386,6 +386,13 @@ def llm_list(
 def llm_update(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Name of the LLM to update.")],
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            help="New model identifier (e.g. gemini-2.5-flash-lite).",
+        ),
+    ] = None,
     max_tokens: Annotated[
         int | None,
         typer.Option(
@@ -425,12 +432,14 @@ def llm_update(
     """Update configuration fields of a registered LLM."""
     with cli_error_boundary():
         # Require at least one update flag
-        if all(v is None for v in (max_tokens, timeout, input_cost, output_cost, temperature)):
+        if all(
+            v is None for v in (model, max_tokens, timeout, input_cost, output_cost, temperature)
+        ):
             from revolver.core.exceptions import ValidationError
 
             raise ValidationError(
                 "No update flags provided. Use at least one of: "
-                "--max-tokens, --timeout, --input-cost, --output-cost, --temperature"
+                "--model, --max-tokens, --timeout, --input-cost, --output-cost, --temperature"
             )
 
         conn = get_global_db()
@@ -438,6 +447,7 @@ def llm_update(
             entry = llm_core.update_llm(
                 name=name,
                 conn=conn,
+                model=model,
                 max_tokens=max_tokens,
                 timeout_s=timeout,
                 input_cost_per_mtok=input_cost,

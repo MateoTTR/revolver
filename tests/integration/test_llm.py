@@ -1335,3 +1335,50 @@ def test_llm_add_json_includes_temperature(mock_global_db: Path) -> None:
     # Also verify other config fields are present for consistency
     assert "max_tokens" in data
     assert "timeout_s" in data
+
+
+# ── Test 36: Update model identifier ───────────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_model(mock_global_db: Path) -> None:
+    """Update model identifier on an existing LLM, verify reflected in JSON output."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["--json", "llm", "update", "test-llm", "--model", "gpt-4o-mini"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["name"] == "test-llm"
+    assert data["model"] == "gpt-4o-mini"
+    # Other fields unchanged
+    assert data["max_tokens"] == 4096
+    assert data["timeout_s"] == 60
+
+
+# ── Test 37: Update model visible in list ──────────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_model_visible_in_list(mock_global_db: Path) -> None:
+    """After updating model, ``llm list`` shows the new model name."""
+    _add_remote_llm()
+
+    # Update model
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--model", "gemini-2.5-flash-lite"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    # Verify via list (JSON)
+    list_result = runner.invoke(app, ["--json", "llm", "list"])
+    assert list_result.exit_code == 0
+    list_data = json.loads(list_result.stdout)
+    assert list_data[0]["model"] == "gemini-2.5-flash-lite"
+    # Other fields unchanged
+    assert list_data[0]["max_tokens"] == 4096
+    assert list_data[0]["timeout_s"] == 60

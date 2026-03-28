@@ -822,6 +822,7 @@ def update_llm(
     conn: sqlite3.Connection,
     name: str,
     *,
+    model: str | None = None,
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     input_cost_per_mtok: float | None = None,
@@ -836,6 +837,7 @@ def update_llm(
     Args:
         conn: A connection to the global database.
         name: The unique LLM name to update.
+        model: New model identifier (e.g. ``gemini-2.5-flash-lite``).
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
         input_cost_per_mtok: New value for cost per million input tokens.
@@ -846,6 +848,8 @@ def update_llm(
         The number of rows affected (0 if name not found, 1 if updated).
     """
     fields: dict[str, object] = {}
+    if model is not None:
+        fields["model"] = model
     if max_tokens is not None:
         fields["max_tokens"] = max_tokens
     if timeout_s is not None:
