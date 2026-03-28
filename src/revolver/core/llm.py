@@ -194,6 +194,7 @@ def update_llm(
     name: str,
     conn: sqlite3.Connection,
     *,
+    model: str | None = None,
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     input_cost_per_mtok: float | None = None,
@@ -207,6 +208,7 @@ def update_llm(
     Args:
         name: LLM registry name.
         conn: Global database connection.
+        model: New model identifier (e.g. ``gemini-2.5-flash-lite``).
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
         input_cost_per_mtok: New value for cost per million input tokens (USD).
@@ -220,6 +222,10 @@ def update_llm(
         RevolverError: If the LLM is not found.
         ValidationError: If any provided value is not positive.
     """
+    # Validate model is not empty
+    if model is not None and not model.strip():
+        raise ValidationError("--model must not be an empty string")
+
     # Validate positive values
     if max_tokens is not None and max_tokens < 1:
         raise ValidationError("--max-tokens must be a positive integer")
@@ -235,6 +241,7 @@ def update_llm(
     row_count = db.update_llm(
         conn,
         name,
+        model=model,
         max_tokens=max_tokens,
         timeout_s=timeout_s,
         input_cost_per_mtok=input_cost_per_mtok,
