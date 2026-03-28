@@ -78,6 +78,16 @@ def run_launch(
             help="Number of parallel evaluations for OpenEvolve.",
         ),
     ] = None,
+    rewrite_mode: Annotated[
+        bool,
+        typer.Option(
+            "--rewrite-mode",
+            help=(
+                "Full-rewrite mode: sets diff_based_evolution=false and "
+                "max_code_length=50000. Overridable by --config-override."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Launch an OpenEvolve evolution run."""
     # If a subcommand was invoked, skip the launch logic
@@ -111,6 +121,7 @@ def run_launch(
             dry_run=dry_run,
             temperature=temperature,
             parallel=parallel,
+            rewrite_mode=rewrite_mode,
         )
 
         if not dry_run:
@@ -315,6 +326,16 @@ def run_resume(
             help="OpenEvolve config override (key=value). Repeatable.",
         ),
     ] = None,
+    rewrite_mode: Annotated[
+        bool,
+        typer.Option(
+            "--rewrite-mode",
+            help=(
+                "Full-rewrite mode: sets diff_based_evolution=false and "
+                "max_code_length=50000. Overridable by --config-override."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Resume an interrupted or completed run from its checkpoint."""
     with cli_error_boundary():
@@ -335,6 +356,7 @@ def run_resume(
             parallel=parallel,
             llm_name=llm,
             config_overrides=config_override or None,
+            rewrite_mode=rewrite_mode,
             quiet=(json_mode or quiet),
         )
 

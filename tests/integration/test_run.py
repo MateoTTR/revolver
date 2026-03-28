@@ -1391,3 +1391,43 @@ def test_run_smart_default_both(project_with_prereqs: dict[str, Path]) -> None:
     assert "Using version v1.0 (only version)" in output
     assert "Using dataset train-small (only train dataset)" in output
     assert "dry-run" in output.lower()
+
+
+# ── Test: run --dry-run --rewrite-mode (S10-09/10/11) ─────────────────────
+
+
+@pytest.mark.integration
+def test_run_dry_run_rewrite_mode(project_with_prereqs: dict[str, Path]) -> None:
+    """--rewrite-mode with --dry-run injects rewrite settings into resolved config."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+            "--rewrite-mode",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "dry-run" in output.lower()
+
+    # Verify NO run was created in DB (dry-run does not persist)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT COUNT(*) FROM runs")
+        count = cursor.fetchone()[0]
+        assert count == 0, f"Expected 0 runs in DB, got {count}"
+    finally:
+        conn.close()

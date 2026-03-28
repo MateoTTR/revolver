@@ -515,6 +515,81 @@ class TestBuildConfig:
         # Config override (step 5) should win over CLI flag (step 2c)
         assert result["evaluator"]["parallel_evaluations"] == 8
 
+    # ── S10-09: --rewrite-mode flag ───────────────────────────────────────
+
+    def test_build_config_rewrite_mode(self) -> None:
+        """build_config(rewrite_mode=True) sets diff_based_evolution and max_code_length (S10-09)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            rewrite_mode=True,
+        )
+        assert result["diff_based_evolution"] is False
+        assert result["llm"]["max_code_length"] == 50000
+
+    def test_build_config_rewrite_mode_override_wins(self) -> None:
+        """Explicit --config-override max_code_length wins over --rewrite-mode (S10-09)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            rewrite_mode=True,
+            config_overrides=["llm.max_code_length=30000"],
+        )
+        # Config override (step 5) should win over rewrite_mode (step 4b)
+        assert result["llm"]["max_code_length"] == 30000
+        # diff_based_evolution is still set by rewrite_mode (no override for it)
+        assert result["diff_based_evolution"] is False
+
+    def test_build_config_rewrite_mode_false_leaves_config_unchanged(self) -> None:
+        """build_config(rewrite_mode=False) does not inject rewrite settings."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            rewrite_mode=False,
+        )
+        assert "diff_based_evolution" not in result
+        assert "max_code_length" not in result.get("llm", {})
+
+    def test_build_config_rewrite_mode_default_is_false(self) -> None:
+        """build_config() default rewrite_mode=False does not inject rewrite settings."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+        )
+        assert "diff_based_evolution" not in result
+        assert "max_code_length" not in result.get("llm", {})
+
+    def test_build_config_rewrite_mode_with_existing_llm_section(self, tmp_path: Path) -> None:
+        """rewrite_mode merges into existing llm section without clobbering (S10-09)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("llm:\n  temperature: 0.8\n")
+
+        llm = _make_llm()
+        result = build_config(
+            problem_config=config_file,
+            llm=llm,
+            rewrite_mode=True,
+        )
+        assert result["llm"]["max_code_length"] == 50000
+        # Existing LLM config should be preserved
+        assert "primary_model" in result["llm"]
+
+    def test_build_config_rewrite_mode_diff_override_wins(self) -> None:
+        """--config-override diff_based_evolution=true wins over --rewrite-mode (S10-09)."""
+        llm = _make_llm()
+        result = build_config(
+            problem_config=None,
+            llm=llm,
+            rewrite_mode=True,
+            config_overrides=["diff_based_evolution=true"],
+        )
+        # Config override (step 5) wins over rewrite_mode (step 4b)
+        assert result["diff_based_evolution"] is True
+
 
 # ── resolve_api_keys tests ────────────────────────────────────────────────────
 

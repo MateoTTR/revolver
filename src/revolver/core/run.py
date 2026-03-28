@@ -553,6 +553,7 @@ def launch_run(
             problem_description=problem_description,
             temperature=config.temperature,
             parallel=config.parallel,
+            rewrite_mode=config.rewrite_mode,
         )
 
         # 8. If dry_run: return early with config, no side effects
@@ -1052,6 +1053,7 @@ def resume_run(
     parallel: int | None = None,
     llm_name: str | None = None,
     config_overrides: list[str] | None = None,
+    rewrite_mode: bool = False,
     project_root: Path | None = None,
     *,
     quiet: bool = False,
@@ -1068,6 +1070,8 @@ def resume_run(
         parallel: Number of parallel evaluations.
         llm_name: Override LLM for the resumed run (must be registered).
         config_overrides: OpenEvolve config overrides (key=value strings).
+        rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
+            ``diff_based_evolution=false`` and ``llm.max_code_length=50000``.
         project_root: Explicit project root, or ``None`` to auto-detect.
         quiet: Suppress informational stderr messages (e.g. in --quiet/--json mode).
 
@@ -1169,6 +1173,7 @@ def resume_run(
             problem_description=problem_description,
             temperature=temperature,
             parallel=parallel,
+            rewrite_mode=rewrite_mode,
         )
 
         # Set output dir
