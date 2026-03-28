@@ -653,6 +653,45 @@ def run_delete(
             )
 
 
+# ── run population (S10-16) ──────────────────────────────────────────────────
+
+
+@run_app.command("population")
+def run_population(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Run ID to inspect.")],
+) -> None:
+    """Display the MAP-Elites population of a run."""
+    with cli_error_boundary():
+        json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
+
+        population = core_run.get_population(run_id)
+
+        if json_mode:
+            render(population, json_mode=True)
+            return
+
+        if not population:
+            sys.stderr.write("Population is empty (no programs found).\n")
+            return
+
+        rows = [
+            {
+                "rank": prog["rank"],
+                "score": f"{prog['score']:.4f}",
+                "generation": prog["generation"],
+                "iteration": prog["iteration_found"],
+                "metrics": ", ".join(
+                    f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+                    for k, v in prog["metrics"].items()
+                ),
+                "program_id": prog["id"],
+            }
+            for prog in population
+        ]
+        render(rows, json_mode=False)
+
+
 # ── run cleanup (S10-15) ──────────────────────────────────────────────────────
 
 
