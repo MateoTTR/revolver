@@ -327,25 +327,25 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 220 | `validate_oe_config()` — filter `initial_program`, `num_generations`, `timeout_per_instance`; deprecation notice for `num_generations` | [ ] | S10 — PR-A |
-| 221 | `infra.db.update_llm()` — add `model: str \| None` parameter, update SQL | [ ] | S10 — PR-B |
-| 222 | `core.llm.update_llm()` — add `model` parameter, propagate to db | [ ] | S10 — PR-B |
-| 223 | `cli.llm.llm_update` — add `--model TEXT` option | [ ] | S10 — PR-B |
-| 224 | `core.run.resume_run()` — add `llm_name` parameter, resolve new LLM from global DB | [ ] | S10 — PR-C |
-| 225 | `cli.run.run_resume` — add `--llm TEXT` option | [ ] | S10 — PR-C |
-| 226 | `core.run.resume_run()` — add `config_overrides` parameter, apply via `_parse_config_overrides()` | [ ] | S10 — PR-C |
-| 227 | `cli.run.run_resume` — add `--config-override TEXT` option (multi-value) | [ ] | S10 — PR-C |
-| 228 | `infra.openevolve.build_config()` — add `rewrite_mode: bool = False`, inject `diff_based_evolution=false` + `max_code_length=50000` | [ ] | S10 — PR-D |
-| 229 | `core.run.launch_run()` + `resume_run()` — add `rewrite_mode` parameter, pass to `build_config()` | [ ] | S10 — PR-D |
-| 230 | `cli.run.run_start` + `run_resume` — add `--rewrite-mode` flag | [ ] | S10 — PR-D |
-| 231 | `core.run.launch_run()` — after OE: `valid_iterations==0` → status `failed`; `<10%` → `completed_with_errors` | [ ] | S10 — PR-E |
-| 232 | `core.run.detect_zombie_runs()` — check PID alive, mark orphaned runs `interrupted` | [ ] | S10 — PR-F |
-| 233 | `cli.run.run_list` — auto-call `detect_zombie_runs()`, display cleanup warning | [ ] | S10 — PR-F |
-| 234 | `cli.run.run_cleanup` — new `run cleanup` command with `--force` | [ ] | S10 — PR-F |
-| 235 | `core.run.get_population()` + `cli.run.run_population` — new `run population <run_id>` command, parse OE `database.json` | [ ] | S10 — PR-G |
-| 236 | Update `docs/guides/tuning-oe-config.md` — full-rewrite mode section + Gemini model compatibility table | [ ] | S10 — PR-H |
-| 237 | Update `docs/guides/initial-program-structure.md` — problem.md enrichment section with POC evidence | [ ] | S10 — PR-H |
-| 238 | L2 integration tests for Sprint 010 (~24 new scenarios) | [ ] | S10 — PR-H |
+| 220 | `validate_oe_config()` — filter `initial_program`, `num_generations`, `timeout_per_instance`; deprecation notice for `num_generations` | [x] | S10 — session 043, PR #147 |
+| 221 | `infra.db.update_llm()` — add `model: str \| None` parameter, update SQL | [x] | S10 — session 043, PR #148 |
+| 222 | `core.llm.update_llm()` — add `model` parameter, propagate to db | [x] | S10 — session 043, PR #148 |
+| 223 | `cli.llm.llm_update` — add `--model TEXT` option | [x] | S10 — session 043, PR #148 |
+| 224 | `core.run.resume_run()` — add `llm_name` parameter, resolve new LLM from global DB | [x] | S10 — session 043, PR #151 |
+| 225 | `cli.run.run_resume` — add `--llm TEXT` option | [x] | S10 — session 043, PR #151 |
+| 226 | `core.run.resume_run()` — add `config_overrides` parameter, apply via `_parse_config_overrides()` | [x] | S10 — session 043, PR #151 |
+| 227 | `cli.run.run_resume` — add `--config-override TEXT` option (multi-value) | [x] | S10 — session 043, PR #151 |
+| 228 | `infra.openevolve.build_config()` — add `rewrite_mode: bool = False`, inject `diff_based_evolution=false` + `max_code_length=50000` | [x] | S10 — session 043, PR #153 |
+| 229 | `core.run.launch_run()` + `resume_run()` — add `rewrite_mode` parameter, pass to `build_config()` | [x] | S10 — session 043, PR #153 |
+| 230 | `cli.run.run_start` + `run_resume` — add `--rewrite-mode` flag | [x] | S10 — session 043, PR #153 |
+| 231 | `core.run.launch_run()` — after OE: `valid_iterations==0` → status `failed`; `<10%` → `completed_with_errors` | [x] | S10 — session 043, PR #149 |
+| 232 | `core.run.detect_zombie_runs()` — check PID alive, mark orphaned runs `interrupted` | [x] | S10 — session 043, PR #155 |
+| 233 | `cli.run.run_list` — auto-call `detect_zombie_runs()`, display cleanup warning | [x] | S10 — session 043, PR #155 |
+| 234 | `cli.run.run_cleanup` — new `run cleanup` command with `--force` | [x] | S10 — session 043, PR #155 |
+| 235 | `core.run.get_population()` + `cli.run.run_population` — new `run population <run_id>` command, parse OE checkpoint programs | [x] | S10 — session 043, PR #157 |
+| 236 | Update `docs/guides/tuning-oe-config.md` — full-rewrite mode section + Gemini model compatibility table | [x] | S10 — session 043, PR #159 |
+| 237 | Update `docs/guides/initial-program-structure.md` — problem.md enrichment section with POC evidence | [x] | S10 — session 043, PR #159 |
+| 238 | L2 integration tests for Sprint 010 (~56 new tests across PRs A-G) | [x] | S10 — session 043, included in PRs |
 
 ### Sprint 011 — Multi-Model Ensemble Support (v0.11.0)
 
