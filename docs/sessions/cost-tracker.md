@@ -50,13 +50,14 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 41 | 2026-03-25 | session-041 | ~2h30 | Phase 5 | Doc audit cascade (19 FAIL + 27 WARN fixed), release v0.9.0, MCP GitHub setup |
 | 42 | 2026-03-27 | session-042 | ~3h30 | Phase 5 | Sprint 009a (5 PRs, 11 tests), release v0.9.1, MCP GitHub fix, CI runner fix |
 | 43 | 2026-03-28 | session-043 | ~5h | Phase 5 | Feedback analysis, sprint 010/011 planning, OE fork setup, sprint 010 execution (8 PRs, 56 tests), release v0.10.0, 965 tests |
+| 44 | 2026-03-28 | session-044 | ~3h | Phase 5 | POC ensemble OE, Sprint 011 execution (5 PRs, 88 tests), code-reviewer fix (opus+MCP), release v0.11.0, 1053 tests |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 44 |
-| **Total duration** | ~80h |
+| **Total sessions** | 45 |
+| **Total duration** | ~83h |
 | **Avg duration/session** | ~1h50 |
 
 ## Notes

@@ -1,9 +1,9 @@
 ---
 name: code-reviewer
 description: Reviews PR code changes for functionality, performance, security, and quality issues. Use after creating a PR or when code has been developed by a subagent. Produces a structured review with inline comments on the GitHub PR via MCP.
-tools: Read, Glob, Grep, Bash, Write
-model: sonnet
-maxTurns: 25
+tools: Read, Glob, Grep, Bash, Write, mcp__github__get_pull_request, mcp__github__get_pull_request_files, mcp__github__get_pull_request_reviews, mcp__github__get_pull_request_comments, mcp__github__create_pull_request_review
+model: opus
+maxTurns: 30
 ---
 
 You are an expert code reviewer for the Revolver project, a MLOps CLI platform written in Python 3.12+.

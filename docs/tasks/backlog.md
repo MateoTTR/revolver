@@ -351,19 +351,19 @@
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 239 | DB migration v8: `ensembles` + `ensemble_members` tables (global DB); `llm_type` column on `runs` (project DB) | [ ] | S11 — PR-A |
-| 240 | `infra.db` helpers: ensemble CRUD (`insert_ensemble`, `get_ensemble`, `list_ensembles`, `delete_ensemble`, `add_ensemble_member`, `get_ensemble_members`) | [ ] | S11 — PR-A |
-| 241 | `models.llm` — new `EnsembleMember` and `EnsembleEntry` Pydantic models | [ ] | S11 — PR-A |
-| 242 | `core.llm` — `create_ensemble()`, `add_member()`, `remove_ensemble()`, `list_ensembles()`, `get_ensemble_info()` | [ ] | S11 — PR-B |
-| 243 | `cli.llm` — new `ensemble` sub-app: `create`, `add`, `list`, `info`, `remove` | [ ] | S11 — PR-B |
-| 244 | `core.llm.resolve_llm_or_ensemble()` — unified lookup returning `LLMEntry \| EnsembleEntry` | [ ] | S11 — PR-C |
-| 245 | `infra.openevolve.build_config()` — emit `llm.models` array when passed `EnsembleEntry` | [ ] | S11 — PR-C |
-| 246 | `core.run.launch_run()` + `resume_run()` — pass resolved `LLMEntry \| EnsembleEntry`; store `llm_type` in run record | [ ] | S11 — PR-C |
-| 247 | `cli.run` — `--llm` resolves via `resolve_llm_or_ensemble()`; `run info`/`run list` show ensemble indicator | [ ] | S11 — PR-C |
-| 248 | L2 integration tests for Sprint 011 (~16 new scenarios) | [ ] | S11 — PR-D |
-| 249 | Update `docs/guides/tuning-oe-config.md` — ensemble strategies section (AlphaEvolve pattern, weights, cost) | [ ] | S11 — PR-D |
-| 250 | (Carry-over) `run population` if not completed in Sprint 010 | [ ] | S11 — PR-D |
-| 251 | Documentation audit cascade: spec-reviewer → validation-reviewer → doc-reviewer. Update specs, DES-002, DES-005, ConOps, traceability matrix, README, user-story-e2e for ensemble feature. | [ ] | S11 — PR-E |
+| 239 | DB migration v8: `ensembles` + `ensemble_members` tables (global DB); `llm_type` + `llm_snapshot` columns on `runs` (project DB) | [x] | S11 — session 044, PR #161 |
+| 240 | `infra.db` helpers: ensemble CRUD (6 functions) | [x] | S11 — session 044, PR #161 |
+| 241 | `models.llm` — `EnsembleMember` and `EnsembleEntry` Pydantic models | [x] | S11 — session 044, PR #161 |
+| 242 | `core.llm` — `create_ensemble()`, `add_member()`, `remove_ensemble()`, `list_ensembles()`, `get_ensemble_info()` with weight sum warning | [x] | S11 — session 044, PR #164 |
+| 243 | `cli.llm` — `ensemble` sub-app: `create`, `add`, `list`, `info`, `remove` with `--json` support | [x] | S11 — session 044, PR #164 |
+| 244 | `core.llm.resolve_llm_or_ensemble()` — unified lookup returning `LLMEntry \| EnsembleEntry` | [x] | S11 — session 044, PR #165 |
+| 245 | `infra.openevolve.build_config()` — emit `llm.models` array with OE field names (`name`, `api_base`); resolve `api_key_env` per member | [x] | S11 — session 044, PR #165 |
+| 246 | `core.run.launch_run()` + `resume_run()` — resolve via ensemble; store `llm_type` and `llm_snapshot` JSON | [x] | S11 — session 044, PR #165 |
+| 247 | `cli.run` — `--llm` resolves ensemble; `run info`/`run list` show ensemble indicator | [x] | S11 — session 044, PR #165 |
+| 248 | L2 integration tests for Sprint 011 (17 scenarios covered across PRs A-D) | [x] | S11 — session 044, PR #167 |
+| 249 | Update `docs/guides/tuning-oe-config.md` — ensemble strategies section | [x] | S11 — session 044, PR #167 |
+| 251 | Documentation audit cascade: spec-reviewer (18F+7W) → validation-reviewer (3F+1W) → doc-reviewer (3F+3W) — all fixed | [x] | S11 — session 044, PR #169 |
+| 252 | (POC finding) OE field mapping: `name` (not `model`), `api_base` (not `base_url`) — covered by task 245 | [~] | S11 — covered by 245 |
 
 ### Unscheduled — Release Process
 
