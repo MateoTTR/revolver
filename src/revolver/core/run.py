@@ -24,7 +24,7 @@ import sys
 import time
 import traceback
 from types import ModuleType
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -104,6 +104,36 @@ from revolver.models.run import (
 
 WRAPPER_FILENAME = "_revolver_evaluator.py"
 EVALUATOR_FILENAME = "evaluator.py"
+
+#: Minimum ratio of valid iterations to total iterations.
+#: Below this threshold, the run is marked ``completed_with_errors``.
+MIN_VALID_ITERATION_RATIO = 0.1
+
+
+def _determine_run_status(
+    valid_iters: int | None, total_iters: int
+) -> Literal["failed", "completed_with_errors", "completed"]:
+    """Determine final run status based on valid iteration ratio.
+
+    Returns ``"failed"`` if no valid iterations were produced,
+    ``"completed_with_errors"`` if fewer than
+    :data:`MIN_VALID_ITERATION_RATIO` of iterations were valid,
+    and ``"completed"`` otherwise.
+
+    Args:
+        valid_iters: Number of iterations that produced valid programs,
+            or ``None`` if the count could not be determined.
+        total_iters: Total number of iterations executed.
+
+    Returns:
+        One of ``"failed"``, ``"completed_with_errors"``, or ``"completed"``.
+    """
+    if valid_iters is None or valid_iters == 0:
+        return "failed"
+    if total_iters > 0 and valid_iters / total_iters < MIN_VALID_ITERATION_RATIO:
+        return "completed_with_errors"
+    return "completed"
+
 
 # ── Wrapper template (DES-005 §3.2) ──────────────────────────────────────────
 
@@ -752,8 +782,11 @@ def launch_run(
                 alias=config.alias,
             )
 
+            # Determine final status based on valid iteration ratio
+            final_status = _determine_run_status(valid_iters, iterations)
+
             # Atomically update generation_time_s and status
-            update_run_generation_time(proj_conn, run_id, generation_time_s)
+            update_run_generation_time(proj_conn, run_id, generation_time_s, status=final_status)
 
             # Run _post_run_evaluation() (warn on failure)
             if not quiet:
@@ -790,7 +823,7 @@ def launch_run(
                 generation_time_s=generation_time_s,
                 iterations=iterations,
                 valid_iterations=valid_iters,
-                status="completed",
+                status=final_status,
                 problem_version=config.problem_version,
                 problem_hash=pv.hash,
                 dataset=config.dataset_name,
@@ -1302,8 +1335,13 @@ def resume_run(
                 best_score=best_score,
             )
 
+            # Determine final status based on valid iteration ratio
+            final_status = _determine_run_status(valid_iters, actual_iterations)
+
             # Atomically update generation_time_s and status
-            update_run_generation_time(proj_conn, new_run_id, generation_time_s)
+            update_run_generation_time(
+                proj_conn, new_run_id, generation_time_s, status=final_status
+            )
 
             # Post-run eval
             if not quiet:
@@ -1338,7 +1376,7 @@ def resume_run(
                 generation_time_s=generation_time_s,
                 iterations=actual_iterations,
                 valid_iterations=valid_iters,
-                status="completed",
+                status=final_status,
                 problem_version=parent_version,
                 problem_hash=pv.hash,
                 dataset=parent_dataset_name,
