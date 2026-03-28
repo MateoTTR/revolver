@@ -149,6 +149,69 @@ def test_validate_oe_config_valid() -> None:
     assert warnings == []
 
 
+# ── S10-01: Revolver key filtering ───────────────────────────────────────────
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
+def test_validate_oe_config_initial_program_filtered() -> None:
+    """initial_program key is silently filtered — no warnings emitted."""
+    config = {
+        "max_iterations": 100,
+        "initial_program": "solve.py",
+    }
+    warnings = validate_oe_config(config)
+    assert warnings == [], f"Expected no warnings, got: {warnings}"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
+def test_validate_oe_config_timeout_per_instance_filtered() -> None:
+    """timeout_per_instance key is silently filtered — no warnings emitted."""
+    config = {
+        "max_iterations": 100,
+        "timeout_per_instance": 30,
+    }
+    warnings = validate_oe_config(config)
+    assert warnings == [], f"Expected no warnings, got: {warnings}"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
+def test_validate_oe_config_num_generations_deprecated() -> None:
+    """num_generations key emits a deprecation notice, not an 'Unknown key' warning."""
+    config = {
+        "num_generations": 50,
+    }
+    warnings = validate_oe_config(config)
+    # Should have exactly one warning: the deprecation notice
+    assert len(warnings) == 1, f"Expected 1 warning, got {len(warnings)}: {warnings}"
+    assert "Deprecation" in warnings[0]
+    assert "num_generations" in warnings[0]
+    assert "max_iterations" in warnings[0]
+    # Must NOT contain "Unknown" — it should be a deprecation, not an unknown key error
+    assert "Unknown" not in warnings[0], f"Got unexpected 'Unknown key' warning: {warnings[0]}"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
+def test_validate_oe_config_num_generations_with_unknown_key() -> None:
+    """num_generations + truly unknown key -> deprecation notice AND unknown key warning."""
+    config = {
+        "num_generations": 50,
+        "bogus_key": True,
+    }
+    warnings = validate_oe_config(config)
+    # Should have exactly two warnings: deprecation + unknown key
+    assert len(warnings) == 2, f"Expected 2 warnings, got {len(warnings)}: {warnings}"
+    # First warning is the deprecation notice
+    assert "Deprecation" in warnings[0]
+    assert "num_generations" in warnings[0]
+    # Second warning is the unknown key
+    assert "Unknown" in warnings[1]
+    assert "bogus_key" in warnings[1]
+
+
 # ── find_latest_checkpoint ────────────────────────────────────────────────────
 
 
