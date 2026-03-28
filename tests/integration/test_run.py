@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,8 +24,10 @@ from typer.testing import CliRunner
 from revolver.cli import app
 from revolver.core.project import init_project
 from revolver.infra.db import (
+    add_ensemble_member,
     get_global_db_at,
     get_project_db,
+    insert_ensemble,
 )
 from revolver.infra.openevolve import RunOutput
 from revolver.infra.store import REVOLVER_DIR
@@ -1620,3 +1623,374 @@ def test_run_cleanup_no_zombies(
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
     assert "No zombie runs found" in output
+
+
+# ── Ensemble helpers ───────────────────────────────────────────────────────────
+
+
+def _register_ensemble(
+    global_db_path: Path,
+    ensemble_name: str,
+    members: list[dict[str, object]],
+) -> None:
+    """Register an ensemble with members in the global database."""
+    conn = get_global_db_at(global_db_path)
+    try:
+        insert_ensemble(conn, ensemble_name, datetime.now(UTC))
+        for m in members:
+            add_ensemble_member(
+                conn,
+                ensemble_name=ensemble_name,
+                llm_name=str(m["llm_name"]),
+                weight=float(m.get("weight", 1.0)),  # type: ignore[arg-type]
+                temperature_override=m.get("temperature_override"),
+                max_tokens_override=m.get("max_tokens_override"),
+            )
+    finally:
+        conn.close()
+
+
+# ── S11-10: Ensemble integration tests (L2) ──────────────────────────────────
+
+
+@pytest.mark.integration
+def test_run_start_single_llm_no_regression(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run start with single LLM still produces llm_type=single (no ensemble regression).
+
+    Traceable to: sprint-011 L2 test_run_start_single_llm_no_regression.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    # Verify DB: llm_type should be 'single'
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT llm_type, llm_snapshot FROM runs WHERE status = 'completed'"
+        ).fetchone()
+        assert row is not None
+        assert row["llm_type"] == "single"
+        # Single LLM snapshot should contain the model name
+        assert row["llm_snapshot"] is not None
+        snapshot = json.loads(row["llm_snapshot"])
+        assert snapshot["type"] == "single"
+        assert snapshot["model"] == "gpt-4"
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_start_with_ensemble(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run start with --llm pointing to an ensemble produces llm_type=ensemble.
+
+    Traceable to: sprint-011 L2 test_run_start_with_ensemble.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Register a second LLM for the ensemble
+    _register_llm(global_db_path, name="llm-b", model="gpt-3.5-turbo")
+
+    # Create ensemble with two members
+    _register_ensemble(
+        global_db_path,
+        "test-ensemble",
+        [
+            {"llm_name": "test-llm", "weight": 0.8},
+            {"llm_name": "llm-b", "weight": 0.2, "temperature_override": 0.5},
+        ],
+    )
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-ensemble",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    run_id = data["run_id"]
+
+    # Verify DB: llm_type should be 'ensemble'
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT llm, llm_type, llm_snapshot, llm_model FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["llm"] == "test-ensemble"
+        assert row["llm_type"] == "ensemble"
+        # llm_model should contain both model names
+        assert "gpt-4" in row["llm_model"]
+        assert "gpt-3.5-turbo" in row["llm_model"]
+        # Snapshot should contain ensemble details
+        snapshot = json.loads(row["llm_snapshot"])
+        assert snapshot["type"] == "ensemble"
+        assert snapshot["name"] == "test-ensemble"
+        assert len(snapshot["members"]) == 2
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_info_ensemble_display(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run info for an ensemble run shows llm_type=ensemble and members in snapshot.
+
+    Traceable to: sprint-011 L2 test_run_info_ensemble_display.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Register a second LLM and an ensemble
+    _register_llm(global_db_path, name="llm-b", model="gpt-3.5-turbo")
+    _register_ensemble(
+        global_db_path,
+        "info-ensemble",
+        [
+            {"llm_name": "test-llm", "weight": 0.7},
+            {"llm_name": "llm-b", "weight": 0.3},
+        ],
+    )
+
+    # Launch ensemble run
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "info-ensemble",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    run_data = _parse_json_output(result)
+    run_id = run_data["run_id"]
+
+    # Query run info via CLI
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+    ):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "info", run_id],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    info = _parse_json_output(result)
+    assert info["llm"] == "info-ensemble"
+    assert info["llm_type"] == "ensemble"
+    assert info["llm_snapshot"] is not None
+
+    # Parse the snapshot to verify member info is preserved
+    snapshot = json.loads(info["llm_snapshot"])
+    assert snapshot["type"] == "ensemble"
+    assert len(snapshot["members"]) == 2
+    member_names = {m["name"] for m in snapshot["members"]}
+    assert "test-llm" in member_names
+    assert "llm-b" in member_names
+
+
+@pytest.mark.integration
+def test_resume_llm_ensemble_override(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run resume --llm can switch from single LLM to ensemble.
+
+    Traceable to: sprint-011 L2 test_resume_llm_ensemble_override.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Launch initial run with single LLM
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_data = _parse_json_output(result)
+    parent_run_id = parent_data["run_id"]
+
+    # Create checkpoint for parent run
+    parent_run_dir = root / REVOLVER_DIR / "runs" / parent_run_id
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # Register second LLM and ensemble
+    _register_llm(global_db_path, name="llm-b", model="gpt-3.5-turbo")
+    _register_ensemble(
+        global_db_path,
+        "resume-ensemble",
+        [
+            {"llm_name": "test-llm", "weight": 0.6},
+            {"llm_name": "llm-b", "weight": 0.4},
+        ],
+    )
+
+    # Resume with ensemble override
+    mock_runner = _make_mock_runner()
+    mock_proxy = _make_mock_proxy()
+    mock_runner_cls = MagicMock(return_value=mock_runner)
+    mock_proxy_cls = MagicMock(return_value=mock_proxy)
+    resume_run_id, resume_sol_id = _next_ids()
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.core.run.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+        patch("revolver.core.run.count_valid_programs", return_value=3),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "run",
+                "resume",
+                "--run",
+                parent_run_id,
+                "--llm",
+                "resume-ensemble",
+            ],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    resume_data = _parse_json_output(result)
+    new_run_id = resume_data["run_id"]
+
+    # Verify the resumed run uses ensemble
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT llm, llm_type, llm_snapshot FROM runs WHERE id = ?",
+            (new_run_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["llm"] == "resume-ensemble"
+        assert row["llm_type"] == "ensemble"
+        snapshot = json.loads(row["llm_snapshot"])
+        assert snapshot["type"] == "ensemble"
+        assert len(snapshot["members"]) == 2
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_start_llm_snapshot_single(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run start with single LLM stores a valid llm_snapshot with model details.
+
+    Traceable to: sprint-011 L2 test_run_start_llm_snapshot_single.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    run_id = data["run_id"]
+
+    # Verify llm_snapshot in DB
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT llm_snapshot FROM runs WHERE id = ?", (run_id,)).fetchone()
+        assert row is not None
+        assert row["llm_snapshot"] is not None
+
+        snapshot = json.loads(row["llm_snapshot"])
+        assert snapshot["type"] == "single"
+        assert snapshot["name"] == "test-llm"
+        assert snapshot["model"] == "gpt-4"
+    finally:
+        conn.close()
