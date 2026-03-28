@@ -2294,6 +2294,7 @@ def test_run_keyboard_interrupt_marks_interrupted(project_with_prereqs: dict) ->
 # ── _determine_run_status tests ──────────────────────────────────────────────
 
 
+@pytest.mark.unit
 class TestDetermineRunStatus:
     """L2 tests for _determine_run_status() helper."""
 
