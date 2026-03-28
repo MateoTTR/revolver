@@ -1431,3 +1431,192 @@ def test_run_dry_run_rewrite_mode(project_with_prereqs: dict[str, Path]) -> None
         assert count == 0, f"Expected 0 runs in DB, got {count}"
     finally:
         conn.close()
+
+
+# ── Zombie run detection tests (S10-13/14/15) ────────────────────────────────
+
+
+def _insert_running_run(
+    root: Path,
+    run_id: str,
+    *,
+    pid: int | None = None,
+    write_lock: bool = True,
+) -> None:
+    """Insert a run with status='running' into the DB, optionally create lock file."""
+    from revolver.infra.store import write_run_lock
+
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                "v1.0",
+                "test-llm",
+                "train-small",
+                10,
+                "hash-zombie",
+                "dhash-zombie",
+                "gpt-4",
+                "running",
+                "2026-03-28T10:00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    if write_lock and pid is not None:
+        write_run_lock(root, run_id, {"run_id": run_id, "pid": pid})
+
+
+@pytest.mark.integration
+def test_detect_zombie_runs_marks_dead_pid(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """A run with status=running and a dead PID is marked interrupted."""
+    from revolver.core.run import detect_zombie_runs
+
+    root = project_with_prereqs["root"]
+
+    # Use PID 999999999 which should not exist
+    _insert_running_run(root, "run-zombie-001", pid=999999999)
+
+    zombies = detect_zombie_runs(project_root=root)
+
+    assert zombies == ["run-zombie-001"]
+
+    # Verify status was updated in DB
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute("SELECT status FROM runs WHERE id = ?", ("run-zombie-001",)).fetchone()
+        assert row is not None
+        assert row[0] == "interrupted"
+    finally:
+        conn.close()
+
+    # Verify lock file was removed
+    lock_file = root / REVOLVER_DIR / "runs" / "locks" / "run-zombie-001.lock"
+    assert not lock_file.exists()
+
+
+@pytest.mark.integration
+def test_detect_zombie_runs_no_false_positive(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """A run with status=running and a live PID is NOT marked interrupted."""
+    import os
+
+    from revolver.core.run import detect_zombie_runs
+
+    root = project_with_prereqs["root"]
+
+    # Use the current process PID — guaranteed to be alive
+    _insert_running_run(root, "run-alive-001", pid=os.getpid())
+
+    zombies = detect_zombie_runs(project_root=root)
+
+    assert zombies == []
+
+    # Verify status was NOT changed
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute("SELECT status FROM runs WHERE id = ?", ("run-alive-001",)).fetchone()
+        assert row is not None
+        assert row[0] == "running"
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_detect_zombie_runs_no_lock_file(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """A run with status=running but no lock file is marked interrupted."""
+    from revolver.core.run import detect_zombie_runs
+
+    root = project_with_prereqs["root"]
+
+    # Insert run without lock file
+    _insert_running_run(root, "run-nolck-001", write_lock=False)
+
+    zombies = detect_zombie_runs(project_root=root)
+
+    assert zombies == ["run-nolck-001"]
+
+    # Verify status was updated
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute("SELECT status FROM runs WHERE id = ?", ("run-nolck-001",)).fetchone()
+        assert row is not None
+        assert row[0] == "interrupted"
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_list_detects_zombie(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run list auto-detects zombie runs and prints a warning."""
+    root = project_with_prereqs["root"]
+
+    # Insert a zombie run (dead PID)
+    _insert_running_run(root, "run-zombie-list-001", pid=999999999)
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["run", "list"], catch_exceptions=False)
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "1 zombie run(s) detected" in output
+
+
+@pytest.mark.integration
+def test_run_cleanup_force(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run cleanup --force marks zombies and reports count."""
+    root = project_with_prereqs["root"]
+
+    _insert_running_run(root, "run-zombie-clnp-001", pid=999999999)
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "cleanup", "--force"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert data["zombies_cleaned"] == 1
+    assert "run-zombie-clnp-001" in data["run_ids"]
+
+
+@pytest.mark.integration
+def test_run_cleanup_no_zombies(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run cleanup --force with no zombies prints 'No zombie runs found'."""
+    root = project_with_prereqs["root"]
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["run", "cleanup", "--force"],
+            catch_exceptions=False,
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "No zombie runs found" in output

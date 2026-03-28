@@ -1646,6 +1646,63 @@ def list_runs(
         conn.close()
 
 
+# ── detect_zombie_runs (S10-13) ──────────────────────────────────────────────
+
+
+def detect_zombie_runs(project_root: Path | None = None) -> list[str]:
+    """Detect and mark zombie runs as interrupted.
+
+    Scans runs with ``status='running'`` in DB. For each, checks if a lock file
+    exists and if the PID is alive. Marks as ``'interrupted'`` if:
+
+    - Lock file exists but PID is dead
+    - Lock file is unreadable (corrupt JSON, missing PID)
+    - No lock file exists (process gone without cleanup)
+
+    Args:
+        project_root: Explicit project root, or ``None`` to auto-detect.
+
+    Returns:
+        A list of run IDs that were marked as interrupted.
+    """
+    import json as _json
+
+    root = _resolve_project_root(project_root)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = db_list_runs(conn, status="running")
+        locks_dir = root / REVOLVER_DIR / "runs" / "locks"
+        zombie_ids: list[str] = []
+
+        for row in rows:
+            run_id = str(row["id"])
+            lock_file = locks_dir / f"{run_id}.lock"
+
+            is_zombie = False
+            if lock_file.exists():
+                try:
+                    lock_data = _json.loads(lock_file.read_text(encoding="utf-8"))
+                    pid = lock_data.get("pid")
+                    if pid is not None and not _is_pid_alive(int(pid)):
+                        is_zombie = True
+                except (ValueError, OSError):
+                    # Can't read or parse lock → treat as zombie
+                    is_zombie = True
+            else:
+                # No lock file → process gone without cleanup
+                is_zombie = True
+
+            if is_zombie:
+                update_run_status(conn, run_id, "interrupted")
+                remove_run_lock(root, run_id)
+                zombie_ids.append(run_id)
+
+        return zombie_ids
+    finally:
+        conn.close()
+
+
 # ── get_run_info (DES-005 §2.5) ──────────────────────────────────────────────
 
 
