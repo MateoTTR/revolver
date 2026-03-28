@@ -1646,9 +1646,7 @@ def test_resume_config_override_single(project_with_prereqs: dict) -> None:
     # Verify build_config was called with config_overrides
     mock_build_config.assert_called_once()
     call_kwargs = mock_build_config.call_args
-    assert call_kwargs.kwargs.get("config_overrides") == ["reasoning_effort=low"] or (
-        len(call_kwargs.args) > 3 and call_kwargs.args[3] == ["reasoning_effort=low"]
-    )
+    assert call_kwargs.kwargs["config_overrides"] == ["reasoning_effort=low"]
 
 
 @pytest.mark.unit
@@ -1736,9 +1734,7 @@ def test_resume_config_override_multiple(project_with_prereqs: dict) -> None:
     # Verify build_config was called with both overrides
     mock_build_config.assert_called_once()
     call_kwargs = mock_build_config.call_args
-    assert call_kwargs.kwargs.get("config_overrides") == overrides or (
-        len(call_kwargs.args) > 3 and call_kwargs.args[3] == overrides
-    )
+    assert call_kwargs.kwargs["config_overrides"] == overrides
 
 
 # ── list_runs tests ──────────────────────────────────────────────────────────

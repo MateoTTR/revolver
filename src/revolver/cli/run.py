@@ -334,7 +334,7 @@ def run_resume(
             temperature=temperature,
             parallel=parallel,
             llm_name=llm,
-            config_overrides=config_override or [],
+            config_overrides=config_override or None,
             quiet=(json_mode or quiet),
         )
 
