@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import os
 import sqlite3
+import sys
 from typing import Literal
 
 from revolver.core.exceptions import (
@@ -23,6 +24,8 @@ from revolver.infra import db
 from revolver.infra.gpu import GpuInfo, get_gpu_info
 from revolver.infra.ollama import OllamaClient
 from revolver.models.llm import (
+    EnsembleEntry,
+    EnsembleMember,
     LLMEntry,
     LLMStatus,
     LLMStatusReport,
@@ -575,3 +578,167 @@ def get_llm_status(
         gpu=gpu_dict,
         ollama_running=ollama_running,
     )
+
+
+# ── Ensemble operations ───────────────────────────────────────────────────
+
+
+def _build_ensemble_entry(
+    ensemble_row: dict[str, object],
+    member_rows: list[dict[str, object]],
+) -> EnsembleEntry:
+    """Construct an EnsembleEntry from raw DB rows.
+
+    Maps DB column names (``temperature_override``, ``max_tokens_override``)
+    to Pydantic field names (``temperature``, ``max_tokens``).
+    """
+    members = [
+        EnsembleMember(
+            llm_name=str(row["llm_name"]),
+            weight=float(row["weight"]),  # type: ignore[arg-type]
+            temperature=(
+                float(row["temperature_override"])  # type: ignore[arg-type]
+                if row["temperature_override"] is not None
+                else None
+            ),
+            max_tokens=(
+                int(row["max_tokens_override"])  # type: ignore[call-overload]
+                if row["max_tokens_override"] is not None
+                else None
+            ),
+        )
+        for row in member_rows
+    ]
+    return EnsembleEntry(
+        name=str(ensemble_row["name"]),
+        members=members,
+        created_at=datetime.fromisoformat(str(ensemble_row["created_at"])),
+    )
+
+
+def create_ensemble(name: str, conn: sqlite3.Connection) -> EnsembleEntry:
+    """Create a new empty ensemble in the global database.
+
+    Args:
+        name: Unique ensemble name.
+        conn: Global database connection.
+
+    Returns:
+        The created :class:`EnsembleEntry`.
+
+    Raises:
+        DuplicateNameError: If an ensemble with *name* already exists.
+    """
+    now = datetime.now(UTC)
+    db.insert_ensemble(conn, name, now)
+    return EnsembleEntry(name=name, members=[], created_at=now)
+
+
+def add_ensemble_member(
+    ensemble_name: str,
+    llm_name: str,
+    weight: float,
+    conn: sqlite3.Connection,
+    *,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> None:
+    """Add a member LLM to an ensemble.
+
+    Validates that the LLM exists in the registry. After adding, checks the
+    total weight sum and emits a warning to stderr if it deviates from 1.0.
+
+    Args:
+        ensemble_name: Name of the ensemble.
+        llm_name: Name of the registered LLM to add.
+        weight: Sampling weight for this member.
+        conn: Global database connection.
+        temperature: Optional per-member temperature override.
+        max_tokens: Optional per-member max_tokens override.
+
+    Raises:
+        RevolverError: If the ensemble or LLM is not found.
+        DuplicateNameError: If the LLM is already a member.
+    """
+    # Validate ensemble exists
+    ensemble_row = db.get_ensemble(conn, ensemble_name)
+    if ensemble_row is None:
+        raise RevolverError(f"Ensemble '{ensemble_name}' not found")
+
+    # Validate LLM exists in registry
+    llm_entry = db.get_llm(conn, llm_name)
+    if llm_entry is None:
+        raise RevolverError(f"LLM '{llm_name}' not found")
+
+    db.add_ensemble_member(
+        conn,
+        ensemble_name,
+        llm_name,
+        weight,
+        temperature_override=temperature,
+        max_tokens_override=max_tokens,
+    )
+
+    # Check weight sum and warn if not close to 1.0
+    members = db.get_ensemble_members(conn, ensemble_name)
+    total_weight = sum(float(m["weight"]) for m in members)  # type: ignore[arg-type, misc]
+    if abs(total_weight - 1.0) > 0.01:
+        print(
+            f"Warning: ensemble '{ensemble_name}' total weight is "
+            f"{total_weight:.2f} (expected ~1.0)",
+            file=sys.stderr,
+        )
+
+
+def remove_ensemble(name: str, conn: sqlite3.Connection) -> None:
+    """Remove an ensemble from the global database.
+
+    CASCADE deletes all associated members.
+
+    Args:
+        name: Ensemble name.
+        conn: Global database connection.
+
+    Raises:
+        RevolverError: If the ensemble is not found.
+    """
+    deleted = db.delete_ensemble(conn, name)
+    if deleted == 0:
+        raise RevolverError(f"Ensemble '{name}' not found")
+
+
+def list_ensembles(conn: sqlite3.Connection) -> list[EnsembleEntry]:
+    """List all ensembles with their members.
+
+    Args:
+        conn: Global database connection.
+
+    Returns:
+        A list of :class:`EnsembleEntry` instances sorted by name.
+    """
+    ensemble_rows = db.list_ensembles(conn)
+    result: list[EnsembleEntry] = []
+    for row in ensemble_rows:
+        member_rows = db.get_ensemble_members(conn, str(row["name"]))
+        result.append(_build_ensemble_entry(row, member_rows))
+    return result
+
+
+def get_ensemble_info(name: str, conn: sqlite3.Connection) -> EnsembleEntry:
+    """Get detailed information about an ensemble.
+
+    Args:
+        name: Ensemble name.
+        conn: Global database connection.
+
+    Returns:
+        The :class:`EnsembleEntry` with its members.
+
+    Raises:
+        RevolverError: If the ensemble is not found.
+    """
+    ensemble_row = db.get_ensemble(conn, name)
+    if ensemble_row is None:
+        raise RevolverError(f"Ensemble '{name}' not found")
+    member_rows = db.get_ensemble_members(conn, name)
+    return _build_ensemble_entry(ensemble_row, member_rows)
