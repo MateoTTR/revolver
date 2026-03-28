@@ -474,13 +474,13 @@ max_code_length: 50000
 
 ### CLI shortcut
 
-The `--rewrite-mode` flag on `run start` and `run resume` sets both keys
+The `--rewrite-mode` flag on `run` and `run resume` sets both keys
 at once:
 
 ```bash
-revolver run start --rewrite-mode
+revolver run --rewrite-mode
 # Equivalent to:
-revolver run start --config-override diff_based_evolution=false \
+revolver run --config-override diff_based_evolution=false \
                    --config-override max_code_length=50000
 ```
 
@@ -488,7 +488,7 @@ Config overrides always take precedence over `--rewrite-mode` defaults.
 For example, to use rewrite mode with a smaller code length limit:
 
 ```bash
-revolver run start --rewrite-mode --config-override max_code_length=30000
+revolver run --rewrite-mode --config-override max_code_length=30000
 # Uses diff_based_evolution=false and max_code_length=30000
 ```
 
@@ -529,7 +529,7 @@ For complex problems where you are unsure which algorithmic approach is best:
    [initial program guide](initial-program-structure.md#problemmd-as-key-lever)):
 
    ```bash
-   revolver run start --llm gemini-pro --rewrite-mode --iterations 50
+   revolver run --llm gemini-pro --rewrite-mode --iterations 50
    ```
 
 2. **Identify the best approach** from the evolved programs using
@@ -540,7 +540,7 @@ For complex problems where you are unsure which algorithmic approach is best:
    optimize parameters and details:
 
    ```bash
-   revolver run start --llm gemini-flash-lite --iterations 500
+   revolver run --llm gemini-flash-lite --iterations 500
    ```
 
 This two-phase workflow combines the creative exploration of full-rewrite
@@ -582,7 +582,7 @@ revolver llm ensemble add alphevo --llm flash-lite --weight 0.8
 revolver llm ensemble add alphevo --llm pro --weight 0.2 --temperature 0.5
 
 # Launch a run with the ensemble
-revolver run start --llm alphevo --iterations 100
+revolver run --llm alphevo --iterations 100
 ```
 
 ### Weight recommendations
@@ -657,7 +657,7 @@ There are two ways to combine cheap and expensive models:
   cross-pollination between model capabilities
 
 ```bash
-revolver run start --llm alphevo --iterations 500
+revolver run --llm alphevo --iterations 500
 ```
 
 **Sequential resume** (phased, separate runs):
@@ -668,7 +668,7 @@ revolver run start --llm alphevo --iterations 500
 
 ```bash
 # Phase 1: broad exploration with cheap model
-revolver run start --llm flash-lite --iterations 500
+revolver run --llm flash-lite --iterations 500
 
 # Phase 2: refine with expensive model, resuming from Phase 1
 revolver run resume --run <run-id> --llm pro --iterations 100

@@ -345,7 +345,7 @@ improved from 1.0 (baseline) to 1.037 (3.7% better than nearest-neighbor).
 ### What is problem.md?
 
 `problem.md` is a markdown file in your problem directory that describes the
-optimization problem to the LLM. When you run `revolver run start`, Revolver
+optimization problem to the LLM. When you run `revolver run`, Revolver
 injects the contents of `problem.md` into the system prompt sent to
 OpenEvolve. The LLM reads this description to understand *what* to optimize
 and *how* to approach it.

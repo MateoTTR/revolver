@@ -15,7 +15,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.9.0
+    ✓ revolver         0.11.0
     ✓ openevolve       0.2.0
 
   External tools:
@@ -198,6 +198,53 @@ $ revolver dataset list
  name          split  instance_count  storage
  train-small   train  50              reference
  eval-bench    eval   200             reference
+```
+
+---
+
+## Phase 3b — Ensemble Setup (Optional)
+
+Alice wants to try an AlphaEvolve-style multi-model ensemble combining a cheap model for broad exploration with an expensive model for targeted breakthroughs.
+
+```bash
+# Register a second remote LLM
+$ revolver llm add flash-lite --provider google --model gemini-2.5-flash-lite \
+    --api-key-env GEMINI_API_KEY --input-cost 0.075 --output-cost 0.30
+
+Done: LLM 'flash-lite' registered
+```
+
+```bash
+# Create a named ensemble
+$ revolver llm ensemble create flash-pro
+
+Ensemble "flash-pro" created (0 members)
+```
+
+```bash
+# Add members with sampling weights
+$ revolver llm ensemble add flash-pro --llm flash-lite --weight 0.8
+$ revolver llm ensemble add flash-pro --llm claude-opus --weight 0.2
+
+Added "flash-lite" to ensemble "flash-pro" (weight: 0.8)
+Added "claude-opus" to ensemble "flash-pro" (weight: 0.2)
+```
+
+```bash
+# Launch an ensemble run
+$ revolver run --llm flash-pro --version v1.0 --dataset train-small --alias ensemble-v1.0
+
+Run started: v1.0 + flash-pro (ensemble: 2 members) + train-small
+  Iteration 200/200 | Best score: 0.91 | Elapsed: 2h45m
+
+Run completed: run-20260310-190000
+  200 iterations in 2h45m
+  Solution: sol-20260310-190000 (rank #1, alias: ensemble-v1.0)
+  Best combined_score: 0.91
+  Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
+  Tokens: 2,100,000 prompt + 510,000 completion = 2,610,000 total
+  Estimated cost: $12.40 (based on ensemble pricing)
+  Stored in: .revolver/runs/run-20260310-190000/
 ```
 
 ---
