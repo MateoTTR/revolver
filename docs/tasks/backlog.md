@@ -323,6 +323,48 @@
 | 218 | Fix tuning guide: all examples use `database:` namespace | [x] | S9a — session 042, PR #143 |
 | 219 | L2 integration tests for Sprint 009a (11 new tests) | [x] | S9a — session 042, PR #143 |
 
+### Sprint 010 — Resume, Robustness & UX (v0.10.0)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 220 | `validate_oe_config()` — filter `initial_program`, `num_generations`, `timeout_per_instance`; deprecation notice for `num_generations` | [ ] | S10 — PR-A |
+| 221 | `infra.db.update_llm()` — add `model: str \| None` parameter, update SQL | [ ] | S10 — PR-B |
+| 222 | `core.llm.update_llm()` — add `model` parameter, propagate to db | [ ] | S10 — PR-B |
+| 223 | `cli.llm.llm_update` — add `--model TEXT` option | [ ] | S10 — PR-B |
+| 224 | `core.run.resume_run()` — add `llm_name` parameter, resolve new LLM from global DB | [ ] | S10 — PR-C |
+| 225 | `cli.run.run_resume` — add `--llm TEXT` option | [ ] | S10 — PR-C |
+| 226 | `core.run.resume_run()` — add `config_overrides` parameter, apply via `_parse_config_overrides()` | [ ] | S10 — PR-C |
+| 227 | `cli.run.run_resume` — add `--config-override TEXT` option (multi-value) | [ ] | S10 — PR-C |
+| 228 | `infra.openevolve.build_config()` — add `rewrite_mode: bool = False`, inject `diff_based_evolution=false` + `max_code_length=50000` | [ ] | S10 — PR-D |
+| 229 | `core.run.launch_run()` + `resume_run()` — add `rewrite_mode` parameter, pass to `build_config()` | [ ] | S10 — PR-D |
+| 230 | `cli.run.run_start` + `run_resume` — add `--rewrite-mode` flag | [ ] | S10 — PR-D |
+| 231 | `core.run.launch_run()` — after OE: `valid_iterations==0` → status `failed`; `<10%` → `completed_with_errors` | [ ] | S10 — PR-E |
+| 232 | `core.run.detect_zombie_runs()` — check PID alive, mark orphaned runs `interrupted` | [ ] | S10 — PR-F |
+| 233 | `cli.run.run_list` — auto-call `detect_zombie_runs()`, display cleanup warning | [ ] | S10 — PR-F |
+| 234 | `cli.run.run_cleanup` — new `run cleanup` command with `--force` | [ ] | S10 — PR-F |
+| 235 | `core.run.get_population()` + `cli.run.run_population` — new `run population <run_id>` command, parse OE `database.json` | [ ] | S10 — PR-G |
+| 236 | Update `docs/guides/tuning-oe-config.md` — full-rewrite mode section + Gemini model compatibility table | [ ] | S10 — PR-H |
+| 237 | Update `docs/guides/initial-program-structure.md` — problem.md enrichment section with POC evidence | [ ] | S10 — PR-H |
+| 238 | L2 integration tests for Sprint 010 (~24 new scenarios) | [ ] | S10 — PR-H |
+
+### Sprint 011 — Multi-Model Ensemble Support (v0.11.0)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 239 | DB migration v8: `ensembles` + `ensemble_members` tables (global DB); `llm_type` column on `runs` (project DB) | [ ] | S11 — PR-A |
+| 240 | `infra.db` helpers: ensemble CRUD (`insert_ensemble`, `get_ensemble`, `list_ensembles`, `delete_ensemble`, `add_ensemble_member`, `get_ensemble_members`) | [ ] | S11 — PR-A |
+| 241 | `models.llm` — new `EnsembleMember` and `EnsembleEntry` Pydantic models | [ ] | S11 — PR-A |
+| 242 | `core.llm` — `create_ensemble()`, `add_member()`, `remove_ensemble()`, `list_ensembles()`, `get_ensemble_info()` | [ ] | S11 — PR-B |
+| 243 | `cli.llm` — new `ensemble` sub-app: `create`, `add`, `list`, `info`, `remove` | [ ] | S11 — PR-B |
+| 244 | `core.llm.resolve_llm_or_ensemble()` — unified lookup returning `LLMEntry \| EnsembleEntry` | [ ] | S11 — PR-C |
+| 245 | `infra.openevolve.build_config()` — emit `llm.models` array when passed `EnsembleEntry` | [ ] | S11 — PR-C |
+| 246 | `core.run.launch_run()` + `resume_run()` — pass resolved `LLMEntry \| EnsembleEntry`; store `llm_type` in run record | [ ] | S11 — PR-C |
+| 247 | `cli.run` — `--llm` resolves via `resolve_llm_or_ensemble()`; `run info`/`run list` show ensemble indicator | [ ] | S11 — PR-C |
+| 248 | L2 integration tests for Sprint 011 (~16 new scenarios) | [ ] | S11 — PR-D |
+| 249 | Update `docs/guides/tuning-oe-config.md` — ensemble strategies section (AlphaEvolve pattern, weights, cost) | [ ] | S11 — PR-D |
+| 250 | (Carry-over) `run population` if not completed in Sprint 010 | [ ] | S11 — PR-D |
+| 251 | Documentation audit cascade: spec-reviewer → validation-reviewer → doc-reviewer. Update specs, DES-002, DES-005, ConOps, traceability matrix, README, user-story-e2e for ensemble feature. | [ ] | S11 — PR-E |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
