@@ -103,6 +103,40 @@ class StopResult(BaseModel):
     was_loaded: bool = True
 
 
+class EnsembleMember(BaseModel):
+    """A member of an LLM ensemble.
+
+    Attributes:
+        llm_name: Name of the registered LLM.
+        weight: Sampling weight for this member (default 1.0).
+        temperature: Optional per-member temperature override.
+        max_tokens: Optional per-member max_tokens override.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    llm_name: str
+    weight: float = 1.0
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+class EnsembleEntry(BaseModel):
+    """A named LLM ensemble stored in the global registry.
+
+    Attributes:
+        name: Unique ensemble name.
+        members: List of ensemble member configurations.
+        created_at: Timestamp of registration.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    members: list[EnsembleMember]
+    created_at: datetime
+
+
 class LLMStatusReport(BaseModel):
     """Aggregated status report for ``revolver llm status``.
 

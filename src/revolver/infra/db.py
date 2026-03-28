@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS runs (
                       CHECK (status IN ('running', 'completed',
                              'interrupted', 'failed', 'completed_with_errors')),
     valid_iterations  INTEGER,
+    llm_type          TEXT NOT NULL DEFAULT 'single',
+    llm_snapshot      TEXT,
     created_at        TEXT NOT NULL
 );
 
@@ -169,6 +171,21 @@ CREATE TABLE IF NOT EXISTS llms (
     timeout_s       INTEGER,
     temperature     REAL,
     registered_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ensembles (
+    name        TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ensemble_members (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ensemble_name       TEXT NOT NULL REFERENCES ensembles(name) ON DELETE CASCADE,
+    llm_name            TEXT NOT NULL,
+    weight              REAL NOT NULL DEFAULT 1.0,
+    temperature_override REAL,
+    max_tokens_override INTEGER,
+    UNIQUE(ensemble_name, llm_name)
 );
 """
 
@@ -435,6 +452,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 7:
         _migrate_v6_to_v7(conn)
 
+    # Migration v8: Add ensemble tables (global) and llm_type/llm_snapshot columns (project).
+    if current < 8:
+        _migrate_v7_to_v8(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -493,6 +514,47 @@ CREATE INDEX IF NOT EXISTS idx_runs_resumed ON runs(resumed_from);
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
         (7, now),
+    )
+    conn.commit()
+
+
+def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
+    """Migration v7->v8: Add ensemble tables (global) and llm_type/llm_snapshot columns (project).
+
+    Global DB: creates ``ensembles`` and ``ensemble_members`` tables.
+    Project DB: adds ``llm_type`` and ``llm_snapshot`` columns to the ``runs`` table.
+    """
+    # Global DB: create ensemble tables (idempotent via IF NOT EXISTS).
+    conn.executescript("""\
+CREATE TABLE IF NOT EXISTS ensembles (
+    name        TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ensemble_members (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ensemble_name       TEXT NOT NULL REFERENCES ensembles(name) ON DELETE CASCADE,
+    llm_name            TEXT NOT NULL,
+    weight              REAL NOT NULL DEFAULT 1.0,
+    temperature_override REAL,
+    max_tokens_override INTEGER,
+    UNIQUE(ensemble_name, llm_name)
+);
+""")
+
+    # Project DB: add llm_type and llm_snapshot columns to runs table.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE runs ADD COLUMN llm_type TEXT NOT NULL DEFAULT 'single'")
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE runs ADD COLUMN llm_snapshot TEXT")
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (8, now),
     )
     conn.commit()
 
@@ -896,6 +958,155 @@ def update_llm_stats(
     """
     # Placeholder: schema extension for stats columns is planned.
     _ = conn, name, vram_mib, throughput_tps
+
+
+# ── Ensemble CRUD operations ──────────────────────────────────────────────
+
+
+def insert_ensemble(
+    conn: sqlite3.Connection,
+    name: str,
+    created_at: datetime,
+) -> None:
+    """Insert a new ensemble into the global database.
+
+    Args:
+        conn: A connection to the global database.
+        name: Unique ensemble name.
+        created_at: Timestamp of creation.
+
+    Raises:
+        DuplicateNameError: If an ensemble with the same name already exists.
+    """
+    try:
+        conn.execute(
+            "INSERT INTO ensembles (name, created_at) VALUES (?, ?)",
+            (name, created_at.isoformat()),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(f"An ensemble named '{name}' already exists") from exc
+
+
+def get_ensemble(conn: sqlite3.Connection, name: str) -> dict[str, object] | None:
+    """Retrieve an ensemble by name.
+
+    Args:
+        conn: A connection to the global database.
+        name: The ensemble name to look up.
+
+    Returns:
+        A dict with ``name`` and ``created_at`` keys, or ``None`` if not found.
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(
+        "SELECT name, created_at FROM ensembles WHERE name = ?",
+        (name,),
+    )
+    row = cursor.fetchone()
+    conn.row_factory = None
+    if row is None:
+        return None
+    return dict(row)
+
+
+def list_ensembles(conn: sqlite3.Connection) -> list[dict[str, object]]:
+    """List all ensembles ordered by name.
+
+    Args:
+        conn: A connection to the global database.
+
+    Returns:
+        A list of dicts with ``name`` and ``created_at`` keys.
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute("SELECT name, created_at FROM ensembles ORDER BY name")
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.row_factory = None
+    return rows
+
+
+def delete_ensemble(conn: sqlite3.Connection, name: str) -> int:
+    """Delete an ensemble by name.
+
+    CASCADE deletes all associated ensemble members.
+
+    Args:
+        conn: A connection to the global database.
+        name: The ensemble name to delete.
+
+    Returns:
+        The number of rows deleted (0 if not found, 1 if deleted).
+    """
+    cursor = conn.execute("DELETE FROM ensembles WHERE name = ?", (name,))
+    conn.commit()
+    return cursor.rowcount
+
+
+def add_ensemble_member(
+    conn: sqlite3.Connection,
+    ensemble_name: str,
+    llm_name: str,
+    weight: float,
+    temperature_override: float | None = None,
+    max_tokens_override: int | None = None,
+) -> None:
+    """Add a member LLM to an ensemble.
+
+    Args:
+        conn: A connection to the global database.
+        ensemble_name: Name of the parent ensemble.
+        llm_name: Name of the LLM to add.
+        weight: Sampling weight for this member.
+        temperature_override: Optional per-member temperature override.
+        max_tokens_override: Optional per-member max_tokens override.
+
+    Raises:
+        DuplicateNameError: If this LLM is already a member of the ensemble.
+    """
+    try:
+        conn.execute(
+            """\
+            INSERT INTO ensemble_members
+                (ensemble_name, llm_name, weight, temperature_override, max_tokens_override)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ensemble_name, llm_name, weight, temperature_override, max_tokens_override),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise DuplicateNameError(
+            f"LLM '{llm_name}' is already a member of ensemble '{ensemble_name}'"
+        ) from exc
+
+
+def get_ensemble_members(
+    conn: sqlite3.Connection,
+    ensemble_name: str,
+) -> list[dict[str, object]]:
+    """Retrieve all members of an ensemble.
+
+    Args:
+        conn: A connection to the global database.
+        ensemble_name: Name of the ensemble.
+
+    Returns:
+        A list of dicts with ``llm_name``, ``weight``, ``temperature_override``,
+        and ``max_tokens_override`` keys, ordered by ``llm_name``.
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(
+        """\
+        SELECT llm_name, weight, temperature_override, max_tokens_override
+        FROM ensemble_members
+        WHERE ensemble_name = ?
+        ORDER BY llm_name
+        """,
+        (ensemble_name,),
+    )
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.row_factory = None
+    return rows
 
 
 # ── Dataset CRUD operations ────────────────────────────────────────────────

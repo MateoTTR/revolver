@@ -656,7 +656,7 @@ class TestSchemaMigrationV3:
         row = cursor.fetchone()
         assert row is not None
         assert row[0] == CURRENT_SCHEMA_VERSION
-        assert CURRENT_SCHEMA_VERSION == 7
+        assert CURRENT_SCHEMA_VERSION == 8
 
     @pytest.mark.unit
     def test_migration_v3_upgrades_existing_v2_db(self, tmp_path: Path) -> None:

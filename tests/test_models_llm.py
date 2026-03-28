@@ -8,6 +8,8 @@ from pydantic import ValidationError
 import pytest
 
 from revolver.models.llm import (
+    EnsembleEntry,
+    EnsembleMember,
     LLMEntry,
     LLMStatus,
     LLMStatusReport,
@@ -237,3 +239,119 @@ def test_llm_status_report_model_dump() -> None:
     assert len(dumped["llms"]) == 1
     assert dumped["llms"][0]["name"] == "x"
     assert dumped["ollama_running"] is False
+
+
+# ── EnsembleMember ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_ensemble_member_valid() -> None:
+    """EnsembleMember validates with all fields provided."""
+    member = EnsembleMember(
+        llm_name="flash-lite",
+        weight=0.8,
+        temperature=0.5,
+        max_tokens=4096,
+    )
+    assert member.llm_name == "flash-lite"
+    assert member.weight == 0.8
+    assert member.temperature == 0.5
+    assert member.max_tokens == 4096
+
+
+@pytest.mark.unit
+def test_ensemble_member_defaults() -> None:
+    """EnsembleMember defaults are correct."""
+    member = EnsembleMember(llm_name="pro")
+    assert member.weight == 1.0
+    assert member.temperature is None
+    assert member.max_tokens is None
+
+
+@pytest.mark.unit
+def test_ensemble_member_frozen() -> None:
+    """EnsembleMember is immutable."""
+    member = EnsembleMember(llm_name="pro")
+    with pytest.raises(ValidationError):
+        member.weight = 0.5  # type: ignore[misc]
+
+
+@pytest.mark.unit
+def test_ensemble_member_model_dump() -> None:
+    """EnsembleMember.model_dump() produces correct dict."""
+    member = EnsembleMember(llm_name="flash", weight=0.6, temperature=0.3)
+    dumped = member.model_dump()
+    assert dumped["llm_name"] == "flash"
+    assert dumped["weight"] == 0.6
+    assert dumped["temperature"] == 0.3
+    assert dumped["max_tokens"] is None
+
+
+# ── EnsembleEntry ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_ensemble_entry_valid() -> None:
+    """EnsembleEntry validates with all fields."""
+    ts = datetime(2026, 3, 28, 10, 0, 0, tzinfo=UTC)
+    entry = EnsembleEntry(
+        name="alphevo",
+        members=[
+            EnsembleMember(llm_name="flash-lite", weight=0.8),
+            EnsembleMember(llm_name="pro", weight=0.2, temperature=0.5),
+        ],
+        created_at=ts,
+    )
+    assert entry.name == "alphevo"
+    assert len(entry.members) == 2
+    assert entry.members[0].llm_name == "flash-lite"
+    assert entry.members[1].temperature == 0.5
+
+
+@pytest.mark.unit
+def test_ensemble_entry_empty_members() -> None:
+    """EnsembleEntry can have an empty members list."""
+    ts = datetime(2026, 3, 28, 10, 0, 0, tzinfo=UTC)
+    entry = EnsembleEntry(name="empty", members=[], created_at=ts)
+    assert entry.members == []
+
+
+@pytest.mark.unit
+def test_ensemble_entry_frozen() -> None:
+    """EnsembleEntry is immutable."""
+    ts = datetime(2026, 3, 28, 10, 0, 0, tzinfo=UTC)
+    entry = EnsembleEntry(name="test", members=[], created_at=ts)
+    with pytest.raises(ValidationError):
+        entry.name = "changed"  # type: ignore[misc]
+
+
+@pytest.mark.unit
+def test_ensemble_entry_model_dump() -> None:
+    """EnsembleEntry.model_dump() serializes cleanly."""
+    ts = datetime(2026, 3, 28, 10, 0, 0, tzinfo=UTC)
+    entry = EnsembleEntry(
+        name="alphevo",
+        members=[EnsembleMember(llm_name="flash", weight=1.0)],
+        created_at=ts,
+    )
+    dumped = entry.model_dump()
+    assert dumped["name"] == "alphevo"
+    assert len(dumped["members"]) == 1
+    assert dumped["members"][0]["llm_name"] == "flash"
+    assert dumped["created_at"] == ts
+
+
+@pytest.mark.unit
+def test_ensemble_entry_from_dict() -> None:
+    """EnsembleEntry.model_validate() works from a raw dict."""
+    data = {
+        "name": "test-ens",
+        "members": [
+            {"llm_name": "a", "weight": 0.5},
+            {"llm_name": "b", "weight": 0.5},
+        ],
+        "created_at": "2026-03-28T10:00:00Z",
+    }
+    entry = EnsembleEntry.model_validate(data)
+    assert entry.name == "test-ens"
+    assert len(entry.members) == 2
