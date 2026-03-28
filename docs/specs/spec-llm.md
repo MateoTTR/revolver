@@ -230,6 +230,124 @@ LLM "claude-opus" updated (max_tokens: 4096, temperature: 0.7)
 
 **Exit codes**: 0 success, 1 if name not found, 1 if no update flags provided
 
+### 2.8 `revolver llm ensemble create <name>`
+
+Create a named LLM ensemble in the global registry. An ensemble groups multiple LLMs with weights for multi-model evolution runs.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Unique ensemble name (e.g., `multi-model-v1`) |
+
+**Output** (human):
+```
+Ensemble "multi-model-v1" created (0 members)
+```
+
+**Exit codes**: 0 success, 1 if name already exists
+
+### 2.9 `revolver llm ensemble add <name> <llm> --weight <w>`
+
+Add a member LLM to an existing ensemble with a sampling weight.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Ensemble name |
+| `llm` | Yes | Registered LLM name to add as member |
+
+**Options**:
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `--weight <w>` | float | Yes | Sampling weight for this member (0.0–1.0) |
+| `--temperature <float>` | float | No | Per-member temperature override (0.0–2.0) |
+| `--max-tokens <n>` | int | No | Per-member max tokens override |
+
+**Behavior**:
+1. Validate the ensemble exists
+2. Validate the LLM is registered
+3. Add the member with the given weight
+4. Warn if total weights across all members do not sum to approximately 1.0
+
+**Output** (human):
+```
+Added "claude-opus" to ensemble "multi-model-v1" (weight: 0.7)
+Warning: Total weights sum to 0.7 (expected ~1.0). Add more members or adjust weights.
+```
+
+**Exit codes**: 0 success, 1 if ensemble or LLM not found, 1 if duplicate member
+
+### 2.10 `revolver llm ensemble list`
+
+List all registered ensembles.
+
+**Output** (human):
+```
+Name              Members  Created
+multi-model-v1    2        2026-03-25
+coding-mix        3        2026-03-26
+```
+
+**Exit codes**: 0 always
+
+### 2.11 `revolver llm ensemble info <name>`
+
+Show detailed information about an ensemble including its members and weights.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Ensemble name |
+
+**Output** (human):
+```
+Ensemble: multi-model-v1
+  Created: 2026-03-25
+
+Members:
+  LLM              Weight  Temperature  Max Tokens
+  claude-opus      0.7     —            —
+  gemini-pro       0.3     0.9          4096
+
+Total weight: 1.0
+```
+
+**Output** (JSON):
+```json
+{
+  "name": "multi-model-v1",
+  "created_at": "2026-03-25T10:00:00Z",
+  "members": [
+    {"llm_name": "claude-opus", "weight": 0.7, "temperature": null, "max_tokens": null},
+    {"llm_name": "gemini-pro", "weight": 0.3, "temperature": 0.9, "max_tokens": 4096}
+  ],
+  "total_weight": 1.0
+}
+```
+
+**Exit codes**: 0 success, 1 if not found
+
+### 2.12 `revolver llm ensemble remove <name>`
+
+Remove an ensemble from the global registry. This cascade-deletes all ensemble members.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Ensemble to remove |
+
+**Output** (human):
+```
+Ensemble "multi-model-v1" removed (2 members deleted)
+```
+
+**Exit codes**: 0 success, 1 if not found
+
 ---
 
 ## 3. Functional Requirements
@@ -255,6 +373,12 @@ LLM "claude-opus" updated (max_tokens: 4096, temperature: 0.7)
 | FR-LLM-017 | MUST | API keys are never stored in Revolver files — only the env var name is stored | NFR-050 |
 | FR-LLM-018 | SHOULD | Support optional `--input-cost` and `--output-cost` pricing (USD per Mtok) for cost estimation in `revolver run` | POC #13 |
 | FR-LLM-019 | SHOULD | LLM temperature stored in registry and injected into OpenEvolve config when present | — |
+| FR-LLM-020 | MUST | Create a named ensemble in the global registry with a unique name | — |
+| FR-LLM-021 | MUST | Add a member LLM to an ensemble with a sampling weight (and optional per-member temperature/max_tokens overrides) | — |
+| FR-LLM-022 | MUST | List all registered ensembles with member counts | — |
+| FR-LLM-023 | MUST | Show ensemble details including members, weights, and per-member overrides | — |
+| FR-LLM-024 | MUST | Remove an ensemble with cascade deletion of its members | — |
+| FR-LLM-025 | SHOULD | Warn if member weights do not sum to approximately 1.0 when adding a member | — |
 
 ---
 
@@ -295,6 +419,27 @@ Using SQLite (rather than individual YAML files) ensures atomic writes and preve
 | `timeout_s` | Optional | Optional |
 | `temperature` | Optional (0.0–2.0) | Optional (0.0–2.0) |
 | `registered_at` | ISO 8601 | ISO 8601 |
+
+### 5.1 Ensemble Storage
+
+Ensembles are stored in two additional tables in the **global SQLite database** (`~/.revolver/revolver.db`). See [DES-001 §4.2–4.3](../architecture/design/DES-001-sqlite-data-model.md) for the schema definition.
+
+**`ensembles` table** — one row per ensemble:
+
+| Field | Description |
+|---|---|
+| `name` | Unique ensemble identifier (PK) |
+| `created_at` | ISO 8601 timestamp |
+
+**`ensemble_members` table** — one row per member LLM:
+
+| Field | Description |
+|---|---|
+| `ensemble_name` | FK to `ensembles(name)` with CASCADE delete |
+| `llm_name` | FK to `llms(name)` |
+| `weight` | Sampling weight (0.0–1.0) |
+| `temperature` | Per-member temperature override (optional) |
+| `max_tokens` | Per-member max tokens override (optional) |
 
 **Runtime-only fields** (not persisted in the `llms` table, queried live):
 - VRAM usage → from Ollama `GET /api/ps`

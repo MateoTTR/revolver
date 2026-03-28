@@ -265,6 +265,8 @@ An **LLM** in Revolver is a registered model available for use in OpenEvolve run
 - Model parameters (context window, etc.)
 - Status (downloaded, running, stopped — for local models)
 
+**Ensembles**: Multiple LLMs can be grouped into a named **ensemble** with sampling weights. During an evolution run with an ensemble, OpenEvolve uses multiple models for code generation, allowing diversity in LLM suggestions and leveraging the strengths of different models. Each member LLM has a weight controlling its sampling probability. Ensembles are managed via `revolver llm ensemble {create,add,list,info,remove}`.
+
 ---
 
 ## 5. User Workflows
@@ -293,6 +295,14 @@ revolver llm start codestral-local
 
 # Check status
 revolver llm status
+
+# Create an ensemble of multiple LLMs
+revolver llm ensemble create multi-model-v1
+revolver llm ensemble add multi-model-v1 claude-opus --weight 0.7
+revolver llm ensemble add multi-model-v1 gemini-pro --weight 0.3
+
+# Use ensemble in a run
+revolver run --version v1.0 --llm multi-model-v1 --dataset train-small
 ```
 
 ### 5.2 Workflow 2 — Create a Project and Define a Problem
@@ -638,6 +648,7 @@ bench-20260310-170000,sol-20260310-150000,gemma-small-v1.1,run-20260310-150000,s
 - Automatic rank-1 solution creation, on-demand extraction for other ranks
 - SQLite for metrics + YAML for configs
 - Example problems and evaluators demonstrating the instance injection pattern (Python + non-Python examples)
+- Multi-model ensembles: group LLMs with sampling weights for diverse evolution runs
 - Dataset registration by reference (hash-only) with optional `--snapshot` for full copy
 
 ### Out of Scope (V1)

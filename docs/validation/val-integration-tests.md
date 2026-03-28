@@ -13,7 +13,7 @@ Integration tests exercise each CLI command end-to-end through Typer's `CliRunne
 
 Each `revolver <command> <subcommand>` gets at least one integration test validating the happy path and key error cases.
 
-**28 commands** across 8 command groups + 2 top-level commands (`doctor`, `setup`).
+**33 commands** across 8 command groups + 2 top-level commands (`doctor`, `setup`).
 
 ### L2-OE: OpenEvolve Contract Tests
 
@@ -51,6 +51,34 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 | `llm stop` | Mock Ollama unload | Success message | FR-LLM-007 |
 | `llm add --temperature 0.7` | Temperature stored in DB | DB entry includes temperature=0.7 | FR-LLM-019 |
 | `llm update --temperature 1.0` | Temperature updated in DB | DB entry updated to temperature=1.0 | FR-LLM-019 |
+
+### 2.2b `revolver llm ensemble`
+
+| Command | Scenario | Validates | FRs |
+|---|---|---|---|
+| `llm ensemble create` | Create named ensemble | DB entry created, 0 members | FR-LLM-020 |
+| `llm ensemble add` | Add registered LLM with weight | Member row created, weight stored | FR-LLM-021 |
+| `llm ensemble add` | Add non-existent LLM | Exit code 1, error message | FR-LLM-021 |
+| `llm ensemble list` | After 2 creates | Both listed with member counts | FR-LLM-022 |
+| `llm ensemble info` | Existing ensemble with 2 members | Members, weights, per-member overrides displayed | FR-LLM-023 |
+| `llm ensemble remove` | Remove existing ensemble | DB entry and members cascade-deleted | FR-LLM-024 |
+| `llm ensemble remove` | Remove non-existent ensemble | Exit code 1 | FR-LLM-024 |
+
+### 2.2c Ensemble `build_config()` integration
+
+| Command | Scenario | Validates | FRs |
+|---|---|---|---|
+| `run --dry-run --llm <ensemble>` | Ensemble resolves to `llm.models` array | OE config contains models array with correct fields | FR-RUN-046 |
+| `run --dry-run --llm <ensemble>` | Per-member temperature override | OE config member has overridden temperature | FR-RUN-046 |
+
+### 2.2d Run with ensemble
+
+| Command | Scenario | Validates | FRs |
+|---|---|---|---|
+| `run --llm <ensemble>` | Full run with mocked OE | Run record stores `llm_type=ensemble` and `llm_snapshot` JSON | FR-RUN-044, 045 |
+| `run info` | Ensemble run | Displays ensemble name and member models | FR-RUN-044 |
+| `run resume --llm <ensemble>` | Override LLM on resume | New run uses ensemble config | FR-RUN-046 |
+| `run` | Single LLM (no regression) | Run record stores `llm_type=single` and `llm_snapshot` JSON | FR-RUN-044, 045 |
 
 ### 2.3 `revolver problem`
 

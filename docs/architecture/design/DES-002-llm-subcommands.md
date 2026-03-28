@@ -212,6 +212,100 @@ Infra (infra/ollama.py)
 
 **Ollama endpoints**: `GET /`, `GET /api/ps`, `POST /api/chat`, `DELETE /api/delete`
 
+### 2.7 `revolver llm ensemble create <name>`
+
+Creates an empty ensemble in the global DB. No Ollama interaction.
+
+```
+CLI (cli/llm.py) → ensemble_app
+  │ Parse: name
+  ▼
+Core (core/llm.py) → create_ensemble(name, conn)
+  │ 1. Check name uniqueness in DB         ──► Infra: db.insert_ensemble(name)
+  │ 2. Return EnsembleEntry
+  ▼
+Infra (infra/db.py)
+  INSERT INTO ensembles (name, created_at) VALUES (?, ?)
+```
+
+**Ollama endpoints**: None (DB-only command)
+
+### 2.8 `revolver llm ensemble add <name> <llm> --weight <w>`
+
+Adds a member LLM to an existing ensemble.
+
+```
+CLI (cli/llm.py) → ensemble_app
+  │ Parse: name, llm, --weight, --temperature, --max-tokens
+  ▼
+Core (core/llm.py) → add_ensemble_member(ensemble_name, llm_name, weight, conn, ...)
+  │ 1. Verify ensemble exists               ──► Infra: db.get_ensemble(name)
+  │ 2. Verify LLM is registered             ──► Infra: db.get_llm(llm_name)
+  │ 3. Insert member row                    ──► Infra: db.insert_ensemble_member(...)
+  │ 4. Check weight sum, warn if != ~1.0    ──► Infra: db.get_ensemble_members(name)
+  ▼
+Infra (infra/db.py)
+  INSERT INTO ensemble_members (ensemble_name, llm_name, weight, temperature, max_tokens) VALUES (?, ?, ?, ?, ?)
+```
+
+**Ollama endpoints**: None (DB-only command)
+
+### 2.9 `revolver llm ensemble list`
+
+Lists all registered ensembles. Pure database query.
+
+```
+CLI (cli/llm.py) → ensemble_app
+  │ Parse: --json
+  ▼
+Core (core/llm.py) → list_ensembles(conn)
+  │ 1. Query all ensembles                  ──► Infra: db.list_ensembles()
+  │ 2. For each: query member count         ──► Infra: db.get_ensemble_members(name)
+  │ 3. Return list of EnsembleEntry
+  ▼
+Infra (infra/db.py)
+  SELECT name, created_at FROM ensembles ORDER BY name;
+```
+
+**Ollama endpoints**: None (DB-only command)
+
+### 2.10 `revolver llm ensemble info <name>`
+
+Shows detailed ensemble information including members, weights, and per-member overrides.
+
+```
+CLI (cli/llm.py) → ensemble_app
+  │ Parse: name, --json
+  ▼
+Core (core/llm.py) → get_ensemble_info(name, conn)
+  │ 1. Query ensemble                       ──► Infra: db.get_ensemble(name)
+  │ 2. Query members with details           ──► Infra: db.get_ensemble_members(name)
+  │ 3. Return EnsembleEntry (with members)
+  ▼
+Infra (infra/db.py)
+  SELECT * FROM ensemble_members WHERE ensemble_name = ? ORDER BY llm_name;
+```
+
+**Ollama endpoints**: None (DB-only command)
+
+### 2.11 `revolver llm ensemble remove <name>`
+
+Removes an ensemble and cascade-deletes all members.
+
+```
+CLI (cli/llm.py) → ensemble_app
+  │ Parse: name
+  ▼
+Core (core/llm.py) → remove_ensemble(name, conn)
+  │ 1. Verify ensemble exists               ──► Infra: db.get_ensemble(name)
+  │ 2. Delete ensemble (CASCADE members)    ──► Infra: db.delete_ensemble(name)
+  ▼
+Infra (infra/db.py)
+  DELETE FROM ensembles WHERE name = ?;
+```
+
+**Ollama endpoints**: None (DB-only command)
+
 ---
 
 ## 3. Infra Layer: `ollama.py` Client Interface
@@ -363,6 +457,30 @@ def list_llms() -> list[LLMEntry]:
 
 def get_llm_status(loaded_only: bool = False) -> LLMStatusReport:
     """Get full status of all LLMs, cross-referenced with Ollama runtime."""
+
+# --- Ensemble Management ---
+def create_ensemble(name: str, conn: sqlite3.Connection) -> EnsembleEntry:
+    """Create a new empty ensemble in the global database."""
+
+def add_ensemble_member(
+    ensemble_name: str,
+    llm_name: str,
+    weight: float,
+    conn: sqlite3.Connection,
+    *,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> None:
+    """Add a member LLM to an ensemble with a sampling weight."""
+
+def list_ensembles(conn: sqlite3.Connection) -> list[EnsembleEntry]:
+    """List all ensembles with their members."""
+
+def get_ensemble_info(name: str, conn: sqlite3.Connection) -> EnsembleEntry:
+    """Get detailed information about an ensemble."""
+
+def remove_ensemble(name: str, conn: sqlite3.Connection) -> None:
+    """Remove an ensemble. CASCADE deletes all members."""
 ```
 
 ---
@@ -422,6 +540,44 @@ def update(
 ): ...
 ```
 
+### 6.2 Ensemble CLI Commands
+
+```python
+ensemble_app = typer.Typer(cls=GlobalOptionGroup, help="LLM ensemble management.")
+llm_app.add_typer(ensemble_app, name="ensemble")
+
+@ensemble_app.command("create")
+def ensemble_create(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Unique name for the ensemble.")],
+): ...
+
+@ensemble_app.command("add")
+def ensemble_add(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the ensemble.")],
+    llm: Annotated[str, typer.Argument(help="Registered LLM name to add.")],
+    weight: Annotated[float, typer.Option("--weight", help="Sampling weight (0.0-1.0)")],
+    temperature: Annotated[float | None, typer.Option("--temperature", help="Per-member temperature")] = None,
+    max_tokens: Annotated[int | None, typer.Option("--max-tokens", help="Per-member max tokens")] = None,
+): ...
+
+@ensemble_app.command("list")
+def ensemble_list(ctx: typer.Context): ...
+
+@ensemble_app.command("info")
+def ensemble_info(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the ensemble.")],
+): ...
+
+@ensemble_app.command("remove")
+def ensemble_remove(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Name of the ensemble to remove.")],
+): ...
+```
+
 ---
 
 ## 7. Summary: Endpoint Usage Matrix
@@ -435,8 +591,15 @@ def update(
 | `llm status` | **health** | — | — | — | — | **loaded?** | — |
 | `llm list` | — | — | — | — | — | — | — |
 | `llm remove` | health | — | — | — | **delete** | loaded? | unload |
+| `llm ensemble create` | — | — | — | — | — | — | — |
+| `llm ensemble add` | — | — | — | — | — | — | — |
+| `llm ensemble list` | — | — | — | — | — | — | — |
+| `llm ensemble info` | — | — | — | — | — | — | — |
+| `llm ensemble remove` | — | — | — | — | — | — | — |
 
 **Bold** = always called. Normal = conditionally called.
+
+**Note**: All ensemble commands are DB-only operations — they do not interact with Ollama.
 
 ---
 

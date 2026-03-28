@@ -26,6 +26,7 @@ revolver doctor                        # Verify environment dependencies
 revolver setup                         # Install missing Python dependencies
 revolver llm add/update/start/stop/remove  # Register and manage LLMs (local Ollama or remote API)
 revolver llm list/status               # Monitor registered LLMs and GPU usage
+revolver llm ensemble create/add/list/info/remove  # Create and manage multi-model ensembles
 revolver problem test                  # Validate evaluator against instances
 revolver problem version create/list/delete  # Create, list and delete immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
@@ -164,7 +165,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (920+ tests, ~15s)
+# Run tests (1050+ tests, ~15s)
 python -m pytest tests/
 
 # Lint
@@ -196,6 +197,9 @@ mypy
 | Sprint 008 | Reliability & lifecycle management | v0.8.0 | Done |
 | Sprint 008a | Scriptability & UX polish | v0.8.1 | Done |
 | Sprint 009 | Solution UX + Config fluide + Run robustness | v0.9.0 | Done |
+| Sprint 009a | Bugfix delta: Resume, Config validation, UX polish | v0.9.1 | Done |
+| Sprint 010 | Resume, Robustness & UX | v0.10.0 | Done |
+| Sprint 011 | Multi-Model Ensemble Support | v0.11.0 | In Progress |
 
 ## Documentation
 
