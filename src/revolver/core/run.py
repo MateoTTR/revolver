@@ -558,6 +558,8 @@ def launch_run(
         ensemble: EnsembleEntry | None = None
         if isinstance(llm_or_ensemble, EnsembleEntry):
             ensemble = llm_or_ensemble
+            if not ensemble.members:
+                raise RevolverError(f"Ensemble '{config.llm_name}' has no members.")
             # Use the first member's LLM as the "primary" for shared config
             first_member_llm = get_llm(global_conn, ensemble.members[0].llm_name)
             if first_member_llm is None:
@@ -1200,6 +1202,8 @@ def resume_run(
         ensemble: EnsembleEntry | None = None
         if isinstance(llm_or_ensemble, EnsembleEntry):
             ensemble = llm_or_ensemble
+            if not ensemble.members:
+                raise RevolverError(f"Ensemble '{effective_llm_name}' has no members.")
             first_member_llm = get_llm(global_conn, ensemble.members[0].llm_name)
             if first_member_llm is None:
                 raise RevolverError(
