@@ -352,7 +352,7 @@ def build_config(
         parallel: CLI ``--parallel`` override for ``evaluator.parallel_evaluations``
             (optional).
         rewrite_mode: Full-rewrite mode shortcut (optional). When ``True``, sets
-            ``diff_based_evolution=false`` and ``llm.max_code_length=50000``.
+            ``diff_based_evolution=false`` and ``max_code_length=50000``.
             Overridable by ``--config-override`` (step 5).
 
     Returns:
@@ -453,9 +453,7 @@ def build_config(
     # 4b. Rewrite mode (full-rewrite shortcut)
     if rewrite_mode:
         config["diff_based_evolution"] = False
-        config.setdefault("llm", {})
-        if isinstance(config.get("llm"), dict):
-            config["llm"]["max_code_length"] = 50000
+        config["max_code_length"] = 50000
 
     # 5. Config overrides (key=value pairs, dotted keys supported)
     if config_overrides:

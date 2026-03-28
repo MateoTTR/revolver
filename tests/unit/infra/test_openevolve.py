@@ -518,7 +518,7 @@ class TestBuildConfig:
     # ── S10-09: --rewrite-mode flag ───────────────────────────────────────
 
     def test_build_config_rewrite_mode(self) -> None:
-        """build_config(rewrite_mode=True) sets diff_based_evolution and max_code_length (S10-09)."""
+        """rewrite_mode=True sets diff_based_evolution and max_code_length."""
         llm = _make_llm()
         result = build_config(
             problem_config=None,
@@ -526,7 +526,7 @@ class TestBuildConfig:
             rewrite_mode=True,
         )
         assert result["diff_based_evolution"] is False
-        assert result["llm"]["max_code_length"] == 50000
+        assert result["max_code_length"] == 50000
 
     def test_build_config_rewrite_mode_override_wins(self) -> None:
         """Explicit --config-override max_code_length wins over --rewrite-mode (S10-09)."""
@@ -535,10 +535,10 @@ class TestBuildConfig:
             problem_config=None,
             llm=llm,
             rewrite_mode=True,
-            config_overrides=["llm.max_code_length=30000"],
+            config_overrides=["max_code_length=30000"],
         )
         # Config override (step 5) should win over rewrite_mode (step 4b)
-        assert result["llm"]["max_code_length"] == 30000
+        assert result["max_code_length"] == 30000
         # diff_based_evolution is still set by rewrite_mode (no override for it)
         assert result["diff_based_evolution"] is False
 
@@ -551,7 +551,7 @@ class TestBuildConfig:
             rewrite_mode=False,
         )
         assert "diff_based_evolution" not in result
-        assert "max_code_length" not in result.get("llm", {})
+        assert "max_code_length" not in result
 
     def test_build_config_rewrite_mode_default_is_false(self) -> None:
         """build_config() default rewrite_mode=False does not inject rewrite settings."""
@@ -561,7 +561,7 @@ class TestBuildConfig:
             llm=llm,
         )
         assert "diff_based_evolution" not in result
-        assert "max_code_length" not in result.get("llm", {})
+        assert "max_code_length" not in result
 
     def test_build_config_rewrite_mode_with_existing_llm_section(self, tmp_path: Path) -> None:
         """rewrite_mode merges into existing llm section without clobbering (S10-09)."""
@@ -574,7 +574,7 @@ class TestBuildConfig:
             llm=llm,
             rewrite_mode=True,
         )
-        assert result["llm"]["max_code_length"] == 50000
+        assert result["max_code_length"] == 50000
         # Existing LLM config should be preserved
         assert "primary_model" in result["llm"]
 

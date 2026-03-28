@@ -1071,7 +1071,7 @@ def resume_run(
         llm_name: Override LLM for the resumed run (must be registered).
         config_overrides: OpenEvolve config overrides (key=value strings).
         rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
-            ``diff_based_evolution=false`` and ``llm.max_code_length=50000``.
+            ``diff_based_evolution=false`` and ``max_code_length=50000``.
         project_root: Explicit project root, or ``None`` to auto-detect.
         quiet: Suppress informational stderr messages (e.g. in --quiet/--json mode).
 

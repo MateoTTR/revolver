@@ -55,7 +55,7 @@ class RunConfig(BaseModel):
         temperature: Sampling temperature for LLM (overrides LLM registry value).
         parallel: Number of parallel evaluations for OpenEvolve.
         rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
-            ``diff_based_evolution=false`` and ``llm.max_code_length=50000``.
+            ``diff_based_evolution=false`` and ``max_code_length=50000``.
     """
 
     problem_version: str
