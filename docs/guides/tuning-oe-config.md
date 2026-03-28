@@ -415,6 +415,134 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 | Iterations | `max_iterations` | `--iterations N` | From config.yaml |
 | Checkpoint interval | `checkpoint_interval` | `--config-override checkpoint_interval=N` | 100 |
 | Cascade evaluation | `evaluator.cascade_evaluation` | `--config-override evaluator.cascade_evaluation=true` | `false` (Revolver default) |
+| Diff-based evolution | `diff_based_evolution` | `--rewrite-mode` (sets to `false`) | `true` |
+| Max code length | `max_code_length` | `--rewrite-mode` (sets to `50000`) | 10000 |
+
+---
+
+## Full-rewrite mode
+
+By default, OpenEvolve operates in **diff-based** mode: the LLM reads the
+current program and produces a SEARCH/REPLACE diff that modifies a small
+section. This works well for incremental optimization — parameter tuning,
+local search improvements, and minor algorithmic tweaks.
+
+**Full-rewrite mode** (`diff_based_evolution: false`) tells OpenEvolve to
+ask the LLM for the **entire program** each iteration. Instead of patching
+the existing code, the LLM generates a complete replacement. This enables
+fundamentally different algorithmic approaches that diff-based mode cannot
+reach.
+
+### When to use full-rewrite mode
+
+Full-rewrite mode is useful when:
+
+- **The initial program is a placeholder or naive baseline.** You want the
+  LLM to explore entirely new solution structures, not tweak an existing one.
+- **You want to explore fundamentally different algorithmic approaches.** For
+  example, switching from a hand-rolled gradient descent to a `scipy.optimize`
+  solver, or from a greedy heuristic to a mathematical programming formulation.
+- **Diff-based mode is producing only minor parameter tweaks.** If evolution
+  has stagnated and all diffs are small constant adjustments, switching to
+  full-rewrite can break out of the local optimum.
+
+Stick with diff-based mode (the default) when:
+
+- The initial program already uses the right algorithmic approach and just
+  needs tuning.
+- You are using a small local model (7B–22B parameters) that struggles with
+  generating long, syntactically correct programs.
+- Token cost is a primary concern — full-rewrite generates far more tokens
+  per iteration.
+
+### Configuration
+
+Two OpenEvolve config keys control full-rewrite behavior:
+
+```yaml
+diff_based_evolution: false
+max_code_length: 50000
+```
+
+- `diff_based_evolution: false` — switches from SEARCH/REPLACE diffs to full
+  program generation.
+- `max_code_length: 50000` — sets the maximum allowed length (in characters)
+  of the generated program. In full-rewrite mode, the LLM produces the entire
+  program, so this limit must be large enough to accommodate it.
+
+### CLI shortcut
+
+The `--rewrite-mode` flag on `run start` and `run resume` sets both keys
+at once:
+
+```bash
+revolver run start --rewrite-mode
+# Equivalent to:
+revolver run start --config-override diff_based_evolution=false \
+                   --config-override max_code_length=50000
+```
+
+Config overrides always take precedence over `--rewrite-mode` defaults.
+For example, to use rewrite mode with a smaller code length limit:
+
+```bash
+revolver run start --rewrite-mode --config-override max_code_length=30000
+# Uses diff_based_evolution=false and max_code_length=30000
+```
+
+### Gemini model compatibility
+
+Not all models work well in full-rewrite mode. Gemini "thinking" models
+(those that use chain-of-thought reasoning internally) can silently consume
+their output token budget on thinking tokens, leaving too few tokens for the
+actual program. This results in truncated output and 0% valid programs.
+
+| Model | Rewrite mode | Notes |
+|---|---|---|
+| Gemini Flash-Lite | OK | Fast and cheap, good for exploration |
+| Gemini Flash (thinking) | NOT recommended | Thinking tokens consume `max_tokens` silently, causing truncated output |
+| Gemini Pro (`reasoning_effort=low`) | OK | Good quality, reasonable cost |
+| Gemini Pro (default reasoning) | OK | Best quality but expensive |
+
+> **Tip**: if you must use a thinking model, set `reasoning_effort=low` via
+> `--config-override llm.reasoning_effort=low` to minimize the token budget
+> consumed by internal reasoning.
+
+### Trade-offs
+
+| Aspect | Diff-based (default) | Full-rewrite |
+|---|---|---|
+| Creativity | Incremental — small changes to existing code | High — can discover fundamentally different approaches |
+| Token cost | Low — only the diff is generated | High — entire program generated each iteration |
+| `max_code_length` needed | Default is sufficient | At least 50000 (the `--rewrite-mode` default) |
+| Iteration speed | Fast — small payloads | Slower — more tokens per iteration |
+| Best for | Tuning, parameter optimization, local search | Paradigm exploration, algorithm discovery |
+
+### Recommended workflow
+
+For complex problems where you are unsure which algorithmic approach is best:
+
+1. **Start in full-rewrite mode** with a minimal initial program and an
+   enriched `problem.md` (see the
+   [initial program guide](initial-program-structure.md#problemmd-as-key-lever)):
+
+   ```bash
+   revolver run start --llm gemini-pro --rewrite-mode --iterations 50
+   ```
+
+2. **Identify the best approach** from the evolved programs using
+   `revolver solution show`.
+
+3. **Switch to diff-based mode** for fine-tuning. Use the best evolved
+   program as the new initial program and run diff-based evolution to
+   optimize parameters and details:
+
+   ```bash
+   revolver run start --llm gemini-flash-lite --iterations 500
+   ```
+
+This two-phase workflow combines the creative exploration of full-rewrite
+with the efficiency of diff-based tuning.
 
 ---
 

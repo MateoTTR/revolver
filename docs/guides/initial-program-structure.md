@@ -340,6 +340,160 @@ functions with hint comments. The LLM can now:
 **Results with codestral:22b**: 100% valid diffs (15/15 iterations), best score
 improved from 1.0 (baseline) to 1.037 (3.7% better than nearest-neighbor).
 
+## Problem.md as key lever
+
+### What is problem.md?
+
+`problem.md` is a markdown file in your problem directory that describes the
+optimization problem to the LLM. When you run `revolver run start`, Revolver
+injects the contents of `problem.md` into the system prompt sent to
+OpenEvolve. The LLM reads this description to understand *what* to optimize
+and *how* to approach it.
+
+A minimal `problem.md` might just state the objective:
+
+```markdown
+# Traveling Salesman Problem
+Find the shortest tour visiting all cities exactly once and returning to the start.
+```
+
+But for complex problems, the richness of `problem.md` directly determines
+the quality of the LLM's output.
+
+### Why it matters
+
+The LLM uses `problem.md` as its primary source of domain knowledge. Without
+domain context, even a powerful model will default to generic approaches —
+gradient descent with hand-rolled loops, simple greedy heuristics, or
+parameter tweaking of the existing code.
+
+A richer `problem.md` gives the LLM the **vocabulary and concepts** it needs
+to formulate sophisticated solutions. This is especially important in
+[full-rewrite mode](tuning-oe-config.md#full-rewrite-mode), where the LLM
+generates the entire program from scratch and has maximum freedom to choose
+its approach.
+
+### What to include
+
+Depending on your problem's complexity, consider adding:
+
+- **Mathematical formulation of the objective function.** Explicit notation
+  helps the LLM reason about the optimization landscape:
+
+  ```markdown
+  ## Objective
+  Minimize the worst-case sidelobe level:
+    min_w max_{θ ∈ sidelobe_region} |w^H a(θ)|²
+  subject to w^H a(θ₀) = 1 (unit gain at look direction)
+  ```
+
+- **Known approaches from literature.** Name specific algorithms and
+  techniques so the LLM can draw on its training knowledge:
+
+  ```markdown
+  ## Known approaches
+  - Gradient descent with softmin relaxation of the max operator
+  - Semidefinite programming (SDP) relaxation
+  - Iterative worst-point boosting (Capon-style)
+  - Continuation methods: start with smooth approximation, anneal toward hard max
+  ```
+
+- **Domain-specific hints.** Mention relevant libraries, useful techniques,
+  and implementation patterns:
+
+  ```markdown
+  ## Implementation hints
+  - Use `scipy.optimize.minimize` with L-BFGS-B for smooth objectives
+  - Use `numpy.linalg` for array operations (steering vectors, covariance)
+  - Softmin via log-sum-exp: `softmin(x, α) = -log(Σ exp(-α·xᵢ)) / α`
+  - Multi-start: try several initial weight vectors to avoid local optima
+  ```
+
+- **Constraint descriptions.** Distinguish hard constraints (must satisfy)
+  from soft constraints (penalized in the objective):
+
+  ```markdown
+  ## Constraints
+  - Hard: unit gain at look direction (normalize weights after optimization)
+  - Soft: mainlobe width (penalize if -3dB width exceeds 2× theoretical minimum)
+  ```
+
+- **Input/output format details.** Specify what the program receives and
+  what it must return, including data types and shapes.
+
+### When to enrich
+
+Not every problem needs a detailed `problem.md`. Use this decision guide:
+
+| Problem type | Enrichment level | What to add |
+|---|---|---|
+| Simple combinatorial (TSP, knapsack) | Minimal | Basic problem statement is sufficient |
+| Continuous optimization | Medium | Mathematical formulation + solver hints |
+| Domain-specific (signal processing, physics) | High | Domain vocabulary, known techniques, library suggestions |
+| Research/novel problems | High | Literature references, known baselines, evaluation criteria |
+
+### Evidence: beamforming POC (v0.9.0)
+
+The impact of `problem.md` enrichment was demonstrated concretely in the
+beamforming POC. Two configurations were compared:
+
+- **Basic problem.md + diff mode** (Flash Lite, 300 iterations): the LLM
+  produced only parameter tweaks to the existing worst-point boosting
+  algorithm. Result: +0.030 dB improvement — equivalent to simply increasing
+  the number of internal iterations in the baseline.
+
+- **Enriched problem.md + full-rewrite mode** (Gemini Pro, 5 iterations):
+  the LLM discovered `scipy.optimize.minimize` with L-BFGS-B, softmin
+  log-sum-exp relaxation, and alpha continuation — a fundamentally different
+  and more powerful approach. In just 5 iterations, it independently arrived
+  at the same algorithmic strategy as a manually-written expert solver.
+
+The enriched `problem.md` included the mathematical formulation (steering
+vectors, softmin aggregation), known approaches (SDP, continuation methods),
+and explicit library hints (`scipy.optimize`). This gave the LLM the
+conceptual framework to propose a solution that diff-based mode with a basic
+problem description could never reach.
+
+**Three factors** were necessary simultaneously for this breakthrough:
+
+1. **Full-rewrite mode** — freed the LLM from incremental SEARCH/REPLACE diffs
+2. **Enriched problem.md** — gave the LLM domain vocabulary and solver hints
+3. **Powerful model** (Gemini Pro) — had the reasoning capacity to formulate
+   the mathematical optimization correctly
+
+### Don't over-specify
+
+Provide context and vocabulary, not a step-by-step algorithm. The goal is to
+expand the LLM's solution space, not to dictate the implementation.
+
+**Good** — gives direction without prescribing implementation:
+
+```markdown
+## Hints
+- Consider using scipy.optimize.minimize with L-BFGS-B for smooth objectives
+- Softmin is a differentiable approximation of the max operator
+- Multi-start with different initial vectors helps avoid local optima
+```
+
+**Too specific** — leaves no room for the LLM to explore:
+
+```markdown
+## Algorithm
+1. Initialize w = a(θ₀) / ||a(θ₀)||²
+2. For α in [5, 50, 500]:
+   a. Define f(w) = -softmin(-|w^H a(θ)|², α) for θ in sidelobe grid
+   b. Call scipy.optimize.minimize(f, w, method='L-BFGS-B', maxiter=2000)
+   c. Normalize: w = w / (w^H a(θ₀))
+3. Return w
+```
+
+The first version lets the LLM discover the right alpha schedule, iteration
+count, and initialization strategy on its own. The second version turns
+OpenEvolve into a copy-paste tool — if you already know the exact algorithm,
+you don't need evolutionary optimization.
+
+---
+
 ## Checklist
 
 Before running OpenEvolve on your program:
