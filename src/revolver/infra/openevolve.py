@@ -96,6 +96,13 @@ _DATABASE_KEYS = frozenset(
     }
 )
 
+# ── Revolver-specific keys ───────────────────────────────────────────────────
+# Keys that Revolver places in config.yaml but are NOT part of the OpenEvolve
+# Config schema.  They must be stripped before dacite strict parsing to avoid
+# false-positive "unknown key" warnings.
+
+REVOLVER_KEYS = frozenset({"initial_program", "num_generations", "timeout_per_instance"})
+
 
 def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     """Validate a config dict or YAML file against the OpenEvolve Config schema.
@@ -148,6 +155,11 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     if isinstance(llm_section, dict):
         llm_section.pop("api_key_env", None)
 
+    # Strip Revolver-specific keys (initial_program, num_generations, etc.)
+    had_num_generations = "num_generations" in data
+    for rk in REVOLVER_KEYS:
+        data.pop(rk, None)
+
     # Attempt strict parse
     try:
         dacite.from_dict(
@@ -159,10 +171,21 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
                 forward_references={"LLMInterface": Any},
             ),
         )
-        return []  # Config is valid
+        warnings: list[str] = []
+        if had_num_generations:
+            warnings.append(
+                "Deprecation: 'num_generations' is deprecated, use 'max_iterations' instead. "
+                "It will still work but may be removed in a future version."
+            )
+        return warnings
     except dacite.UnexpectedDataError as exc:
         # exc.keys is a set of unknown key names
-        warnings: list[str] = []
+        warnings = []
+        if had_num_generations:
+            warnings.append(
+                "Deprecation: 'num_generations' is deprecated, use 'max_iterations' instead. "
+                "It will still work but may be removed in a future version."
+            )
         for key in sorted(exc.keys):
             if key in _DATABASE_KEYS:
                 warnings.append(
@@ -651,6 +674,7 @@ def count_valid_programs(checkpoint_dir: Path) -> int | None:
 
 
 __all__ = [
+    "REVOLVER_KEYS",
     "OpenEvolveRunner",
     "ProgressInfo",
     "RunOutput",
