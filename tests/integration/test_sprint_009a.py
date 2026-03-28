@@ -193,6 +193,25 @@ def test_validate_oe_config_num_generations_deprecated() -> None:
     assert "Unknown" not in warnings[0], f"Got unexpected 'Unknown key' warning: {warnings[0]}"
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(not _has_dacite_and_openevolve(), reason="dacite/openevolve not installed")
+def test_validate_oe_config_num_generations_with_unknown_key() -> None:
+    """num_generations + truly unknown key -> deprecation notice AND unknown key warning."""
+    config = {
+        "num_generations": 50,
+        "bogus_key": True,
+    }
+    warnings = validate_oe_config(config)
+    # Should have exactly two warnings: deprecation + unknown key
+    assert len(warnings) == 2, f"Expected 2 warnings, got {len(warnings)}: {warnings}"
+    # First warning is the deprecation notice
+    assert "Deprecation" in warnings[0]
+    assert "num_generations" in warnings[0]
+    # Second warning is the unknown key
+    assert "Unknown" in warnings[1]
+    assert "bogus_key" in warnings[1]
+
+
 # ── find_latest_checkpoint ────────────────────────────────────────────────────
 
 

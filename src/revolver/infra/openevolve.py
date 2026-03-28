@@ -116,12 +116,16 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
 
     - ``output_dir`` at top level (Revolver passes it to OEController, not Config)
     - ``api_key_env`` inside ``llm`` (Revolver resolves it to ``api_key`` at runtime)
+    - ``initial_program``, ``num_generations``, ``timeout_per_instance`` — Revolver-
+      specific keys listed in :data:`REVOLVER_KEYS`
 
     Args:
         config: Path to a YAML config file **or** an already-loaded dict.
 
     Returns:
-        A (possibly empty) list of human-readable warning strings.
+        A (possibly empty) list of human-readable warning strings.  Entries
+        may be unknown-key warnings **or** deprecation notices (e.g. for
+        ``num_generations``).
     """
     try:
         import dacite  # type: ignore[import-not-found,unused-ignore]
@@ -160,6 +164,14 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     for rk in REVOLVER_KEYS:
         data.pop(rk, None)
 
+    # Build deprecation notice (independent of dacite parse outcome)
+    warnings: list[str] = []
+    if had_num_generations:
+        warnings.append(
+            "Deprecation: 'num_generations' is deprecated, use 'max_iterations' instead. "
+            "It will still work but may be removed in a future version."
+        )
+
     # Attempt strict parse
     try:
         dacite.from_dict(
@@ -171,21 +183,9 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
                 forward_references={"LLMInterface": Any},
             ),
         )
-        warnings: list[str] = []
-        if had_num_generations:
-            warnings.append(
-                "Deprecation: 'num_generations' is deprecated, use 'max_iterations' instead. "
-                "It will still work but may be removed in a future version."
-            )
         return warnings
     except dacite.UnexpectedDataError as exc:
         # exc.keys is a set of unknown key names
-        warnings = []
-        if had_num_generations:
-            warnings.append(
-                "Deprecation: 'num_generations' is deprecated, use 'max_iterations' instead. "
-                "It will still work but may be removed in a future version."
-            )
         for key in sorted(exc.keys):
             if key in _DATABASE_KEYS:
                 warnings.append(
