@@ -1382,3 +1382,20 @@ def test_llm_update_model_visible_in_list(mock_global_db: Path) -> None:
     # Other fields unchanged
     assert list_data[0]["max_tokens"] == 4096
     assert list_data[0]["timeout_s"] == 60
+
+
+# ── Test 38: Update model empty string rejected ─────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_update_model_empty_string_rejected(mock_global_db: Path) -> None:
+    """Passing --model '' should fail with a validation error."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--model", ""],
+    )
+    assert result.exit_code != 0, f"output: {_get_all_output(result)}"
+    output = _get_all_output(result)
+    assert "empty string" in output.lower() or "must not be" in output.lower()

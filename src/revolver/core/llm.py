@@ -222,6 +222,10 @@ def update_llm(
         RevolverError: If the LLM is not found.
         ValidationError: If any provided value is not positive.
     """
+    # Validate model is not empty
+    if model is not None and not model.strip():
+        raise ValidationError("--model must not be an empty string")
+
     # Validate positive values
     if max_tokens is not None and max_tokens < 1:
         raise ValidationError("--max-tokens must be a positive integer")
