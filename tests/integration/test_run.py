@@ -271,7 +271,7 @@ def _invoke_with_mocks(
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=run_id),
         patch("revolver.core.run.generate_solution_id", return_value=sol_id),
-        patch("revolver.core.run.count_valid_programs", return_value=5),
+        patch("revolver.core.run.count_valid_programs", return_value=10),
     ):
         return runner.invoke(app, args, catch_exceptions=False)
 
