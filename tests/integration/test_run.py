@@ -1563,10 +1563,9 @@ def test_run_dry_run_ensemble_json(
 
     # Check member names and weights are present
     names = [m.get("name") for m in rc["llm_models"]]
-    assert "gpt-4" in names or "test-llm" in [m.get("name") for m in rc["llm_models"]]
+    assert names == ["gpt-4", "gpt-4-mini"]
     weights = [m.get("weight") for m in rc["llm_models"]]
-    assert 0.7 in weights
-    assert 0.3 in weights
+    assert weights == [0.7, 0.3]
 
 
 # ── Zombie run detection tests (S10-13/14/15) ────────────────────────────────
