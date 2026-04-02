@@ -156,7 +156,7 @@ def run_launch(
                     },
                     json_mode=False,
                 )
-                # Display resolved OE config section (S9a-08)
+                # Display resolved OE config section (S9a-08, S12-04/05/06)
                 if result.resolved_config is not None:
                     rc = result.resolved_config
                     config_data: dict[str, object] = {}
@@ -174,6 +174,24 @@ def run_launch(
                         config_data["temperature"] = rc.temperature
                     if rc.parallel_evaluations is not None:
                         config_data["parallel_evaluations"] = rc.parallel_evaluations
+                    if rc.diff_based_evolution is not None:
+                        config_data["diff_based_evolution"] = rc.diff_based_evolution
+                    if rc.max_code_length is not None:
+                        config_data["max_code_length"] = rc.max_code_length
+                    if rc.config_overrides is not None:
+                        config_data["config_overrides"] = ", ".join(
+                            f"{k}={v}" for k, v in rc.config_overrides.items()
+                        )
+                    if rc.llm_models is not None:
+                        parts = []
+                        for m in rc.llm_models:
+                            name = m.get("name", m.get("model", "?"))
+                            weight = m.get("weight")
+                            if weight is not None:
+                                parts.append(f"{name}\u00d7{weight}")
+                            else:
+                                parts.append(name)
+                        config_data["llm_models"] = ", ".join(parts)
                     if config_data:
                         sys.stderr.write("\nResolved OpenEvolve config:\n")
                         render(config_data, json_mode=False)

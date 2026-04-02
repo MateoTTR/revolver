@@ -9,6 +9,7 @@ Traceable to: DES-005 (Run Orchestration) §8, FR-RUN-001..030.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -173,6 +174,10 @@ class ResolvedOEConfig(BaseModel):
         feature_bins: Number of bins per feature dimension.
         temperature: LLM sampling temperature.
         parallel_evaluations: Number of parallel evaluations.
+        diff_based_evolution: Whether diff-based evolution is enabled.
+        max_code_length: Maximum code length for LLM context.
+        config_overrides: Raw config override key=value pairs from CLI.
+        llm_models: Ensemble LLM model entries with names and weights.
     """
 
     iterations: int | None = None
@@ -182,6 +187,10 @@ class ResolvedOEConfig(BaseModel):
     feature_bins: int | None = None
     temperature: float | None = None
     parallel_evaluations: int | None = None
+    diff_based_evolution: bool | None = None
+    max_code_length: int | None = None
+    config_overrides: dict[str, Any] | None = None
+    llm_models: list[dict[str, Any]] | None = None
 
 
 class RunResult(BaseModel):
