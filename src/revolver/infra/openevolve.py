@@ -758,12 +758,65 @@ def find_latest_checkpoint(run_dir: Path) -> Path | None:
     return checkpoint_dirs[-1][1]
 
 
+def _build_cell_reverse_map(
+    checkpoint_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    """Build a reverse map from program ID to MAP-Elites cell info.
+
+    Reads ``metadata.json`` from *checkpoint_dir* and parses the
+    ``island_feature_maps`` field — a list (one per island) of dicts
+    mapping ``"dim0-dim1"`` cell keys to program IDs.
+
+    Returns:
+        A dict mapping ``program_id`` to
+        ``{"cell_indices": [int, ...], "island": int}``.
+        Returns an empty dict on any failure (missing file, parse error).
+    """
+    metadata_path = checkpoint_dir / "metadata.json"
+    if not metadata_path.is_file():
+        return {}
+
+    try:
+        metadata = _json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("Failed to read or parse %s", metadata_path)
+        return {}
+
+    island_maps = metadata.get("island_feature_maps")
+    if not isinstance(island_maps, list):
+        return {}
+
+    reverse: dict[str, dict[str, Any]] = {}
+    for island_idx, feature_map in enumerate(island_maps):
+        if not isinstance(feature_map, dict):
+            continue
+        for cell_key, prog_id in feature_map.items():
+            try:
+                cell_indices = [int(x) for x in cell_key.split("-")]
+            except (ValueError, AttributeError):
+                logger.warning(
+                    "Skipping unparseable cell key '%s' in island %d",
+                    cell_key,
+                    island_idx,
+                )
+                continue
+            reverse[prog_id] = {
+                "cell_indices": cell_indices,
+                "island": island_idx,
+            }
+
+    return reverse
+
+
 def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
     """Parse OE checkpoint programs into a ranked population list.
 
     Scans ``checkpoint_dir/programs/*.json``, loads each program,
     extracts key fields and computes combined_score (sum of numeric
     metric values, matching OpenEvolve's ``_safe_sum_metrics`` convention).
+
+    Also reads ``metadata.json`` to resolve MAP-Elites cell indices
+    and island assignments for each program.
 
     Args:
         checkpoint_dir: Path to the OpenEvolve checkpoint directory
@@ -772,11 +825,13 @@ def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
     Returns:
         List of dicts sorted by combined_score descending, each with
         keys: ``rank``, ``id``, ``score``, ``metrics``, ``generation``,
-        ``iteration_found``, ``parent_id``.
+        ``iteration_found``, ``parent_id``, ``cell_indices``, ``island``.
     """
     programs_dir = checkpoint_dir / "programs"
     if not programs_dir.is_dir():
         return []
+
+    cell_map = _build_cell_reverse_map(checkpoint_dir)
 
     population: list[dict[str, Any]] = []
     for prog_file in sorted(programs_dir.glob("*.json")):
@@ -791,14 +846,19 @@ def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
             ]
             combined_score = sum(numeric_vals) if numeric_vals else 0.0
 
+            prog_id = data.get("id", prog_file.stem)
+            cell_info = cell_map.get(prog_id, {})
+
             population.append(
                 {
-                    "id": data.get("id", prog_file.stem),
+                    "id": prog_id,
                     "score": combined_score,
                     "metrics": metrics,
                     "generation": data.get("generation", 0),
                     "iteration_found": data.get("iteration_found", 0),
                     "parent_id": data.get("parent_id"),
+                    "cell_indices": cell_info.get("cell_indices"),
+                    "island": cell_info.get("island"),
                 }
             )
         except (OSError, ValueError, KeyError):

@@ -55,6 +55,7 @@ def _create_checkpoint_with_programs(
     run_dir: Path,
     checkpoint_num: int,
     programs: list[dict[str, object]],
+    metadata: dict[str, object] | None = None,
 ) -> Path:
     """Create a fake OE checkpoint with program JSON files.
 
@@ -62,6 +63,7 @@ def _create_checkpoint_with_programs(
         run_dir: The run directory (e.g. .revolver/runs/<id>).
         checkpoint_num: Checkpoint number (e.g. 5 for checkpoint_5).
         programs: List of dicts with keys: id, metrics, generation, iteration_found.
+        metadata: Optional metadata dict to write as ``metadata.json``.
 
     Returns:
         Path to the created checkpoint directory.
@@ -80,6 +82,9 @@ def _create_checkpoint_with_programs(
             parent_id=prog.get("parent_id"),  # type: ignore[arg-type]
         )
         (programs_dir / f"{prog_id}.json").write_text(prog_json, encoding="utf-8")
+
+    if metadata is not None:
+        (checkpoint_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
 
     return checkpoint_dir
 
@@ -139,6 +144,7 @@ def _setup_project_with_run(
     programs: list[dict[str, object]] | None = None,
     checkpoint_num: int = 5,
     create_checkpoint: bool = True,
+    metadata: dict[str, object] | None = None,
 ) -> Path:
     """Create a project with a run and optional checkpoint."""
     init_project_store(tmp_path)
@@ -148,7 +154,7 @@ def _setup_project_with_run(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     if create_checkpoint and programs is not None:
-        _create_checkpoint_with_programs(run_dir, checkpoint_num, programs)
+        _create_checkpoint_with_programs(run_dir, checkpoint_num, programs, metadata)
 
     return tmp_path
 
@@ -193,6 +199,9 @@ class TestParsePopulation:
         assert prog["iteration_found"] == 5
         assert prog["rank"] == 1
         assert prog["metrics"] == {"combined_score": 0.95, "accuracy": 0.8}
+        # No metadata.json → cell_indices and island should be None
+        assert prog["cell_indices"] is None
+        assert prog["island"] is None
 
     def test_multiple_programs_sorted_by_score(self, tmp_path: Path) -> None:
         """Programs are sorted by combined score descending."""
@@ -257,6 +266,111 @@ class TestParsePopulation:
 
         result = parse_population(tmp_path)
         assert result[0]["id"] == "prog_x"
+
+
+# ── L1: parse_population() cell-index tests ───────────────────────────────────
+
+
+class TestParsePopulationCellIndices:
+    """Unit tests for MAP-Elites cell indices in ``parse_population()``."""
+
+    def test_single_island_cell_indices(self, tmp_path: Path) -> None:
+        """Programs found in metadata get correct cell_indices and island."""
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_json = _make_program_json("p1", metrics={"score": 1.0})
+        (programs_dir / "p1.json").write_text(prog_json, encoding="utf-8")
+
+        metadata = {"island_feature_maps": [{"0-5": "p1"}]}
+        (tmp_path / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+        result = parse_population(tmp_path)
+        assert len(result) == 1
+        assert result[0]["cell_indices"] == [0, 5]
+        assert result[0]["island"] == 0
+
+    def test_multi_island(self, tmp_path: Path) -> None:
+        """Programs from different islands get correct island index."""
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        for pid in ["p1", "p2", "p3"]:
+            prog_json = _make_program_json(pid, metrics={"score": 1.0})
+            (programs_dir / f"{pid}.json").write_text(prog_json, encoding="utf-8")
+
+        metadata = {
+            "island_feature_maps": [
+                {"0-5": "p1", "2-3": "p2"},
+                {"1-1": "p3"},
+            ]
+        }
+        (tmp_path / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+        result = parse_population(tmp_path)
+        by_id = {p["id"]: p for p in result}
+        assert by_id["p1"]["cell_indices"] == [0, 5]
+        assert by_id["p1"]["island"] == 0
+        assert by_id["p2"]["cell_indices"] == [2, 3]
+        assert by_id["p2"]["island"] == 0
+        assert by_id["p3"]["cell_indices"] == [1, 1]
+        assert by_id["p3"]["island"] == 1
+
+    def test_program_not_in_feature_map(self, tmp_path: Path) -> None:
+        """Programs not in any feature map get cell_indices=None."""
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        for pid in ["p1", "p2"]:
+            prog_json = _make_program_json(pid, metrics={"score": 1.0})
+            (programs_dir / f"{pid}.json").write_text(prog_json, encoding="utf-8")
+
+        # Only p1 is in the feature map
+        metadata = {"island_feature_maps": [{"0-5": "p1"}]}
+        (tmp_path / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+        result = parse_population(tmp_path)
+        by_id = {p["id"]: p for p in result}
+        assert by_id["p1"]["cell_indices"] == [0, 5]
+        assert by_id["p1"]["island"] == 0
+        assert by_id["p2"]["cell_indices"] is None
+        assert by_id["p2"]["island"] is None
+
+    def test_missing_metadata_json(self, tmp_path: Path) -> None:
+        """All programs get null cell data when metadata.json is absent."""
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_json = _make_program_json("p1", metrics={"score": 1.0})
+        (programs_dir / "p1.json").write_text(prog_json, encoding="utf-8")
+
+        result = parse_population(tmp_path)
+        assert result[0]["cell_indices"] is None
+        assert result[0]["island"] is None
+
+    def test_metadata_missing_island_feature_maps(self, tmp_path: Path) -> None:
+        """Graceful fallback when island_feature_maps key is absent."""
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_json = _make_program_json("p1", metrics={"score": 1.0})
+        (programs_dir / "p1.json").write_text(prog_json, encoding="utf-8")
+
+        metadata = {"best_program_id": "p1"}
+        (tmp_path / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+        result = parse_population(tmp_path)
+        assert result[0]["cell_indices"] is None
+        assert result[0]["island"] is None
+
+    def test_corrupt_metadata_json(self, tmp_path: Path) -> None:
+        """Graceful fallback when metadata.json is not valid JSON."""
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_json = _make_program_json("p1", metrics={"score": 1.0})
+        (programs_dir / "p1.json").write_text(prog_json, encoding="utf-8")
+
+        (tmp_path / "metadata.json").write_text("not valid json", encoding="utf-8")
+
+        result = parse_population(tmp_path)
+        assert len(result) == 1
+        assert result[0]["cell_indices"] is None
+        assert result[0]["island"] is None
 
 
 # ── L1: get_population() unit tests ─────────────────────────────────────────
@@ -346,7 +460,7 @@ class TestRunPopulationCLI:
         assert "0.8000" in output
 
     def test_run_population_json_output(self, tmp_path: Path) -> None:
-        """With --json, outputs a JSON array of programs."""
+        """With --json, outputs a JSON array of programs including cell data."""
         programs = [
             {
                 "id": "p1",
@@ -355,7 +469,8 @@ class TestRunPopulationCLI:
                 "iteration_found": 5,
             },
         ]
-        _setup_project_with_run(tmp_path, "run-pop-2", programs=programs)
+        metadata = {"island_feature_maps": [{"2-7": "p1"}]}
+        _setup_project_with_run(tmp_path, "run-pop-2", programs=programs, metadata=metadata)
 
         with patch("pathlib.Path.cwd", return_value=tmp_path):
             result = runner.invoke(app, ["--json", "run", "population", "run-pop-2"])
@@ -367,6 +482,8 @@ class TestRunPopulationCLI:
         assert data[0]["id"] == "p1"
         assert data[0]["score"] == pytest.approx(0.95)
         assert data[0]["rank"] == 1
+        assert data[0]["cell_indices"] == [2, 7]
+        assert data[0]["island"] == 0
 
     def test_run_population_run_not_found(self, tmp_path: Path) -> None:
         """Non-existent run ID produces an error."""
@@ -399,6 +516,40 @@ class TestRunPopulationCLI:
 
         assert result.exit_code == 0
 
+    def test_run_population_shows_cell_column(self, tmp_path: Path) -> None:
+        """Table output includes a Cell column with cell indices."""
+        programs = [
+            {
+                "id": "p1",
+                "metrics": {"score": 0.9},
+                "generation": 1,
+                "iteration_found": 1,
+            },
+        ]
+        metadata = {"island_feature_maps": [{"3-8": "p1"}]}
+        _setup_project_with_run(tmp_path, "run-pop-cell", programs=programs, metadata=metadata)
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["run", "population", "run-pop-cell"])
+
+        assert result.exit_code == 0
+        assert "[3, 8]" in result.output
+
+    def test_run_population_no_island_column_single_island(self, tmp_path: Path) -> None:
+        """Island column is hidden when all programs share the same island."""
+        programs = [
+            {"id": "p1", "metrics": {"score": 0.9}, "generation": 1, "iteration_found": 1},
+            {"id": "p2", "metrics": {"score": 0.8}, "generation": 1, "iteration_found": 1},
+        ]
+        metadata = {"island_feature_maps": [{"0-1": "p1", "0-2": "p2"}]}
+        _setup_project_with_run(tmp_path, "run-pop-noisland", programs=programs, metadata=metadata)
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["run", "population", "run-pop-noisland"])
+
+        assert result.exit_code == 0
+        # Island column header should NOT appear
+        assert "island" not in result.output.lower().split("cell")[0]
 
 # ── L1: read_checkpoint_best_score() unit tests ──────────────────────────────
 

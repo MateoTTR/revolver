@@ -718,20 +718,32 @@ def run_population(
             sys.stderr.write("Population is empty (no programs found).\n")
             return
 
-        rows = [
-            {
+        # Determine whether to show the island column (only if >1 island).
+        island_values = {
+            prog.get("island") for prog in population if prog.get("island") is not None
+        }
+        show_island = len(island_values) > 1
+
+        rows: list[dict[str, object]] = []
+        for prog in population:
+            row: dict[str, object] = {
                 "rank": prog["rank"],
                 "score": f"{prog['score']:.4f}",
-                "generation": prog["generation"],
-                "iteration": prog["iteration_found"],
-                "metrics": ", ".join(
-                    f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
-                    for k, v in prog["metrics"].items()
+                "cell": (
+                    str(prog["cell_indices"]) if prog.get("cell_indices") is not None else "\u2014"
                 ),
-                "program_id": prog["id"],
             }
-            for prog in population
-        ]
+            if show_island:
+                row["island"] = prog.get("island") if prog.get("island") is not None else "\u2014"
+            row["generation"] = prog["generation"]
+            row["iteration"] = prog["iteration_found"]
+            row["metrics"] = ", ".join(
+                f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+                for k, v in prog["metrics"].items()
+            )
+            row["program_id"] = prog["id"]
+            rows.append(row)
+
         render(rows, json_mode=False)
 
 
