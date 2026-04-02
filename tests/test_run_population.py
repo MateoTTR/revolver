@@ -570,6 +570,7 @@ class TestRunPopulationCLI:
         # Rich may truncate headers (e.g. "isla…"), so check the short prefix.
         assert "isla" in result.output.lower()
 
+
 # ── L1: read_checkpoint_best_score() unit tests ──────────────────────────────
 
 
