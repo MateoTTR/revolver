@@ -109,20 +109,15 @@ from revolver.models.run import (
 WRAPPER_FILENAME = "_revolver_evaluator.py"
 EVALUATOR_FILENAME = "evaluator.py"
 
-#: Minimum ratio of valid iterations to total iterations.
-#: Below this threshold, the run is marked ``completed_with_errors``.
-MIN_VALID_ITERATION_RATIO = 0.1
-
 
 def _determine_run_status(
     valid_iters: int | None, total_iters: int
 ) -> Literal["failed", "completed_with_errors", "completed"]:
-    """Determine final run status based on valid iteration ratio.
+    """Determine final run status based on valid iteration count.
 
     Returns ``"failed"`` if no valid iterations were produced,
-    ``"completed_with_errors"`` if fewer than
-    :data:`MIN_VALID_ITERATION_RATIO` of iterations were valid,
-    and ``"completed"`` otherwise.
+    ``"completed_with_errors"`` if some but not all iterations were valid,
+    and ``"completed"`` if all iterations produced valid programs.
 
     Args:
         valid_iters: Number of iterations that produced valid programs,
@@ -134,9 +129,46 @@ def _determine_run_status(
     """
     if valid_iters is None or valid_iters == 0:
         return "failed"
-    if total_iters > 0 and valid_iters / total_iters < MIN_VALID_ITERATION_RATIO:
+    if valid_iters < total_iters:
         return "completed_with_errors"
     return "completed"
+
+
+def _determine_crash_status(
+    run_dir: Path, iterations: int
+) -> tuple[Literal["failed", "completed_with_errors"], int | None]:
+    """Determine status for a run that crashed (OE exception).
+
+    Checks whether the run produced any valid programs in its checkpoint
+    before the crash. If valid programs exist, the status is derived from
+    :func:`_determine_run_status`; otherwise ``"failed"`` is returned.
+
+    Args:
+        run_dir: Path to the run directory containing ``oe-output/``.
+        iterations: Total number of iterations requested for the run.
+
+    Returns:
+        A tuple of (status, valid_iterations) where status is
+        ``"failed"`` or ``"completed_with_errors"`` and valid_iterations
+        is the count of valid programs found (or ``None`` if none were
+        found).
+    """
+    valid_iters: int | None = None
+    latest_ckpt = find_latest_checkpoint(run_dir)
+    if latest_ckpt is not None:
+        valid_iters = count_valid_programs(latest_ckpt)
+    if valid_iters is None:
+        oe_output_dir = run_dir / "oe-output"
+        if oe_output_dir.exists():
+            valid_iters = count_valid_programs(oe_output_dir)
+
+    if valid_iters is not None and valid_iters > 0:
+        status = _determine_run_status(valid_iters, iterations)
+        # A crash can never be "completed" — at best "completed_with_errors"
+        if status == "completed":
+            return "completed_with_errors", valid_iters
+        return status, valid_iters
+    return "failed", valid_iters
 
 
 # ── Wrapper template (DES-005 §3.2) ──────────────────────────────────────────
@@ -965,7 +997,10 @@ def launch_run(
                     re_exc,
                 )
             else:
-                update_run_status(proj_conn, run_id, "failed")
+                crash_status, crash_valid = _determine_crash_status(run_dir, iterations)
+                update_run_status(proj_conn, run_id, crash_status)
+                if crash_valid is not None:
+                    update_run_valid_iterations(proj_conn, run_id, crash_valid)
                 with contextlib.suppress(Exception):
                     error_log = run_dir / "run-error.log"
                     error_log.write_text(
@@ -994,7 +1029,10 @@ def launch_run(
                     f"Error details in: {run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                update_run_status(proj_conn, run_id, "failed")
+                crash_status, crash_valid = _determine_crash_status(run_dir, iterations)
+                update_run_status(proj_conn, run_id, crash_status)
+                if crash_valid is not None:
+                    update_run_valid_iterations(proj_conn, run_id, crash_valid)
                 with contextlib.suppress(Exception):
                     error_log = run_dir / "run-error.log"
                     error_log.write_text(
@@ -1548,7 +1586,10 @@ def resume_run(
                     re_exc,
                 )
             else:
-                update_run_status(proj_conn, new_run_id, "failed")
+                crash_status, crash_valid = _determine_crash_status(new_run_dir, actual_iterations)
+                update_run_status(proj_conn, new_run_id, crash_status)
+                if crash_valid is not None:
+                    update_run_valid_iterations(proj_conn, new_run_id, crash_valid)
                 with contextlib.suppress(Exception):
                     error_log = new_run_dir / "run-error.log"
                     error_log.write_text(
@@ -1577,7 +1618,10 @@ def resume_run(
                     f"Error details in: {new_run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                update_run_status(proj_conn, new_run_id, "failed")
+                crash_status, crash_valid = _determine_crash_status(new_run_dir, actual_iterations)
+                update_run_status(proj_conn, new_run_id, crash_status)
+                if crash_valid is not None:
+                    update_run_valid_iterations(proj_conn, new_run_id, crash_valid)
                 with contextlib.suppress(Exception):
                     error_log = new_run_dir / "run-error.log"
                     error_log.write_text(

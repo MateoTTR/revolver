@@ -21,8 +21,8 @@ import pytest
 
 from revolver.core.exceptions import ExternalError, IntegrityError, RevolverError
 from revolver.core.run import (
-    MIN_VALID_ITERATION_RATIO,
     _collect_programs,
+    _determine_crash_status,
     _determine_run_status,
     _handle_post_run_failure,
     _is_pid_alive,
@@ -2647,26 +2647,95 @@ class TestDetermineRunStatus:
         """A run with valid_iterations=0 and total_iterations=0 should be 'failed'."""
         assert _determine_run_status(valid_iters=0, total_iters=0) == "failed"
 
-    def test_run_low_valid_ratio_status_completed_with_errors(self) -> None:
-        """A run with valid_iterations=1 out of 20 (5%) should be 'completed_with_errors'."""
+    def test_run_some_valid_status_completed_with_errors(self) -> None:
+        """A run with valid < total should be 'completed_with_errors'."""
         assert _determine_run_status(valid_iters=1, total_iters=20) == "completed_with_errors"
 
-    def test_run_normal_valid_ratio_status_completed(self) -> None:
-        """A run with valid_iterations=15 out of 20 (75%) should be 'completed'."""
-        assert _determine_run_status(valid_iters=15, total_iters=20) == "completed"
+    def test_run_most_valid_status_completed_with_errors(self) -> None:
+        """A run with valid=15, total=20 should still be 'completed_with_errors'."""
+        assert _determine_run_status(valid_iters=15, total_iters=20) == "completed_with_errors"
 
-    def test_run_exactly_at_threshold_status_completed(self) -> None:
-        """A run at exactly MIN_VALID_ITERATION_RATIO should be 'completed'."""
-        # 10% = exactly at threshold → completed (not strictly less)
-        total = 100
-        valid = int(total * MIN_VALID_ITERATION_RATIO)  # 10
-        assert _determine_run_status(valid_iters=valid, total_iters=total) == "completed"
+    def test_run_24_of_30_status_completed_with_errors(self) -> None:
+        """Acceptance criteria: _determine_run_status(24, 30) returns 'completed_with_errors'."""
+        assert _determine_run_status(valid_iters=24, total_iters=30) == "completed_with_errors"
 
-    def test_run_just_below_threshold_status_completed_with_errors(self) -> None:
-        """A run just below MIN_VALID_ITERATION_RATIO should be 'completed_with_errors'."""
-        # 9/100 = 9% < 10%
-        assert _determine_run_status(valid_iters=9, total_iters=100) == "completed_with_errors"
+    def test_run_0_of_30_status_failed(self) -> None:
+        """Acceptance criteria: _determine_run_status(0, 30) returns 'failed'."""
+        assert _determine_run_status(valid_iters=0, total_iters=30) == "failed"
+
+    def test_run_30_of_30_status_completed(self) -> None:
+        """Acceptance criteria: _determine_run_status(30, 30) returns 'completed'."""
+        assert _determine_run_status(valid_iters=30, total_iters=30) == "completed"
 
     def test_run_all_valid_status_completed(self) -> None:
         """A run where all iterations are valid should be 'completed'."""
         assert _determine_run_status(valid_iters=20, total_iters=20) == "completed"
+
+
+@pytest.mark.integration
+class TestDetermineCrashStatus:
+    """L2 tests for _determine_crash_status() helper."""
+
+    def test_crash_no_checkpoint_returns_failed(self, tmp_path: Path) -> None:
+        """A crash with no checkpoint directory should return ('failed', None)."""
+        run_dir = tmp_path / "run-abc"
+        run_dir.mkdir()
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "failed"
+        assert valid_iters is None
+
+    def test_crash_empty_checkpoint_returns_failed(self, tmp_path: Path) -> None:
+        """A crash with an empty checkpoint directory should return ('failed', ...)."""
+        run_dir = tmp_path / "run-abc"
+        ckpt_dir = run_dir / "oe-output" / "checkpoints" / "checkpoint_0"
+        ckpt_dir.mkdir(parents=True)
+        status, _valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "failed"
+
+    def test_crash_with_valid_programs_returns_completed_with_errors(self, tmp_path: Path) -> None:
+        """A crash with valid programs in checkpoint returns ('completed_with_errors', 10)."""
+        run_dir = tmp_path / "run-abc"
+        ckpt_dir = run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+        ckpt_dir.mkdir(parents=True)
+
+        # Create a database.json with programs as a list (count_valid_programs format)
+        import json
+
+        db_data = {"programs": [{"id": f"prog_{i}"} for i in range(10)]}
+        (ckpt_dir / "database.json").write_text(json.dumps(db_data))
+
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "completed_with_errors"
+        assert valid_iters == 10
+
+    def test_crash_with_all_valid_programs_returns_completed_with_errors(
+        self, tmp_path: Path
+    ) -> None:
+        """Even if valid_iters >= total, a crash should never be 'completed'."""
+        run_dir = tmp_path / "run-abc"
+        ckpt_dir = run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+        ckpt_dir.mkdir(parents=True)
+
+        import json
+
+        db_data = {"programs": [{"id": f"prog_{i}"} for i in range(30)]}
+        (ckpt_dir / "database.json").write_text(json.dumps(db_data))
+
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "completed_with_errors"
+        assert valid_iters == 30
+
+    def test_crash_oe_output_fallback_returns_completed_with_errors(self, tmp_path: Path) -> None:
+        """Fallback: no checkpoint but oe-output/ has valid programs."""
+        run_dir = tmp_path / "run-abc"
+        oe_output_dir = run_dir / "oe-output"
+        oe_output_dir.mkdir(parents=True)
+
+        import json
+
+        db_data = {"programs": [{"id": f"prog_{i}"} for i in range(5)]}
+        (oe_output_dir / "database.json").write_text(json.dumps(db_data))
+
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "completed_with_errors"
+        assert valid_iters == 5
