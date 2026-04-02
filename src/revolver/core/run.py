@@ -71,6 +71,7 @@ from revolver.infra.openevolve import (
     count_valid_programs,
     find_latest_checkpoint,
     parse_population,
+    read_checkpoint_best_score,
     resolve_api_keys,
     revolver_env,
 )
@@ -1633,6 +1634,19 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
                 started_at_str = str(run_data.get("created_at", ""))
                 started_at = datetime.fromisoformat(started_at_str) if started_at_str else None
                 elapsed = (datetime.now(UTC) - started_at).total_seconds() if started_at else None
+
+                # Read progress from checkpoint (read-only, error-tolerant)
+                iterations_completed: int | None = None
+                best_score: float | None = None
+                try:
+                    run_dir = root / REVOLVER_DIR / "runs" / active_run_ids[0]
+                    checkpoint = find_latest_checkpoint(run_dir)
+                    if checkpoint is not None:
+                        iterations_completed = count_valid_programs(checkpoint)
+                        best_score = read_checkpoint_best_score(checkpoint)
+                except Exception:
+                    pass  # Checkpoint may be mid-write; graceful degradation
+
                 return RunStatus(
                     active=True,
                     run_ids=active_run_ids,
@@ -1640,11 +1654,13 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
                     problem_version=str(run_data.get("problem_version", "")),
                     llm=str(run_data.get("llm", "")),
                     dataset=str(run_data.get("dataset", "")),
+                    iterations_completed=iterations_completed,
                     iterations_total=(
                         int(run_data["iterations"])  # type: ignore[call-overload]
                         if run_data.get("iterations")
                         else None
                     ),
+                    best_score=best_score,
                     started_at=started_at,
                     elapsed_s=elapsed,
                 )
@@ -1661,12 +1677,19 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
 
         started_at_str = str(latest.get("created_at", ""))
         started_at = datetime.fromisoformat(started_at_str) if started_at_str else None
+
+        # For completed runs, show valid_iterations from DB
+        valid_iters: int | None = None
+        if latest.get("valid_iterations") is not None:
+            valid_iters = int(latest["valid_iterations"])  # type: ignore[call-overload]
+
         return RunStatus(
             active=False,
             run_id=str(latest.get("id", "")),
             problem_version=str(latest.get("problem_version", "")),
             llm=str(latest.get("llm", "")),
             dataset=str(latest.get("dataset", "")),
+            iterations_completed=valid_iters,
             iterations_total=(
                 int(latest["iterations"])  # type: ignore[call-overload]
                 if latest.get("iterations")

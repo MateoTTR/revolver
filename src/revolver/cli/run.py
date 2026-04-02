@@ -266,8 +266,12 @@ def run_status(
                     data["llm"] = status.llm
                 if status.dataset:
                     data["dataset"] = status.dataset
-                if status.iterations_total is not None:
+                if status.iterations_completed is not None and status.iterations_total is not None:
+                    data["progress"] = f"{status.iterations_completed}/{status.iterations_total}"
+                elif status.iterations_total is not None:
                     data["iterations_total"] = status.iterations_total
+                if status.best_score is not None:
+                    data["best_score"] = status.best_score
                 if status.elapsed_s is not None:
                     data["elapsed_s"] = f"{status.elapsed_s:.1f}"
                 render(data, json_mode=False)
@@ -282,6 +286,8 @@ def run_status(
                     data["llm"] = status.llm
                 if status.dataset:
                     data["dataset"] = status.dataset
+                if status.iterations_completed is not None and status.iterations_total is not None:
+                    data["progress"] = f"{status.iterations_completed}/{status.iterations_total}"
                 render(data, json_mode=False)
             else:
                 render({"status": "idle", "message": "No runs found."}, json_mode=False)

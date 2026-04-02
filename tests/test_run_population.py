@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 from revolver.cli import app
 from revolver.core.run import get_population
 from revolver.infra.db import get_project_db, insert_run
-from revolver.infra.openevolve import parse_population
+from revolver.infra.openevolve import parse_population, read_checkpoint_best_score
 from revolver.infra.store import REVOLVER_DIR, init_project_store
 
 runner = CliRunner()
@@ -398,3 +398,82 @@ class TestRunPopulationCLI:
             result = runner.invoke(app, ["run", "population", "run-pop-5"])
 
         assert result.exit_code == 0
+
+
+# ── L1: read_checkpoint_best_score() unit tests ──────────────────────────────
+
+
+class TestReadCheckpointBestScore:
+    """Unit tests for ``infra.openevolve.read_checkpoint_best_score()``."""
+
+    def test_no_metadata_file(self, tmp_path: Path) -> None:
+        """Returns None when metadata.json does not exist."""
+        assert read_checkpoint_best_score(tmp_path) is None
+
+    def test_no_best_program_id(self, tmp_path: Path) -> None:
+        """Returns None when metadata.json has no best_program_id."""
+        (tmp_path / "metadata.json").write_text(json.dumps({"version": 1}))
+        assert read_checkpoint_best_score(tmp_path) is None
+
+    def test_missing_program_file(self, tmp_path: Path) -> None:
+        """Returns None when program file referenced by metadata is missing."""
+        (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-999"}))
+        (tmp_path / "programs").mkdir()
+        assert read_checkpoint_best_score(tmp_path) is None
+
+    def test_combined_score_preferred(self, tmp_path: Path) -> None:
+        """Returns combined_score when present in program metrics."""
+        (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-001"}))
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_data = {
+            "id": "prog-001",
+            "metrics": {"combined_score": 42.5, "accuracy": 0.95},
+        }
+        (programs_dir / "prog-001.json").write_text(json.dumps(prog_data))
+
+        result = read_checkpoint_best_score(tmp_path)
+
+        assert result == pytest.approx(42.5)
+
+    def test_sum_of_numeric_metrics_fallback(self, tmp_path: Path) -> None:
+        """Falls back to sum of numeric metrics when no combined_score."""
+        (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-002"}))
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_data = {
+            "id": "prog-002",
+            "metrics": {"accuracy": 0.8, "throughput": 1.2},
+        }
+        (programs_dir / "prog-002.json").write_text(json.dumps(prog_data))
+
+        result = read_checkpoint_best_score(tmp_path)
+
+        assert result == pytest.approx(2.0)
+
+    def test_empty_metrics(self, tmp_path: Path) -> None:
+        """Returns None when program has no numeric metrics."""
+        (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-003"}))
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        prog_data = {
+            "id": "prog-003",
+            "metrics": {},
+        }
+        (programs_dir / "prog-003.json").write_text(json.dumps(prog_data))
+
+        assert read_checkpoint_best_score(tmp_path) is None
+
+    def test_corrupt_metadata_json(self, tmp_path: Path) -> None:
+        """Returns None when metadata.json is corrupt."""
+        (tmp_path / "metadata.json").write_text("not valid json{{{")
+        assert read_checkpoint_best_score(tmp_path) is None
+
+    def test_corrupt_program_json(self, tmp_path: Path) -> None:
+        """Returns None when program JSON is corrupt."""
+        (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-bad"}))
+        programs_dir = tmp_path / "programs"
+        programs_dir.mkdir()
+        (programs_dir / "prog-bad.json").write_text("invalid json")
+
+        assert read_checkpoint_best_score(tmp_path) is None
