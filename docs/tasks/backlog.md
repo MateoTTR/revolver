@@ -365,6 +365,21 @@
 | 251 | Documentation audit cascade: spec-reviewer (18F+7W) → validation-reviewer (3F+1W) → doc-reviewer (3F+3W) — all fixed | [x] | S11 — session 044, PR #169 |
 | 252 | (POC finding) OE field mapping: `name` (not `model`), `api_base` (not `base_url`) — covered by task 245 | [~] | S11 — covered by 245 |
 
+### Sprint 012 — Demo Feedback: UX & Reliability (v0.12.0)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 253 | Simplify `_determine_run_status()`: remove 10% threshold, binary valid/failed logic | [x] | S12 — session 045, PR #178 |
+| 254 | Fix exception handlers in `launch_run()`/`resume_run()`: count valid programs before marking status | [x] | S12 — session 045, PR #178 |
+| 255 | Extend `ResolvedOEConfig` with `diff_based_evolution`, `max_code_length`, `config_overrides`, `llm_models` | [x] | S12 — session 045, PR #176 |
+| 256 | Update `_extract_resolved_config()` + dry-run CLI display for complete config | [x] | S12 — session 045, PR #176 |
+| 257 | Change ensemble indicator from suffix `(E)` to prefix `(E)` in `run list` | [x] | S12 — session 045, PR #179 |
+| 258 | Add `resume_chain` and `resumed_from` to `solution info` output | [x] | S12 — session 045, PR #179 |
+| 259 | Populate `RunStatus.iterations_completed` + `best_score` from checkpoint in `get_run_status()` | [x] | S12 — session 045, PR #177 |
+| 260 | Add `read_checkpoint_best_score()` helper to `infra.openevolve` | [x] | S12 — session 045, PR #177 |
+| 261 | Read `metadata.json` `island_feature_maps` in `parse_population()`, add `cell_indices` + `island` per program | [x] | S12 — session 045, PR #175 |
+| 262 | L2 integration tests for Sprint 012 (~30 new tests across PRs A-E) | [x] | S12 — session 045, included in PRs |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
