@@ -317,7 +317,10 @@ def generate_solution_id() -> str:
 # ── Resolved OE config extraction ─────────────────────────────────────────────
 
 
-def _extract_resolved_config(oe_config: dict[str, Any]) -> ResolvedOEConfig:
+def _extract_resolved_config(
+    oe_config: dict[str, Any],
+    config_overrides: dict[str, Any] | None = None,
+) -> ResolvedOEConfig:
     """Extract key parameters from a merged OE config dict.
 
     Used in dry-run mode to show the user what values would be used
@@ -325,6 +328,7 @@ def _extract_resolved_config(oe_config: dict[str, Any]) -> ResolvedOEConfig:
 
     Args:
         oe_config: The merged OpenEvolve configuration dictionary.
+        config_overrides: Raw config override dict from CLI (optional).
 
     Returns:
         A :class:`ResolvedOEConfig` with the extracted parameters.
@@ -339,6 +343,12 @@ def _extract_resolved_config(oe_config: dict[str, Any]) -> ResolvedOEConfig:
     if not isinstance(eval_section, dict):
         eval_section = {}
 
+    # Extract ensemble llm.models array when present
+    llm_models: list[dict[str, Any]] | None = None
+    raw_models = llm_section.get("models")
+    if isinstance(raw_models, list) and raw_models:
+        llm_models = raw_models
+
     return ResolvedOEConfig(
         iterations=oe_config.get("max_iterations"),
         checkpoint_interval=oe_config.get("checkpoint_interval"),
@@ -347,6 +357,10 @@ def _extract_resolved_config(oe_config: dict[str, Any]) -> ResolvedOEConfig:
         feature_bins=db_section.get("feature_bins"),
         temperature=llm_section.get("temperature"),
         parallel_evaluations=eval_section.get("parallel_evaluations"),
+        diff_based_evolution=oe_config.get("diff_based_evolution"),
+        max_code_length=oe_config.get("max_code_length"),
+        config_overrides=config_overrides if config_overrides else None,
+        llm_models=llm_models,
     )
 
 
@@ -667,7 +681,15 @@ def launch_run(
 
         # 8. If dry_run: return early with config, no side effects
         if config.dry_run:
-            resolved = _extract_resolved_config(oe_config)
+            # Convert config_overrides list[str] to dict for display
+            overrides_dict: dict[str, Any] | None = None
+            if config.config_overrides:
+                overrides_dict = {}
+                for override in config.config_overrides:
+                    if "=" in override:
+                        key, val = override.split("=", 1)
+                        overrides_dict[key.strip()] = val.strip()
+            resolved = _extract_resolved_config(oe_config, config_overrides=overrides_dict)
             return RunResult(
                 run_id="dry-run",
                 solution=SolutionResult(

@@ -1436,6 +1436,138 @@ def test_run_dry_run_rewrite_mode(project_with_prereqs: dict[str, Path]) -> None
         conn.close()
 
 
+# ── Tests: dry-run resolved config completeness (S12-04/05/06) ─────────────
+
+
+@pytest.mark.integration
+def test_run_dry_run_rewrite_mode_json_fields(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """--rewrite-mode --dry-run --json includes diff_based_evolution and max_code_length."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+            "--rewrite-mode",
+            "--json",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    rc = data.get("resolved_config")
+    assert rc is not None, "resolved_config missing from JSON output"
+    assert rc["diff_based_evolution"] is False
+    assert rc["max_code_length"] == 50000
+
+
+@pytest.mark.integration
+def test_run_dry_run_config_override_json(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """--config-override with --dry-run --json includes config_overrides dict."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+            "--config-override",
+            "max_code_length=30000",
+            "--json",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    rc = data.get("resolved_config")
+    assert rc is not None, "resolved_config missing from JSON output"
+    assert rc["config_overrides"] == {"max_code_length": "30000"}
+    # The override should also be applied to the actual config value
+    assert rc["max_code_length"] == 30000
+
+
+@pytest.mark.integration
+def test_run_dry_run_ensemble_json(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """--dry-run --json with ensemble LLM includes llm_models array."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Register a second LLM for the ensemble
+    _register_llm(global_db_path, name="test-llm-2", model="gpt-4-mini")
+
+    # Create ensemble with two members
+    _register_ensemble(
+        global_db_path,
+        "dry-run-ensemble",
+        [
+            {"llm_name": "test-llm", "weight": 0.7},
+            {"llm_name": "test-llm-2", "weight": 0.3},
+        ],
+    )
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "dry-run-ensemble",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+            "--json",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    rc = data.get("resolved_config")
+    assert rc is not None, "resolved_config missing from JSON output"
+    assert rc["llm_models"] is not None, "llm_models missing from resolved_config"
+    assert isinstance(rc["llm_models"], list)
+    assert len(rc["llm_models"]) == 2
+
+    # Check member names and weights are present
+    names = [m.get("name") for m in rc["llm_models"]]
+    assert names == ["gpt-4", "gpt-4-mini"]
+    weights = [m.get("weight") for m in rc["llm_models"]]
+    assert weights == [0.7, 0.3]
+
+
 # ── Zombie run detection tests (S10-13/14/15) ────────────────────────────────
 
 
