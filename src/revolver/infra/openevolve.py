@@ -812,6 +812,57 @@ def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
     return population
 
 
+def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
+    """Read the best program score from an OpenEvolve checkpoint.
+
+    Reads ``metadata.json`` to find ``best_program_id``, then loads the
+    corresponding program file from ``programs/{id}.json`` and extracts
+    the score.
+
+    Score extraction mirrors :func:`parse_population`: sums all numeric
+    metric values.
+
+    All file operations are read-only and error-tolerant — the checkpoint
+    may be mid-write by a concurrent OpenEvolve process.
+
+    Args:
+        checkpoint_dir: Path to the OpenEvolve checkpoint directory
+            (e.g. ``checkpoint_N/``).
+
+    Returns:
+        The best program's score, or ``None`` if unavailable.
+    """
+    try:
+        metadata_path = checkpoint_dir / "metadata.json"
+        if not metadata_path.exists():
+            return None
+
+        metadata = _json.loads(metadata_path.read_text(encoding="utf-8"))
+        best_id = metadata.get("best_program_id")
+        if not best_id:
+            return None
+
+        program_path = checkpoint_dir / "programs" / f"{best_id}.json"
+        if not program_path.exists():
+            return None
+
+        program_data = _json.loads(program_path.read_text(encoding="utf-8"))
+        metrics = program_data.get("metrics", {})
+        if not isinstance(metrics, dict):
+            return None
+
+        # Sum of all numeric metric values (consistent with parse_population)
+        numeric_vals = [
+            v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+        ]
+        if numeric_vals:
+            return float(sum(numeric_vals))
+
+        return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def count_valid_programs(checkpoint_dir: Path) -> int | None:
     """Count valid program entries in an OpenEvolve checkpoint database.
 
@@ -859,6 +910,7 @@ __all__ = [
     "count_valid_programs",
     "find_latest_checkpoint",
     "parse_population",
+    "read_checkpoint_best_score",
     "resolve_api_keys",
     "revolver_env",
     "validate_oe_config",

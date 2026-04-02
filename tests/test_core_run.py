@@ -13,6 +13,7 @@ All OpenEvolve calls are mocked. Tests cover:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -2023,6 +2024,146 @@ def test_get_run_status_removes_stale_lock(project_with_prereqs: dict) -> None:
     # Lock file should have been removed
     lock_file = root / REVOLVER_DIR / "runs" / "locks" / "run-stale.lock"
     assert not lock_file.exists()
+
+
+@pytest.mark.unit
+def test_get_run_status_active_with_checkpoint_progress(project_with_prereqs: dict) -> None:
+    """get_run_status must populate iterations_completed and best_score from checkpoint."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    run_id = "run-progress"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=50,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="running",
+        )
+    finally:
+        conn.close()
+
+    # Write lock with current PID (alive)
+    write_run_lock(
+        root,
+        run_id,
+        {"run_id": run_id, "pid": os.getpid(), "llm_source": "remote"},
+    )
+
+    # Create checkpoint directory with programs and metadata
+    run_dir = root / REVOLVER_DIR / "runs" / run_id
+    checkpoint_dir = run_dir / "oe-output" / "checkpoints" / "checkpoint_10"
+    programs_dir = checkpoint_dir / "programs"
+    programs_dir.mkdir(parents=True)
+
+    # Write metadata pointing to best program
+    metadata = {"best_program_id": "prog-001"}
+    (checkpoint_dir / "metadata.json").write_text(json.dumps(metadata))
+
+    # Write best program with metrics
+    prog_data = {
+        "id": "prog-001",
+        "metrics": {"combined_score": 42.5, "accuracy": 0.95},
+        "generation": 3,
+    }
+    (programs_dir / "prog-001.json").write_text(json.dumps(prog_data))
+
+    # Write database.json with program entries
+    db_entries = [{"id": f"prog-{i:03d}"} for i in range(12)]
+    (checkpoint_dir / "database.json").write_text(json.dumps(db_entries))
+
+    status = get_run_status(project_root=root)
+
+    assert status.active is True
+    assert status.iterations_completed == 12
+    assert status.iterations_total == 50
+    assert status.best_score == pytest.approx(43.45)  # sum of all numeric metrics
+
+
+@pytest.mark.unit
+def test_get_run_status_active_no_checkpoint(project_with_prereqs: dict) -> None:
+    """get_run_status must gracefully handle missing checkpoint (early in run)."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    run_id = "run-no-ckpt"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=50,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="running",
+        )
+    finally:
+        conn.close()
+
+    # Write lock with current PID (alive), but NO checkpoint directory
+    write_run_lock(
+        root,
+        run_id,
+        {"run_id": run_id, "pid": os.getpid(), "llm_source": "remote"},
+    )
+
+    status = get_run_status(project_root=root)
+
+    assert status.active is True
+    assert status.iterations_completed is None
+    assert status.best_score is None
+    assert status.iterations_total == 50
+
+
+@pytest.mark.unit
+def test_get_run_status_idle_with_valid_iterations(project_with_prereqs: dict) -> None:
+    """get_run_status must show valid_iterations for completed runs in idle status."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id="run-done",
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=50,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+        # Set valid_iterations in DB
+        conn.execute(
+            "UPDATE runs SET valid_iterations = ? WHERE id = ?",
+            (35, "run-done"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    status = get_run_status(project_root=root)
+
+    assert status.active is False
+    assert status.run_id == "run-done"
+    assert status.iterations_completed == 35
+    assert status.iterations_total == 50
 
 
 # ── _collect_programs tests ───────────────────────────────────────────────────
