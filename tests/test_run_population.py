@@ -548,8 +548,27 @@ class TestRunPopulationCLI:
             result = runner.invoke(app, ["run", "population", "run-pop-noisland"])
 
         assert result.exit_code == 0
-        # Island column header should NOT appear
-        assert "island" not in result.output.lower().split("cell")[0]
+        # Island column header should NOT appear anywhere in output.
+        # Rich may truncate headers (e.g. "isla…"), so check the short prefix.
+        assert "isla" not in result.output.lower()
+
+    def test_run_population_multi_island_shows_island_column(self, tmp_path: Path) -> None:
+        """Island column appears when programs span multiple islands."""
+        programs = [
+            {"id": "p1", "metrics": {"score": 0.9}, "generation": 1, "iteration_found": 1},
+            {"id": "p2", "metrics": {"score": 0.8}, "generation": 1, "iteration_found": 1},
+        ]
+        metadata = {"island_feature_maps": [{"0-1": "p1"}, {"0-2": "p2"}]}
+        _setup_project_with_run(
+            tmp_path, "run-pop-multiisland", programs=programs, metadata=metadata
+        )
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["run", "population", "run-pop-multiisland"])
+
+        assert result.exit_code == 0
+        # Rich may truncate headers (e.g. "isla…"), so check the short prefix.
+        assert "isla" in result.output.lower()
 
 # ── L1: read_checkpoint_best_score() unit tests ──────────────────────────────
 

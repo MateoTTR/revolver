@@ -800,6 +800,9 @@ def _build_cell_reverse_map(
                     island_idx,
                 )
                 continue
+            # Last-write-wins: a program ID should appear in at most one island's
+            # feature map (OE creates new UUIDs on migration). If duplicates ever
+            # occur, we keep the last island's entry.
             reverse[prog_id] = {
                 "cell_indices": cell_indices,
                 "island": island_idx,
