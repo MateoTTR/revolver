@@ -2672,25 +2672,28 @@ class TestDetermineRunStatus:
         assert _determine_run_status(valid_iters=20, total_iters=20) == "completed"
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestDetermineCrashStatus:
     """L2 tests for _determine_crash_status() helper."""
 
     def test_crash_no_checkpoint_returns_failed(self, tmp_path: Path) -> None:
-        """A crash with no checkpoint directory should return 'failed'."""
+        """A crash with no checkpoint directory should return ('failed', None)."""
         run_dir = tmp_path / "run-abc"
         run_dir.mkdir()
-        assert _determine_crash_status(run_dir, iterations=30) == "failed"
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "failed"
+        assert valid_iters is None
 
     def test_crash_empty_checkpoint_returns_failed(self, tmp_path: Path) -> None:
-        """A crash with an empty checkpoint directory should return 'failed'."""
+        """A crash with an empty checkpoint directory should return ('failed', ...)."""
         run_dir = tmp_path / "run-abc"
         ckpt_dir = run_dir / "oe-output" / "checkpoints" / "checkpoint_0"
         ckpt_dir.mkdir(parents=True)
-        assert _determine_crash_status(run_dir, iterations=30) == "failed"
+        status, _valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "failed"
 
     def test_crash_with_valid_programs_returns_completed_with_errors(self, tmp_path: Path) -> None:
-        """A crash with valid programs in checkpoint should return 'completed_with_errors'."""
+        """A crash with valid programs in checkpoint returns ('completed_with_errors', 10)."""
         run_dir = tmp_path / "run-abc"
         ckpt_dir = run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
         ckpt_dir.mkdir(parents=True)
@@ -2701,8 +2704,9 @@ class TestDetermineCrashStatus:
         db_data = {"programs": [{"id": f"prog_{i}"} for i in range(10)]}
         (ckpt_dir / "database.json").write_text(json.dumps(db_data))
 
-        result = _determine_crash_status(run_dir, iterations=30)
-        assert result == "completed_with_errors"
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "completed_with_errors"
+        assert valid_iters == 10
 
     def test_crash_with_all_valid_programs_returns_completed_with_errors(
         self, tmp_path: Path
@@ -2717,5 +2721,21 @@ class TestDetermineCrashStatus:
         db_data = {"programs": [{"id": f"prog_{i}"} for i in range(30)]}
         (ckpt_dir / "database.json").write_text(json.dumps(db_data))
 
-        result = _determine_crash_status(run_dir, iterations=30)
-        assert result == "completed_with_errors"
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "completed_with_errors"
+        assert valid_iters == 30
+
+    def test_crash_oe_output_fallback_returns_completed_with_errors(self, tmp_path: Path) -> None:
+        """Fallback: no checkpoint but oe-output/ has valid programs."""
+        run_dir = tmp_path / "run-abc"
+        oe_output_dir = run_dir / "oe-output"
+        oe_output_dir.mkdir(parents=True)
+
+        import json
+
+        db_data = {"programs": [{"id": f"prog_{i}"} for i in range(5)]}
+        (oe_output_dir / "database.json").write_text(json.dumps(db_data))
+
+        status, valid_iters = _determine_crash_status(run_dir, iterations=30)
+        assert status == "completed_with_errors"
+        assert valid_iters == 5
