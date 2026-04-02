@@ -106,6 +106,15 @@ def solution_info(
                 "llm_model": info.get("llm_model", ""),
                 "program_path": info.get("program_path", ""),
             }
+
+            # Resume chain display (F6)
+            if "resumed_from" in info:
+                data["resumed_from"] = info["resumed_from"]
+            if "resume_chain" in info:
+                chain = info["resume_chain"]
+                if isinstance(chain, list):
+                    data["resume_chain"] = " \u2192 ".join(str(r) for r in chain)
+
             render(data, json_mode=False)
 
             # Siblings (FR-SOL-009)

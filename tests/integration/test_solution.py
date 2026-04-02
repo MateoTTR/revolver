@@ -1128,3 +1128,151 @@ def test_solution_diff_json(project_with_show_solutions: Path) -> None:
     assert "identical" in data
     assert data["identical"] is False
     assert "---" in data["diff"]
+
+
+# ── Resume chain tests (F6, S12-08, S12-09) ──────────────────────────────────
+
+
+def _create_resumed_run_chain(
+    project_root: Path,
+) -> tuple[str, str, str]:
+    """Create a chain of 3 runs: original -> resumed1 -> resumed2.
+
+    Returns (original_run_id, resumed1_run_id, resumed2_run_id).
+    """
+    db_path = project_root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    now = datetime.now(UTC)
+    try:
+        # Original run
+        insert_run(
+            conn,
+            run_id="run-original",
+            problem_version="v1.0",
+            llm="llm-a",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train",
+            llm_model="model-a",
+            created_at=now,
+            status="completed",
+            generation_time_s=30.0,
+        )
+        # First resume
+        insert_run(
+            conn,
+            run_id="run-resumed1",
+            problem_version="v1.0",
+            llm="llm-b",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train",
+            llm_model="model-b",
+            created_at=now,
+            status="completed",
+            generation_time_s=25.0,
+            resumed_from="run-original",
+        )
+        # Second resume
+        insert_run(
+            conn,
+            run_id="run-resumed2",
+            problem_version="v1.0",
+            llm="llm-c",
+            dataset="train-small",
+            iterations=10,
+            problem_hash="phash-v1.0",
+            dataset_hash="dhash-train",
+            llm_model="model-c",
+            created_at=now,
+            status="completed",
+            generation_time_s=20.0,
+            resumed_from="run-resumed1",
+        )
+        # Solution for the last run
+        insert_solution(
+            conn,
+            solution_id="sol-resumed",
+            run_id="run-resumed2",
+            rank=1,
+            best_score=0.99,
+        )
+    finally:
+        conn.close()
+
+    # Create program file
+    programs_dir = project_root / REVOLVER_DIR / RUNS_DIR / "run-resumed2" / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
+
+    return ("run-original", "run-resumed1", "run-resumed2")
+
+
+@pytest.fixture()
+def project_with_resume_chain(tmp_project: Path) -> Path:
+    """Set up a project with a 3-run resume chain and a solution on the last run."""
+    _create_problem_version_in_db(tmp_project, "v1.0")
+    _create_dataset_in_db(tmp_project, "train-small")
+    _create_resumed_run_chain(tmp_project)
+    return tmp_project
+
+
+@pytest.mark.integration
+def test_solution_info_resume_chain(project_with_resume_chain: Path) -> None:
+    """solution info shows resumed_from and resume_chain for a resumed run.
+
+    Validates: F6, S12-08, S12-09 — resume chain display.
+    """
+    result = _invoke_with_cwd(
+        ["solution", "info", "sol-resumed"],
+        project_with_resume_chain,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+
+    # Should show resumed_from
+    assert "run-resumed1" in output, f"Expected resumed_from in output: {output}"
+    # Should show the chain with arrow notation
+    assert "\u2192" in output, f"Expected arrow in resume chain: {output}"
+    assert "run-original" in output, f"Expected root run in chain: {output}"
+
+
+@pytest.mark.integration
+def test_solution_info_resume_chain_json(project_with_resume_chain: Path) -> None:
+    """solution info --json includes resumed_from and resume_chain fields.
+
+    Validates: F6, S12-09 — JSON output includes resume chain.
+    """
+    result = _invoke_with_cwd(
+        ["--json", "solution", "info", "sol-resumed"],
+        project_with_resume_chain,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+
+    assert data["resumed_from"] == "run-resumed1"
+    assert "resume_chain" in data
+    chain = data["resume_chain"]
+    assert isinstance(chain, list)
+    assert chain == ["run-original", "run-resumed1", "run-resumed2"]
+
+
+@pytest.mark.integration
+def test_solution_info_no_resume_chain(project_with_solutions: Path) -> None:
+    """solution info for a non-resumed run does NOT show resume fields.
+
+    Validates: F6 — resume fields are only shown when the run was resumed.
+    """
+    result = _invoke_with_cwd(
+        ["--json", "solution", "info", "sol-20260301-100000"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+
+    assert "resumed_from" not in data, f"Non-resumed run should not have resumed_from: {data}"
+    assert "resume_chain" not in data, f"Non-resumed run should not have resume_chain: {data}"

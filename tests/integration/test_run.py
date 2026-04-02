@@ -1994,3 +1994,61 @@ def test_run_start_llm_snapshot_single(
         assert snapshot["model"] == "gpt-4"
     finally:
         conn.close()
+
+
+# ── Test: run list ensemble prefix (F4) ────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_run_list_ensemble_prefix(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """run list shows ``(E)`` as prefix for ensemble runs, not suffix.
+
+    Traceable to: F4 (demo feedback), S12-07.
+    """
+    root = project_with_prereqs["root"]
+
+    # Insert an ensemble run directly in DB
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, llm_type, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run-ensemble-prefix-001",
+                "v1.0",
+                "flash-mix",
+                "train-small",
+                5,
+                "hash-ep1",
+                "dhash-ep1",
+                "gemini-2.0-flash",
+                "completed",
+                "ensemble",
+                "2026-04-01T10:00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Non-JSON output: verify prefix format (Rich may truncate, so check for "(E) fl")
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["run", "list"], catch_exceptions=False)
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "(E) fl" in output, f"Expected '(E)' prefix in output: {output}"
+    assert "flash-mix (E)" not in output, "Suffix format should not appear"
+
+    # JSON output: verify llm_type is exposed
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["--json", "run", "list"], catch_exceptions=False)
+
+    data = _parse_json_output(result)
+    ensemble_runs = [r for r in data if r["run_id"] == "run-ensemble-prefix-001"]
+    assert len(ensemble_runs) == 1
+    assert ensemble_runs[0]["llm_type"] == "ensemble"

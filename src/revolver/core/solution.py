@@ -23,6 +23,7 @@ from revolver.core.exceptions import DuplicateNameError, RevolverError, Validati
 from revolver.infra.db import (
     delete_solution as db_delete_solution,
     get_project_db,
+    get_resume_chain,
     get_run,
     get_solution,
     get_solution_by_alias,
@@ -114,6 +115,15 @@ def get_solution_info(
             for s in siblings
             if s.id != str(detail["id"])
         ]
+
+        # Build resume chain if the run was resumed (F6)
+        run_record = get_run(conn, run_id)
+        if run_record is not None:
+            resumed_from = run_record.get("resumed_from")
+            if resumed_from is not None:
+                detail["resumed_from"] = str(resumed_from)
+                chain = get_resume_chain(conn, run_id)
+                detail["resume_chain"] = chain
 
         return detail
     finally:
