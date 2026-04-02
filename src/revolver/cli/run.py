@@ -472,7 +472,7 @@ def run_list(
                     {
                         "run_id": s.run_id,
                         "version": s.problem_version,
-                        "llm": (f"{s.llm} (E)" if s.llm_type == "ensemble" else s.llm),
+                        "llm": (f"(E) {s.llm}" if s.llm_type == "ensemble" else s.llm),
                         "dataset": s.dataset,
                         "status": s.status,
                         "iterations": s.iterations,
