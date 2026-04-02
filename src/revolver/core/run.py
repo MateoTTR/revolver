@@ -18,6 +18,7 @@ import copy
 from datetime import UTC, datetime
 import importlib.util
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -104,6 +105,8 @@ from revolver.models.run import (
     SolutionResult,
     TokenUsage as PydanticTokenUsage,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1644,8 +1647,8 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
                     if checkpoint is not None:
                         iterations_completed = count_valid_programs(checkpoint)
                         best_score = read_checkpoint_best_score(checkpoint)
-                except Exception:
-                    pass  # Checkpoint may be mid-write; graceful degradation
+                except (OSError, ValueError, KeyError, TypeError):
+                    logger.debug("Could not read checkpoint progress", exc_info=True)
 
                 return RunStatus(
                     active=True,
@@ -1683,9 +1686,17 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
         if latest.get("valid_iterations") is not None:
             valid_iters = int(latest["valid_iterations"])  # type: ignore[call-overload]
 
+        # Retrieve best_score from rank-1 solution (if any)
+        idle_best_score: float | None = None
+        run_id_str = str(latest.get("id", ""))
+        if run_id_str:
+            solutions = get_solutions_for_run(proj_conn, run_id_str)
+            if solutions and solutions[0].best_score is not None:
+                idle_best_score = solutions[0].best_score
+
         return RunStatus(
             active=False,
-            run_id=str(latest.get("id", "")),
+            run_id=run_id_str,
             problem_version=str(latest.get("problem_version", "")),
             llm=str(latest.get("llm", "")),
             dataset=str(latest.get("dataset", "")),
@@ -1695,6 +1706,7 @@ def get_run_status(project_root: Path | None = None) -> RunStatus:
                 if latest.get("iterations")
                 else None
             ),
+            best_score=idle_best_score,
             started_at=started_at,
         )
     finally:

@@ -288,6 +288,8 @@ def run_status(
                     data["dataset"] = status.dataset
                 if status.iterations_completed is not None and status.iterations_total is not None:
                     data["progress"] = f"{status.iterations_completed}/{status.iterations_total}"
+                if status.best_score is not None:
+                    data["best_score"] = status.best_score
                 render(data, json_mode=False)
             else:
                 render({"status": "idle", "message": "No runs found."}, json_mode=False)

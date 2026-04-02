@@ -421,8 +421,8 @@ class TestReadCheckpointBestScore:
         (tmp_path / "programs").mkdir()
         assert read_checkpoint_best_score(tmp_path) is None
 
-    def test_combined_score_preferred(self, tmp_path: Path) -> None:
-        """Returns combined_score when present in program metrics."""
+    def test_sums_all_numeric_metrics(self, tmp_path: Path) -> None:
+        """Sums all numeric metrics including combined_score (consistent with parse_population)."""
         (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-001"}))
         programs_dir = tmp_path / "programs"
         programs_dir.mkdir()
@@ -434,10 +434,10 @@ class TestReadCheckpointBestScore:
 
         result = read_checkpoint_best_score(tmp_path)
 
-        assert result == pytest.approx(42.5)
+        assert result == pytest.approx(43.45)
 
-    def test_sum_of_numeric_metrics_fallback(self, tmp_path: Path) -> None:
-        """Falls back to sum of numeric metrics when no combined_score."""
+    def test_sum_of_numeric_metrics_no_combined(self, tmp_path: Path) -> None:
+        """Sums numeric metrics when no combined_score key is present."""
         (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-002"}))
         programs_dir = tmp_path / "programs"
         programs_dir.mkdir()

@@ -819,8 +819,7 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
     corresponding program file from ``programs/{id}.json`` and extracts
     the score.
 
-    Score extraction mirrors :func:`parse_population`: first tries
-    ``metrics.combined_score``, then falls back to the sum of all numeric
+    Score extraction mirrors :func:`parse_population`: sums all numeric
     metric values.
 
     All file operations are read-only and error-tolerant — the checkpoint
@@ -852,12 +851,7 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
         if not isinstance(metrics, dict):
             return None
 
-        # Prefer explicit combined_score (OE convention)
-        combined = metrics.get("combined_score")
-        if isinstance(combined, (int, float)) and not isinstance(combined, bool):
-            return float(combined)
-
-        # Fallback: sum of numeric metric values (consistent with parse_population)
+        # Sum of all numeric metric values (consistent with parse_population)
         numeric_vals = [
             v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
         ]

@@ -2085,7 +2085,7 @@ def test_get_run_status_active_with_checkpoint_progress(project_with_prereqs: di
     assert status.active is True
     assert status.iterations_completed == 12
     assert status.iterations_total == 50
-    assert status.best_score == 42.5
+    assert status.best_score == pytest.approx(43.45)  # sum of all numeric metrics
 
 
 @pytest.mark.unit
