@@ -199,7 +199,8 @@ mypy
 | Sprint 009 | Solution UX + Config fluide + Run robustness | v0.9.0 | Done |
 | Sprint 009a | Bugfix delta: Resume, Config validation, UX polish | v0.9.1 | Done |
 | Sprint 010 | Resume, Robustness & UX | v0.10.0 | Done |
-| Sprint 011 | Multi-Model Ensemble Support | v0.11.0 | In Progress |
+| Sprint 011 | Multi-Model Ensemble Support | v0.11.0 | Done |
+| Sprint 012 | Demo feedback: UX & reliability | v0.12.0 | Done |
 
 ## Documentation
 

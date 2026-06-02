@@ -17,12 +17,13 @@ Revolver needs a primary implementation language. The choice impacts development
 
 ## Decision
 
-**Python** (>= 3.11) is the implementation language for Revolver V1.
+**Python** (>= 3.12) is the implementation language for Revolver V1.
 
-Python 3.11 is chosen as the minimum version for:
-- Significant performance improvements (10-60% faster than 3.10)
+Python 3.12 is chosen as the minimum version for:
+- Significant performance improvements over earlier 3.x releases
 - `tomllib` in stdlib (useful for pyproject.toml parsing)
 - Exception groups and `TaskGroup` (for future parallel evaluation)
+- Cleaner typing (no `unused-ignore` workarounds needed under mypy)
 - Broad availability (Ubuntu 24.04, current Homebrew, conda)
 
 ## Alternatives Considered
@@ -45,7 +46,7 @@ Python 3.11 is chosen as the minimum version for:
 
 ### Negative
 - **CLI startup**: ~200ms cold start (well within NFR-030's 2s limit, but noticeable vs compiled CLIs)
-- **No single binary**: users need a Python >= 3.11 installation (mitigated by pipx/uv for isolated installs)
+- **No single binary**: users need a Python >= 3.12 installation (mitigated by pipx/uv for isolated installs)
 - **Type safety**: runtime type errors possible (mitigated by strict mypy/pyright in CI)
 
 ### Risks
@@ -53,7 +54,7 @@ Python 3.11 is chosen as the minimum version for:
 | Risk | Severity | Mitigation |
 |---|---|---|
 | CLI startup perceived as slow | Low | 200ms is acceptable; can use lazy imports to reduce further |
-| Python version availability | Low | 3.11 is 2+ years old, widely available; document in prerequisites |
+| Python version availability | Low | 3.12 is widely available (Ubuntu 24.04, Homebrew, conda); document in prerequisites |
 | Dependency conflicts with user environment | Medium | Recommend pipx or uv for isolated installation (NFR-060) |
 
 ## References

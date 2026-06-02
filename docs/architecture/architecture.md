@@ -46,7 +46,7 @@ Revolver is a CLI tool that orchestrates OpenEvolve and manages the operational 
 | OpenEvolve | Python library (import) | Yes (`revolver setup`) | pip | NFR-060, FR-SET-* |
 | Ollama | Service (HTTP on localhost) | Yes, if conda available | conda-forge | ADR-001, NFR-042, FR-SET-015 |
 | Remote LLM APIs | Network services | No (user provides API keys) | — | NFR-050 |
-| Python >= 3.11 | Runtime | No (prerequisite) | — | ADR-002 |
+| Python >= 3.12 | Runtime | No (prerequisite) | — | ADR-002 |
 | NVIDIA GPU + drivers | Hardware/system | No (detected by `doctor`) | — | NFR-041 |
 
 ---
@@ -388,7 +388,7 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 
 | Concern | Technology | ADR |
 |---|---|---|
-| Language | Python >= 3.11 | ADR-002 |
+| Language | Python >= 3.12 | ADR-002 |
 | CLI framework | Typer (>= 0.21) on Click | ADR-003 |
 | Local LLM server | Ollama | ADR-001 |
 | Structured storage | SQLite (WAL mode) | ADR-004 |
