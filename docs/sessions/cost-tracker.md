@@ -52,14 +52,15 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 43 | 2026-03-28 | session-043 | ~5h | Phase 5 | Feedback analysis, sprint 010/011 planning, OE fork setup, sprint 010 execution (8 PRs, 56 tests), release v0.10.0, 965 tests |
 | 44 | 2026-03-28 | session-044 | ~3h | Phase 5 | POC ensemble OE, Sprint 011 execution (5 PRs, 88 tests), code-reviewer fix (opus+MCP), release v0.11.0, 1053 tests |
 | 45 | 2026-04-02 | session-045 | ~2h30 | Phase 5 | Demo feedback analysis, Sprint 012 (5 PRs, ~30 tests), release v0.12.0, 1086 tests |
+| 46 | 2026-06-02 | session-046 | ~2h00 | Phase 5 | Project reprise (new machine), conda env setup, hotfix #181 (Typer/click drift + CI conda), self-hosted runner provisioned, ShinkaEvolve backend investigation (2 analyses) |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 46 |
-| **Total duration** | ~85h30 |
-| **Avg duration/session** | ~1h50 |
+| **Total sessions** | 47 |
+| **Total duration** | ~87h30 |
+| **Avg duration/session** | ~1h52 |
 
 ## Notes
 
