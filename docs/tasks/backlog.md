@@ -390,6 +390,16 @@ Not a sprint — a single hotfix bundled in one PR, tracked here for traceabilit
 | 264 | Fix `_global_options.py` `parse_args` typing for Typer's vendored Click context (`ctx: Any`) — resolves 5 mypy override/arg-type errors | [x] | Hotfix — PR #181 (#180) |
 | 265 | Refactor `ci.yml`: venv → ephemeral conda env per run (`mamba create -c conda-forge`), `actions/checkout@v5`, concurrency cancel-in-progress. Self-hosted runner provisioned (`revolver-runner` systemd user service + `revolver-ci` helper) | [x] | Hotfix — PR #181 (#180) |
 
+### Investigation — Multi-backend support (OpenEvolve + ShinkaEvolve)
+
+Goal: make Revolver target either OpenEvolve (default) or ShinkaEvolve as a pluggable evolution backend. Analyses done 2026-06-02: see [shinka-vs-openevolve.md](../analysis/shinka-vs-openevolve.md) (comparison) and [shinka-backend-impact.md](../analysis/shinka-backend-impact.md) (impact). Direction: additive backend behind an adapter, OpenEvolve stays default; ShinkaEvolve dependency-isolated. Sequenced — do NOT write ADRs/specs before the spike.
+
+| # | Task | Status | Ref |
+|---|---|---|---|
+| 266 | **Phase 0 spike** — dependency cohabitation test: fresh conda env, `pip install` Revolver + `shinka-evolve`, observe conflicts (`httpx==0.27`, `hydra-core==1.3.2`, heavy stack). Decide the founding question: co-install (`revolver[shinka]` extra) vs isolated subprocess. This determines `launch()` shape, dep strategy, async/token handling | [ ] | next session |
+| 267 | **Detailed impact analysis per CLI step** — after the spike, zoom into each Revolver CLI command (`run`/`resume`/`status`/`population`, `eval`, `solution`, `benchmark`, `problem version`) and assess compatibility/behavior with BOTH OpenEvolve and ShinkaEvolve; pin down the `EvolutionBackend` interface from real command needs | [ ] | next session |
+| 268 | **Detailed plan** — from 266/267: write the backend-abstraction ADR(s) and the required evolutions of specs / design (DES-005/DES-006) / validation. Then phased implementation plan (P1 refactor no-behavior-change → P2 Shinka MVP → P3 parity) | [ ] | TBD |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
