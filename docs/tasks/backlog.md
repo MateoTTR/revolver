@@ -380,6 +380,16 @@
 | 261 | Read `metadata.json` `island_feature_maps` in `parse_population()`, add `cell_indices` + `island` per program | [x] | S12 — session 045, PR #175 |
 | 262 | L2 integration tests for Sprint 012 (~30 new tests across PRs A-E) | [x] | S12 — session 045, included in PRs |
 
+### Hotfix (post-v0.12.0) — Typer/click dependency drift + CI conda runner
+
+Not a sprint — a single hotfix bundled in one PR, tracked here for traceability.
+
+| # | Task | Status | Ref |
+|---|---|---|---|
+| 263 | Declare `click>=8` in `pyproject.toml` dependencies (direct import in `_global_options.py`, previously masked by Typer transitive dep; Typer 0.26.x dropped it) | [x] | Hotfix — PR #181 (#180) |
+| 264 | Fix `_global_options.py` `parse_args` typing for Typer's vendored Click context (`ctx: Any`) — resolves 5 mypy override/arg-type errors | [x] | Hotfix — PR #181 (#180) |
+| 265 | Refactor `ci.yml`: venv → ephemeral conda env per run (`mamba create -c conda-forge`), `actions/checkout@v5`, concurrency cancel-in-progress. Self-hosted runner provisioned (`revolver-runner` systemd user service + `revolver-ci` helper) | [x] | Hotfix — PR #181 (#180) |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
