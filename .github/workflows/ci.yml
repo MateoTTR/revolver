@@ -13,57 +13,107 @@ on:
       - '**.md'
       - 'docs/**'
 
+# Cancel superseded runs for the same ref (e.g. new push to an open PR).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint (ruff + mypy)
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64]
     if: github.event.pull_request.draft == false || github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Setup venv
+      - name: Define ephemeral conda env path
+        # Unique per run so parallel jobs on the same runner don't clash.
+        run: echo "CONDA_ENV=${RUNNER_TEMP}/revolver-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-lint" >> "$GITHUB_ENV"
+
+      - name: Make conda/mamba available
         run: |
-          python3.12 -m venv .venv
-          . .venv/bin/activate
-          pip install -e ".[dev]"
+          if command -v mamba >/dev/null 2>&1; then
+            echo "mamba already on PATH: $(command -v mamba)"
+            exit 0
+          fi
+          for base in "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" "/opt/conda"; do
+            if [ -x "$base/condabin/mamba" ]; then
+              echo "$base/condabin" >> "$GITHUB_PATH"
+              echo "Added $base/condabin to PATH"
+              exit 0
+            fi
+          done
+          echo "::error::Could not find mamba/miniforge on the runner" >&2
+          exit 1
+
+      - name: Create ephemeral conda env (Python 3.12)
+        run: mamba create -y -p "$CONDA_ENV" -c conda-forge python=3.12
+
+      - name: Install package (dev)
+        run: mamba run -p "$CONDA_ENV" python -m pip install -e ".[dev]"
 
       - name: Ruff check
-        run: . .venv/bin/activate && ruff check src/ tests/
+        run: mamba run -p "$CONDA_ENV" ruff check src/ tests/
 
       - name: Ruff format check
-        run: . .venv/bin/activate && ruff format --check src/ tests/
+        run: mamba run -p "$CONDA_ENV" ruff format --check src/ tests/
 
       - name: Mypy
-        run: . .venv/bin/activate && mypy src/revolver/
+        run: mamba run -p "$CONDA_ENV" mypy
+
+      - name: Remove ephemeral conda env
+        if: always()
+        run: mamba env remove -y -p "$CONDA_ENV" || rm -rf "$CONDA_ENV"
 
   test:
     name: Test (pytest + coverage)
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64]
     if: github.event.pull_request.draft == false || github.event_name == 'push'
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Setup venv
+      - name: Define ephemeral conda env path
+        run: echo "CONDA_ENV=${RUNNER_TEMP}/revolver-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test-${{ matrix.python-version }}" >> "$GITHUB_ENV"
+
+      - name: Make conda/mamba available
         run: |
-          python${{ matrix.python-version }} -m venv .venv
-          . .venv/bin/activate
-          pip install -e ".[dev]"
+          if command -v mamba >/dev/null 2>&1; then
+            echo "mamba already on PATH: $(command -v mamba)"
+            exit 0
+          fi
+          for base in "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" "/opt/conda"; do
+            if [ -x "$base/condabin/mamba" ]; then
+              echo "$base/condabin" >> "$GITHUB_PATH"
+              echo "Added $base/condabin to PATH"
+              exit 0
+            fi
+          done
+          echo "::error::Could not find mamba/miniforge on the runner" >&2
+          exit 1
+
+      - name: Create ephemeral conda env (Python ${{ matrix.python-version }})
+        run: mamba create -y -p "$CONDA_ENV" -c conda-forge python=${{ matrix.python-version }}
+
+      - name: Install package (dev)
+        run: mamba run -p "$CONDA_ENV" python -m pip install -e ".[dev]"
 
       - name: Clean stale global DB
         run: rm -rf ~/.revolver
 
       - name: Run tests with coverage
-        run: |
-          . .venv/bin/activate
-          pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
+        run: mamba run -p "$CONDA_ENV" pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
 
       - name: Run L2-OE tests (OpenEvolve contract)
         if: matrix.python-version == '3.12'
         continue-on-error: true
         run: |
-          . .venv/bin/activate
-          pip install "openevolve>=0.2.26"
-          pytest tests/integration/test_run_oe.py -v --no-header
+          mamba run -p "$CONDA_ENV" python -m pip install "openevolve>=0.2.26"
+          mamba run -p "$CONDA_ENV" pytest tests/integration/test_run_oe.py -v --no-header
+
+      - name: Remove ephemeral conda env
+        if: always()
+        run: mamba env remove -y -p "$CONDA_ENV" || rm -rf "$CONDA_ENV"
