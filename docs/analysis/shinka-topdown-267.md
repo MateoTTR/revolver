@@ -333,6 +333,78 @@ user-doc pass → doc-reviewer. Then implement P1→P2→P3 (S13→S14→S15).
 
 ---
 
+## 8. Addendum — Q&A clarifications (session 047)
+
+Four user questions, each verified against current code (Revolver v0.12.1 + the installed
+`shinka-evolve 0.0.7`).
+
+### 8.1 Is Revolver's *remote* LLM registration enough to configure Shinka?
+
+Data-wise yes (no schema change), but the remote path has **two frictions the local path does not**
+(local is clean — Shinka takes an explicit `api_key_env` via `local/<model>@<url>?api_key_env=`):
+
+1. **Model-name recognition is mandatory.** Shinka derives both provider *and* pricing from a bundled
+   `pricing.csv` via `resolve_model_backend()` → `get_provider()`
+   (`shinka/llm/providers/model_resolver.py`). A `model` string not in Shinka's table (and without a
+   `openrouter/` / `azure-` / `local/` prefix) raises `ValueError: Model … not supported`. Revolver's
+   stored `provider` does **not** help — Shinka ignores any hint and re-derives from the name. → a
+   **real constraint to document**: remote model ids must match Shinka's known set or be routed via a
+   prefix. (The same table drives native cost — an unrecognized model also has no cost, see §8.3.)
+2. **`api_key_env` is ignored for remote.** Shinka remote uses SDK-standard env names
+   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or hardcoded ones (`DEEPSEEK_API_KEY`,
+   `OPENROUTER_API_KEY`) — `shinka/llm/client.py:59-92`. → **bridgeable by the adapter**: Revolver
+   already resolves the key at launch (`resolve_api_keys`); the Shinka adapter exports the
+   provider-standard env var. Not a registry gap, an adapter duty.
+
+**Net:** confirms §3 (no schema change) with two added adapter responsibilities + one documented
+limitation (model-name recognition).
+
+### 8.2 Engine traceability at run AND solution level
+
+`Solution` is a pure `(run_id, rank)` reference with no own metadata (`models/solution.py:39`), so
+the engine is **derivable via the run**. The planned `runs.backend` column (§5.2) makes
+solution-backend a join on `run_id`; `llm_snapshot`/`config_snapshot` on the run already trace "same
+LLM". **The OE-vs-SE-same-problem-same-LLM benchmark is natively supported by the design** — it
+compares Solutions, each tracing to a run carrying `backend` + `llm_snapshot`. **New requirement:
+surface `backend` in `run info` / `run list` / `solution info` (derived) / `benchmark results`** so
+cross-engine comparisons are legible. (Adds to S15.)
+
+### 8.3 Do we record token cost per solution? → as a benchmark criterion
+
+**Today: cost is RUN-level, not per-solution, and NOT in the benchmark.** `runs` has
+`prompt_tokens`/`completion_tokens` (`infra/db.py:79-80`); `estimated_cost_usd` is computed at read
+time (FR-RUN-028..030). `BenchmarkEntry`/`BenchmarkResult` compare only on `metrics`/`combined_score`
+— no cost/token field. Since 1 run → 1 tracked rank-1 solution, "cost of a solution" = cost of its
+run (clean mapping). **Gap + opportunity:** cost-to-reach-a-score is exactly where Shinka claims an
+edge (sample efficiency), so it is a high-value cross-engine benchmark axis. **Caveat (R2 unit
+mismatch):** OE = tokens→estimated USD (Revolver pricing); Shinka = native USD (its `pricing.csv`) +
+per-provider tokens. Governed by the `TokenUsage`-semantics decision (Q2, §7). **New feature:
+cost/token columns in `benchmark` output** (scope to S15 or a follow-up, gated on Q2).
+
+### 8.4 Can Shinka dump top-N programs? (the OE limitation that drove the rank-1 simplification)
+
+**Yes — natively and reliably via SQLite:** `get_top_programs(k)`, `get_all_programs()`,
+`get_best_program()` (`shinka/database/dbase.py:1549/1645/1768`) — richer than OE. Current Revolver
+state: `_collect_programs` (`core/run.py:2177`) already writes `rank-1..N.py` from OE's
+`top_programs/`/`best_programs/` dirs, but `solution extract` is **hardcoded to rank-1**
+(`cli/solution.py:273`; `--rank` removed in tasks 197/198). So the run/solution simplification =
+"only rank-1 is promotable to a tracked Solution", an **OE-driven** pragmatic call (OE's
+`top_programs` ranking was unreliable). **Implication:** Shinka makes reliable top-N feasible again.
+Keep **rank-1 as the MVP common denominator** (works for both); expose **top-N extraction as a
+backend capability** (Shinka in S15/P3; possibly retrofit OE if `top_programs` proves usable). The
+infra already supports it (`programs/rank-N.py` + `UNIQUE(run_id, rank)`); only the extract CLI is
+gated to 1 — add `top_n_extraction` to `BackendCapabilities` (§2.2).
+
+### 8.5 New backlog items raised by this Q&A (for #268 / sprint plan)
+
+- **Surface `backend` everywhere** (run info/list, solution info, benchmark results) — S15.
+- **Cost/token columns in `benchmark`** for cross-engine cost-efficiency comparison — gated on Q2,
+  S15 or follow-up.
+- **`top_n_extraction` backend capability** — re-enable top-N solution extraction for backends that
+  support it (Shinka) — S15/P3.
+
+---
+
 ## Appendix — investigation method
 
 Top-down walk of `cli/__init__.py` → `cli/*.py` → `core/*.py` (all ~44 leaf commands), three
