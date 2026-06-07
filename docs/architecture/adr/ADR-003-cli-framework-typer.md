@@ -16,7 +16,7 @@ Revolver is a CLI-first tool (NFR-007) with ~30 subcommands across 9 command gro
 - Custom exit codes: 0, 1, 2, 3, 4 (§4.2 of specifications)
 - Progress indicators for long-running commands (NFR-005)
 - In-process test runner (no subprocess needed)
-- Python >= 3.11 (ADR-002), pip-installable (NFR-060)
+- Python >= 3.12 (ADR-002), pip-installable (NFR-060)
 
 Three candidates were evaluated: **Typer**, **Click**, and **argparse** (stdlib).
 
@@ -59,7 +59,7 @@ Typer is built on top of Click, using Python type hints to define CLI interfaces
 ### Positive
 
 - **Minimal boilerplate**: for ~30 commands, type-hint-driven definitions save significant code. A typical command is 5-8 lines vs 10-15 (Click) or 15-25 (argparse).
-- **Modern Python style**: type hints align with Python >= 3.11 and the project's mypy/pyright linting approach (ADR-002).
+- **Modern Python style**: type hints align with Python >= 3.12 and the project's mypy/pyright linting approach (ADR-002).
 - **Click underneath**: Typer delegates to Click for the heavy lifting — battle-tested command parsing, shell completion, and context management.
 - **One-command completion setup**: `revolver --install-completion` satisfies NFR-008 with zero user friction.
 - **Rich integration**: progress bars (NFR-005), formatted tables, colored output come built-in.
@@ -82,7 +82,7 @@ Typer is built on top of Click, using Python type hints to define CLI interfaces
 
 ## References
 
-- [ADR-002](ADR-002-python-language.md) — Python >= 3.11 as implementation language
+- [ADR-002](ADR-002-python-language.md) — Python >= 3.12 as implementation language
 - [specifications.md](../../specs/specifications.md) — NFR-002, NFR-003, NFR-005, NFR-007, NFR-008
 - [Typer documentation](https://typer.tiangolo.com/)
 - [Click documentation](https://click.palletsprojects.com/)

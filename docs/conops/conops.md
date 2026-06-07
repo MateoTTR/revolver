@@ -665,7 +665,7 @@ bench-20260310-170000,sol-20260310-150000,gemma-small-v1.1,run-20260310-150000,s
 ## 10. Open Questions
 
 - [x] **OQ-01**: Exact local LLM management tool — **Resolved: Ollama** (9x faster than vLLM, 4x less VRAM via quantization, native OpenAI-compatible API, clean lifecycle management) (→ ADR-001)
-- [x] **OQ-02**: Primary programming language for Revolver itself — **Resolved: Python >= 3.11** (→ ADR-002)
+- [x] **OQ-02**: Primary programming language for Revolver itself — **Resolved: Python >= 3.12** (→ ADR-002)
 - [x] **OQ-03**: CLI framework choice — **Resolved: Typer >= 0.21** (→ ADR-003)
 - [x] **OQ-04**: Internal store location — **Resolved**: project-local `.revolver/` for project data, global `~/.revolver/` for LLMs
 - [x] **OQ-05**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training runs — **Resolved: A+B hybrid strategy** — env var injection (`REVOLVER_DATASET_DIR`) as core mechanism + optional SQLite side-channel (`REVOLVER_INSTANCE_LOG`) for per-instance visibility. Callable evaluator (Strategy C) rejected (fork-dependent, fragile). Revolver generates the wrapper evaluator; user writes only `evaluate_instance()`. (→ ADR-006, POC #12)

@@ -14,6 +14,8 @@ the normal Click/Typer parsing, storing them in ``ctx.obj``.
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 from typer.core import TyperCommand, TyperGroup
 
@@ -46,10 +48,18 @@ def _apply_flags_to_context(ctx: click.Context, flags: set[str]) -> None:
         ctx.obj["quiet"] = True
 
 
+# ``ctx`` is typed as ``Any`` on the ``parse_args`` overrides below: the base
+# ``TyperGroup``/``TyperCommand`` expect Typer's vendored Click context
+# (``typer._click.core.Context`` in recent Typer releases), which is a distinct
+# class from the public ``click.Context`` and varies across Typer versions.
+# Using ``Any`` keeps the override LSP-compatible without importing a private
+# Typer module. At runtime Typer always passes a Click-compatible context.
+
+
 class GlobalOptionGroup(TyperGroup):
     """TyperGroup subclass that intercepts global flags."""
 
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         args, flags = _extract_global_flags(args)
         _apply_flags_to_context(ctx, flags)
         return super().parse_args(ctx, args)
@@ -58,7 +68,7 @@ class GlobalOptionGroup(TyperGroup):
 class GlobalOptionCommand(TyperCommand):
     """TyperCommand subclass that intercepts global flags."""
 
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         args, flags = _extract_global_flags(args)
         _apply_flags_to_context(ctx, flags)
         return super().parse_args(ctx, args)

@@ -365,6 +365,47 @@
 | 251 | Documentation audit cascade: spec-reviewer (18F+7W) → validation-reviewer (3F+1W) → doc-reviewer (3F+3W) — all fixed | [x] | S11 — session 044, PR #169 |
 | 252 | (POC finding) OE field mapping: `name` (not `model`), `api_base` (not `base_url`) — covered by task 245 | [~] | S11 — covered by 245 |
 
+### Sprint 012 — Demo Feedback: UX & Reliability (v0.12.0)
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 253 | Simplify `_determine_run_status()`: remove 10% threshold, binary valid/failed logic | [x] | S12 — session 045, PR #178 |
+| 254 | Fix exception handlers in `launch_run()`/`resume_run()`: count valid programs before marking status | [x] | S12 — session 045, PR #178 |
+| 255 | Extend `ResolvedOEConfig` with `diff_based_evolution`, `max_code_length`, `config_overrides`, `llm_models` | [x] | S12 — session 045, PR #176 |
+| 256 | Update `_extract_resolved_config()` + dry-run CLI display for complete config | [x] | S12 — session 045, PR #176 |
+| 257 | Change ensemble indicator from suffix `(E)` to prefix `(E)` in `run list` | [x] | S12 — session 045, PR #179 |
+| 258 | Add `resume_chain` and `resumed_from` to `solution info` output | [x] | S12 — session 045, PR #179 |
+| 259 | Populate `RunStatus.iterations_completed` + `best_score` from checkpoint in `get_run_status()` | [x] | S12 — session 045, PR #177 |
+| 260 | Add `read_checkpoint_best_score()` helper to `infra.openevolve` | [x] | S12 — session 045, PR #177 |
+| 261 | Read `metadata.json` `island_feature_maps` in `parse_population()`, add `cell_indices` + `island` per program | [x] | S12 — session 045, PR #175 |
+| 262 | L2 integration tests for Sprint 012 (~30 new tests across PRs A-E) | [x] | S12 — session 045, included in PRs |
+
+### Hotfix (post-v0.12.0) — Typer/click dependency drift + CI conda runner
+
+Not a sprint — a single hotfix bundled in one PR, tracked here for traceability.
+
+| # | Task | Status | Ref |
+|---|---|---|---|
+| 263 | Declare `click>=8` in `pyproject.toml` dependencies (direct import in `_global_options.py`, previously masked by Typer transitive dep; Typer 0.26.x dropped it) | [x] | Hotfix — PR #181 (#180) |
+| 264 | Fix `_global_options.py` `parse_args` typing for Typer's vendored Click context (`ctx: Any`) — resolves 5 mypy override/arg-type errors | [x] | Hotfix — PR #181 (#180) |
+| 265 | Refactor `ci.yml`: venv → ephemeral conda env per run (`mamba create -c conda-forge`), `actions/checkout@v5`, concurrency cancel-in-progress. Self-hosted runner provisioned (`revolver-runner` systemd user service + `revolver-ci` helper) | [x] | Hotfix — PR #181 (#180) |
+
+### Investigation — Multi-backend support (OpenEvolve + ShinkaEvolve)
+
+Goal: make Revolver target either OpenEvolve (default) or ShinkaEvolve as a pluggable evolution backend. Analyses done 2026-06-02: see [shinka-vs-openevolve.md](../analysis/shinka-vs-openevolve.md) (comparison) and [shinka-backend-impact.md](../analysis/shinka-backend-impact.md) (impact, incl. a draft `EvolutionBackend` interface §3.2). Direction: additive backend behind an adapter, OpenEvolve stays default; ShinkaEvolve dependency-isolated. Sequenced — do NOT write ADRs/specs before the spike.
+
+The first impact analysis is strong but **bottom-up** (from `infra/`). The complement (267) must be **top-down** (from the CLI) and broaden beyond code architecture. Open questions raised in discussion, to fold into 267:
+- **CLI workflow partition** — confirm which commands are engine-coupled (`run`/`resume`/`status`/`population`) vs engine-neutral (`eval`, `solution show/diff/export`, `benchmark`, `problem test` — they reuse the snapshot evaluator, not the engine). This sizes the whole refactor.
+- **LLM registration model** — Revolver registers LLMs as-is (`llm`/`ensemble`: local Ollama + remote API, `api_key_env`, weighted ensemble) for an OpenAI-compatible world. ShinkaEvolve uses model-name strings + native per-provider SDKs + `local/<model>@<url>?api_key_env=` syntax + bandit ensemble (UCB/Thompson). Does Revolver's LLM registry need to evolve, and how does it map per backend?
+- **Parameter/config surface** — the current surface is very OE-specific (`ResolvedOEConfig`, `--temperature`/`--parallel`/`--rewrite-mode`/`--config-override`, `config.yaml` shape). Decide the neutral subset vs per-backend extras.
+- **Cross-engineering impact** — not just architecture: specs (FR/NFR), design (architecture + DES-005/006), and the validation plan (test strategy L1-L3, traceability matrix).
+
+| # | Task | Status | Ref |
+|---|---|---|---|
+| 266 | **Phase 0 spike** — dependency cohabitation test: fresh conda env, `pip install` Revolver + `shinka-evolve`, observe conflicts (`httpx==0.27`, `hydra-core==1.3.2`, heavy stack). Decide the founding question: co-install (`revolver[shinka]` extra) vs isolated subprocess. This determines `launch()` shape, dep strategy, async/token handling | [ ] | next session |
+| 267 | **Top-down complementary analysis** (post-spike) — walk each Revolver CLI command to (a) confirm the engine-coupled vs engine-neutral partition, (b) validate/finalize the draft `EvolutionBackend` interface against real command needs, (c) resolve the LLM-registration mapping and the parameter/config-surface questions above. Then extend to the **full engineering impact**: proposed changes to specs (FR/NFR), design (architecture + DES-005/006), and validation (strategy + traceability), plus a **preliminary incremental dev+validation sprint plan**. Output = preliminary material ready to feed the project agents | [ ] | next session |
+| 268 | **Formalize the plan via the project agents** — from 266/267, drive structuring with the existing agents: backend-abstraction **ADR(s)**, spec updates (→ spec-reviewer), design/architecture/DES-005/006 revisions, validation updates (→ validation-reviewer), sprint structuring (→ scrum-master), user-doc pass (→ doc-reviewer). Then phased implementation (P1 refactor no-behavior-change → P2 Shinka MVP → P3 parity) | [ ] | TBD |
+
 ### Unscheduled — Release Process
 
 | # | Task | Status | Sprint |
