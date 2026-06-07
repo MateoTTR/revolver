@@ -382,7 +382,7 @@
 
 ### Hotfix (post-v0.12.0) — Typer/click dependency drift + CI conda runner
 
-Not a sprint — a single hotfix bundled in one PR, tracked here for traceability.
+Not a sprint — a single hotfix bundled in one PR, tracked here for traceability. **Released as v0.12.1** (session 047, tag `v0.12.1` on `main`).
 
 | # | Task | Status | Ref |
 |---|---|---|---|
