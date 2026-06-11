@@ -1,6 +1,6 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.5 — migrations v3-v8, ensemble tables, llm_type/llm_snapshot columns
+**Version**: 0.6 — runs.backend column + planned migration v9 (ADR-007)
 **Date**: 2026-03-25
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
@@ -157,7 +157,7 @@ CREATE TABLE dataset_compat (
 
 ### 3.5 `runs`
 
-Run metadata created by `revolver run`. A run is the physical unit of an OpenEvolve evolution session: it owns the checkpoint, config, wrapper evaluator, and stored programs. A single solution (rank-1) is auto-created on completion; additional solutions can be extracted on demand via `revolver solution extract`. Full provenance for traceability (NFR-020).
+Run metadata created by `revolver run`. A run is the physical unit of an evolution session on the selected backend (ADR-007): it owns the resume state, config, wrapper evaluator, and stored programs. A single solution (rank-1) is auto-created on completion; additional solutions can be extracted on demand via `revolver solution extract`. Full provenance for traceability (NFR-020). The `backend` column (migration v9, planned for S13) records which evolution backend produced the run; solutions derive their backend via the `run_id` join.
 
 ```sql
 CREATE TABLE runs (
@@ -179,6 +179,7 @@ CREATE TABLE runs (
                              'failed', 'completed_with_errors')),
     llm_type          TEXT NOT NULL DEFAULT 'single', -- 'single' or 'ensemble'
     llm_snapshot      TEXT,                   -- JSON snapshot of LLM/ensemble config for traceability
+    backend           TEXT NOT NULL DEFAULT 'openevolve', -- evolution backend (ADR-007, migration v9 — S13)
     created_at        TEXT NOT NULL           -- ISO 8601
 );
 
@@ -458,6 +459,18 @@ UPDATE schema_version SET version = 8, applied_at = datetime('now');
 ```
 
 Each `ALTER TABLE` is executed individually with error suppression (SQLite does not support `ADD COLUMN IF NOT EXISTS`).
+
+### 5.8 Migration: v8 → v9 (Sprint 013 — planned)
+
+Schema version 9 adds the `backend` column to the `runs` table (project DB) for evolution-backend
+traceability (ADR-007, FR-RUN-047):
+
+```sql
+ALTER TABLE runs ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve';
+UPDATE schema_version SET version = 9, applied_at = datetime('now');
+```
+
+All pre-v9 runs are OpenEvolve runs, so the default backfills them correctly.
 
 ---
 

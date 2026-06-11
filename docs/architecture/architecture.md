@@ -9,7 +9,7 @@
 
 ## 1. System Context
 
-Revolver is a CLI tool that orchestrates OpenEvolve and manages the operational layer around it. It interacts with:
+Revolver is a CLI tool that orchestrates a pluggable evolution backend — OpenEvolve by default, ShinkaEvolve optional ([ADR-007](adr/ADR-007-pluggable-evolution-backend.md)) — and manages the operational layer around it. It interacts with:
 
 ```
                                     ┌──────────────────┐
@@ -44,6 +44,7 @@ Revolver is a CLI tool that orchestrates OpenEvolve and manages the operational 
 | Dependency | Type | Managed by Revolver? | Install method | Reference |
 |---|---|---|---|---|
 | OpenEvolve | Python library (import) | Yes (`revolver setup`) | pip | NFR-060, FR-SET-* |
+| ShinkaEvolve | Python library (import, optional backend) | Opt-in (`pip install revolver[shinka]`) | pip extra | ADR-007, NFR-061 |
 | Ollama | Service (HTTP on localhost) | Yes, if conda available | conda-forge | ADR-001, NFR-042, FR-SET-015 |
 | Remote LLM APIs | Network services | No (user provides API keys) | — | NFR-050 |
 | Python >= 3.12 | Runtime | No (prerequisite) | — | ADR-002 |
@@ -128,7 +129,7 @@ src/revolver/
 │   ├── llm.py               # LLM registration, lifecycle management
 │   ├── problem.py           # Problem testing, version snapshotting
 │   ├── dataset.py           # Dataset registration, integrity verification
-│   ├── run.py               # OpenEvolve orchestration, run management
+│   ├── run.py               # Evolution-backend orchestration (ADR-007), run management
 │   ├── eval.py              # Evaluation loop (per-instance iteration)
 │   ├── solution.py          # Solution browsing, alias management, on-demand extraction
 │   ├── benchmark.py         # Multi-solution comparison, export
@@ -145,8 +146,12 @@ src/revolver/
 │   ├── ollama.py            # Ollama HTTP client (pull, start, stop, status, models)
 │   ├── gpu.py               # nvidia-smi wrapper (GPU name, VRAM usage/total)
 │   ├── evaluator_loader.py  # Dynamic Python module loading for evaluator (DES-003)
-│   ├── openevolve.py        # OpenEvolve wrapper (import, configure, launch, monitor)
-│   └── token_proxy.py      # Transparent HTTP proxy for token usage tracking (DES-005 DD-14)
+│   ├── backends/            # Evolution backend adapters (ADR-007 — introduced in S13)
+│   │   ├── base.py          # EvolutionBackend protocol, BackendCapabilities, get_backend()
+│   │   ├── openevolve.py    # OpenEvolveBackend (absorbs infra/openevolve.py)
+│   │   └── shinka.py        # ShinkaBackend (optional — requires revolver[shinka])
+│   ├── openevolve.py        # OpenEvolve wrapper (migrates into backends/openevolve.py in S13)
+│   └── token_proxy.py      # Transparent HTTP proxy for token usage tracking (DES-005 DD-14; OpenEvolve backend only)
 │
 └── models/                  # Shared data models (dataclasses / Pydantic)
     ├── __init__.py
@@ -198,11 +203,11 @@ Each module encapsulates the business rules for one command group. Key responsib
 | `llm` | Register/remove LLMs, start/stop local models via Ollama client, check status. See [DES-002](design/DES-002-llm-subcommands.md) for Ollama API mapping |
 | `problem` | Run evaluator on instances (test), create immutable snapshots (version), list versions. See [DES-003](design/DES-003-problem-versioning.md) |
 | `dataset` | Register dataset by reference, compute hashes, verify integrity, manage compatibility. See [DES-004](design/DES-004-dataset-registration.md) |
-| `run` | Configure OpenEvolve, set environment variables for instance injection, launch run, store run artifacts, create solution DB references (run_id, rank), record lineage in runs table |
+| `run` | Configure the selected evolution backend (ADR-007), set environment variables for instance injection, launch run, store run artifacts, create solution DB references (run_id, rank), record lineage in runs table |
 | `eval` | Iterate instances, invoke evaluator per instance, collect metrics, compute aggregates, store in SQLite |
 | `solution` | Query solutions from SQLite, manage aliases, `show_solution()`, `diff_solutions()`, `extract_solution(force=True)` |
 | `benchmark` | Orchestrate multi-solution eval, reuse existing results, compute comparison stats, export CSV/JSON |
-| `doctor` | Check Python version, Ollama availability, GPU (nvidia-smi), OpenEvolve importability |
+| `doctor` | Check Python version, Ollama availability, GPU (nvidia-smi), evolution backend availability (OpenEvolve; ShinkaEvolve informational) |
 | `setup` | Install/upgrade Python dependencies (OpenEvolve, etc.) with user confirmation |
 
 **Cross-cutting rules enforced here**:
@@ -222,7 +227,8 @@ Each module encapsulates the business rules for one command group. Key responsib
 | `output` | Output formatting | Human-readable tables (rich), JSON serialization, progress bars (rich.progress) |
 | `ollama` | Ollama HTTP client | Wraps Ollama REST API: pull model, load/unload, list models, check health |
 | `gpu` | GPU monitoring | Wraps `nvidia-smi` for GPU name, VRAM used/total. Used by `llm status` and `doctor` |
-| `openevolve` | OpenEvolve integration | Import OpenEvolve as library, configure programmatically, launch evolution, monitor progress |
+| `openevolve` | OpenEvolve integration | Import OpenEvolve as library, configure programmatically, launch evolution, monitor progress (migrates into `backends/openevolve.py` in S13) |
+| `backends` | Evolution backend adapters (ADR-007) | `EvolutionBackend` protocol + `BackendCapabilities` + `get_backend()` factory; one adapter per engine (OpenEvolve, ShinkaEvolve) |
 
 ### 4.4 Data Models — `revolver.models`
 
@@ -360,7 +366,7 @@ Errors always go to stderr (NFR-004). Progress indicators go to stderr (NFR-005)
 | 1 | General error (invalid args, missing files, name conflict) | All commands |
 | 2 | Integrity error (hash mismatch, corrupted data) | dataset, eval, benchmark, run |
 | 3 | Resource error (Ollama not running, GPU unavailable, OOM) | llm, run |
-| 4 | External error (OpenEvolve failure, LLM API error) | llm, run, eval |
+| 4 | External error (evolution-backend failure, LLM API error) | llm, run, eval |
 
 Domain layer raises typed exceptions (e.g., `IntegrityError`, `ResourceError`). CLI layer catches them and maps to exit codes.
 
@@ -397,7 +403,7 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | Terminal output | rich | — |
 | Data models | Pydantic v2 | ADR-005 |
 | HTTP client | httpx (for Ollama API) | — |
-| Evolution engine | OpenEvolve (Python import) | — |
+| Evolution backends | OpenEvolve (default), ShinkaEvolve (optional `[shinka]` extra) | ADR-007 |
 | Package format | pip-installable (`pyproject.toml`) | NFR-060 |
 
 ---

@@ -1,15 +1,22 @@
 # DES-005 — `revolver run` — OpenEvolve Orchestration
 
-**Version**: 0.5.0 — completed_with_errors status, api_key_env security, Google seed fix
-**Date**: 2026-03-17
+**Version**: 0.6.0 — backend mediation (ADR-007)
+**Date**: 2026-06-11
 **Status**: Draft
-**Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
+**Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
 
 ---
 
 ## 1. Overview
 
-This document details the design of the `revolver run` commands: `run` (launch an evolution run), `status`, `resume`, `list`, and `info`. The **run** is the first-class physical entity that owns all artifacts (checkpoint, config, wrapper evaluator, programs). Solutions are lightweight DB references pointing to (run_id, rank). These commands orchestrate OpenEvolve to generate solutions from a problem version + LLM + dataset combination.
+This document details the design of the `revolver run` commands: `run` (launch an evolution run), `status`, `resume`, `list`, and `info`. The **run** is the first-class physical entity that owns all artifacts (resume state, config, wrapper evaluator, programs). Solutions are lightweight DB references pointing to (run_id, rank). These commands orchestrate the selected evolution backend to generate solutions from a problem version + LLM + dataset combination.
+
+> **Backend mediation (ADR-007)**: since [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md),
+> orchestration is mediated by the `EvolutionBackend` abstraction (`infra/backends/`) rather than
+> calling OpenEvolve directly. OpenEvolve remains the default backend; the OpenEvolve-specific
+> sections of this document (§3 wrapper generation, §4 integration, DD-14 token proxy) describe the
+> **`OpenEvolveBackend` reference implementation**. The ShinkaEvolve counterpart will be designed in
+> the S14 revision. See §14.1 for the mediation summary.
 
 ### 1.1 Key Responsibilities
 
@@ -1363,8 +1370,27 @@ Google's `generativelanguage.googleapis.com` endpoint rejects the `seed` paramet
 
 | Module | Layer | Purpose |
 |---|---|---|
-| `infra/openevolve.py` | Infrastructure | OpenEvolve controller wrapper (launch, monitor, collect results) |
-| `infra/token_proxy.py` | Infrastructure | Transparent HTTP proxy for token usage tracking (DD-14) |
+| `infra/openevolve.py` | Infrastructure | OpenEvolve controller wrapper (launch, monitor, collect results) — migrates into `infra/backends/openevolve.py` in S13 (ADR-007) |
+| `infra/token_proxy.py` | Infrastructure | Transparent HTTP proxy for token usage tracking (DD-14) — used by the OpenEvolve backend only |
+| `infra/backends/` | Infrastructure | Evolution backend adapters (ADR-007): `base.py` (`EvolutionBackend` protocol, `BackendCapabilities`, `get_backend()`), `openevolve.py`, `shinka.py` |
+
+### 14.1 Backend mediation (ADR-007 — introduced in S13)
+
+From S13 onwards, `core/run.py` no longer imports `infra/openevolve.py` directly; it resolves the
+run's backend via `get_backend(name)` and drives launch / resume / live-progress / population
+parsing / token collection through the `EvolutionBackend` interface:
+
+| Concern | Backend-mediated behavior |
+|---|---|
+| **Backend selection** | `--backend {openevolve,shinka}` (default `openevolve`); stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047) |
+| **Resume semantics** | Backend-defined (FR-RUN-024): OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve reuses the parent `results_dir` (its SQLite DB is the resume state) |
+| **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
+| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.5, DD-14); Shinka: native per-program accounting read from `programs.sqlite`, plus a supplementary native `cost_usd` |
+| **Capabilities** | `capabilities()` drives map-with-warn behavior for unsupported options (FR-RUN-048) and the per-backend reproducibility caveat (NFR-024) |
+
+The post-engine boundary is unchanged: `launch_run` writes Revolver-owned artifacts
+(`programs/rank-N.py` + manifest), keeping everything downstream (solution/eval/benchmark)
+engine-agnostic (#267 §1.4).
 
 ### Existing modules impacted
 
