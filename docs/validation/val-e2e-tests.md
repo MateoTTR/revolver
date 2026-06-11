@@ -133,6 +133,18 @@ A scenario validating Revolver behavior without Ollama or GPU. Defined during Ph
 
 **CI suitability**: runs on any runner (no GPU required).
 
+### 3.3 Scenario 3 — ShinkaEvolve Backend Happy Path (planned — S14, ADR-007)
+
+A mirror of the Scenario 1 happy path on the ShinkaEvolve backend (`revolver run --backend
+shinka`): same problem/dataset/evaluator, fake LLM server (or tiny local model), asserting the
+post-engine boundary — `programs/rank-N.py` + manifest with `backend: shinka` — and that the
+engine-neutral downstream (`solution`, `eval`, `benchmark`) works identically on the produced
+artifacts. Requires the `revolver[shinka]` extra; auto-skip when not installed.
+
+**FRs covered**: FR-RUN-047/048, NFR-024 (seed warning), NFR-061 (extra install)
+
+**CI suitability**: runs on any runner (no GPU required); non-blocking like L2-Shinka.
+
 ---
 
 ## 4. Conventions

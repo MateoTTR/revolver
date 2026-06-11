@@ -50,7 +50,16 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 | 1 — Unit | Functions, classes | ~seconds | None (mocked) | Every push | This file (§5) |
 | 2 — Integration | CLI commands, DB, filesystem | ~seconds to minutes | SQLite (real), filesystem (tmpdir) | Every push + PR | [val-integration-tests.md](val-integration-tests.md) |
 | 2-OE — OpenEvolve | Config roundtrip, controller init | ~seconds | openevolve (pip), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
+| 2-Shinka — ShinkaEvolve *(planned — S14, ADR-007)* | Config projection, wrapper contract (`metrics.json`), `programs.sqlite` parsing | ~seconds | shinka-evolve (pip extra), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
 | 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Nightly / manual | [val-e2e-tests.md](val-e2e-tests.md) |
+
+**Backend matrix axis (ADR-007)**: with the pluggable evolution backend, tests split along a new
+axis. **Engine-neutral** tests (~36 of the ~44 commands: `llm`, `dataset`, `solution`, `eval`,
+`benchmark`, `problem`, `run list/info/delete/cleanup`) run **once** — they do not depend on the
+engine. **Engine-coupled** tests (`run` launch, `run resume`, `run status` active-path,
+`run population`, plus the doctor/setup/project-init/version-create shims) are **parameterized per
+backend**: the existing matrices stay as-is for OpenEvolve and gain a ShinkaEvolve variant in S14.
+Each backend keeps a dedicated contract-test track (L2-OE today, L2-Shinka from S14).
 
 ---
 

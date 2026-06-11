@@ -21,6 +21,20 @@ A separate sub-level (L2-OE) validates the contract between Revolver and the rea
 
 L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are silently swallowed by `dacite.from_dict()` when the dict keys don't match OpenEvolve's dataclass fields.
 
+### L2-Shinka: ShinkaEvolve Contract Tests (planned — S14, ADR-007)
+
+A mirror track for the ShinkaEvolve backend will be added in S14: config projection from the LLM
+registry, the generated `evaluate.py` wrapper contract (`metrics.json`/`correct.json` output —
+the top silent-bug risk of the backend initiative), and `programs.sqlite` parsing (population,
+token/cost collection). Test doubles: a mocked `ShinkaEvolveRunner` plus a fixture
+`programs.sqlite`. Auto-skip via `pytest.importorskip("shinka")`; non-blocking CI step like L2-OE.
+
+**Backend impact on the existing matrix (ADR-007)**: the engine-neutral command tests (§2.1–2.4,
+§2.6–2.9, and the `run list`/`info`/`delete`/`cleanup` rows of §2.5) are unaffected. The
+engine-coupled rows of §2.5 (launch, resume, status active-path, population) get a per-backend
+variant in S14. S13 (refactor, no behavior change) adds tests asserting `backend='openevolve'` is
+recorded end-to-end by default.
+
 ---
 
 ## 2. Command Test Matrix
