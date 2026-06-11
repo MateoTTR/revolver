@@ -405,7 +405,7 @@ class TestShinkaBackendStub:
         available, hint = ShinkaBackend().is_available()
         assert available is False
         assert hint is not None
-        assert "pip install revolver[shinka]" in hint
+        assert "pip install 'revolver[shinka]'" in hint
 
     def test_wants_http_proxy_false(self) -> None:
         """ShinkaEvolve tracks tokens natively — no HTTP proxy."""
@@ -439,7 +439,7 @@ class TestShinkaBackendStub:
         with pytest.raises(BackendUnavailableError) as exc_info:
             call(ShinkaBackend(), spec)
         assert exc_info.value.exit_code == 3
-        assert "pip install revolver[shinka]" in str(exc_info.value)
+        assert "pip install 'revolver[shinka]'" in str(exc_info.value)
 
 
 # ── Re-export shim tests ──────────────────────────────────────────────────────

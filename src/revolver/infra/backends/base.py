@@ -98,6 +98,10 @@ class BackendRunSpec:
         run_dir: Run directory (``.revolver/runs/<id>``). ``None`` for
             build-only flows (e.g. ``--dry-run`` before a run dir exists).
         iterations: Iteration count override (``None`` = use config default).
+            Contract: for :meth:`EvolutionBackend.resume` the orchestrator
+            must pass the **already-resolved** count (parent-run fallback
+            applied per FR-RUN-024) — the backend does not know the parent
+            run's iteration count.
         config_overrides: Raw ``key=value`` override strings from the CLI.
         problem_description: Content of ``problem.md`` for prompt injection.
         temperature: CLI ``--temperature`` override.
@@ -188,7 +192,12 @@ class EvolutionBackend(Protocol):
         config: dict[str, Any],
         config_overrides: dict[str, Any] | None = None,
     ) -> ResolvedOEConfig:
-        """Extract key parameters for dry-run display."""
+        """Extract key parameters for dry-run display.
+
+        TODO(S13 PR-C): transitional signature — returns the OE-shaped
+        ``ResolvedOEConfig`` until the neutral ``ResolvedConfig`` +
+        ``backend_extras`` lands (ADR-007 D4, PR-B/PR-C).
+        """
         ...
 
     def generate_wrapper(self, spec: BackendRunSpec) -> Path:
@@ -201,7 +210,13 @@ class EvolutionBackend(Protocol):
         config: dict[str, Any],
         on_progress: Callable[[ProgressInfo], None] | None = None,
     ) -> BackendRunResult:
-        """Launch a fresh evolution run."""
+        """Launch a fresh evolution run.
+
+        Contract: the backend overwrites ``config['output_dir']`` for its
+        own layout; orchestrators must persist any config snapshot *before*
+        calling. Backends MAY ignore *on_progress* (live progress is served
+        by :meth:`read_progress` polling).
+        """
         ...
 
     def resume(
@@ -211,7 +226,12 @@ class EvolutionBackend(Protocol):
         parent_run_dir: Path,
         on_progress: Callable[[ProgressInfo], None] | None = None,
     ) -> BackendRunResult:
-        """Resume evolution from a parent run (backend-defined semantics)."""
+        """Resume evolution from a parent run (backend-defined semantics).
+
+        Same ``config['output_dir']`` / *on_progress* contract as
+        :meth:`launch`. ``spec.iterations`` must already carry the
+        parent-run fallback (see :class:`BackendRunSpec`).
+        """
         ...
 
     def read_progress(self, run_dir: Path) -> tuple[int | None, float | None]:
@@ -260,8 +280,10 @@ def get_backend(name: str) -> EvolutionBackend:
         "openevolve": OpenEvolveBackend,
         "shinka": ShinkaBackend,
     }
+    # Guard against the registry and the display constant drifting apart.
+    assert set(registry) == set(AVAILABLE_BACKENDS)
     factory = registry.get(name)
     if factory is None:
-        available = ", ".join(AVAILABLE_BACKENDS)
+        available = ", ".join(sorted(registry))
         raise ValidationError(f"Unknown backend '{name}'. Available backends: {available}.")
     return factory()

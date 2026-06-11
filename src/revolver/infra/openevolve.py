@@ -7,6 +7,10 @@ pre-existing import keeps working unmodified.
 
 Deprecation: import from ``revolver.infra.backends.openevolve`` instead.
 This shim is scheduled for removal in Sprint 015.
+
+Note: the module's logger name changed with the move — records now log
+under ``revolver.infra.backends.openevolve`` (logging configs filtering
+on the old name must be updated).
 """
 
 from __future__ import annotations

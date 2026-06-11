@@ -1001,8 +1001,11 @@ class OpenEvolveBackend:
     def config_template(self) -> str:
         """Return the OE-shaped ``config.yaml`` scaffold (project init)."""
         # The template is currently owned by core/project.py; ownership moves
-        # into this backend with the project-init shim (S13-13, PR-D).
-        # Imported lazily to avoid a core <-> infra import cycle.
+        # into this backend with the project-init shim (S13-13, PR-D), at
+        # which point the cross-layer private import below disappears.
+        # TODO(S13 PR-D): invert ownership; promote to a public name if any
+        # interim core access remains. Imported lazily to avoid a
+        # core <-> infra import cycle.
         from revolver.core.project import _CONFIG_TEMPLATE
 
         return _CONFIG_TEMPLATE
@@ -1089,6 +1092,13 @@ class OpenEvolveBackend:
         (unless the orchestrator already staged it there) and fed to the
         controller as ``checkpoint_path``. OpenEvolve writes fresh
         checkpoints to ``oe-output/checkpoints/`` as usual.
+
+        Ownership contract (PR-C): the orchestrator owns the fail-fast
+        staging precheck *before* inserting the run record (today's
+        ``core/run.py`` behavior); the copy below is a fallback only, not
+        a parallel implementation. ``spec.iterations`` must already carry
+        the parent-run fallback (FR-RUN-024) — the snapshot-config default
+        used here is a last resort, not equivalent to it.
         """
         run_dir, initial_program, evaluator, output_dir = self._runner_inputs(spec)
         checkpoint = run_dir / "oe-checkpoint"

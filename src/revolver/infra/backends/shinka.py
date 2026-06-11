@@ -28,7 +28,7 @@ from revolver.infra.backends.base import (
 )
 from revolver.models.run import ResolvedOEConfig, TokenUsage
 
-_INSTALL_HINT = "Install with: pip install revolver[shinka]"
+_INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
 
 
 class ShinkaBackend:
