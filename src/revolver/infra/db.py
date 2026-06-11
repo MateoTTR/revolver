@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS runs (
     valid_iterations  INTEGER,
     llm_type          TEXT NOT NULL DEFAULT 'single',
     llm_snapshot      TEXT,
+    backend           TEXT NOT NULL DEFAULT 'openevolve',
     created_at        TEXT NOT NULL
 );
 
@@ -456,6 +457,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 8:
         _migrate_v7_to_v8(conn)
 
+    # Migration v9: Add backend column to runs table (project).
+    if current < 9:
+        _migrate_v8_to_v9(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -555,6 +560,29 @@ CREATE TABLE IF NOT EXISTS ensemble_members (
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
         (8, now),
+    )
+    conn.commit()
+
+
+def _migrate_v8_to_v9(conn: sqlite3.Connection) -> None:
+    """Migration v8->v9: Add backend column to the runs table (project DB).
+
+    Records the evolution backend used for each run (ADR-007, FR-RUN-047,
+    DES-001 §5.8).  All pre-v9 runs are OpenEvolve runs, so the column
+    default backfills them correctly.  The global DB has no runs table —
+    only the schema version is bumped there.
+    """
+    # Project DB: add backend column to runs table.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE runs ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve'")
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (9, now),
     )
     conn.commit()
 
@@ -1444,6 +1472,7 @@ def insert_run(
     valid_iterations: int | None = None,
     llm_type: str = "single",
     llm_snapshot: str | None = None,
+    backend: str = "openevolve",
 ) -> None:
     """Insert a run record into the project database.
 
@@ -1469,6 +1498,8 @@ def insert_run(
             multi-model ensemble.
         llm_snapshot: JSON snapshot of LLM/ensemble configuration for
             traceability.
+        backend: Evolution backend used for this run (ADR-007).
+            Defaults to ``"openevolve"``.
     """
     conn.execute(
         """\
@@ -1477,8 +1508,8 @@ def insert_run(
             generation_time_s, prompt_tokens, completion_tokens,
             config_snapshot, problem_hash, dataset_hash, llm_model,
             resumed_from, status, valid_iterations, llm_type,
-            llm_snapshot, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            llm_snapshot, backend, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -1498,6 +1529,7 @@ def insert_run(
             valid_iterations,
             llm_type,
             llm_snapshot,
+            backend,
             created_at.isoformat(),
         ),
     )

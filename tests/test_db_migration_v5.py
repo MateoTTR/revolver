@@ -438,14 +438,14 @@ def test_fresh_db_has_cascade(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_schema_version_is_8(tmp_path: Path) -> None:
-    """CURRENT_SCHEMA_VERSION must be 8 after migration v8 (ensembles)."""
-    assert CURRENT_SCHEMA_VERSION == 8
+def test_schema_version_is_9(tmp_path: Path) -> None:
+    """CURRENT_SCHEMA_VERSION must be 9 after migration v9 (runs.backend)."""
+    assert CURRENT_SCHEMA_VERSION == 9
 
     db_path = tmp_path / "revolver.db"
     conn = get_project_db(db_path)
     try:
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 8
+        assert cursor.fetchone()[0] == 9
     finally:
         conn.close()

@@ -19,7 +19,7 @@ from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import run as core_run
 from revolver.core.exceptions import ValidationError
 from revolver.infra.output import print_confirmation, render
-from revolver.models.run import RunConfig
+from revolver.models.run import ResolvedOEConfig, RunConfig
 
 # ── Default callback: launch run (DES-005 §2.1) ─────────────────────────────
 
@@ -157,7 +157,10 @@ def run_launch(
                     json_mode=False,
                 )
                 # Display resolved OE config section (S9a-08, S12-04/05/06)
-                if result.resolved_config is not None:
+                # Type-narrowing only: core/run.py still produces the
+                # deprecated ResolvedOEConfig; this renderer switches to
+                # the neutral ResolvedConfig in Sprint 013 PR-C.
+                if isinstance(result.resolved_config, ResolvedOEConfig):
                     rc = result.resolved_config
                     config_data: dict[str, object] = {}
                     if rc.iterations is not None:
