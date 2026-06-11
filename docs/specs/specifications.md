@@ -92,7 +92,8 @@ Each `spec-*.md` file follows this structure:
 | NFR-020 | MUST | Every solution records its full lineage: problem version, dataset, LLM, config, timestamp |
 | NFR-021 | MUST | Local LLM models can be pinned by digest (e.g., `codestral:22b@sha256:...`) |
 | NFR-022 | MUST | Dataset registration records per-instance hashes for integrity verification |
-| NFR-023 | SHOULD | OpenEvolve config used for a run is stored verbatim in the run manifest |
+| NFR-023 | SHOULD | The evolution-backend config used for a run is stored verbatim in the run manifest (ADR-007) |
+| NFR-024 | SHOULD | Search-level reproducibility (same config + seed ⇒ same evolution trajectory) is a **backend capability**: honored by OpenEvolve (`random_seed`), not guaranteed by ShinkaEvolve (no global search seed). Commands warn when a seed is configured on a backend that cannot honor it (ADR-007) |
 
 ### 3.4 Performance
 
@@ -125,7 +126,7 @@ Each `spec-*.md` file follows this structure:
 | ID | Priority | Requirement |
 |---|---|---|
 | NFR-060 | MUST | Revolver is installable as a Python package via `pip install` (or compatible tool: uv, pipx, etc.) |
-| NFR-061 | MUST | All Python dependencies (CLI framework, YAML parser, SQLite driver, OpenEvolve, etc.) are declared in the package metadata and installed automatically |
+| NFR-061 | MUST | All Python dependencies (CLI framework, YAML parser, SQLite driver, OpenEvolve, etc.) are declared in the package metadata and installed automatically. Optional evolution backends are provided via package extras (e.g. `pip install revolver[shinka]` for ShinkaEvolve — ADR-007) |
 | NFR-062 | MUST | System-level dependencies (nvidia-smi, GPU drivers) are NOT managed by the installer — they are detected and reported at runtime. Ollama can be installed via conda-forge by `revolver setup` when conda/mamba is available. |
 | NFR-063 | MUST | A `revolver doctor` command checks the presence, version, and health of all required dependencies (Python and non-Python) |
 | NFR-064 | MUST | A `revolver setup` command installs or upgrades missing dependencies: Python packages via pip, Ollama via conda-forge (when conda/mamba is available), with user confirmation |
@@ -185,7 +186,7 @@ Configuration is resolved in this order (last wins):
 | [spec-llm.md](spec-llm.md) | `revolver llm {add,start,stop,status,list,remove,update}`, `revolver llm ensemble {create,add,list,info,remove}` | §4.8, §5.1 | LLM registration, lifecycle, monitoring, ensembles |
 | [spec-problem.md](spec-problem.md) | `revolver problem {test,version,versions}` | §4.2, §5.3, §5.4, §7.1 | Problem testing and versioning |
 | [spec-dataset.md](spec-dataset.md) | `revolver dataset {add,update,remove,list,info}` | §4.3, §4.4, §5.4, §7.2 | Dataset registration, integrity, compatibility |
-| [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume,list,info,delete}` | §4.6, §5.5 | OpenEvolve orchestration, solution generation |
+| [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume,list,info,delete}` | §4.6, §5.5 | Evolution-backend orchestration (OpenEvolve default, ShinkaEvolve optional), solution generation |
 | [spec-eval.md](spec-eval.md) | `revolver eval {<default>,results}` | §5.6 | Single solution evaluation |
 | [spec-benchmark.md](spec-benchmark.md) | `revolver benchmark {<default>,results,export,list,delete}` | §4.7, §5.7, §8 | Multi-solution comparison and export |
 | [spec-solution.md](spec-solution.md) | `revolver solution {list,info,alias,extract,delete}` | §4.6 | Solution browsing, extraction, and deletion |
@@ -216,6 +217,6 @@ Configuration is resolved in this order (last wins):
 | §5.5 | Workflow: Generate solution | FR-RUN-* |
 | §5.6 | Workflow: Evaluate | FR-EVL-* |
 | §5.7 | Workflow: Benchmark | FR-BEN-* |
-| §7 | Immutability & integrity | NFR-014 to NFR-017, NFR-020 to NFR-023 |
+| §7 | Immutability & integrity | NFR-014 to NFR-017, NFR-020 to NFR-024 |
 | §8 | Export format | FR-BEN-* |
 | §9 | V1 scope | All FR-* and NFR-* |

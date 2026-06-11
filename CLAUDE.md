@@ -184,9 +184,9 @@ Independent PRs are developed in parallel using separate worktree agents. Depend
 ## Key Constraints
 
 - **CLI-first**: all functionality exposed as CLI commands, composable in scripts
-- **OpenEvolve-based**: solution generation relies on OpenEvolve's evolutionary loop
+- **Backend-based**: solution generation relies on a pluggable evolution backend — OpenEvolve by default, ShinkaEvolve optional (ADR-007)
 - **LLM-agnostic**: must support local models and multiple API providers (Anthropic, Google, OpenAI)
 - **LLM interface**: all LLMs must expose an OpenAI-compatible API (native or via adapter)
 - **Full traceability**: every solution must trace back to problem version, dataset, LLM, and config
-- **Reproducibility**: runs must be reproducible given the same config and seed
+- **Reproducibility**: a backend capability — guaranteed on OpenEvolve given the same config and seed; not guaranteed on ShinkaEvolve (no global search seed — ADR-007)
 

@@ -170,7 +170,7 @@ No changes made (dry run).
 | ID | Priority | Requirement | NFR Ref |
 |---|---|---|---|
 | FR-SET-001 | MUST | `doctor` checks all Python package dependencies are importable | NFR-063 |
-| FR-SET-002 | MUST | `doctor` checks OpenEvolve is installed and reports its version | NFR-063 |
+| FR-SET-002 | MUST | `doctor` checks each evolution backend (OpenEvolve; ShinkaEvolve if the `shinka` extra is expected) and reports its installed version. Optional backends that are absent are reported as informational, not failures (ADR-007) | NFR-063 |
 | FR-SET-003 | MUST | `doctor` checks Ollama binary presence, service status, and API reachability | NFR-063 |
 | FR-SET-004 | MUST | `doctor` checks nvidia-smi availability and reports GPU info | NFR-063 |
 | FR-SET-005 | MUST | `doctor` reports each dependency with OK/WARN/FAIL status and actionable message | NFR-066 |
@@ -199,6 +199,7 @@ No changes made (dry run).
 | conda install fails | Error: "Failed to install ollama via conda: \<error\>" | 1 |
 | nvidia-smi not found | WARN: "nvidia-smi not found. GPU monitoring unavailable. Install NVIDIA drivers for local LLM inference." | 0 (warn only) |
 | OpenEvolve not installed | FAIL: "OpenEvolve not installed. Run `revolver setup` to install." | 1 |
+| ShinkaEvolve not installed (optional backend) | INFO: "ShinkaEvolve not installed (optional). Install with `pip install revolver[shinka]`." | 0 (info only) |
 | pip install fails | Error: "Failed to install <package>: <error>" | 1 |
 | No network access during `setup` | Error: "Cannot reach PyPI. Check your network connection." | 1 |
 

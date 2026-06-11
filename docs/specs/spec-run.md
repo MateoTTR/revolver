@@ -1,13 +1,13 @@
 # Spec: revolver run
 
-**Traceable to**: ConOps §4.6 (Solution), §5.5 (Workflow: Generate a Solution), §3.3 (Concurrency Model), §4.4 (Instance Injection), DES-005 v0.3
+**Traceable to**: ConOps §4.6 (Solution), §5.5 (Workflow: Generate a Solution), §3.3 (Concurrency Model), §4.4 (Instance Injection), DES-005 v0.3, ADR-007
 **Status**: Draft
 
 ---
 
 ## 1. Scope
 
-This spec covers solution generation via OpenEvolve orchestration. `revolver run` is the core command that ties together a problem version, a dataset, and an LLM to produce evolved solutions.
+This spec covers solution generation via a pluggable evolution backend (OpenEvolve by default, ShinkaEvolve optional — ADR-007). `revolver run` is the core command that ties together a problem version, a dataset, and an LLM to produce evolved solutions.
 
 ---
 
@@ -15,7 +15,7 @@ This spec covers solution generation via OpenEvolve orchestration. `revolver run
 
 ### 2.1 `revolver run`
 
-Launch an OpenEvolve evolution run.
+Launch an evolution run on the selected backend.
 
 **Options**:
 
@@ -24,12 +24,13 @@ Launch an OpenEvolve evolution run.
 | `--version <tag>` | string | Yes | Problem version to use |
 | `--llm <name>` | string | Yes | Registered LLM or ensemble name |
 | `--dataset <name>` | string | Yes | Registered training dataset |
-| `--iterations <n>` | int | No | Number of evolution iterations. Overrides config.yaml value. |
+| `--backend <name>` | string | No | Evolution backend: `openevolve` (default) or `shinka`. Stored in the run record (FR-RUN-047) |
+| `--iterations <n>` | int | No | Number of evolution iterations. Overrides config.yaml value. Mapped to the backend's native parameter (OE: `max_iterations`; Shinka: `num_generations`) |
 | `--alias <name>` | string | No | User-friendly name for the generated solution |
-| `--config-override <key=value>` | string[] | No | Override specific OpenEvolve config values |
-| `--dry-run` | flag | No | Validate all inputs and display resolved OpenEvolve config without launching the run |
-| `--temperature <float>` | float | No | Override `llm.temperature` in the OpenEvolve config (range: 0.0–2.0) |
-| `--parallel <int>` | int | No | Override `evaluator.parallel_evaluations` in the OpenEvolve config (positive integer) |
+| `--config-override <key=value>` | string[] | No | Override specific backend config values (validated against the selected backend's schema) |
+| `--dry-run` | flag | No | Validate all inputs and display the resolved config (neutral fields + backend extras) without launching the run |
+| `--temperature <float>` | float | No | Override the LLM sampling temperature (range: 0.0–2.0). Mapped per backend (OE: `llm.temperature`; Shinka: per-model `llm_kwargs`) |
+| `--parallel <int>` | int | No | Override evaluation parallelism (positive integer). Mapped per backend (OE: `evaluator.parallel_evaluations`; Shinka: evaluation job pool, with a warning) |
 
 **Behavior**:
 1. **Validate inputs**:
@@ -42,15 +43,15 @@ Launch an OpenEvolve evolution run.
    - Set `REVOLVER_DATASET_DIR` to the dataset path
    - Set `REVOLVER_INSTANCE_LOG` to the side-channel SQLite DB path (optional, for per-instance visibility — ADR-006)
    - Set `REVOLVER_EVAL_LOG` to the evaluator log file path (optional — ADR-006)
-   - Set OpenEvolve config to use the LLM's base URL
-4. **Launch OpenEvolve** with the problem version's files (initial_program, evaluator, config)
+   - Configure the backend to use the registered LLM (base URL/model for OpenAI-compatible access; per-provider projection for ShinkaEvolve — ADR-007 D5)
+4. **Launch the selected backend** with the problem version's files (initial_program, evaluator, config)
 5. **Monitor progress**: display iteration count, best score, elapsed time
 6. **On completion**:
-   - Store all top-ranked programs as `rank-1.py`, `rank-2.py`, etc. in `.revolver/runs/<run-id>/programs/` (OpenEvolve internal output, preserved for later extraction)
+   - Store all top-ranked programs as `rank-1.py`, `rank-2.py`, etc. in `.revolver/runs/<run-id>/programs/` (backend output, preserved for later extraction)
    - Create **one** solution DB row for the best program (rank-1) with `(run_id, rank=1)`
    - Record full lineage in `RunManifest` stored in the run directory
    - Store metrics in SQLite
-   - Store the OpenEvolve checkpoint in the run directory for potential resume
+   - Store the backend resume state in the run directory for potential resume (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir with `programs.sqlite`)
 
 **Output** (human, during run):
 ```
@@ -107,7 +108,7 @@ Run completed: run-20260310-143000
 }
 ```
 
-**Exit codes**: 0 success, 1 invalid inputs, 2 dataset integrity failure, 3 LLM unavailable, 4 OpenEvolve failure
+**Exit codes**: 0 success, 1 invalid inputs, 2 dataset integrity failure, 3 LLM or backend unavailable, 4 backend failure
 
 ### 2.2 `revolver run status`
 
@@ -135,15 +136,16 @@ Resume an interrupted run from its checkpoint. Creates a NEW run from the parent
 | `--llm <name>` | string | No | Override the LLM or ensemble used for the resumed run. Accepts both single LLM and ensemble names, allowing switching between single and ensemble mode. |
 
 **Behavior**:
-1. Locate the OpenEvolve checkpoint in the parent run's directory
-2. Verify the checkpoint is valid and resumable
-3. Create a new run (`resumed_from: <parent-run-id>`). The parent run's checkpoint is READ but not modified
-4. If `--llm` is provided, use the specified LLM or ensemble instead of the parent run's LLM
-5. Copy the wrapper evaluator from the parent run (no regeneration)
-6. Re-launch OpenEvolve from the checkpoint with the (optionally overridden) configuration
-7. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
+1. Locate the parent run's backend resume state (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir)
+2. Verify the resume state is valid and resumable
+3. Create a new run (`resumed_from: <parent-run-id>`). The parent run's resume state is READ but not modified
+4. The resumed run uses the **parent run's backend** (cross-backend resume is not supported)
+5. If `--llm` is provided, use the specified LLM or ensemble instead of the parent run's LLM
+6. Reuse the parent run's wrapper evaluator (no regeneration)
+7. Re-launch the backend from the parent's resume state with the (optionally overridden) configuration
+8. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
 
-**Exit codes**: 0 success, 1 if run or checkpoint not found, 4 if OpenEvolve fails
+**Exit codes**: 0 success, 1 if run or resume state not found, 4 if the backend fails
 
 ### 2.4 `revolver run list`
 
@@ -275,30 +277,30 @@ Deleted run "run-20260310-143000"
 | FR-RUN-005 | MUST | Set `REVOLVER_DATASET_DIR` environment variable for the evaluator | §4.4 |
 | FR-RUN-026 | SHOULD | Set `REVOLVER_INSTANCE_LOG` for optional per-instance SQLite side-channel logging | §4.4, ADR-006 |
 | FR-RUN-027 | SHOULD | Set `REVOLVER_EVAL_LOG` for optional evaluator log file | §4.4, ADR-006 |
-| FR-RUN-006 | MUST | Configure OpenEvolve to use the LLM's base URL and model ID | §3.2 |
+| FR-RUN-006 | MUST | Configure the backend to use the registered LLM: base URL and model ID for OpenAI-compatible backends (OpenEvolve); per-provider projection of the same registry fields for ShinkaEvolve (ADR-007 D5) | §3.2 |
 | FR-RUN-007 | MUST | Generate a unique run ID: `run-{YYYYMMDD}-{HHMMSS}`. Generate solution IDs: `sol-{YYYYMMDD}-{HHMMSS}` | §4.6 |
-| FR-RUN-008 | MUST | Store all top-ranked programs as `rank-N.py` files in the run directory (from OpenEvolve output). Create **one** solution DB row for the best program (rank-1), referencing (`run_id`, `rank=1`). Additional programs can be promoted to solutions via `revolver solution extract`. | §4.6 |
+| FR-RUN-008 | MUST | Store all top-ranked programs as `rank-N.py` files in the run directory (from backend output). Create **one** solution DB row for the best program (rank-1), referencing (`run_id`, `rank=1`). Additional programs can be promoted to solutions via `revolver solution extract`. | §4.6 |
 | FR-RUN-009 | MUST | Record full lineage in `RunManifest` in the run directory: problem version, dataset, LLM, config, timestamp, iterations, generation time | §4.6 |
 | FR-RUN-010 | MUST | Store metrics (best scores per iteration) in SQLite | §4.6 |
 | FR-RUN-019 | MUST | On completion, evaluate the rank-1 program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`) | §4.6 |
 | FR-RUN-020 | MUST | Training results are accessible via `revolver eval results --solution <id> --dataset <train-dataset>` | — |
-| FR-RUN-011 | MUST | Store the OpenEvolve checkpoint in the run directory for resume capability | §4.6, §5.5 |
+| FR-RUN-011 | MUST | Store the backend resume state in the run directory for resume capability (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir) | §4.6, §5.5 |
 | FR-RUN-012 | MUST | Support `--alias` for user-friendly solution naming | §4.6 |
 | FR-RUN-013 | MUST | `resume` creates a new run from parent checkpoint. The parent run is immutable. | §5.5 |
 | FR-RUN-014 | MUST | Local LLM runs execute sequentially (one at a time) | §3.3 |
 | FR-RUN-015 | MUST | Remote LLM runs can execute in parallel | §3.3 |
 | FR-RUN-016 | SHOULD | Display progress during the run (iteration count, best score, elapsed time) | — |
-| FR-RUN-017 | SHOULD | Store the OpenEvolve config used (verbatim copy) in the run directory | NFR-023 |
+| FR-RUN-017 | SHOULD | Store the backend config used (verbatim copy) in the run directory | NFR-023 |
 | FR-RUN-018 | SHOULD | Record generation wall-clock time in solution lineage | §4.6 |
 | FR-RUN-021 | MUST | `run list` shows all runs with filtering by version, LLM, status | — |
 | FR-RUN-022 | MUST | `run info` displays full run details including the auto-created solution, all stored programs with scores, and resume chain | — |
-| FR-RUN-023 | MUST | `--dry-run` validates all inputs and displays resolved config without launching | — |
-| FR-RUN-024 | MUST | Resume copies the wrapper evaluator from the parent run (no regeneration) | — |
+| FR-RUN-023 | MUST | `--dry-run` validates all inputs and displays the resolved config (neutral fields + backend extras) without launching | ADR-007 D4 |
+| FR-RUN-024 | MUST | Resume reuses the parent run's wrapper evaluator (no regeneration) and backend resume state; the resume mechanism is backend-defined (OpenEvolve: copy checkpoint; ShinkaEvolve: reuse results DB) | ADR-007 |
 | FR-RUN-025 | SHOULD | Per-run lock files in `.revolver/runs/locks/` enable concurrent run tracking | §3.3 |
-| FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run by intercepting LLM API responses | §4.6, POC #13 |
+| FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run. The accounting source is backend-defined: HTTP response interception (OpenEvolve) or the engine's native per-program accounting (ShinkaEvolve) — token-primary on all backends (ADR-007 D2) | §4.6, POC #13 |
 | FR-RUN-029 | SHOULD | Display token usage in run completion output and `run info` | §4.6 |
-| FR-RUN-030 | SHOULD | Estimate cost from token usage and optional LLM pricing (if configured). Display in run output when pricing is available. | §4.6, POC #13 |
-| FR-RUN-031 | MUST | If OpenEvolve throws an exception during execution, run status is set to `failed` in DB, `run-error.log` is written to the run directory, and the lock file is removed | — |
+| FR-RUN-030 | SHOULD | Estimate cost from token usage and optional LLM pricing (if configured). Display in run output when pricing is available. On backends with native cost tracking (ShinkaEvolve), report the native USD cost as a supplementary field (ADR-007 D2) | §4.6, POC #13 |
+| FR-RUN-031 | MUST | If the evolution backend throws an exception during execution, run status is set to `failed` in DB, `run-error.log` is written to the run directory, and the lock file is removed | — |
 | FR-RUN-032 | MUST | Post-processing errors are logged to `run-error.log` in the run directory | — |
 | FR-RUN-033 | MUST | `solution extract` accepts runs with status `completed_with_errors` if the program file exists | — |
 | FR-RUN-034 | MUST | `resume` accepts `completed_with_errors` as a valid parent run status | — |
@@ -307,12 +309,14 @@ Deleted run "run-20260310-143000"
 | FR-RUN-037 | MUST | Deleting a run cascade-deletes associated solutions and their evaluation data | — |
 | FR-RUN-038 | MUST | Deleting a run removes the run directory from the filesystem | — |
 | FR-RUN-039 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error | NFR-003 |
-| FR-RUN-040 | SHOULD | `--temperature` overrides `llm.temperature` in the resolved OpenEvolve config (range: 0.0–2.0) | — |
-| FR-RUN-041 | SHOULD | `--parallel` overrides `evaluator.parallel_evaluations` in the resolved OpenEvolve config (positive integer) | — |
-| FR-RUN-043 | MUST | If OpenEvolve completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
+| FR-RUN-040 | SHOULD | `--temperature` overrides the LLM sampling temperature in the resolved config (range: 0.0–2.0), mapped to the backend's native parameter (OE: `llm.temperature`; Shinka: per-model `llm_kwargs`) | — |
+| FR-RUN-041 | SHOULD | `--parallel` overrides evaluation parallelism in the resolved config (positive integer), mapped to the backend's native parameter (OE: `evaluator.parallel_evaluations`; Shinka: evaluation job pool, with a warning) | — |
+| FR-RUN-043 | MUST | If the backend completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
 | FR-RUN-044 | MUST | Run metadata stores `llm_type` (`single` or `ensemble`) indicating whether a single LLM or an ensemble was used | — |
 | FR-RUN-045 | MUST | Run metadata stores `llm_snapshot` (JSON) capturing the full LLM or ensemble configuration at run time for traceability | NFR-020 |
-| FR-RUN-046 | MUST | `--llm` accepts ensemble names; when an ensemble is used, OpenEvolve is configured with multiple models via `llm.models` array | — |
+| FR-RUN-046 | MUST | `--llm` accepts ensemble names; when an ensemble is used, the backend is configured with multiple models (OpenEvolve: weighted `llm.models` array; ShinkaEvolve: bandit selection — member weights are dropped with a warning, ADR-007 D5) | — |
+| FR-RUN-047 | MUST | `--backend {openevolve,shinka}` selects the evolution backend (default: `openevolve`). The backend is stored in the run record and manifest, and surfaced in `run info`, `run list`, and dry-run output. `resume` inherits the parent run's backend. | ADR-007 |
+| FR-RUN-048 | MUST | Backend capability differences are reported honestly: an option not supported by the selected backend produces a warning (map-with-warn), never a silent no-op or an error that breaks scripts | ADR-007 D3/D4 |
 
 ---
 
@@ -328,8 +332,10 @@ Deleted run "run-20260310-143000"
 | Dataset split is not `train` | Warning: "Dataset '<name>' has split 'eval'. Consider using a training dataset." | 0 (continue) |
 | Dataset hash mismatch | Warning: "Dataset '<name>' has been modified since registration. Results may not be reproducible." | 0 (continue) |
 | Dataset incompatible with problem version | Warning: "Dataset '<name>' is not declared compatible with version '<tag>'." | 0 (continue) |
-| OpenEvolve crashes during run | Error: "OpenEvolve failed: <error>". Run status set to `failed`, `run-error.log` written, lock removed. Preserve partial results if any. | 4 |
-| Resume with no checkpoint | Error: "No checkpoint found for run '<run-id>'" | 1 |
+| Backend crashes during run | Error: "<Backend> failed: <error>". Run status set to `failed`, `run-error.log` written, lock removed. Preserve partial results if any. | 4 |
+| Resume with no resume state | Error: "No checkpoint found for run '<run-id>'" (OE) / "No results database found for run '<run-id>'" (Shinka) | 1 |
+| `--backend shinka` but ShinkaEvolve not installed | Error: "Backend 'shinka' is not installed. Install with `pip install revolver[shinka]`." | 3 |
+| `--backend` with unknown name | Error: "Unknown backend '<name>'. Available: openevolve, shinka." | 1 |
 | Another local run already in progress | Error: "A local LLM run is already in progress (see `.revolver/runs/locks/`). Wait for it to complete or cancel it." | 3 |
 | `--dry-run` with missing or invalid inputs | Error reported as normal (exit 1), no run launched | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |
@@ -346,6 +352,7 @@ Deleted run "run-20260310-143000"
 ```yaml
 run_id: "run-20260310-143000"
 status: "completed"
+backend: "openevolve"             # evolution backend used (FR-RUN-047, ADR-007)
 created_at: "2026-03-10T14:30:00Z"
 generation_time_s: 13500
 iterations: 200
