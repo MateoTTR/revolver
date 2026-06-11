@@ -438,9 +438,13 @@ def test_fresh_db_has_cascade(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_schema_version_is_9(tmp_path: Path) -> None:
-    """CURRENT_SCHEMA_VERSION must be 9 after migration v9 (runs.backend)."""
-    assert CURRENT_SCHEMA_VERSION == 9
+def test_schema_version_is_at_least_9(tmp_path: Path) -> None:
+    """CURRENT_SCHEMA_VERSION is at least 9 (runs.backend, migration v9).
+
+    Relaxed pin (>=) so future migrations don't churn this file; the
+    fresh-DB stamp is checked against CURRENT_SCHEMA_VERSION below.
+    """
+    assert CURRENT_SCHEMA_VERSION >= 9
 
     db_path = tmp_path / "revolver.db"
     conn = get_project_db(db_path)
