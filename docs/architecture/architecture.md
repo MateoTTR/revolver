@@ -412,6 +412,7 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | [ADR-004](adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
 | [ADR-005](adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
 | [ADR-006](adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
+| [ADR-007](adr/ADR-007-pluggable-evolution-backend.md) | Pluggable evolution backend (OpenEvolve default, ShinkaEvolve optional) | Accepted |
 
 ---
 
