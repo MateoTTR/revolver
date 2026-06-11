@@ -139,9 +139,11 @@ A mirror of the Scenario 1 happy path on the ShinkaEvolve backend (`revolver run
 shinka`): same problem/dataset/evaluator, fake LLM server (or tiny local model), asserting the
 post-engine boundary — `programs/rank-N.py` + manifest with `backend: shinka` — and that the
 engine-neutral downstream (`solution`, `eval`, `benchmark`) works identically on the produced
-artifacts. Requires the `revolver[shinka]` extra; auto-skip when not installed.
+artifacts. Requires the `revolver[shinka]` extra; uses `@pytest.mark.e2e` plus
+`pytest.importorskip("shinka.database")` for auto-skip when not installed (no dedicated marker).
 
-**FRs covered**: FR-RUN-047/048, NFR-024 (seed warning), NFR-061 (extra install)
+**FRs covered**: FR-RUN-047/048, NFR-024 (seed warning), NFR-061 (extra install), FR-SET-002
+(doctor reports ShinkaEvolve availability as informational)
 
 **CI suitability**: runs on any runner (no GPU required); non-blocking like L2-Shinka.
 
@@ -153,7 +155,8 @@ artifacts. Requires the `revolver[shinka]` extra; auto-skip when not installed.
   ```
   tests/e2e/
   ├── test_alice_jobshop.py     # Scenario 1 (fake LLM + optional real Ollama)
-  └── test_remote_only.py       # Scenario 2 (TBD in Phase 5)
+  ├── test_remote_only.py       # Scenario 2 (TBD in Phase 5)
+  └── test_shinka_backend.py    # Scenario 3 (planned — S14, ADR-007)
   ```
 - **Markers**:
   - `@pytest.mark.e2e` — runs with fake LLM server (no GPU)

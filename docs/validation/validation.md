@@ -194,6 +194,7 @@ markers = [
     "unit: L1 unit tests",
     "integration: L2 integration tests (real DB + filesystem, mocked externals)",
     "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
+    "shinkaevolve: L2-Shinka tests requiring the shinka-evolve package (no LLM needed) — planned, S14",
     "e2e: end-to-end tests with fake LLM server (no GPU required)",
     "e2e_gpu: end-to-end tests requiring Ollama + GPU",
     "slow: tests that take more than 10 seconds",
@@ -224,7 +225,8 @@ push / PR:
   ├── mypy --strict
   ├── pytest tests/unit/ --cov --cov-fail-under=80
   ├── pytest tests/integration/ -m integration
-  └── pip install openevolve && pytest tests/integration/test_run_oe.py  (non-blocking)
+  ├── pip install openevolve && pytest tests/integration/test_run_oe.py  (non-blocking)
+  └── pip install "revolver[shinka]" && pytest tests/integration/test_run_shinka.py  (non-blocking — planned, S14)
 
 nightly (standard runner):
   └── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
@@ -233,7 +235,7 @@ manual (self-hosted + GPU):
   └── pytest tests/e2e/ -m e2e_gpu  (Ollama + real model)
 ```
 
-**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge. L2-OE and E2E failures are reported but do not block.
+**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge. L2-OE, L2-Shinka and E2E failures are reported but do not block.
 
 **Draft PRs**: lint and test jobs are skipped for draft PRs to save CI minutes.
 

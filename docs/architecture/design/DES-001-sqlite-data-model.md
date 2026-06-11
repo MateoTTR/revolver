@@ -169,7 +169,7 @@ CREATE TABLE runs (
     generation_time_s REAL,
     prompt_tokens     INTEGER,               -- total input tokens consumed (NULL if unavailable)
     completion_tokens INTEGER,               -- total output tokens consumed (NULL if unavailable)
-    config_snapshot   TEXT,                   -- verbatim OpenEvolve YAML config (NFR-023)
+    config_snapshot   TEXT,                   -- verbatim backend config used for the run (NFR-023, ADR-007)
     problem_hash      TEXT NOT NULL,          -- hash of problem snapshot used
     dataset_hash      TEXT NOT NULL,          -- hash of dataset at registration
     llm_model         TEXT NOT NULL,          -- full model ID (e.g., "claude-opus-4-6")

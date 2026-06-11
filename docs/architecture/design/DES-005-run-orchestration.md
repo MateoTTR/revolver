@@ -1337,7 +1337,7 @@ OpenEvolve does not expose token usage data (POC #13 finding). Revolver solves t
 
 **Lifecycle**: The proxy is started before `openevolve.run()` and stopped after it returns. It lives within the same process as `revolver run`, managed by `TokenCountingProxy`. On resume, a new proxy is started for the new run (token counts are per-run).
 
-**Note on `config_snapshot`**: The `config_snapshot` stored in SQLite (NFR-023) will contain the proxy URL (`http://127.0.0.1:<port>/v1`) instead of the real LLM endpoint. This is acceptable because: (1) the proxy is ephemeral and only exists during the run, (2) the real LLM endpoint is always recoverable from the `llms` registry via `runs.llm`, (3) `run info` displays the LLM name and model from the run metadata, not from the config snapshot.
+**Note on `config_snapshot`** (OpenEvolve backend only — backends without a proxy, e.g. ShinkaEvolve, store the real endpoint): the `config_snapshot` stored in SQLite (NFR-023) will contain the proxy URL (`http://127.0.0.1:<port>/v1`) instead of the real LLM endpoint. This is acceptable because: (1) the proxy is ephemeral and only exists during the run, (2) the real LLM endpoint is always recoverable from the `llms` registry via `runs.llm`, (3) `run info` displays the LLM name and model from the run metadata, not from the config snapshot.
 
 ### DD-15: `api_key_env` in config instead of resolved API key (F1, NFR-050/052)
 

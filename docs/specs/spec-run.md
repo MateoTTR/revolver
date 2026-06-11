@@ -1,6 +1,6 @@
 # Spec: revolver run
 
-**Traceable to**: ConOps §4.6 (Solution), §5.5 (Workflow: Generate a Solution), §3.3 (Concurrency Model), §4.4 (Instance Injection), DES-005 v0.3, ADR-007
+**Traceable to**: ConOps §4.6 (Solution), §5.5 (Workflow: Generate a Solution), §3.3 (Concurrency Model), §4.4 (Instance Injection), DES-005 v0.6.0, ADR-007
 **Status**: Draft
 
 ---
@@ -161,13 +161,13 @@ List all runs in the current project.
 
 **Output** (human):
 ```
-ID                    Version  LLM              Dataset      Iter  Score   Status      Date
-run-20260310-143000   v1.0     codestral-local  train-small  100   0.74    completed   2026-03-10
-run-20260310-173000   v1.0     claude-opus      train-small  100   0.82    completed   2026-03-10
-run-20260310-190000   v1.0     multi-model-v1*  train-small  200   0.91    completed   2026-03-10
+ID                    Version  LLM              Dataset      Backend     Iter  Score   Status      Date
+run-20260310-143000   v1.0     codestral-local  train-small  openevolve  100   0.74    completed   2026-03-10
+run-20260310-173000   v1.0     claude-opus      train-small  openevolve  100   0.82    completed   2026-03-10
+run-20260310-190000   v1.0     multi-model-v1*  train-small  shinka      200   0.91    completed   2026-03-10
 ```
 
-Note: Ensemble names are marked with `*` in the LLM column.
+Note: Ensemble names are marked with `*` in the LLM column. The `Backend` column surfaces the evolution backend (FR-RUN-047).
 
 **Exit codes**: 0 always
 
@@ -185,6 +185,7 @@ Show detailed information about a run.
 ```
 Run: run-20260310-143000
   Status: completed
+  Backend: openevolve
   Problem version: v1.1 (sha256:e5f6g7h8...)
   LLM: claude-opus (claude-opus-4-6)
   Dataset: train-small (sha256:f1e2d3c4...)
@@ -198,7 +199,7 @@ Run: run-20260310-143000
 Solution (auto-created):
   sol-20260310-143000  rank=#1  score=0.91  claude-small-v1.1
 
-Programs (from OpenEvolve output):
+Programs (from backend output):
   #1  score=0.91  → sol-20260310-143000 (extracted)
   #2  score=0.85
   #3  score=0.79
@@ -381,7 +382,7 @@ solution:                          # auto-created rank-1 solution
   alias: "claude-small-v1.1"
   program: "programs/rank-1.py"
 
-programs:                          # all programs stored from OpenEvolve output
+programs:                          # all programs stored from backend output
   - rank: 1
     score: 0.91
     file: "programs/rank-1.py"

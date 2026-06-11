@@ -292,8 +292,8 @@ Domain Layer (core.run)
   │ 3. Verify dataset integrity (recompute hashes)
   │ 4. Resolve LLM config from registry
   │ 5. Set env vars: REVOLVER_DATASET_DIR
-  │ 6. Configure OpenEvolve programmatically
-  │ 7. Launch OpenEvolve evolution loop
+  │ 6. Configure the selected backend programmatically (via get_backend() — ADR-007)
+  │ 7. Launch the backend's evolution loop
   │ 8. On completion: store run artifacts, create solution references in SQLite
   ▼
 Infrastructure Layer
@@ -301,7 +301,7 @@ Infrastructure Layer
   ├── db: insert run + solution rows
   ├── hashing: verify dataset integrity
   ├── ollama: (if local LLM) ensure model is loaded
-  └── openevolve: import and run OpenEvolve
+  └── backends: import and run the selected engine (OpenEvolve by default)
 ```
 
 ### 6.2 Evaluation (`revolver eval`)

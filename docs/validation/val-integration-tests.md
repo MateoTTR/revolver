@@ -27,7 +27,7 @@ A mirror track for the ShinkaEvolve backend will be added in S14: config project
 registry, the generated `evaluate.py` wrapper contract (`metrics.json`/`correct.json` output —
 the top silent-bug risk of the backend initiative), and `programs.sqlite` parsing (population,
 token/cost collection). Test doubles: a mocked `ShinkaEvolveRunner` plus a fixture
-`programs.sqlite`. Auto-skip via `pytest.importorskip("shinka")`; non-blocking CI step like L2-OE.
+`programs.sqlite`. Auto-skip via `pytest.importorskip("shinka.database")`; non-blocking CI step like L2-OE.
 
 **Backend impact on the existing matrix (ADR-007)**: the engine-neutral command tests (§2.1–2.4,
 §2.6–2.9, and the `run list`/`info`/`delete`/`cleanup` rows of §2.5) are unaffected. The
@@ -303,10 +303,12 @@ tests/fixtures/
   ├── test_benchmark.py
   ├── test_doctor.py
   ├── test_setup.py
-  └── test_cross_cutting.py
+  ├── test_cross_cutting.py
+  └── test_run_shinka.py        # L2-Shinka contract tests (planned — S14, ADR-007)
   ```
 - **Pattern**: each test creates a temporary project via `tmp_project` fixture, runs CLI commands through `CliRunner`, asserts on stdout/stderr/exit code and DB state
 - **Markers**: `@pytest.mark.integration` — allows running unit-only or integration-only via `-m`
 - **Speed**: full integration suite must run in under 2 minutes
 - **No network**: all HTTP calls (Ollama, LLM APIs) are mocked via `mock_ollama` / `mock_openevolve` fixtures
 - **L2-OE tests**: use `pytest.importorskip("openevolve.config")` at module level for auto-skip when `openevolve` is not installed. Marked with `@pytest.mark.openevolve` in addition to `@pytest.mark.integration`. A dummy `OPENAI_API_KEY` is set via `monkeypatch` for tests that instantiate the OpenEvolve controller (it requires an API key even though no LLM call is made).
+- **L2-Shinka tests** (planned — S14): use `pytest.importorskip("shinka.database")` at module level for auto-skip when the `shinka` extra is not installed. Marked with `@pytest.mark.shinkaevolve` in addition to `@pytest.mark.integration`.

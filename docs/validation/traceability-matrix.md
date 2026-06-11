@@ -386,14 +386,14 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-llm | 25 | 16 | 9 | 0 | 4 | 15 | via Sc.1 | 6 |
 | spec-problem | 15 | 10 | 4 | 1 | 1 | 10 | via Sc.1 | 3 |
 | spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
-| spec-run | 52 | 39 | 11 | 0 | 30 | 14 | via Sc.1 | 6 |
+| spec-run | 54 | 41 | 11 | 0 | 30 | 16 | via Sc.1 | 6 |
 | spec-eval | 23 | 17 | 3 | 1 | 7 | 9 | via Sc.1 | 5 (incl. 1 deferred) |
 | spec-solution | 20 | 18 | 2 | 0 | 2 | 16 | via Sc.1 | 2 |
 | spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
-| NFR (direct) | 27 | 19 | 8 | 0 | 6 | 11 | — | 5 (3 perf manual + 2 planned) |
+| NFR (direct) | 28 | 19 | 9 | 0 | 6 | 12 | — | 5 (3 perf manual + 2 planned) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **236** | **170** | **55** | **2** | **73** | **130** | **2 scenarios** | **28** |
+| **Total** | **239** | **172** | **56** | **2** | **73** | **133** | **3 scenarios (1 planned)** | **28** |
 
 Notes:
 - Run delete (FR-RUN-035) adds 11 new test entries covering DB layer, core logic, CLI, and edge cases.

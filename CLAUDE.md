@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Revolver** is a MLOps CLI platform that orchestrates OpenEvolve to let users define optimization problems, manage LLMs (local or API), version problems and datasets, generate solutions via LLM-guided evolution, and benchmark results with full traceability.
+**Revolver** is a MLOps CLI platform that orchestrates a pluggable evolution backend (OpenEvolve by default, ShinkaEvolve optional — ADR-007) to let users define optimization problems, manage LLMs (local or API), version problems and datasets, generate solutions via LLM-guided evolution, and benchmark results with full traceability.
 
 ## How to Use This File
 
