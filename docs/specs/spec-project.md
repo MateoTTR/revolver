@@ -31,6 +31,7 @@ Initialize a new Revolver project.
 |---|---|---|---|
 | `--path <dir>` | string | `.` | Directory to initialize. Created if it does not exist. |
 | `--description <text>` | string | `""` | Short project description |
+| `--backend <name>` | string | `openevolve` | Evolution backend whose `config.yaml` template to scaffold (`openevolve` or `shinka` — ADR-007). Unknown names fail fast (exit 1) before any side effect. |
 
 **Output** (human):
 ```
@@ -59,7 +60,7 @@ Created: .revolver/, initial_program.py, evaluator.py, config.yaml, project.yaml
 | FR-PRJ-002 | MUST | Generate a `project.yaml` file with project name, description, and creation timestamp | §4.1 |
 | FR-PRJ-003 | MUST | Generate a template `initial_program.py` with `EVOLVE-BLOCK` markers and inline comments explaining the pattern | §4.2, Appendix A |
 | FR-PRJ-004 | MUST | Generate a template `evaluator.py` implementing `evaluate_instance(program_path: str, instance_path: str)` with the correct 2-argument signature. The template includes only the per-instance function (recommended mode). Legacy aggregated mode (`evaluate(program_path)` with `REVOLVER_DATASET_DIR`) is documented in the template docstring as an opt-in for advanced users. | §4.4 |
-| FR-PRJ-005 | MUST | Generate a template `config.yaml` with OpenEvolve defaults and comments | Appendix A |
+| FR-PRJ-005 | MUST | Generate a template `config.yaml` with the selected backend's defaults and comments (`--backend`, default OpenEvolve; template content is backend-owned via `config_template()` — ADR-007) | Appendix A |
 | FR-PRJ-006 | MUST | Refuse to initialize if `.revolver/` already exists in the target directory (exit code 1 with clear error message) | — |
 | FR-PRJ-007 | SHOULD | Support `--path <dir>` to create and initialize a new directory in one step | §5.2 |
 | FR-PRJ-008 | SHOULD | Set `.revolver/` directory permissions to 700 (user-only) | NFR-051 |

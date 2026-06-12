@@ -193,9 +193,9 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-044 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_type_stored` | Implemented |
 | FR-RUN-045 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_snapshot_stored` | Implemented |
 | FR-RUN-046 | MUST | DES-005 §4.3 | L2 | `integration/test_run::test_run_with_ensemble` | Implemented |
-| FR-RUN-047 | MUST | ADR-007, DES-005 §14.1, DES-001 §3.5 | L2 | `integration/test_run::test_run_backend_flag_and_default` (S13) | Planned |
-| FR-RUN-047 | MUST | ADR-007, DES-005 §14.1 | L2 | `integration/test_run::test_resume_inherits_parent_backend` (S13) | Planned |
-| FR-RUN-048 | MUST | ADR-007, DES-005 §14.1 | L2 | `integration/test_run_shinka::test_unsupported_option_warns` (S14) | Planned |
+| FR-RUN-047 | MUST | ADR-007, DES-005 §14.1, DES-001 §3.5 | L2 | `integration/test_run::test_run_backend_flag_and_default` | Implemented |
+| FR-RUN-047 | MUST | ADR-007, DES-005 §14.1 | L2 | `integration/test_run::test_resume_inherits_parent_backend` | Implemented |
+| FR-RUN-048 | MUST | ADR-007, DES-005 §14.1 | L1 | `unit/infra/test_shinka_backend::test_parallel_warns` | Implemented |
 
 ---
 
