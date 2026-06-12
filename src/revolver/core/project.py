@@ -13,6 +13,7 @@ from pathlib import Path
 
 import revolver
 from revolver.core.exceptions import DuplicateNameError
+from revolver.infra.backends.base import get_backend
 from revolver.infra.db import get_project_db
 from revolver.infra.store import REVOLVER_DIR, init_project_store, write_manifest
 from revolver.models.project import ProjectConfig
@@ -91,27 +92,8 @@ def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]
     return {"combined_score": 0.0}
 '''
 
-_CONFIG_TEMPLATE = """\
-# OpenEvolve configuration — edit to match your problem.
-#
-# See OpenEvolve documentation for all available options.
-# Revolver passes this file to OpenEvolve via --config.
-
-# Number of evolutionary iterations (generations).
-num_iterations: 10
-
-# Population size — number of candidate programs per generation.
-population_size: 10
-
-# LLM sampling settings.
-llm:
-  temperature: 0.8
-  max_tokens: 4096
-
-# Evaluation settings.
-evaluation:
-  timeout_per_instance: 30  # seconds
-"""
+# NOTE (S13-13): the config.yaml template is owned by the evolution backend
+# (``OpenEvolveBackend.config_template()``) — see ADR-007.
 
 
 def init_project(
@@ -185,7 +167,9 @@ def init_project(
         # FR-PRJ-004: generate template evaluator.py
         (path / "evaluator.py").write_text(_EVALUATOR_TEMPLATE, encoding="utf-8")
 
-        # FR-PRJ-005: generate template config.yaml
-        (path / "config.yaml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+        # FR-PRJ-005: generate template config.yaml — served by the
+        # evolution backend (S13-13, ADR-007)
+        config_template = get_backend("openevolve").config_template()
+        (path / "config.yaml").write_text(config_template, encoding="utf-8")
 
     return config

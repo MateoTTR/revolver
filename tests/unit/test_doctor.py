@@ -12,13 +12,14 @@ from revolver.core.doctor import (
     CheckStatus,
     DependencyStatus,
     DoctorReport,
+    _check_backend,
     _check_nvidia_smi,
     _check_ollama,
-    _check_openevolve,
     _check_python_package,
     _check_revolver,
     run_doctor,
 )
+from revolver.infra.backends.openevolve import OpenEvolveBackend
 from revolver.infra.gpu import GpuInfo
 
 # ── DoctorReport dataclass ────────────────────────────────────────────────────
@@ -76,6 +77,20 @@ def test_doctor_report_empty() -> None:
     assert report.warning_count == 0
 
 
+@pytest.mark.unit
+def test_doctor_report_info_not_counted() -> None:
+    """INFO checks (optional backends) affect neither status nor counts."""
+    report = DoctorReport(
+        checks=[
+            DependencyStatus(name="a", type="python", status=CheckStatus.OK),
+            DependencyStatus(name="b", type="python", status=CheckStatus.INFO),
+        ]
+    )
+    assert report.overall_status == CheckStatus.OK
+    assert report.error_count == 0
+    assert report.warning_count == 0
+
+
 # ── Python package checks ────────────────────────────────────────────────────
 
 
@@ -105,14 +120,17 @@ def test_check_python_package_missing() -> None:
     assert result.fixable is True
 
 
-# ── OpenEvolve check ─────────────────────────────────────────────────────────
+# ── Evolution backend checks (FR-SET-002) ───────────────────────────────────
 
 
 @pytest.mark.unit
 def test_check_openevolve_installed() -> None:
-    """_check_openevolve returns OK when openevolve is importable."""
-    with patch("revolver.core.doctor.importlib.metadata.version", return_value="0.2.0"):
-        result = _check_openevolve()
+    """_check_backend('openevolve') returns OK when the backend is available."""
+    with (
+        patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
+        patch("revolver.core.doctor.importlib.metadata.version", return_value="0.2.0"),
+    ):
+        result = _check_backend("openevolve")
 
     assert result.status == CheckStatus.OK
     assert result.version == "0.2.0"
@@ -122,16 +140,30 @@ def test_check_openevolve_installed() -> None:
 
 @pytest.mark.unit
 def test_check_openevolve_missing() -> None:
-    """_check_openevolve returns FAIL when openevolve is not installed."""
-    with patch(
-        "revolver.core.doctor.importlib.metadata.version",
-        side_effect=importlib.metadata.PackageNotFoundError("openevolve"),
+    """_check_backend('openevolve') returns FAIL when the backend is absent."""
+    with patch.object(
+        OpenEvolveBackend,
+        "is_available",
+        return_value=(False, "Install with: pip install 'revolver[openevolve]'"),
     ):
-        result = _check_openevolve()
+        result = _check_backend("openevolve")
 
     assert result.status == CheckStatus.FAIL
     assert result.message == "not installed"
     assert result.fixable is True
+
+
+@pytest.mark.unit
+def test_check_backend_shinka_informational() -> None:
+    """_check_backend('shinka') reports INFO (optional, not a failure)."""
+    result = _check_backend("shinka")
+
+    assert result.status == CheckStatus.INFO
+    assert result.name == "shinkaevolve"
+    assert result.type == "python"
+    assert result.fixable is False
+    assert "optional" in (result.message or "")
+    assert "revolver[shinka]" in (result.message or "")
 
 
 # ── Ollama check ──────────────────────────────────────────────────────────────
@@ -268,6 +300,7 @@ def test_run_doctor_all_pass() -> None:
 
     with (
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
+        patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
         patch("revolver.core.doctor._detect_conda", return_value=True),
@@ -280,25 +313,28 @@ def test_run_doctor_all_pass() -> None:
 
         report = run_doctor()
 
+    # ShinkaEvolve absent is informational only — overall stays OK
     assert report.overall_status == CheckStatus.OK
     assert report.error_count == 0
-    # Should have: revolver + 5 python deps + openevolve + ollama + nvidia-smi = 9
-    assert len(report.checks) == 9
+    assert report.warning_count == 0
+    # revolver + 5 python deps + openevolve + shinkaevolve + ollama + nvidia-smi = 10
+    assert len(report.checks) == 10
+    shinka_check = next(c for c in report.checks if c.name == "shinkaevolve")
+    assert shinka_check.status == CheckStatus.INFO
 
 
 @pytest.mark.unit
 def test_run_doctor_missing_dep() -> None:
-    """run_doctor with a missing dep returns FAIL report."""
-
-    def mock_version(name: str) -> str:
-        if name == "openevolve":
-            raise importlib.metadata.PackageNotFoundError("openevolve")
-        return "1.0.0"
-
+    """run_doctor with a missing required backend returns FAIL report."""
     gpu = GpuInfo(name="RTX 5090", vram_used_mib=0, vram_total_mib=32768)
 
     with (
-        patch("revolver.core.doctor.importlib.metadata.version", side_effect=mock_version),
+        patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
+        patch.object(
+            OpenEvolveBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[openevolve]'"),
+        ),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
         patch("revolver.core.doctor._detect_conda", return_value=True),
@@ -326,6 +362,7 @@ def test_run_doctor_ollama_warn_without_conda() -> None:
 
     with (
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
+        patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
         patch(
             "revolver.core.doctor.httpx.get",
             side_effect=httpx.ConnectError("refused"),
@@ -339,4 +376,5 @@ def test_run_doctor_ollama_warn_without_conda() -> None:
     assert ollama_check.status == CheckStatus.WARN
     assert ollama_check.fixable is False
     # Overall should be WARN (not FAIL) since Ollama is the only issue
+    # (ShinkaEvolve absent is informational, not a warning)
     assert report.overall_status == CheckStatus.WARN

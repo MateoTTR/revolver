@@ -219,13 +219,19 @@ def create_version(
         for fname in files_to_copy:
             (snapshot_dir / fname).chmod(0o444)
 
-        # S9a-04: Validate OE config if config.yaml exists in snapshot
+        # S9a-04: Validate config if config.yaml exists in snapshot.
+        # S13-13: dispatched via the evolution backend (ADR-007); validation
+        # is skipped silently when the engine package is absent, preserving
+        # the pre-S13 conditional-import semantics.
         config_warnings: list[str] = []
         config_path = snapshot_dir / "config.yaml"
         if config_path.exists():
-            from revolver.infra.openevolve import validate_oe_config
+            from revolver.infra.backends.base import get_backend
 
-            config_warnings = validate_oe_config(config_path)
+            backend = get_backend("openevolve")
+            available, _hint = backend.is_available()
+            if available:
+                config_warnings = backend.validate_config(config_path)
 
         # Compute per-file SHA-256 on the SNAPSHOT copies
         file_snapshots: list[FileSnapshot] = []

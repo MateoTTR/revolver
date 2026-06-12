@@ -45,10 +45,16 @@ class InstallResult:
 
 @dataclass
 class InstallPlan:
-    """Plan of items to install and manual instructions."""
+    """Plan of items to install and manual instructions.
+
+    ``optional_instructions`` lists install instructions for optional
+    dependencies (e.g. the ShinkaEvolve backend — FR-SET-002): they are
+    reported but never auto-installed, and do not count as issues.
+    """
 
     items: list[InstallItem] = field(default_factory=list)
     manual_instructions: list[str] = field(default_factory=list)
+    optional_instructions: list[str] = field(default_factory=list)
 
     @property
     def has_installable(self) -> bool:
@@ -124,6 +130,14 @@ def compute_install_plan(report: DoctorReport, managers: dict[str, bool]) -> Ins
 
     for check in report.checks:
         if check.status == CheckStatus.OK:
+            continue
+
+        if check.status == CheckStatus.INFO:
+            # Optional dependency (e.g. the ShinkaEvolve backend): report
+            # the manual install instruction, never auto-install an
+            # optional extra (FR-SET-002, NFR-064/NFR-065 philosophy).
+            if check.message:
+                plan.optional_instructions.append(f"{check.name}: {check.message}")
             continue
 
         if check.type == "python" and check.fixable:
