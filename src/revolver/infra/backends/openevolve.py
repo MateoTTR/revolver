@@ -1247,6 +1247,8 @@ class OpenEvolveBackend:
     """
 
     name: str = "openevolve"
+    # Engine output directory name inside a run dir (ADR-007, S14-05).
+    default_output_subdir: str = "oe-output"
 
     def capabilities(self) -> BackendCapabilities:
         """Return the OpenEvolve capability matrix (ADR-007)."""
