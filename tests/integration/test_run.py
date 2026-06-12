@@ -266,7 +266,7 @@ def _invoke_with_mocks(
             "revolver.core.run.get_global_db",
             side_effect=lambda: get_global_db_at(global_db_path),
         ),
-        patch("revolver.core.run.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
         patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=run_id),
@@ -663,7 +663,7 @@ def test_run_post_run_evaluation(project_with_prereqs: dict[str, Path]) -> None:
             "revolver.core.run.get_global_db",
             side_effect=lambda: get_global_db_at(global_db_path),
         ),
-        patch("revolver.core.run.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
         patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
         patch("revolver.core.run._post_run_evaluation") as mock_eval,
         patch("revolver.core.run.generate_run_id", return_value=eval_run_id),
@@ -882,7 +882,7 @@ def test_run_resume(project_with_prereqs: dict[str, Path]) -> None:
             "revolver.core.run.get_global_db",
             side_effect=lambda: get_global_db_at(global_db_path),
         ),
-        patch("revolver.core.run.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
         patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
@@ -1471,8 +1471,10 @@ def test_run_dry_run_rewrite_mode_json_fields(
     assert isinstance(data, dict)
     rc = data.get("resolved_config")
     assert rc is not None, "resolved_config missing from JSON output"
-    assert rc["diff_based_evolution"] is False
-    assert rc["max_code_length"] == 50000
+    # OE-exclusive keys live in backend_extras since S13 PR-C (ADR-007 D4)
+    assert rc["backend"] == "openevolve"
+    assert rc["backend_extras"]["diff_based_evolution"] is False
+    assert rc["backend_extras"]["max_code_length"] == 50000
 
 
 @pytest.mark.integration
@@ -1510,7 +1512,8 @@ def test_run_dry_run_config_override_json(
     assert rc is not None, "resolved_config missing from JSON output"
     assert rc["config_overrides"] == {"max_code_length": "30000"}
     # The override should also be applied to the actual config value
-    assert rc["max_code_length"] == 30000
+    # (OE-exclusive key → backend_extras since S13 PR-C, ADR-007 D4)
+    assert rc["backend_extras"]["max_code_length"] == 30000
 
 
 @pytest.mark.integration
@@ -2033,7 +2036,7 @@ def test_resume_llm_ensemble_override(
             "revolver.core.run.get_global_db",
             side_effect=lambda: get_global_db_at(global_db_path),
         ),
-        patch("revolver.core.run.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
         patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
@@ -2167,9 +2170,13 @@ def test_run_list_ensemble_prefix(
     finally:
         conn.close()
 
-    # Non-JSON output: verify prefix format (Rich may truncate, so check for "(E) fl")
+    # Non-JSON output: verify prefix format (Rich may truncate, so check for
+    # "(E) fl"). Widen the virtual terminal: the Backend column added in
+    # S13 PR-C (FR-RUN-047) squeezes the llm column below 80 cols.
     with patch("pathlib.Path.cwd", return_value=root):
-        result = runner.invoke(app, ["run", "list"], catch_exceptions=False)
+        result = runner.invoke(
+            app, ["run", "list"], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
 
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
@@ -2184,3 +2191,341 @@ def test_run_list_ensemble_prefix(
     ensemble_runs = [r for r in data if r["run_id"] == "run-ensemble-prefix-001"]
     assert len(ensemble_runs) == 1
     assert ensemble_runs[0]["llm_type"] == "ensemble"
+
+
+# ── Backend surfacing tests (S13 PR-C, FR-RUN-047/048, ADR-007) ─────────────
+
+
+@pytest.mark.integration
+def test_run_backend_flag_and_default(project_with_prereqs: dict[str, Path]) -> None:
+    """Default and explicit ``--backend openevolve`` record the backend.
+
+    The backend must be stored in the run record (DB), written to the
+    manifest, and surfaced by ``run info`` / ``run list`` (FR-RUN-047).
+    """
+    from revolver.infra.store import read_run_manifest
+
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Run 1: default backend (no flag)
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    default_run_id = _parse_json_output(result)["run_id"]
+
+    # Run 2: explicit --backend openevolve behaves identically
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "openevolve",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    explicit_run_id = _parse_json_output(result)["run_id"]
+
+    # DB: both runs record backend='openevolve'
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        for rid in (default_run_id, explicit_run_id):
+            cursor = conn.execute("SELECT backend FROM runs WHERE id = ?", (rid,))
+            row = cursor.fetchone()
+            assert row is not None
+            assert row[0] == "openevolve", f"run {rid}: backend={row[0]!r}"
+    finally:
+        conn.close()
+
+    # Manifest: backend key present (FR-RUN-047)
+    manifest = read_run_manifest(root, default_run_id)
+    assert manifest["backend"] == "openevolve"
+
+    # run info: backend surfaced (JSON and human)
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app, ["--json", "run", "info", default_run_id], catch_exceptions=False
+        )
+    assert result.exit_code == 0
+    info = _parse_json_output(result)
+    assert info["backend"] == "openevolve"
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app, ["run", "info", default_run_id], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0
+    assert "backend" in output
+    assert "openevolve" in output
+
+    # run list: Backend column surfaced (JSON)
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["--json", "run", "list"], catch_exceptions=False)
+    assert result.exit_code == 0
+    rows = _parse_json_output(result)
+    assert all(r["backend"] == "openevolve" for r in rows)
+
+
+@pytest.mark.integration
+def test_resume_inherits_parent_backend(project_with_prereqs: dict[str, Path]) -> None:
+    """A resumed run inherits the parent run's backend (FR-RUN-047, §2.3)."""
+    from revolver.infra.store import read_run_manifest
+
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Parent run (default backend)
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    # Stage a parent checkpoint so resume can proceed
+    parent_run_dir = root / REVOLVER_DIR / "runs" / parent_run_id
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resume (no backend flag exists on resume — it takes the parent's)
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    resume_run_id, resume_sol_id = _next_ids()
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+    ):
+        result = runner.invoke(
+            app,
+            ["--json", "run", "resume", "--run", parent_run_id],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0, _get_all_output(result)
+    new_run_id = _parse_json_output(result)["run_id"]
+
+    # DB: the resumed run records the parent's backend
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT backend FROM runs WHERE id = ?", (new_run_id,))
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "openevolve"
+    finally:
+        conn.close()
+
+    # Manifest: backend inherited
+    manifest = read_run_manifest(root, new_run_id)
+    assert manifest["backend"] == "openevolve"
+
+
+@pytest.mark.integration
+def test_run_unknown_backend_exit1(project_with_prereqs: dict[str, Path]) -> None:
+    """``run --backend nope`` exits 1 and lists the available backends."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "nope",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Unknown backend 'nope'" in output
+    assert "openevolve" in output
+    assert "shinka" in output
+
+    # No run record was created
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_shinka_stub_not_installed_exit3(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """``run --backend shinka`` exits 3 with the install hint (stub backend)."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "shinka",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 3, f"Exit {result.exit_code}; output: {output}"
+    assert "pip install 'revolver[shinka]'" in output
+
+    # No run record was created (the stub fails before any side effect)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_run_backend_nondefault_surfaced(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """A non-default backend value is faithfully surfaced (review handoff).
+
+    Inserts a run row with ``backend='shinka'`` directly in the DB: if any
+    display path forgot to wire ``backend=`` (and silently rode the model
+    default), this test catches it — a default-valued run cannot.
+    """
+    root = project_with_prereqs["root"]
+
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, problem_version, llm, dataset, iterations, "
+            "problem_hash, dataset_hash, llm_model, status, backend, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run-shinka-display-001",
+                "v1.0",
+                "test-llm",
+                "train-small",
+                5,
+                "hash-sd1",
+                "dhash-sd1",
+                "shinka-model",
+                "completed",
+                "shinka",
+                "2026-04-02T10:00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # run list (JSON): backend faithfully reported
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["--json", "run", "list"], catch_exceptions=False)
+    assert result.exit_code == 0
+    rows = _parse_json_output(result)
+    shinka_rows = [r for r in rows if r["run_id"] == "run-shinka-display-001"]
+    assert len(shinka_rows) == 1
+    assert shinka_rows[0]["backend"] == "shinka"
+
+    # run list (human): Backend column shows the non-default value
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app, ["run", "list"], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0
+    assert "shinka" in output
+
+    # run info (JSON + human): backend faithfully reported
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app, ["--json", "run", "info", "run-shinka-display-001"], catch_exceptions=False
+        )
+    assert result.exit_code == 0
+    assert _parse_json_output(result)["backend"] == "shinka"
+
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["run", "info", "run-shinka-display-001"],
+            catch_exceptions=False,
+            env={"COLUMNS": "200"},
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0
+    assert "shinka" in output
+
+
+@pytest.mark.integration
+def test_run_dry_run_backend_surfaced(project_with_prereqs: dict[str, Path]) -> None:
+    """Dry-run output surfaces the backend (FR-RUN-047): human and JSON."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Human output: backend line + backend-aware resolved-config header
+    result = _invoke_with_mocks(
+        ["run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small", "--dry-run"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "backend" in output
+    assert "openevolve" in output
+    assert "Resolved openevolve config" in output
+
+    # JSON output: resolved_config carries backend + backend_extras
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0
+    data = _parse_json_output(result)
+    rc = data["resolved_config"]
+    assert rc["backend"] == "openevolve"
+    assert isinstance(rc["backend_extras"], dict)

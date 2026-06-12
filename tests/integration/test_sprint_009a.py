@@ -445,7 +445,7 @@ def _invoke_with_mocks(
             "revolver.core.run.get_global_db",
             side_effect=lambda: get_global_db_at(global_db_path),
         ),
-        patch("revolver.core.run.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
         patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=run_id),
@@ -488,7 +488,7 @@ def test_run_dry_run_shows_resolved_config(
     assert "dry-run" in output.lower()
 
     # Verify resolved config section shows the key parameters
-    assert "Resolved OpenEvolve config" in output
+    assert "Resolved openevolve config" in output  # backend-aware header (S13 PR-C, FR-RUN-047)
     assert "iterations" in output.lower()
     assert "temperature" in output.lower()
     assert "parallel_evaluations" in output.lower()

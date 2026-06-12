@@ -3,7 +3,7 @@
 Registers commands on the ``run_app`` Typer instance from
 ``revolver.cli``.
 
-Traceable to: DES-005 section 2, FR-RUN-001..030.
+Traceable to: DES-005 section 2, FR-RUN-001..048, ADR-007.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import run as core_run
 from revolver.core.exceptions import ValidationError
 from revolver.infra.output import print_confirmation, render
-from revolver.models.run import ResolvedOEConfig, RunConfig
+from revolver.models.run import RunConfig
 
 # ── Default callback: launch run (DES-005 §2.1) ─────────────────────────────
 
@@ -39,9 +39,16 @@ def run_launch(
         str | None,
         typer.Option("--dataset", help="Registered dataset name."),
     ] = None,
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            help="Evolution backend: openevolve (default) or shinka.",
+        ),
+    ] = "openevolve",
     iterations: Annotated[
         int | None,
-        typer.Option("--iterations", help="Number of OpenEvolve iterations."),
+        typer.Option("--iterations", help="Number of evolution iterations."),
     ] = None,
     alias: Annotated[
         str | None,
@@ -54,7 +61,7 @@ def run_launch(
         list[str] | None,
         typer.Option(
             "--config-override",
-            help="OpenEvolve config override (key=value). Repeatable.",
+            help="Backend config override (key=value). Repeatable.",
         ),
     ] = None,
     dry_run: Annotated[
@@ -75,7 +82,7 @@ def run_launch(
         int | None,
         typer.Option(
             "--parallel",
-            help="Number of parallel evaluations for OpenEvolve.",
+            help="Number of parallel evaluations.",
         ),
     ] = None,
     rewrite_mode: Annotated[
@@ -89,7 +96,7 @@ def run_launch(
         ),
     ] = False,
 ) -> None:
-    """Launch an OpenEvolve evolution run."""
+    """Launch an evolution run on the selected backend."""
     # If a subcommand was invoked, skip the launch logic
     if ctx.invoked_subcommand is not None:
         return
@@ -122,6 +129,7 @@ def run_launch(
             temperature=temperature,
             parallel=parallel,
             rewrite_mode=rewrite_mode,
+            backend=backend,
         )
 
         if not dry_run:
@@ -130,12 +138,12 @@ def run_launch(
                 f"{f', iterations={iterations}' if iterations else ''}\n"
             )
 
-        # Real-time progress: stream OE output line-by-line (S8a-09)
+        # Real-time progress: stream engine output line-by-line (S8a-09)
         # Disable Python output buffering so child processes flush immediately.
         suppress_info = json_mode or quiet
         os.environ["PYTHONUNBUFFERED"] = "1"
         if not dry_run and not suppress_info:
-            sys.stderr.write("Running OpenEvolve evolution...\n")
+            sys.stderr.write(f"Running {backend} evolution...\n")
         result = core_run.launch_run(config, quiet=suppress_info)
 
         if dry_run:
@@ -149,6 +157,7 @@ def run_launch(
                     {
                         "status": "dry-run",
                         "run_id": result.run_id,
+                        "backend": backend,
                         "problem_version": result.problem_version,
                         "llm": result.llm,
                         "dataset": result.dataset,
@@ -156,35 +165,20 @@ def run_launch(
                     },
                     json_mode=False,
                 )
-                # Display resolved OE config section (S9a-08, S12-04/05/06)
-                # Type-narrowing only: core/run.py still produces the
-                # deprecated ResolvedOEConfig; this renderer switches to
-                # the neutral ResolvedConfig in Sprint 013 PR-C.
-                if isinstance(result.resolved_config, ResolvedOEConfig):
+                # Display the resolved config section (S9a-08, S12-04/05/06,
+                # FR-RUN-047): backend-neutral fields first, then a generic
+                # loop over the backend-exclusive extras (ADR-007 D4).
+                if result.resolved_config is not None:
                     rc = result.resolved_config
-                    config_data: dict[str, object] = {}
+                    config_data: dict[str, object] = {"backend": rc.backend}
                     if rc.iterations is not None:
                         config_data["iterations"] = rc.iterations
-                    if rc.checkpoint_interval is not None:
-                        config_data["checkpoint_interval"] = rc.checkpoint_interval
                     if rc.num_islands is not None:
                         config_data["num_islands"] = rc.num_islands
-                    if rc.feature_dimensions is not None:
-                        config_data["feature_dimensions"] = rc.feature_dimensions
-                    if rc.feature_bins is not None:
-                        config_data["feature_bins"] = rc.feature_bins
                     if rc.temperature is not None:
                         config_data["temperature"] = rc.temperature
-                    if rc.parallel_evaluations is not None:
-                        config_data["parallel_evaluations"] = rc.parallel_evaluations
-                    if rc.diff_based_evolution is not None:
-                        config_data["diff_based_evolution"] = rc.diff_based_evolution
-                    if rc.max_code_length is not None:
-                        config_data["max_code_length"] = rc.max_code_length
-                    if rc.config_overrides is not None:
-                        config_data["config_overrides"] = ", ".join(
-                            f"{k}={v}" for k, v in rc.config_overrides.items()
-                        )
+                    if rc.language is not None:
+                        config_data["language"] = rc.language
                     if rc.llm_models is not None:
                         parts = []
                         for m in rc.llm_models:
@@ -195,9 +189,14 @@ def run_launch(
                             else:
                                 parts.append(name)
                         config_data["llm_models"] = ", ".join(parts)
-                    if config_data:
-                        sys.stderr.write("\nResolved OpenEvolve config:\n")
-                        render(config_data, json_mode=False)
+                    if rc.config_overrides is not None:
+                        config_data["config_overrides"] = ", ".join(
+                            f"{k}={v}" for k, v in rc.config_overrides.items()
+                        )
+                    for key, value in rc.backend_extras.items():
+                        config_data[key] = value
+                    sys.stderr.write(f"\nResolved {rc.backend} config:\n")
+                    render(config_data, json_mode=False)
             return
 
         # Display token usage on stderr if available
@@ -352,7 +351,7 @@ def run_resume(
         list[str] | None,
         typer.Option(
             "--config-override",
-            help="OpenEvolve config override (key=value). Repeatable.",
+            help="Backend config override (key=value). Repeatable.",
         ),
     ] = None,
     rewrite_mode: Annotated[
@@ -366,7 +365,10 @@ def run_resume(
         ),
     ] = False,
 ) -> None:
-    """Resume an interrupted or completed run from its checkpoint."""
+    """Resume an interrupted or completed run from its checkpoint.
+
+    The resumed run inherits the parent run's backend (FR-RUN-047).
+    """
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
@@ -485,6 +487,7 @@ def run_list(
                         "version": s.problem_version,
                         "llm": (f"(E) {s.llm}" if s.llm_type == "ensemble" else s.llm),
                         "dataset": s.dataset,
+                        "backend": s.backend,
                         "status": s.status,
                         "iterations": s.iterations,
                         "valid": (
@@ -547,6 +550,7 @@ def run_info(
                 "dataset": info.dataset,
                 "dataset_hash": info.dataset_hash,
                 "status": info.status,
+                "backend": info.backend,
                 "iterations": info.iterations,
                 "created_at": str(info.created_at),
             }

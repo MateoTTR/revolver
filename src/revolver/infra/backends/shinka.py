@@ -26,7 +26,7 @@ from revolver.infra.backends.base import (
     BackendUnavailableError,
     ProgressInfo,
 )
-from revolver.models.run import ResolvedOEConfig, TokenUsage
+from revolver.models.run import ResolvedConfig, TokenUsage
 
 _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
 
@@ -79,7 +79,7 @@ class ShinkaBackend:
         self,
         config: dict[str, Any],
         config_overrides: dict[str, Any] | None = None,
-    ) -> ResolvedOEConfig:
+    ) -> ResolvedConfig:
         """Not available until S14."""
         raise self._unavailable()
 

@@ -18,7 +18,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from revolver.core.exceptions import ResourceError, ValidationError
 from revolver.models.llm import EnsembleEntry, LLMEntry
-from revolver.models.run import ResolvedOEConfig, TokenUsage
+from revolver.models.run import ResolvedConfig, TokenUsage
 
 # Names accepted by :func:`get_backend`, in display order.
 AVAILABLE_BACKENDS: tuple[str, ...] = ("openevolve", "shinka")
@@ -191,12 +191,11 @@ class EvolutionBackend(Protocol):
         self,
         config: dict[str, Any],
         config_overrides: dict[str, Any] | None = None,
-    ) -> ResolvedOEConfig:
-        """Extract key parameters for dry-run display.
+    ) -> ResolvedConfig:
+        """Extract key parameters for dry-run display (ADR-007 D4).
 
-        TODO(S13 PR-C): transitional signature — returns the OE-shaped
-        ``ResolvedOEConfig`` until the neutral ``ResolvedConfig`` +
-        ``backend_extras`` lands (ADR-007 D4, PR-B/PR-C).
+        Returns the backend-neutral :class:`~revolver.models.run.ResolvedConfig`;
+        backend-exclusive parameters go into ``backend_extras``.
         """
         ...
 

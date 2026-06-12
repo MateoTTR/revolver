@@ -12,7 +12,6 @@ from revolver.models.run import (
     ProgramEntry,
     ProgressInfo,
     ResolvedConfig,
-    ResolvedOEConfig,
     RunConfig,
     RunInfo,
     RunManifest,
@@ -622,11 +621,15 @@ llm_model: codestral:22b
         assert config.backend == "shinka"
 
 
-class TestRunResultResolvedConfigWidening:
-    """RunResult.resolved_config accepts both legacy and neutral models."""
+class TestRunResultResolvedConfig:
+    """RunResult.resolved_config holds the neutral model (S13 PR-C).
+
+    The legacy ``ResolvedOEConfig`` was removed with the union narrowing
+    (ADR-007 D4, Sprint 013 PR-C).
+    """
 
     @staticmethod
-    def _make_result(resolved: ResolvedOEConfig | ResolvedConfig | None) -> RunResult:
+    def _make_result(resolved: ResolvedConfig | None) -> RunResult:
         sol = SolutionResult(solution_id="sol-1", run_id="run-1", rank=1)
         return RunResult(
             run_id="run-1",
@@ -641,14 +644,6 @@ class TestRunResultResolvedConfigWidening:
         )
 
     @pytest.mark.unit
-    def test_accepts_legacy_resolved_oe_config(self) -> None:
-        """RunResult still accepts the deprecated ResolvedOEConfig."""
-        legacy = ResolvedOEConfig(iterations=100, num_islands=4)
-        result = self._make_result(legacy)
-        assert isinstance(result.resolved_config, ResolvedOEConfig)
-        assert result.resolved_config.iterations == 100
-
-    @pytest.mark.unit
     def test_accepts_neutral_resolved_config(self) -> None:
         """RunResult accepts the neutral ResolvedConfig."""
         neutral = ResolvedConfig(backend="openevolve", iterations=100)
@@ -661,3 +656,16 @@ class TestRunResultResolvedConfigWidening:
         """RunResult resolved_config remains optional."""
         result = self._make_result(None)
         assert result.resolved_config is None
+
+    @pytest.mark.unit
+    def test_backend_extras_round_trip(self) -> None:
+        """OE-exclusive keys live in backend_extras (ADR-007 D4)."""
+        neutral = ResolvedConfig(
+            backend="openevolve",
+            iterations=100,
+            backend_extras={"checkpoint_interval": 10, "diff_based_evolution": False},
+        )
+        result = self._make_result(neutral)
+        assert result.resolved_config is not None
+        assert result.resolved_config.backend_extras["checkpoint_interval"] == 10
+        assert result.resolved_config.backend_extras["diff_based_evolution"] is False
