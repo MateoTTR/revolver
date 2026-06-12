@@ -437,11 +437,11 @@ Per ADR-007 (P2 phase — real `ShinkaBackend`, opt-in `revolver[shinka]` extra)
 | 284 | R4 contract tests for `generate_wrapper()` — 5 scenarios on generated `evaluate.py` (S14-02) | [x] | S14 — session 049, PR #192 |
 | 285 | Contract tests for DB-reading methods — tokens/population/count/progress vs fixture DB (S14-03) | [x] | S14 — session 049, PR #192 |
 | 286 | `pyproject.toml` — `[project.optional-dependencies] shinka = ["shinka-evolve>=0.0.7,<0.1"]` (S14-04) | [x] | S14 — session 049, PR #192 |
-| 287 | Orchestrator seams 2+3 — `backend.default_output_subdir`, single-owner iterations resolution (S14-05) | [ ] | S14 — PR-B |
-| 288 | Orchestrator seam 1 — `_determine_crash_status()` delegates to `backend.count_valid()` (S14-06) | [ ] | S14 — PR-B |
-| 289 | `ShinkaBackend.is_available()` real import check + `config_template()` + `validate_config()` (S14-07) | [ ] | S14 — PR-B |
-| 290 | `ShinkaBackend.build_config()` — spec→`EvolutionConfig`/`DatabaseConfig`/`LocalJobConfig` projection + `resolved_config()` (S14-08) | [ ] | S14 — PR-B |
-| 291 | `ShinkaBackend.generate_wrapper()` — Shinka `evaluate.py` adapting `evaluate_instance()` over dataset (S14-09) | [ ] | S14 — PR-B |
+| 287 | Orchestrator seams 2+3 — `backend.default_output_subdir`, single-owner iterations resolution (S14-05) | [x] | S14 — session 049, PR #193 |
+| 288 | Orchestrator seam 1 — `_determine_crash_status()` delegates to `backend.count_valid()` (S14-06) | [x] | S14 — session 049, PR #193 |
+| 289 | `ShinkaBackend.is_available()` real import check + `config_template()` + `validate_config()` (S14-07) | [x] | S14 — session 049, PR #193 |
+| 290 | `ShinkaBackend.build_config()` — spec→`EvolutionConfig`/`DatabaseConfig`/`LocalJobConfig` projection + `resolved_config()` (S14-08) | [x] | S14 — session 049, PR #193 |
+| 291 | `ShinkaBackend.generate_wrapper()` — Shinka `evaluate.py` adapting `evaluate_instance()` over dataset (S14-09) | [x] | S14 — session 049, PR #193 |
 | 292 | `ShinkaBackend.launch()` via `ShinkaEvolveRunner` + `default_output_subdir` (S14-10) | [ ] | S14 — PR-C |
 | 293 | `ShinkaBackend.collect_token_usage()` — `metadata.api_costs` + `metadata.llm_result.*` from `programs.sqlite` (S14-11) | [ ] | S14 — PR-C |
 | 294 | `ShinkaBackend.parse_population()`, `count_valid()`, `read_progress()` from `programs.sqlite` (S14-12) | [ ] | S14 — PR-C |
