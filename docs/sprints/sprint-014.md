@@ -1,6 +1,6 @@
 # Sprint 014 — ShinkaEvolve MVP (P2, v0.14.0)
 
-**Status**: Planning
+**Status**: Complete (4 PRs merged — session 049)
 **Goal**: Implement the real `ShinkaBackend` adapter (replacing the S13 stub) so that `revolver run --backend shinka` completes a genuine mini-evolution end-to-end; front-load the evaluator-wrapper contract tests (R4 risk) in the first wave.
 **Demo**: `revolver run --backend shinka --iterations 3 --llm <local-model> ...` completes on a dev env with `pip install 'revolver[shinka]'`, writes `programs/rank-1.py` + manifest with `backend: shinka`, and the full downstream chain (`solution list`, `eval`, `benchmark`) is unaffected. The existing suite (1175+ tests) stays green on an env without Shinka installed.
 **Source**: ADR-007 (P2 phase, decisions D1–D6), [shinka-topdown-267.md](../analysis/shinka-topdown-267.md) §6 (S14 scope), [shinka-backend-impact.md](../analysis/shinka-backend-impact.md) (risks R1-R4), sprint-013 carry-over.
@@ -110,8 +110,8 @@ Source: `shinka/database/dbase.py` (`CREATE TABLE programs`), `shinka/core/async
 | S14-12 | `infra/backends/shinka.py` — `parse_population()`, `count_valid()`, `read_progress()`: query `programs.sqlite` as verified by S14-03b/c/d; `parse_population()` returns list of dicts with `id`, `generation`, `combined_score`, `correct`, `public_metrics` — **no `cell_indices` or `island` fields** (warn in docstring that callers must not assume these). | infra | PR-C | S14-08 | [x] | Contract tests S14-03b/c/d pass against real implementation |
 | S14-13 | `infra/backends/shinka.py` — `resume()`: for Shinka, resume means reusing the existing `results_dir` (DB-driven: if `programs.sqlite` exists, `ShinkaEvolveRunner` auto-resumes from `last_iteration`). Implementation: same as `launch()` but do not create a new `shinka-output/` dir; instead point `results_dir` at the existing one in `parent_run_dir`. Note: full clone-based resume parity (copying `programs.sqlite` + `gen_*` dirs) is deferred to S15; the S14 implementation reuses the parent dir directly, which means resume creates a logical continuation but not a separate artifact tree. Document this limitation in the method docstring. | infra | PR-C | S14-10 | [x] | `resume()` reuses `parent_run_dir/shinka-output`; a mocked runner receives the correct `results_dir`; behavior documented |
 | S14-14 | `tests/integration/test_run_shinka.py` — L2-Shinka integration tests (mocked `ShinkaEvolveRunner` + fixture DB): (a) `test_shinka_launch_mocked`: `revolver run --backend shinka` with mocked runner completes, inserts run record with `backend='shinka'`, manifest written with `backend: shinka`; (b) `test_shinka_dry_run`: `--dry-run` shows Shinka `backend_extras` fields; (c) `test_shinka_resume_mocked`: resume inherits `backend='shinka'`, reuses parent `shinka-output/`; (d) `test_shinka_token_collection`: after a mocked run, `collect_token_usage()` reads fixture DB and stores tokens in run record; (e) `test_shinka_population_no_cell_indices`: `run population` for a Shinka run does not include `cell_indices`, exits 0. All auto-skip via `pytest.importorskip("shinka.database")`. | test | PR-C | S14-10, S14-11, S14-12 | [x] | All 5 scenarios pass with shinka installed; auto-skipped without; existing OE tests unaffected |
-| S14-15 | `core/doctor.py` + `core/setup.py`: `ShinkaBackend.is_available()` now returns `True` when shinka is installed — verify the doctor output changes from "informational (not installed)" to "OK (installed)" when the extra is present; `setup` entry lists `pip install 'revolver[shinka]'`. Also: `core/project.py` `config_template()` for Shinka returns the Shinka-shaped scaffold from S14-07; `core/problem.py` `validate_config` dispatches to `ShinkaBackend.validate_config()` when `--backend shinka` provided. | domain | PR-D | S14-07 | [ ] | `test_doctor_shinka_installed` (new) passes when shinka importable; `test_doctor_shinka_informational` (S13) still passes without shinka |
-| S14-16 | `tests/e2e/test_shinka_backend.py` — L3 E2E Scenario 3 (Shinka happy path): full workflow mirror of Scenario 1 steps 1–13 using `--backend shinka`; fake LLM server registered as `local/<model>@http://localhost:<port>/v1`; 3 iterations; asserts `programs/rank-1.py` exists, manifest has `backend: shinka`, `solution list` shows solution, `eval` runs downstream. `@pytest.mark.e2e` + `pytest.importorskip("shinka.database")`. | test | PR-D | S14-10, S14-13, S14-14 | [ ] | Test file exists; passes with shinka installed + fake LLM server; auto-skipped without shinka |
+| S14-15 | `core/doctor.py` + `core/setup.py`: `ShinkaBackend.is_available()` now returns `True` when shinka is installed — verify the doctor output changes from "informational (not installed)" to "OK (installed)" when the extra is present; `setup` entry lists `pip install 'revolver[shinka]'`. Also: `core/project.py` `config_template()` for Shinka returns the Shinka-shaped scaffold from S14-07; `core/problem.py` `validate_config` dispatches to `ShinkaBackend.validate_config()` when `--backend shinka` provided. | domain | PR-D | S14-07 | [x] | `test_doctor_shinka_installed` (new) passes when shinka importable; `test_doctor_shinka_informational` (S13) still passes without shinka |
+| S14-16 | `tests/e2e/test_shinka_backend.py` — L3 E2E Scenario 3 (Shinka happy path): full workflow mirror of Scenario 1 steps 1–13 using `--backend shinka`; fake LLM server registered as `local/<model>@http://localhost:<port>/v1`; 3 iterations; asserts `programs/rank-1.py` exists, manifest has `backend: shinka`, `solution list` shows solution, `eval` runs downstream. `@pytest.mark.e2e` + `pytest.importorskip("shinka.database")`. | test | PR-D | S14-10, S14-13, S14-14 | [x] | Test file exists; passes with shinka installed + fake LLM server; auto-skipped without shinka |
 
 ---
 
@@ -279,17 +279,31 @@ The sprint is complete when ALL of the following hold:
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Completed in session 049 (2026-06-12).** Delivery: 4 PRs (#192 PR-A, #193 PR-B, #196 PR-C, #197 PR-D), each issue → worktree dev agent → draft PR → code review → fixes → ready → user merge. Waves as planned (A+B parallel, then C+D parallel; no merge conflicts — the only shared file, `tests/unit/test_doctor.py`, merged cleanly across C/D). Code reviews: #192 0C/1W/4S (agent), #193 0C/1W/4S (main session after 2 reviewer-agent deaths), #196 0C/2W/4S (main session after 1 death), #197 0C/2W/4S (agent) — all CRITICAL-free, all actionable findings fixed in-PR.
 
 ### Tests passing
-- X / Y L2-Shinka contract tests passing
-- X / X existing (non-Shinka) tests passing (regression)
+- Final suite on `develop`, **no-shinka env: 1248 passed / 11 skipped** (baseline 1175 at sprint start); ruff/mypy clean; coverage ≥ 87%.
+- Final suite, **real shinka-evolve 0.0.7 env (`shinka-spike`): 1269 passed / 0 failed / 7 skipped / 1 deselected** — the whole suite is env-independent (`no_shinka` conftest fixture forces un-importability for "not installed" tests).
+- **L3 E2E Scenario 3 passes on the real engine**: full workflow (init → llm add on the fake LLM server → version → datasets → `run --backend shinka --iterations 2 --rewrite-mode` → solution/eval downstream) in ~6 s; `programs/rank-1.py` ≠ initial program; native tokens > 0.
+- E2E tests are deselected by default (`addopts -m 'not e2e'`, val-e2e-tests.md nightly/manual convention); run with `-m e2e`.
 
 ### Demo-able features
-- [ ] `revolver run --backend shinka` completes a real mini-evolution
-- [ ] `revolver run --backend shinka --dry-run` shows Shinka config surface
-- [ ] `revolver doctor` correctly reports Shinka availability
-- [ ] `solution list` / `eval` / `benchmark` work unchanged on Shinka-generated artifacts
+- [x] `revolver run --backend shinka` completes a real mini-evolution (E2E proof, real `ShinkaEvolveRunner`)
+- [x] `revolver run --backend shinka --dry-run` shows the neutral config + Shinka `backend_extras`
+- [x] `revolver doctor` reports Shinka OK when installed / informational + install hint when absent; `setup` lists the `pip install 'revolver[shinka]'` path
+- [x] `project init --backend shinka` scaffolds a Shinka config validating cleanly; `problem version create` dispatches validation per backend
+- [x] `run resume` works on Shinka parents (in-place continuation; backend-aware precheck)
+- [x] `solution list` / `eval` work unchanged on Shinka-generated artifacts (exercised by the E2E); native token/cost accounting stored per ADR-007 D2
 
-### Carry-over
-_Deferred items and open issues to feed into Sprint 015._
+### Carry-over (feed into the S15 issue)
+- **Resume clone parity** (planned S15): the S14 in-place continuation has two user-visible effects (documented in `ShinkaBackend.resume()` docstring, review #196 W1): (a) the resumed run's tokens/valid counts are **cumulative** over the parent chain — benchmark/cost comparisons over-attribute the child; (b) `run population`/`run status` on the **parent** show the child's generations (shared mutated DB).
+- **`resume_precheck` backend hook**: the orchestrator's resume staging dispatch is on `backend.name == "openevolve"` strings; the `else` branch assumes shinka-shaped layout for any future backend (review #196 S1).
+- **Pin resume `--iterations` semantics in DES-005/spec-run**: now uniformly "N more on top of the parent chain" on both backends — undocumented in specs (review #196 S2).
+- **Spec/DES doc for the new `--backend` options** on `project init` and `problem version create` (review #197 W2): FR-PRJ/DES-003 silent; fold into the release doc cascade.
+- **val-e2e-tests.md drift**: fake-server details (latency default, content-based responses, `--source local`) and Scenario 3 status → update in the doc cascade (review #197 S4).
+- Backend-side `iterations` fallback (`openevolve.py` launch/resume) kept as defensive-only with a comment binding it to `core.run.DEFAULT_ITERATIONS` — remove in S15 with the shim cleanup (review #193 W1 / #196).
+- `PYTHONUNBUFFERED` unrestored env mutation in both backends — S15 cleanup (review #196 S4).
+- Top-N extraction: `_BEST_PROGRAMS_COUNT = 1` mirrors OE's single best program; `capabilities().top_n_extraction` full support is S15.
+- `--config-override` typos on shinka warn at launch (`_dataclass_kwargs` drop) instead of failing at dry-run (review #196 S3).
+- Pre-existing S13 doc debts (unchanged): FR-RUN-042 numbering gap, FR-RUN-036..039 traceability rows, DES-005 title rename.
+- `infra/openevolve.py` re-export shim removal (incl. `WRAPPER_FILENAME`, `count_valid_programs`, `generate_wrapper` aliases) — S15.
