@@ -78,7 +78,14 @@ class FakeLLMServer:
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     def start(self) -> str:
-        """Start the server on a random port and return its root URL."""
+        """Start the server on a random port and return its root URL.
+
+        Raises:
+            RuntimeError: When the server is already running (a second
+                start would leak the first server thread).
+        """
+        if self._server is not None:
+            raise RuntimeError("FakeLLMServer is already started — call stop() first.")
         fake = self
 
         class _Handler(BaseHTTPRequestHandler):

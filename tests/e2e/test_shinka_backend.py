@@ -53,9 +53,13 @@ def _strip_ansi(text: str) -> str:
 
 
 def _get_all_output(result: object) -> str:
-    """Combine stdout and stderr from a CliRunner result."""
+    """Combine stdout and stderr from a CliRunner result.
+
+    ``result.output`` aliases ``result.stdout`` on Click's CliRunner —
+    reading both would duplicate the captured text.
+    """
     parts: list[str] = []
-    for attr in ("stdout", "stderr", "output"):
+    for attr in ("stdout", "stderr"):
         val = getattr(result, attr, None)
         if val:
             parts.append(val)
@@ -163,7 +167,6 @@ def _write_instances(directory: Path, instances: dict[str, dict[str, object]]) -
         (directory / name).write_text(json.dumps(payload), encoding="utf-8")
 
 
-@pytest.mark.e2e
 def test_shinka_backend_happy_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -249,7 +252,8 @@ def test_shinka_backend_happy_path(
     assert result.exit_code == 0, output
     # The scaffolded template must validate cleanly against the real
     # Shinka dataclasses (S14-15: template/validate_config consistency).
-    assert "Unknown" not in output, f"template failed Shinka validation: {output}"
+    # Validation findings are printed with a "Warning:" prefix.
+    assert "Warning:" not in output, f"template failed Shinka validation: {output}"
 
     # Step 5 — datasets (train + eval)
     result = _invoke(

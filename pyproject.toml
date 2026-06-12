@@ -70,6 +70,10 @@ mypy_path = "src"
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# L3 E2E tests are nightly/manual-only (val-e2e-tests.md): deselected by
+# default so a plain `pytest tests/` never runs them, even in an env with
+# the engine extras installed. Run them explicitly with `-m e2e`.
+addopts = "-m 'not e2e'"
 markers = [
     "unit: L1 unit tests",
     "integration: L2 integration tests",
