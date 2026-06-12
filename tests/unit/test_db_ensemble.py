@@ -57,9 +57,9 @@ def project_conn(tmp_path: Path) -> sqlite3.Connection:
 
 
 @pytest.mark.unit
-def test_schema_version_is_8() -> None:
-    """CURRENT_SCHEMA_VERSION should be 8."""
-    assert CURRENT_SCHEMA_VERSION == 8
+def test_schema_version_is_at_least_8() -> None:
+    """CURRENT_SCHEMA_VERSION should be at least 8 (v8 features present)."""
+    assert CURRENT_SCHEMA_VERSION >= 8
 
 
 @pytest.mark.unit
@@ -109,19 +109,19 @@ def test_project_db_llm_type_default(project_conn: sqlite3.Connection) -> None:
 
 
 @pytest.mark.unit
-def test_global_db_schema_version_8(global_conn: sqlite3.Connection) -> None:
-    """Global DB schema_version should be 8."""
+def test_global_db_schema_version_current(global_conn: sqlite3.Connection) -> None:
+    """Global DB schema_version should be the current version."""
     cursor = global_conn.execute("SELECT MAX(version) FROM schema_version")
     row = cursor.fetchone()
-    assert row is not None and row[0] == 8
+    assert row is not None and row[0] == CURRENT_SCHEMA_VERSION
 
 
 @pytest.mark.unit
-def test_project_db_schema_version_8(project_conn: sqlite3.Connection) -> None:
-    """Project DB schema_version should be 8."""
+def test_project_db_schema_version_current(project_conn: sqlite3.Connection) -> None:
+    """Project DB schema_version should be the current version."""
     cursor = project_conn.execute("SELECT MAX(version) FROM schema_version")
     row = cursor.fetchone()
-    assert row is not None and row[0] == 8
+    assert row is not None and row[0] == CURRENT_SCHEMA_VERSION
 
 
 # ── Migration from v7: no data loss ────────────────────────────────────────
@@ -182,9 +182,9 @@ CREATE TABLE IF NOT EXISTS llms (
         )
         assert cursor.fetchone() is not None
 
-        # Schema version must be 8.
+        # Schema version must reach the current version (chain continues past 8).
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 8
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
     finally:
         conn.close()
 

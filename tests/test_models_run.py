@@ -6,10 +6,13 @@ from datetime import UTC, datetime
 
 from pydantic import ValidationError
 import pytest
+import yaml
 
 from revolver.models.run import (
     ProgramEntry,
     ProgressInfo,
+    ResolvedConfig,
+    ResolvedOEConfig,
     RunConfig,
     RunInfo,
     RunManifest,
@@ -472,3 +475,189 @@ class TestDatetimeSerialization:
         data = summary.model_dump()
         restored = RunSummary.model_validate(data)
         assert restored.created_at == now
+
+
+class TestResolvedConfig:
+    """Tests for the backend-neutral ResolvedConfig model (ADR-007 D4)."""
+
+    @pytest.mark.unit
+    def test_defaults(self) -> None:
+        """ResolvedConfig instantiates with only backend; extras default to {}."""
+        config = ResolvedConfig(backend="openevolve")
+        assert config.backend == "openevolve"
+        assert config.iterations is None
+        assert config.num_islands is None
+        assert config.temperature is None
+        assert config.language is None
+        assert config.llm_models is None
+        assert config.config_overrides is None
+        assert config.backend_extras == {}
+
+    @pytest.mark.unit
+    def test_backend_required(self) -> None:
+        """ResolvedConfig requires the backend field."""
+        with pytest.raises(ValidationError):
+            ResolvedConfig()  # type: ignore[call-arg]
+
+    @pytest.mark.unit
+    def test_backend_extras_not_shared(self) -> None:
+        """backend_extras default dict is not shared between instances."""
+        a = ResolvedConfig(backend="openevolve")
+        b = ResolvedConfig(backend="shinka")
+        a.backend_extras["checkpoint_interval"] = 10
+        assert b.backend_extras == {}
+
+    @pytest.mark.unit
+    def test_with_all_fields(self) -> None:
+        """ResolvedConfig accepts all neutral fields and backend extras."""
+        config = ResolvedConfig(
+            backend="openevolve",
+            iterations=100,
+            num_islands=4,
+            temperature=0.8,
+            language="python",
+            llm_models=[{"name": "test-model", "weight": 1.0}],
+            config_overrides={"llm.temperature": "0.8"},
+            backend_extras={"checkpoint_interval": 10, "max_code_length": 50000},
+        )
+        assert config.iterations == 100
+        assert config.num_islands == 4
+        assert config.temperature == 0.8
+        assert config.language == "python"
+        assert config.llm_models == [{"name": "test-model", "weight": 1.0}]
+        assert config.config_overrides == {"llm.temperature": "0.8"}
+        assert config.backend_extras["checkpoint_interval"] == 10
+
+
+class TestBackendField:
+    """Tests for the backend field on run models (ADR-007, FR-RUN-047)."""
+
+    @pytest.mark.unit
+    def test_run_config_backend_default(self) -> None:
+        """RunConfig defaults backend to 'openevolve'."""
+        config = RunConfig(
+            problem_version="v1.0",
+            llm_name="test-llm",
+            dataset_name="train",
+        )
+        assert config.backend == "openevolve"
+
+    @pytest.mark.unit
+    def test_run_manifest_backend_default(self) -> None:
+        """RunManifest defaults backend to 'openevolve'."""
+        manifest = RunManifest(
+            run_id="run-1",
+            created_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
+            iterations=100,
+            problem_version="v1.0",
+            problem_hash="sha256:abc",
+            dataset="train",
+            dataset_hash="sha256:def",
+            llm="test-llm",
+            llm_model="test-model",
+        )
+        assert manifest.backend == "openevolve"
+
+    @pytest.mark.unit
+    def test_run_manifest_yaml_without_backend_loads(self) -> None:
+        """A pre-v9 manifest YAML without a backend key loads with the default."""
+        manifest_yaml = """\
+run_id: run-20260310-143000
+created_at: 2026-03-10T14:30:00+00:00
+iterations: 100
+status: completed
+problem_version: v1.0
+problem_hash: sha256:abc
+dataset: train-small
+dataset_hash: sha256:def
+llm: codestral-local
+llm_model: codestral:22b
+"""
+        data = yaml.safe_load(manifest_yaml)
+        assert "backend" not in data
+        manifest = RunManifest.model_validate(data)
+        assert manifest.backend == "openevolve"
+        assert manifest.run_id == "run-20260310-143000"
+
+    @pytest.mark.unit
+    def test_run_summary_backend_default(self) -> None:
+        """RunSummary defaults backend to 'openevolve'."""
+        summary = RunSummary(
+            run_id="run-1",
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train",
+            iterations=100,
+            status="completed",
+            created_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        assert summary.backend == "openevolve"
+
+    @pytest.mark.unit
+    def test_run_info_backend_default(self) -> None:
+        """RunInfo defaults backend to 'openevolve'."""
+        info = RunInfo(
+            run_id="run-1",
+            problem_version="v1.0",
+            problem_hash="sha256:abc",
+            llm="test-llm",
+            llm_model="test-model",
+            dataset="train",
+            dataset_hash="sha256:def",
+            iterations=100,
+            status="completed",
+            created_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        assert info.backend == "openevolve"
+
+    @pytest.mark.unit
+    def test_backend_explicit_value(self) -> None:
+        """The backend field accepts an explicit non-default value."""
+        config = RunConfig(
+            problem_version="v1.0",
+            llm_name="test-llm",
+            dataset_name="train",
+            backend="shinka",
+        )
+        assert config.backend == "shinka"
+
+
+class TestRunResultResolvedConfigWidening:
+    """RunResult.resolved_config accepts both legacy and neutral models."""
+
+    @staticmethod
+    def _make_result(resolved: ResolvedOEConfig | ResolvedConfig | None) -> RunResult:
+        sol = SolutionResult(solution_id="sol-1", run_id="run-1", rank=1)
+        return RunResult(
+            run_id="run-1",
+            solution=sol,
+            programs_stored=1,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train",
+            iterations=100,
+            generation_time_s=10.0,
+            resolved_config=resolved,
+        )
+
+    @pytest.mark.unit
+    def test_accepts_legacy_resolved_oe_config(self) -> None:
+        """RunResult still accepts the deprecated ResolvedOEConfig."""
+        legacy = ResolvedOEConfig(iterations=100, num_islands=4)
+        result = self._make_result(legacy)
+        assert isinstance(result.resolved_config, ResolvedOEConfig)
+        assert result.resolved_config.iterations == 100
+
+    @pytest.mark.unit
+    def test_accepts_neutral_resolved_config(self) -> None:
+        """RunResult accepts the neutral ResolvedConfig."""
+        neutral = ResolvedConfig(backend="openevolve", iterations=100)
+        result = self._make_result(neutral)
+        assert isinstance(result.resolved_config, ResolvedConfig)
+        assert result.resolved_config.backend == "openevolve"
+
+    @pytest.mark.unit
+    def test_accepts_none(self) -> None:
+        """RunResult resolved_config remains optional."""
+        result = self._make_result(None)
+        assert result.resolved_config is None
