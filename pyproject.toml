@@ -22,6 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 openevolve = ["openevolve"]
+# ShinkaEvolve backend — opt-in (ADR-007 D6). Never pulled by dev/test extras.
+shinka = ["shinka-evolve>=0.0.7,<0.1"]
 dev = [
     "pytest>=8",
     "pytest-cov>=5",
@@ -72,6 +74,7 @@ markers = [
     "unit: L1 unit tests",
     "integration: L2 integration tests",
     "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
+    "shinkaevolve: L2-Shinka tests requiring the shinka-evolve package (no LLM needed)",
     "e2e: L3 end-to-end tests",
 ]
 
