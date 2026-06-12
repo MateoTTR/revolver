@@ -1249,6 +1249,9 @@ class OpenEvolveBackend:
     name: str = "openevolve"
     # Engine output directory name inside a run dir (ADR-007, S14-05).
     default_output_subdir: str = "oe-output"
+    # Wrapper evaluator filename inside a run dir (S14-13: the resume
+    # orchestrator copies the parent's wrapper by this backend-owned name).
+    wrapper_filename: str = WRAPPER_FILENAME
 
     def capabilities(self) -> BackendCapabilities:
         """Return the OpenEvolve capability matrix (ADR-007)."""

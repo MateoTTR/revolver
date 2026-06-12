@@ -14,9 +14,8 @@ facts"):
 - ``count_valid()`` counts rows where ``correct = 1``.
 - ``read_progress()`` returns ``(last_generation, best_combined_score)``.
 
-The backend is still the S13 stub (raises ``BackendUnavailableError``), so
-every test is ``xfail(strict=False)`` until the implementation lands in
-S14 PR-C — keeping PR-A independently mergeable.
+The tests run against the real S14 PR-C implementation (the ``xfail``
+markers from the PR-A skeleton phase were removed when it landed).
 
 Skipped automatically when shinka-evolve is not installed (mirrors L2-OE).
 
@@ -45,11 +44,6 @@ from tests.fixtures.programs_sqlite import (
     build_shinka_run_dir,
 )
 
-xfail_stub = pytest.mark.xfail(
-    strict=False,
-    reason="ShinkaBackend DB-reading methods are the S13 stub — implementation lands in S14 PR-C",
-)
-
 
 @pytest.fixture()
 def shinka_run_dir(tmp_path: Path) -> Path:
@@ -62,7 +56,6 @@ def shinka_run_dir(tmp_path: Path) -> Path:
 class TestShinkaDbContract:
     """DB-reading contract against the fixture programs.sqlite."""
 
-    @xfail_stub
     def test_collect_token_usage_sums_metadata(self, shinka_run_dir: Path) -> None:
         """(a) Tokens from metadata.llm_result.*, cost from metadata.api_costs.
 
@@ -81,7 +74,6 @@ class TestShinkaDbContract:
         assert usage.completion_tokens == EXPECTED_COMPLETION_TOKENS
         assert usage.estimated_cost_usd == pytest.approx(EXPECTED_COST_USD)
 
-    @xfail_stub
     def test_collect_token_usage_missing_db_returns_none(self, tmp_path: Path) -> None:
         """(a-bis) No programs.sqlite (run died early) → None, no crash (S14-11)."""
         empty_run_dir = tmp_path / "run"
@@ -89,7 +81,6 @@ class TestShinkaDbContract:
 
         assert ShinkaBackend().collect_token_usage(empty_run_dir) is None
 
-    @xfail_stub
     def test_parse_population_ranked_no_cell_indices(self, shinka_run_dir: Path) -> None:
         """(b) Population ranked by combined_score desc, no cell_indices field."""
         population = ShinkaBackend().parse_population(shinka_run_dir)
@@ -112,12 +103,10 @@ class TestShinkaDbContract:
                 assert key in entry, f"population entry is missing key: {key}"
             assert "cell_indices" not in entry
 
-    @xfail_stub
     def test_count_valid_counts_correct_rows(self, shinka_run_dir: Path) -> None:
         """(c) count_valid() counts rows where correct = 1."""
         assert ShinkaBackend().count_valid(shinka_run_dir) == EXPECTED_VALID_COUNT
 
-    @xfail_stub
     def test_read_progress_returns_last_generation_and_best_score(
         self, shinka_run_dir: Path
     ) -> None:

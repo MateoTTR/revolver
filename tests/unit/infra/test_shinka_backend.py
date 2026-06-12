@@ -1,18 +1,25 @@
-"""Unit tests for the ShinkaBackend config tier (S14 PR-B, ADR-007).
+"""Unit tests for the ShinkaBackend config + engine tiers (S14, ADR-007).
 
-Covers S14-05..09: the ``default_output_subdir`` protocol seam, the
+Covers S14-05..13: the ``default_output_subdir`` protocol seam, the
 backend-delegated crash-status counting, ``is_available()``,
 ``config_template()``, ``validate_config()``, ``build_config()`` (LLM
-projection per ADR-007 D5), ``resolved_config()`` and
-``generate_wrapper()`` (R4 risk materializer).
+projection per ADR-007 D5), ``resolved_config()``, ``generate_wrapper()``
+(R4 risk materializer), the engine tier (``launch()``/``resume()`` with a
+fake ``ShinkaEvolveRunner``), and the ``programs.sqlite`` reading methods
+(``collect_token_usage``/``parse_population``/``count_valid``/
+``read_progress``).
 
 All tests run WITHOUT shinka installed: availability-dependent paths use
-fake ``shinka.*`` modules injected into ``sys.modules``, and the wrapper
-execution tests exercise the generated script's standalone fallback.
+fake ``shinka.*`` modules injected into ``sys.modules``, the wrapper
+execution tests exercise the generated script's standalone fallback, and
+the DB-reading tests use the shared fixture factory (the install-gated
+contract twins live in ``tests/integration/test_shinka_db.py``; the unit
+twins keep the engine-tier code covered on the shinka-less CI env).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import dataclasses
 from datetime import datetime
 import json
@@ -26,7 +33,12 @@ from typing import Any
 import pytest
 import yaml
 
-from revolver.core.exceptions import EvaluatorLoadError, ValidationError
+from revolver.core.exceptions import (
+    EvaluatorLoadError,
+    ExternalError,
+    RevolverError,
+    ValidationError,
+)
 from revolver.core.run import _determine_crash_status
 from revolver.infra.backends.base import (
     BackendRunSpec,
@@ -34,10 +46,23 @@ from revolver.infra.backends.base import (
 )
 from revolver.infra.backends.openevolve import OpenEvolveBackend
 from revolver.infra.backends.shinka import (
+    SHINKA_PROGRAMS_DB,
     SHINKA_WRAPPER_FILENAME,
     ShinkaBackend,
 )
 from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
+from tests.fixtures.programs_sqlite import (
+    EXPECTED_BEST_SCORE,
+    EXPECTED_COMPLETION_TOKENS,
+    EXPECTED_COST_USD,
+    EXPECTED_LAST_GENERATION,
+    EXPECTED_PROMPT_TOKENS,
+    EXPECTED_RANKED_IDS,
+    EXPECTED_VALID_COUNT,
+    FIXTURE_PROGRAM_ROWS,
+    build_programs_db,
+    build_shinka_run_dir,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -127,6 +152,10 @@ def fake_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "shinka.core", core)
     monkeypatch.setitem(sys.modules, "shinka.database", database)
     monkeypatch.setitem(sys.modules, "shinka.launch", launch)
+
+
+# The "shinka not installed" tests use the shared ``no_shinka`` fixture
+# from tests/conftest.py (sys.modules None injection — env-independent).
 
 
 # ── default_output_subdir seam (S14-05) ──────────────────────────────────────
@@ -232,7 +261,7 @@ class TestDetermineCrashStatusDelegation:
 class TestShinkaIsAvailable:
     """is_available() probes the real shinka import."""
 
-    def test_unavailable_without_shinka(self) -> None:
+    def test_unavailable_without_shinka(self, no_shinka: None) -> None:
         """Without shinka installed: (False, install hint)."""
         available, hint = ShinkaBackend().is_available()
         assert available is False
@@ -271,7 +300,7 @@ class TestShinkaConfigTemplate:
 class TestShinkaValidateConfig:
     """validate_config() checks keys against the Shinka dataclasses."""
 
-    def test_graceful_without_shinka(self) -> None:
+    def test_graceful_without_shinka(self, no_shinka: None) -> None:
         """Without shinka the validation degrades to no warnings."""
         warnings = ShinkaBackend().validate_config({"evo_config": {"bogus_key": 1}})
         assert warnings == []
@@ -322,7 +351,7 @@ class TestShinkaValidateConfig:
 class TestShinkaBuildConfig:
     """build_config() projects BackendRunSpec into the nested Shinka dict."""
 
-    def test_unavailable_raises_backend_unavailable(self, tmp_path: Path) -> None:
+    def test_unavailable_raises_backend_unavailable(self, no_shinka: None, tmp_path: Path) -> None:
         """Without shinka, build_config fails fast (exit-3 contract)."""
         with pytest.raises(BackendUnavailableError):
             ShinkaBackend().build_config(_make_spec(tmp_path))
@@ -728,3 +757,344 @@ class TestShinkaGenerateWrapper:
         assert metrics["accuracy"] == 0.5
         assert correct["correct"] is False
         assert "combined_score" in (correct["error"] or "")
+
+
+# ── Engine tier: launch/resume (S14-10/13) ────────────────────────────────────
+
+# Env vars probed inside the fake runner ctor (llm_env export assertions).
+_ENV_PROBES = ("OLLAMA_API_KEY", "ANTHROPIC_API_KEY")
+
+
+def _install_fake_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    on_run: Callable[[dict[str, Any]], None] | None = None,
+    run_exc: Exception | None = None,
+) -> list[dict[str, Any]]:
+    """Install a recording ``ShinkaEvolveRunner`` on the fake shinka.core.
+
+    Each construction appends its kwargs (plus an ``_env`` snapshot of
+    :data:`_ENV_PROBES` taken at construction time — the moment shinka's
+    real ``_validate_evo_config_model_env_access`` would run) to the
+    returned list. ``run()`` raises *run_exc* when given, else invokes
+    *on_run* with the recorded kwargs.
+    """
+    calls: list[dict[str, Any]] = []
+
+    class _FakeRunner:
+        def __init__(self, **kwargs: Any) -> None:
+            kwargs["_env"] = {name: os.environ.get(name) for name in _ENV_PROBES}
+            calls.append(kwargs)
+
+        def run(self) -> None:
+            if run_exc is not None:
+                raise run_exc
+            if on_run is not None:
+                on_run(calls[-1])
+
+    monkeypatch.setattr(
+        sys.modules["shinka.core"], "ShinkaEvolveRunner", _FakeRunner, raising=False
+    )
+    return calls
+
+
+def _make_engine_spec(tmp_path: Path, **kwargs: Any) -> BackendRunSpec:
+    """Spec with snapshot files and a generated wrapper, ready to launch."""
+    spec = _make_spec(tmp_path, **kwargs)
+    _write_snapshot(spec, _EVALUATOR_OK)
+    spec.wrapper_path = ShinkaBackend().generate_wrapper(spec)
+    return spec
+
+
+def _write_fixture_db(call: dict[str, Any]) -> None:
+    """on_run callback: write the fixture programs DB into results_dir."""
+    results_dir = Path(call["evo_config"].results_dir)
+    build_programs_db(results_dir / SHINKA_PROGRAMS_DB)
+
+
+class TestShinkaLaunch:
+    """launch() constructs the runner, runs it, materializes best/."""
+
+    def test_unavailable_without_shinka(self, no_shinka: None, tmp_path: Path) -> None:
+        """launch() raises the typed not-installed error (exit 3)."""
+        spec = _make_spec(tmp_path)
+        with pytest.raises(BackendUnavailableError):
+            ShinkaBackend().launch(spec, {})
+
+    def test_constructs_runner_and_materializes_best(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Runner gets dataclass configs + string contents; best/ written."""
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, iterations=3)
+        config = backend.build_config(spec)
+
+        result = backend.launch(spec, config)
+
+        assert spec.run_dir is not None
+        output_dir = spec.run_dir / "shinka-output"
+        assert len(calls) == 1
+        call = calls[0]
+        evo_config = call["evo_config"]
+        assert evo_config.results_dir == str(output_dir)
+        assert evo_config.num_generations == 3
+        assert evo_config.llm_models == [
+            "local/llama3@http://localhost:11434/v1?api_key_env=OLLAMA_API_KEY"
+        ]
+        assert call["init_program_str"] == "x = 1\n"
+        assert "--program_path" in call["evaluate_str"]
+        assert call["verbose"] is True
+        # The orchestrator contract: config['output_dir'] is overwritten.
+        assert config["output_dir"] == str(output_dir)
+
+        # Materialization: best program from the DB, never init_program.py.
+        best_file = output_dir / "best" / "best_program.py"
+        assert best_file.exists()
+        assert best_file.read_text() != call["init_program_str"]
+        assert result.best_score == pytest.approx(EXPECTED_BEST_SCORE)
+        assert result.best_program == best_file
+        assert result.output_dir == output_dir
+
+    def test_exports_local_placeholder_key(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Key-less local endpoint: placeholder exported, then restored."""
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path)
+        config = backend.build_config(spec)
+        assert config["llm_env"] == {"OLLAMA_API_KEY": None}
+
+        backend.launch(spec, config)
+
+        assert calls[0]["_env"]["OLLAMA_API_KEY"] == "ollama"
+        # revolver_env restored the ambient environment after the run.
+        assert os.environ.get("OLLAMA_API_KEY") is None
+
+    def test_existing_target_env_untouched(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An ambient target var wins over the placeholder."""
+        monkeypatch.setenv("OLLAMA_API_KEY", "user-key")
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path)
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert calls[0]["_env"]["OLLAMA_API_KEY"] == "user-key"
+        assert os.environ["OLLAMA_API_KEY"] == "user-key"
+
+    def test_remote_provider_env_copied_from_source(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Remote LLM: provider-standard var copied from the Revolver var."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("MY_ANTHROPIC_KEY", "secret-key")
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(
+            tmp_path,
+            llm=_make_llm(
+                source="remote",
+                provider="anthropic",
+                model="claude-x",
+                base_url="https://api.anthropic.com/v1",
+                api_key_env="MY_ANTHROPIC_KEY",
+            ),
+        )
+        config = backend.build_config(spec)
+        assert config["llm_env"] == {"ANTHROPIC_API_KEY": "MY_ANTHROPIC_KEY"}
+
+        backend.launch(spec, config)
+
+        assert calls[0]["_env"]["ANTHROPIC_API_KEY"] == "secret-key"
+        assert os.environ.get("ANTHROPIC_API_KEY") is None
+
+    def test_engine_error_wrapped_as_external(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Engine failures surface as ExternalError (crash-status path)."""
+        _install_fake_runner(monkeypatch, run_exc=RuntimeError("boom"))
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path)
+
+        with pytest.raises(ExternalError, match="ShinkaEvolve run failed"):
+            backend.launch(spec, backend.build_config(spec))
+
+    def test_no_scored_programs_yields_no_best(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A DB without scored programs materializes an EMPTY best/ dir.
+
+        The empty ``best/`` is deliberate (review #196 W2): an existing
+        named dir keeps the orchestrator's program collection from falling
+        back to the engine's own root scripts (``init_program.py``,
+        ``evaluate.py``) and collecting them as bogus solutions.
+        """
+        unscored = tuple(row for row in FIXTURE_PROGRAM_ROWS if row["combined_score"] is None)
+
+        def _write_unscored(call: dict[str, Any]) -> None:
+            results_dir = Path(call["evo_config"].results_dir)
+            build_programs_db(results_dir / SHINKA_PROGRAMS_DB, rows=unscored)
+
+        _install_fake_runner(monkeypatch, on_run=_write_unscored)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path)
+
+        result = backend.launch(spec, backend.build_config(spec))
+
+        assert result.best_score is None
+        assert result.best_program is None
+        assert spec.run_dir is not None
+        best_dir = spec.run_dir / "shinka-output" / "best"
+        assert best_dir.exists()
+        assert sorted(best_dir.glob("*.py")) == []
+
+    def test_missing_run_dir_raises(self, fake_shinka: None, tmp_path: Path) -> None:
+        """launch() requires spec.run_dir."""
+        spec = _make_spec(tmp_path, run_dir=None)
+        with pytest.raises(ValidationError):
+            ShinkaBackend().launch(spec, {})
+
+
+class TestShinkaResume:
+    """resume() continues in the parent's results dir (S14-13)."""
+
+    def test_reuses_parent_dir_and_materializes_into_new(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Engine runs in parent shinka-output/; artifacts land in new dir."""
+        parent_run_dir = tmp_path / "parent"
+        build_shinka_run_dir(parent_run_dir)
+        calls = _install_fake_runner(monkeypatch)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, iterations=4)
+        config = backend.build_config(spec)
+
+        result = backend.resume(spec, config, parent_run_dir)
+
+        parent_output = parent_run_dir / "shinka-output"
+        evo_config = calls[0]["evo_config"]
+        assert evo_config.results_dir == str(parent_output)
+        # "Run 4 more": total target = parent last_iteration + iterations.
+        assert evo_config.num_generations == EXPECTED_LAST_GENERATION + 4
+        assert config["output_dir"] == str(parent_output)
+
+        assert spec.run_dir is not None
+        new_output = spec.run_dir / "shinka-output"
+        assert (new_output / SHINKA_PROGRAMS_DB).exists()
+        best_file = new_output / "best" / "best_program.py"
+        assert best_file.exists()
+        assert result.best_score == pytest.approx(EXPECTED_BEST_SCORE)
+        assert result.output_dir == new_output
+
+    def test_missing_parent_db_raises(self, fake_shinka: None, tmp_path: Path) -> None:
+        """A parent without programs.sqlite cannot be resumed (fallback)."""
+        parent_run_dir = tmp_path / "parent"
+        parent_run_dir.mkdir()
+        spec = _make_engine_spec(tmp_path)
+
+        with pytest.raises(RevolverError, match="programs database"):
+            ShinkaBackend().resume(spec, {}, parent_run_dir)
+
+    def test_unavailable_without_shinka(self, no_shinka: None, tmp_path: Path) -> None:
+        """resume() raises the typed not-installed error (exit 3)."""
+        parent_run_dir = tmp_path / "parent"
+        build_shinka_run_dir(parent_run_dir)
+        spec = _make_spec(tmp_path)
+        with pytest.raises(BackendUnavailableError):
+            ShinkaBackend().resume(spec, {}, parent_run_dir)
+
+
+# ── Engine tier: programs.sqlite readers (S14-11/12) ──────────────────────────
+
+
+@pytest.fixture()
+def shinka_run_dir(tmp_path: Path) -> Path:
+    """A run dir with the fixture ``shinka-output/programs.sqlite``."""
+    return build_shinka_run_dir(tmp_path / "run")
+
+
+class TestShinkaCollectTokenUsage:
+    """collect_token_usage() per the verified 0.0.7 metadata schema."""
+
+    def test_sums_tokens_and_costs(self, shinka_run_dir: Path) -> None:
+        """api_costs + llm_result token sums; null metadata tolerated."""
+        usage = ShinkaBackend().collect_token_usage(shinka_run_dir)
+
+        assert usage is not None
+        assert usage.prompt_tokens == EXPECTED_PROMPT_TOKENS
+        assert usage.completion_tokens == EXPECTED_COMPLETION_TOKENS
+        assert usage.estimated_cost_usd == pytest.approx(EXPECTED_COST_USD)
+
+    def test_missing_db_returns_none(self, tmp_path: Path) -> None:
+        """No programs.sqlite (run died early) -> None, no crash."""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        assert ShinkaBackend().collect_token_usage(run_dir) is None
+
+
+class TestShinkaParsePopulation:
+    """parse_population() ranking and field contract (S14-12)."""
+
+    def test_ranked_by_combined_score_desc(self, shinka_run_dir: Path) -> None:
+        """Scored programs first, descending; NULL scores listed last."""
+        population = ShinkaBackend().parse_population(shinka_run_dir)
+
+        assert population is not None
+        assert len(population) == len(FIXTURE_PROGRAM_ROWS)
+        scored = [p for p in population if p["combined_score"] is not None]
+        assert [p["id"] for p in scored] == list(EXPECTED_RANKED_IDS)
+        assert [p["rank"] for p in population] == list(range(1, len(population) + 1))
+
+    def test_no_map_elites_fields(self, shinka_run_dir: Path) -> None:
+        """No cell_indices / island keys (ADR-007: no MAP-Elites grid)."""
+        population = ShinkaBackend().parse_population(shinka_run_dir)
+        assert population is not None
+        for entry in population:
+            assert "cell_indices" not in entry
+            assert "island" not in entry
+
+    def test_display_aliases_for_cli_renderer(self, shinka_run_dir: Path) -> None:
+        """run population renderer keys: score/metrics/iteration_found."""
+        population = ShinkaBackend().parse_population(shinka_run_dir)
+        assert population is not None
+        for entry in population:
+            assert isinstance(entry["score"], float)
+            assert entry["metrics"] == entry["public_metrics"]
+            assert entry["iteration_found"] == entry["generation"]
+        # NULL combined_score renders as 0.0 (display) but stays None (raw).
+        broken = next(p for p in population if p["id"] == "prog-gen2-broken")
+        assert broken["score"] == 0.0
+        assert broken["combined_score"] is None
+
+    def test_missing_db_returns_none(self, tmp_path: Path) -> None:
+        """No programs.sqlite -> None (run population shows 'no checkpoint')."""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        assert ShinkaBackend().parse_population(run_dir) is None
+
+
+class TestShinkaCountValidAndProgress:
+    """count_valid() / read_progress() against the fixture DB."""
+
+    def test_count_valid_counts_correct_rows(self, shinka_run_dir: Path) -> None:
+        assert ShinkaBackend().count_valid(shinka_run_dir) == EXPECTED_VALID_COUNT
+
+    def test_count_valid_missing_db_returns_none(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        assert ShinkaBackend().count_valid(run_dir) is None
+
+    def test_read_progress_returns_generation_and_best(self, shinka_run_dir: Path) -> None:
+        iterations_done, best_score = ShinkaBackend().read_progress(shinka_run_dir)
+        assert iterations_done == EXPECTED_LAST_GENERATION
+        assert best_score == pytest.approx(EXPECTED_BEST_SCORE)
+
+    def test_read_progress_missing_db(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        assert ShinkaBackend().read_progress(run_dir) == (None, None)

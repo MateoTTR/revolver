@@ -20,6 +20,7 @@ from revolver.core.doctor import (
     run_doctor,
 )
 from revolver.infra.backends.openevolve import OpenEvolveBackend
+from revolver.infra.backends.shinka import ShinkaBackend
 from revolver.infra.gpu import GpuInfo
 
 # ── DoctorReport dataclass ────────────────────────────────────────────────────
@@ -301,6 +302,13 @@ def test_run_doctor_all_pass() -> None:
     with (
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
         patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
+        # Pin "shinka absent" so the INFO assertion below holds identically
+        # in a real-shinka env (e.g. shinka-spike).
+        patch.object(
+            ShinkaBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+        ),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
         patch("revolver.core.doctor._detect_conda", return_value=True),

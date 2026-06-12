@@ -4,10 +4,23 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+import sys
 
 import pytest
 
 from revolver.infra.store import init_project_store
+
+
+@pytest.fixture
+def no_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force shinka to be un-importable, even when actually installed.
+
+    Setting a ``sys.modules`` entry to ``None`` makes ``import x`` raise
+    ``ImportError`` — so "shinka not installed" tests pass identically in
+    the no-shinka dev env and in a real-shinka env (e.g. ``shinka-spike``).
+    """
+    for module_name in ("shinka", "shinka.core", "shinka.database", "shinka.launch"):
+        monkeypatch.setitem(sys.modules, module_name, None)  # type: ignore[arg-type]
 
 
 @pytest.fixture()

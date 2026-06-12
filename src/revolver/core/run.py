@@ -55,16 +55,18 @@ from revolver.infra.backends.openevolve import (
     # DEPRECATED shim re-exports: wrapper generation moved into
     # OpenEvolveBackend in Sprint 013 PR-C (ADR-007); valid-program
     # counting moved behind backend.count_valid() in Sprint 014 PR-B
-    # (S14-06). These aliases keep pre-existing ``core.run`` imports
-    # working. Scheduled for removal in Sprint 015 (grep marker:
-    # DEPRECATED shim).
+    # (S14-06); the wrapper filename moved behind backend.wrapper_filename
+    # in Sprint 014 PR-C (S14-13). These aliases keep pre-existing
+    # ``core.run`` imports working. Scheduled for removal in Sprint 015
+    # (grep marker: DEPRECATED shim).
     _WRAPPER_TEMPLATE as _WRAPPER_TEMPLATE,
     # Engine helpers still owned by the orchestrator: the resume
     # checkpoint-staging precheck must run in core (fail fast BEFORE the
-    # run-record insert — DES-005 §14.1). count_valid_programs and
-    # generate_wrapper are DEPRECATED shim re-exports only.
+    # run-record insert — DES-005 §14.1). count_valid_programs,
+    # generate_wrapper and WRAPPER_FILENAME are DEPRECATED shim
+    # re-exports only.
     EVALUATOR_FILENAME,
-    WRAPPER_FILENAME,
+    WRAPPER_FILENAME as WRAPPER_FILENAME,
     count_valid_programs as count_valid_programs,
     find_latest_checkpoint,
     generate_wrapper as generate_wrapper,
@@ -1199,26 +1201,40 @@ def resume_run(
 
         parent_run_dir = get_run_dir(root, run_id)
 
-        # 5. Copy wrapper from parent run dir (FR-RUN-024)
-        parent_wrapper = parent_run_dir / WRAPPER_FILENAME
+        # 5. Copy wrapper from parent run dir (FR-RUN-024). The wrapper
+        # filename is backend-owned (S14-13: _revolver_evaluator.py on OE,
+        # _shinka_evaluator.py on Shinka).
+        parent_wrapper = parent_run_dir / backend.wrapper_filename
         if parent_wrapper.exists():
-            copy_run_file(parent_wrapper, new_run_dir / WRAPPER_FILENAME)
+            copy_run_file(parent_wrapper, new_run_dir / backend.wrapper_filename)
 
-        # 6. Copy checkpoint from parent run dir.
-        # The orchestrator owns this fail-fast staging precheck: it must
-        # run BEFORE the run-record insert and lock acquisition so a
-        # checkpoint-less parent aborts cleanly (DES-005 §14.1). The
-        # backend's resume() self-staging branch is a fallback only.
-        parent_checkpoint = find_latest_checkpoint(parent_run_dir)
-        if parent_checkpoint is None:
-            raise RevolverError(
-                f"No checkpoint found in parent run '{run_id}'. "
-                "The run may have been too short to produce a checkpoint."
-            )
-        # oe-checkpoint is the *input* checkpoint fed to OE for resume.
-        # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
-        new_checkpoint: Path = new_run_dir / "oe-checkpoint"
-        copy_run_file(parent_checkpoint, new_checkpoint)
+        # 6. Backend-aware resume staging precheck (S14-13, ADR-007 D6).
+        # The orchestrator owns this fail-fast precheck: it must run BEFORE
+        # the run-record insert and lock acquisition so a resume-state-less
+        # parent aborts cleanly (DES-005 §14.1). Resume state formats are
+        # backend-specific, hence the dispatch.
+        if backend.name == "openevolve":
+            # Copy checkpoint from parent run dir. The backend's resume()
+            # self-staging branch is a fallback only.
+            parent_checkpoint = find_latest_checkpoint(parent_run_dir)
+            if parent_checkpoint is None:
+                raise RevolverError(
+                    f"No checkpoint found in parent run '{run_id}'. "
+                    "The run may have been too short to produce a checkpoint."
+                )
+            # oe-checkpoint is the *input* checkpoint fed to OE for resume.
+            # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
+            new_checkpoint: Path = new_run_dir / "oe-checkpoint"
+            copy_run_file(parent_checkpoint, new_checkpoint)
+        else:
+            # ShinkaEvolve auto-resumes from the parent's programs database
+            # (reused in place by ShinkaBackend.resume() — no staging copy).
+            parent_programs_db = parent_run_dir / backend.default_output_subdir / "programs.sqlite"
+            if not parent_programs_db.exists():
+                raise RevolverError(
+                    f"No programs database found in parent run '{run_id}'. "
+                    "The run may have been too short to produce any programs."
+                )
 
         # Resolve paths
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version
@@ -1248,7 +1264,7 @@ def resume_run(
             rewrite_mode=rewrite_mode,
             ensemble=ensemble,
             conn=global_conn,
-            wrapper_path=new_run_dir / WRAPPER_FILENAME,
+            wrapper_path=new_run_dir / backend.wrapper_filename,
         )
         oe_config = backend.build_config(spec)
 
@@ -1325,7 +1341,7 @@ def resume_run(
                 start_time = time.monotonic()
 
                 # Pre-flight check: evaluate initial program on first instance
-                wrapper_path = new_run_dir / WRAPPER_FILENAME
+                wrapper_path = new_run_dir / backend.wrapper_filename
                 initial_program = snapshot_dir / "initial_program.py"
                 preflight_instances = sorted(
                     (
@@ -2018,21 +2034,29 @@ def _collect_programs(oe_output_dir: Path, programs_dir: Path) -> list[ProgramEn
     programs: list[ProgramEntry] = []
     programs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Look for top_programs/ or best_programs/ or best/ or just .py files
-    source_dirs = [
+    # Look for top_programs/ or best_programs/ or best/; fall back to loose
+    # .py files at the output-dir root ONLY when no named dir exists. An
+    # existing-but-empty named dir is terminal: engines that keep their
+    # programs in a database (ShinkaEvolve) also write their own scripts at
+    # the root (init_program.py, evaluate.py) — the root fallback would
+    # collect those as solutions of a programless run (review #196 W2).
+    named_dirs = [
         oe_output_dir / "top_programs",
         oe_output_dir / "best_programs",
         oe_output_dir / "best",
-        oe_output_dir,
     ]
 
     py_files: list[Path] = []
-    for source in source_dirs:
+    named_dir_found = False
+    for source in named_dirs:
         if source.exists():
+            named_dir_found = True
             found = sorted(source.glob("*.py"))
             if found:
                 py_files = found
                 break
+    if not named_dir_found:
+        py_files = sorted(oe_output_dir.glob("*.py"))
 
     for rank, py_file in enumerate(py_files, start=1):
         dest = programs_dir / f"rank-{rank}.py"
