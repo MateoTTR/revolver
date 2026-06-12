@@ -1,7 +1,7 @@
 # Revolver — Traceability Matrix
 
-**Version**: 0.4 — Backend abstraction rows (ADR-007: FR-RUN-047/048, NFR-024)
-**Date**: 2026-06-11
+**Version**: 0.5 — S14 backend rows implemented (FR-RUN-047/048; L2-Shinka + E2E Scenario 3 delivered)
+**Date**: 2026-06-13
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Validation Overview](validation.md)
 
