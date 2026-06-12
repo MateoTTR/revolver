@@ -55,9 +55,10 @@ def setup_command(
                 payload: dict[str, object] = {
                     "status": "ok",
                     "message": "All dependencies are satisfied.",
+                    # Unconditional for a stable JSON shape (matches the
+                    # other payloads in this module).
+                    "optional": plan.optional_instructions,
                 }
-                if plan.optional_instructions:
-                    payload["optional"] = plan.optional_instructions
                 render(payload, json_mode=True)
             else:
                 from rich.console import Console

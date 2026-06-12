@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 from revolver.cli import app
 from revolver.core.doctor import CheckStatus, DependencyStatus, DoctorReport
 from revolver.infra.backends.openevolve import OpenEvolveBackend
+from revolver.infra.backends.shinka import ShinkaBackend
 from revolver.infra.gpu import GpuInfo
 
 pytestmark = pytest.mark.integration
@@ -286,8 +287,9 @@ def _healthy_env_patches() -> list[object]:
     """Patches simulating a healthy environment for the REAL run_doctor.
 
     OpenEvolve availability is pinned (env-independent), Ollama/GPU/conda
-    boundaries are mocked. ShinkaEvolve availability is NOT mocked: the
-    real registered stub reports not-installed (Sprint 013).
+    boundaries are mocked. ShinkaEvolve availability is pinned to
+    not-installed so these tests stay deterministic once S14 lands (and
+    on machines where the shinka extra happens to be installed).
     """
     gpu = GpuInfo(name="NVIDIA RTX 4090", vram_used_mib=0, vram_total_mib=24576)
     mock_resp = MagicMock()
@@ -297,6 +299,11 @@ def _healthy_env_patches() -> list[object]:
     return [
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
         patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
+        patch.object(
+            ShinkaBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+        ),
         patch("revolver.core.doctor.httpx.get", return_value=mock_resp),
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
         patch("revolver.core.doctor._detect_conda", return_value=True),

@@ -66,11 +66,14 @@ def _render_human(report: DoctorReport) -> None:
         console.print("  External tools:")
         for check in external_checks + system_checks:
             icon = _STATUS_ICONS[check.status]
-            version_str = check.version or ""
-            extra = f"  {check.message}" if check.message else ""
+            # Same escaping rationale as the Python-packages loop above.
+            version_str = escape(check.version or "")
+            extra = f"  {escape(check.message)}" if check.message else ""
             line = f"    {icon} {check.name:<16s} {version_str}{extra}"
             if check.status == CheckStatus.OK:
                 console.print(f"[green]{line}[/green]")
+            elif check.status == CheckStatus.INFO:
+                console.print(f"[dim]{line}[/dim]")
             elif check.status == CheckStatus.WARN:
                 console.print(f"[yellow]{line}[/yellow]")
             else:

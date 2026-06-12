@@ -113,6 +113,11 @@ _REQUIRED_BACKENDS: frozenset[str] = frozenset({"openevolve"})
 # entry for the "shinka" backend is "shinkaevolve", matching "openevolve").
 _BACKEND_CHECK_NAMES: dict[str, str] = {"openevolve": "openevolve", "shinka": "shinkaevolve"}
 
+# Distribution names for importlib.metadata version lookup — the check
+# name is a display name and does NOT always match the PyPI distribution
+# (the "shinka" backend ships as the "shinka-evolve" distribution).
+_BACKEND_DIST_NAMES: dict[str, str] = {"openevolve": "openevolve", "shinka": "shinka-evolve"}
+
 
 def _check_backend(backend_name: str) -> DependencyStatus:
     """Check an evolution backend's availability (FR-SET-002).
@@ -121,14 +126,21 @@ def _check_backend(backend_name: str) -> DependencyStatus:
     same message and fixable-via-``revolver setup`` behavior as before.
     Optional backends (ShinkaEvolve) report INFO when absent — not a
     failure, not auto-fixable (ADR-007, spec-setup error cases).
+
+    Availability is decided by ``backend.is_available()`` (import-based),
+    not by package metadata. Two edge cases follow: a backend importable
+    without metadata reports OK with ``version=None`` (pre-S13: FAIL),
+    and stale metadata without an importable package reports FAIL
+    (pre-S13: OK) — the import-based answer is the truthful one.
     """
     backend = get_backend(backend_name)
     available, hint = backend.is_available()
     check_name = _BACKEND_CHECK_NAMES.get(backend_name, backend_name)
 
     if available:
+        dist_name = _BACKEND_DIST_NAMES.get(backend_name, backend_name)
         try:
-            version: str | None = importlib.metadata.version(check_name)
+            version: str | None = importlib.metadata.version(dist_name)
         except importlib.metadata.PackageNotFoundError:
             version = None
         return DependencyStatus(
