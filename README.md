@@ -1,6 +1,6 @@
 # Revolver
 
-**MLOps CLI platform for LLM-guided evolutionary optimization via [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve).**
+**MLOps CLI platform for LLM-guided evolutionary optimization via a pluggable evolution backend — [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) by default, [ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve) optional.**
 
 Revolver adds the operational layer that OpenEvolve lacks: LLM lifecycle management, problem versioning, dataset registration, solution traceability, and multi-solution benchmarking — all from the command line.
 
@@ -21,18 +21,18 @@ OpenEvolve provides the core evolutionary loop for LLM-guided code optimization.
 ## Features
 
 ```
-revolver project init                  # Initialize a new optimization project
+revolver project init                  # Initialize a new optimization project (--backend scaffolds the matching config.yaml)
 revolver doctor                        # Verify environment dependencies
 revolver setup                         # Install missing Python dependencies
 revolver llm add/update/start/stop/remove  # Register and manage LLMs (local Ollama or remote API)
 revolver llm list/status               # Monitor registered LLMs and GPU usage
 revolver llm ensemble create/add/list/info/remove  # Create and manage multi-model ensembles
 revolver problem test                  # Validate evaluator against instances
-revolver problem version create/list/delete  # Create, list and delete immutable problem snapshots
+revolver problem version create/list/delete  # Create (--backend validates config.yaml), list and delete immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
 revolver dataset list/info             # Inspect datasets
-revolver run/run resume                # Launch or resume evolution runs (--backend openevolve|shinka, OpenEvolve by default)
-revolver run status/list/info/delete   # Monitor, inspect and clean up runs
+revolver run/run resume                # Launch (--backend openevolve|shinka) or resume runs (resume inherits the parent's backend)
+revolver run status/list/info/population/cleanup/delete  # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
 revolver solution show/extract/delete  # Show, extract solution code or clean up
@@ -131,7 +131,9 @@ revolver dataset add eval-set --path data/eval/ --split eval
 revolver run --version v1.0 --llm claude --dataset training-set
 revolver run status
 
-# Or on the ShinkaEvolve backend (requires the [shinka] extra)
+# Or on the ShinkaEvolve backend (requires the [shinka] extra).
+# Tip: initialize with `revolver project init <name> --backend shinka`
+# to scaffold a Shinka-shaped config.yaml (evo_config/db_config/job_config).
 revolver run --version v1.0 --llm claude --dataset training-set --backend shinka
 ```
 

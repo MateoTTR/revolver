@@ -227,7 +227,7 @@ A **Solution** is a **lightweight reference** to a program within a Run. It is a
 - **Creation**: The rank-1 solution is auto-created by `revolver run`. Additional solutions can be extracted on demand via `revolver solution extract --run <id> --rank <N>`, which promotes a stored program to a first-class solution with post-extraction training evaluation.
 
 A **Run** is the first-class physical entity that owns all artifacts from an evolution on the selected backend (ADR-007):
-- **Programs**: All top-ranked evolved programs stored in `.revolver/runs/<run_id>/programs/` (from backend output). Only the best (rank-1) is auto-promoted to a solution; others are available for inspection and on-demand extraction.
+- **Programs**: The best evolved program is stored as `.revolver/runs/<run_id>/programs/rank-1.py` (from backend output — both backends currently materialize a single best program) and is auto-promoted to a solution. The full population remains inspectable via `run population`; promoting arbitrary population members is a planned extension (top-N extraction, ADR-007 capability).
 - **Resume state**: Backend resume state for potential resume (OpenEvolve: checkpoint in `.revolver/runs/<run_id>/oe-checkpoint/`; ShinkaEvolve: results dir with its SQLite DB)
 - **Config**: The backend config used for this run
 - **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)

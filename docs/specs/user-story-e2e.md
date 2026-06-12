@@ -15,7 +15,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.13.0
+    ✓ revolver         0.14.0
     ✓ openevolve       0.2.0
     ℹ shinkaevolve     not installed (optional). Install with: pip install 'revolver[shinka]'
 
@@ -242,7 +242,7 @@ Run completed: run-20260310-190000
   200 iterations in 2h45m
   Solution: sol-20260310-190000 (rank #1, alias: ensemble-v1.0)
   Best combined_score: 0.91
-  Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
+  Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 2,100,000 prompt + 510,000 completion = 2,610,000 total
   Estimated cost: $12.40 (based on ensemble pricing)
   Stored in: .revolver/runs/run-20260310-190000/
@@ -273,7 +273,7 @@ Run completed: run-20260310-143000
   100 iterations in 1h30m
   Solution: sol-20260310-143000 (rank #1, alias: codestral-v1.0)
   Best combined_score: 0.74
-  Programs stored: 3 (use `run info` to inspect, `solution extract` to promote)
+  Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 890,000 prompt + 215,000 completion = 1,105,000 total
   Stored in: .revolver/runs/run-20260310-143000/
 ```
@@ -298,7 +298,7 @@ Run completed: run-20260310-173000
   100 iterations in 2h15m
   Solution: sol-20260310-173000 (rank #1, alias: claude-v1.0)
   Best combined_score: 0.82
-  Programs stored: 3 (use `run info` to inspect, `solution extract` to promote)
+  Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
   Estimated cost: $43.28 (based on claude-opus pricing)
   Stored in: .revolver/runs/run-20260310-173000/
@@ -379,7 +379,7 @@ Done: Run 'run-20260310-143000' deleted (including 3 solutions and run files)
 | 3 | Project | `revolver project init` | Create project |
 | 4 | Problem | `revolver problem test --instance` | Quick smoke test |
 | 5 | Problem | `revolver problem test --dataset` | Full validation |
-| 6 | Problem | `revolver problem version` | Freeze problem definition |
+| 6 | Problem | `revolver problem version create` | Freeze problem definition |
 | 7 | Dataset | `revolver dataset add` (x2) | Register train + eval datasets |
 | 8 | Run | `revolver llm start` | Load local model |
 | 9 | Run | `revolver run` (x2) | Generate solutions |

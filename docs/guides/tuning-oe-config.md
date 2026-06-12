@@ -11,6 +11,8 @@ but a few have significant impact on optimization quality and cost. This guide
 focuses on the parameters you are most likely to tune through `revolver run`
 flags and `--config-override`.
 
+> **Backend scope**: this guide applies to the default **OpenEvolve** backend. The ShinkaEvolve backend (`--backend shinka`) uses a different `config.yaml` shape (`evo_config`/`db_config`/`job_config`) — these keys and overrides do not apply there; a dedicated Shinka tuning guide is planned (S15).
+
 **Key principle**: OpenEvolve is an *evolutionary* system. It needs enough
 iterations to explore, diversify, and converge. Tuning the parameters below
 determines the balance between exploration breadth, exploitation depth, and
