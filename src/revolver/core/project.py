@@ -101,6 +101,7 @@ def init_project(
     name: str,
     description: str = "",
     no_templates: bool = False,
+    backend: str = "openevolve",
 ) -> ProjectConfig:
     """Initialize a new Revolver project.
 
@@ -113,13 +114,21 @@ def init_project(
         description: Short project description.
         no_templates: If True, skip writing template files
             (``evaluator.py``, ``initial_program.py``, ``config.yaml``).
+        backend: Evolution backend whose ``config.yaml`` template is
+            scaffolded (ADR-007, S14-15). Defaults to ``"openevolve"``.
 
     Returns:
         The created ``ProjectConfig``.
 
     Raises:
         DuplicateNameError: If ``.revolver/`` already exists in *path* (FR-PRJ-006).
+        ValidationError: If *backend* is not a registered backend name
+            (raised before any directory is created — fail fast).
     """
+    # Resolve the backend first: an unknown name must fail before any
+    # side effect (no directory, no DB) — get_backend raises ValidationError.
+    backend_obj = get_backend(backend)
+
     path = path.resolve()
 
     # FR-PRJ-007: create target directory if it does not exist
@@ -168,8 +177,8 @@ def init_project(
         (path / "evaluator.py").write_text(_EVALUATOR_TEMPLATE, encoding="utf-8")
 
         # FR-PRJ-005: generate template config.yaml — served by the
-        # evolution backend (S13-13, ADR-007)
-        config_template = get_backend("openevolve").config_template()
+        # selected evolution backend (S13-13/S14-15, ADR-007)
+        config_template = backend_obj.config_template()
         (path / "config.yaml").write_text(config_template, encoding="utf-8")
 
     return config

@@ -293,3 +293,79 @@ def test_init_config_template_served_by_backend(tmp_path: pytest.TempPathFactory
 
     # Byte-identical to the historical template
     assert content == _EXPECTED_CONFIG_TEMPLATE
+
+
+# ── S14-15: --backend selects the config.yaml template (ADR-007) ─────────────
+
+
+@pytest.mark.integration
+def test_project_init_backend_shinka_template(tmp_path: pytest.TempPathFactory) -> None:
+    """project init --backend shinka scaffolds the Shinka-shaped config.yaml.
+
+    Validates: FR-PRJ-005, ADR-007 (S14-15: template served by the
+    selected backend — no shinka install required, the template is
+    static data on the adapter).
+    """
+    from revolver.infra.backends.base import get_backend
+
+    result = runner.invoke(
+        app,
+        ["project", "init", "shinka-project", "--path", str(tmp_path), "--backend", "shinka"],
+    )
+    assert result.exit_code == 0, f"stdout: {result.stdout}"
+
+    content = (tmp_path / "config.yaml").read_text(encoding="utf-8")
+
+    # Served by the Shinka backend
+    assert content == get_backend("shinka").config_template()
+
+    # Shinka-shaped scaffold: the three engine sections are present, and
+    # the template parses as YAML with matching top-level keys.
+    parsed = yaml.safe_load(content)
+    assert isinstance(parsed, dict)
+    for section in ("evo_config", "db_config", "job_config"):
+        assert section in parsed, f"missing section {section}"
+
+    # No OpenEvolve-shaped keys leak into the Shinka scaffold
+    assert "num_iterations" not in parsed
+    assert "population_size" not in parsed
+
+    # Other templates are backend-independent and still written
+    assert (tmp_path / "initial_program.py").is_file()
+    assert (tmp_path / "evaluator.py").is_file()
+
+
+@pytest.mark.integration
+def test_project_init_backend_default_is_openevolve(
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """Without --backend, project init keeps the OpenEvolve template."""
+    from revolver.infra.backends.base import get_backend
+
+    result = runner.invoke(app, ["project", "init", "default-project", "--path", str(tmp_path)])
+    assert result.exit_code == 0, f"stdout: {result.stdout}"
+
+    content = (tmp_path / "config.yaml").read_text(encoding="utf-8")
+    assert content == get_backend("openevolve").config_template()
+
+
+@pytest.mark.integration
+def test_project_init_backend_unknown_fails_fast(tmp_path: pytest.TempPathFactory) -> None:
+    """Unknown --backend: exit 1 and no project structure is created.
+
+    The backend name is resolved before any side effect, so a typo must
+    not leave a half-initialized project behind.
+    """
+    target = tmp_path / "sub"  # does not exist yet
+    result = runner.invoke(
+        app,
+        ["project", "init", "bad-project", "--path", str(target), "--backend", "nope"],
+    )
+
+    assert result.exit_code == 1
+    output = _get_all_output(result)
+    assert "Unknown backend 'nope'" in output
+
+    # Fail fast: nothing was created
+    assert not (target / ".revolver").exists()
+    assert not (target / "project.yaml").exists()
