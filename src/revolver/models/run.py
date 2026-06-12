@@ -57,6 +57,7 @@ class RunConfig(BaseModel):
         parallel: Number of parallel evaluations for OpenEvolve.
         rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
             ``diff_based_evolution=false`` and ``max_code_length=50000``.
+        backend: Evolution backend name (ADR-007). Defaults to ``"openevolve"``.
     """
 
     problem_version: str
@@ -69,6 +70,7 @@ class RunConfig(BaseModel):
     temperature: float | None = None
     parallel: int | None = None
     rewrite_mode: bool = False
+    backend: str = "openevolve"
 
 
 class ProgramEntry(BaseModel):
@@ -123,6 +125,9 @@ class RunManifest(BaseModel):
         llm: LLM registry name used.
         llm_model: Full model identifier (e.g. ``"claude-opus-4-6"``).
         resumed_from: Parent run ID if this is a resumed run.
+        backend: Evolution backend name (ADR-007). Defaults to
+            ``"openevolve"`` so manifests written before Sprint 013
+            keep loading.
         token_usage: Token counts from the run (``None`` while running).
         solution: Auto-created rank-1 solution (``None`` while running).
         programs: All stored programs from OpenEvolve output.
@@ -147,6 +152,7 @@ class RunManifest(BaseModel):
     llm: str
     llm_model: str
     resumed_from: str | None = None
+    backend: str = "openevolve"
 
     # Token usage (FR-RUN-028/029/030)
     token_usage: TokenUsage | None = None
@@ -160,37 +166,32 @@ class RunManifest(BaseModel):
     config_file: str = "config.yaml"
 
 
-class ResolvedOEConfig(BaseModel):
-    """Resolved OpenEvolve configuration parameters for dry-run display.
+class ResolvedConfig(BaseModel):
+    """Backend-neutral resolved configuration for dry-run display.
 
-    Extracted from the merged OE config dict to show the user what
-    values would be used if the run were actually launched.
+    Holds the parameters shared by all evolution backends (ADR-007 D4),
+    plus a ``backend_extras`` escape hatch for backend-exclusive keys
+    (e.g. OpenEvolve's ``checkpoint_interval`` or ``feature_dimensions``).
 
     Attributes:
-        iterations: Maximum iterations (from ``max_iterations``).
-        checkpoint_interval: Checkpoint save interval.
-        num_islands: Number of MAP-Elites islands.
-        feature_dimensions: Feature dimension names for MAP-Elites.
-        feature_bins: Number of bins per feature dimension.
+        backend: Evolution backend name (``"openevolve"`` or ``"shinka"``).
+        iterations: Maximum evolution iterations/generations.
+        num_islands: Number of evolutionary islands.
         temperature: LLM sampling temperature.
-        parallel_evaluations: Number of parallel evaluations.
-        diff_based_evolution: Whether diff-based evolution is enabled.
-        max_code_length: Maximum code length for LLM context.
-        config_overrides: Raw config override key=value pairs from CLI.
+        language: Programming language of the evolved program.
         llm_models: Ensemble LLM model entries with names and weights.
+        config_overrides: Raw config override key=value pairs from CLI.
+        backend_extras: Backend-exclusive parameters as a free-form dict.
     """
 
+    backend: str
     iterations: int | None = None
-    checkpoint_interval: int | None = None
     num_islands: int | None = None
-    feature_dimensions: list[str] | None = None
-    feature_bins: int | None = None
     temperature: float | None = None
-    parallel_evaluations: int | None = None
-    diff_based_evolution: bool | None = None
-    max_code_length: int | None = None
-    config_overrides: dict[str, Any] | None = None
+    language: str | None = None
     llm_models: list[dict[str, Any]] | None = None
+    config_overrides: dict[str, Any] | None = None
+    backend_extras: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunResult(BaseModel):
@@ -208,7 +209,8 @@ class RunResult(BaseModel):
         generation_time_s: Wall-clock generation time in seconds.
         token_usage: Token counts from the proxy (``None`` if unavailable).
         resumed_from: Parent run ID if this is a resumed run.
-        resolved_config: Resolved OE configuration (populated in dry-run mode).
+        resolved_config: Backend-neutral resolved configuration
+            (populated in dry-run mode — ADR-007 D4).
     """
 
     run_id: str
@@ -222,7 +224,7 @@ class RunResult(BaseModel):
     generation_time_s: float
     token_usage: TokenUsage | None = None
     resumed_from: str | None = None
-    resolved_config: ResolvedOEConfig | None = None
+    resolved_config: ResolvedConfig | None = None
 
 
 class RunStatus(BaseModel):
@@ -273,6 +275,7 @@ class RunSummary(BaseModel):
         best_score: Best score achieved (from rank-1 solution).
         alias: Alias of the rank-1 solution (if set).
         llm_type: ``"single"`` or ``"ensemble"``.
+        backend: Evolution backend name (ADR-007). Defaults to ``"openevolve"``.
     """
 
     run_id: str
@@ -289,6 +292,7 @@ class RunSummary(BaseModel):
     best_score: float | None = None
     alias: str | None = None
     llm_type: str = "single"
+    backend: str = "openevolve"
 
 
 class RunInfo(BaseModel):
@@ -314,6 +318,7 @@ class RunInfo(BaseModel):
         resume_chain: Ordered list of ancestor run IDs.
         llm_type: ``"single"`` or ``"ensemble"``.
         llm_snapshot: JSON string with LLM/ensemble configuration snapshot.
+        backend: Evolution backend name (ADR-007). Defaults to ``"openevolve"``.
     """
 
     run_id: str
@@ -335,6 +340,7 @@ class RunInfo(BaseModel):
     resume_chain: list[str] = []
     llm_type: str = "single"
     llm_snapshot: str | None = None
+    backend: str = "openevolve"
 
 
 class ProgressInfo(BaseModel):

@@ -93,6 +93,15 @@ best = asyncio.run(controller.run(iterations=N, checkpoint_path="path/to/checkpo
 | `OpenEvolve` controller class API changes | Medium | Pin OpenEvolve version; wrapper isolates the integration point |
 | Evaluator logging conflict with OpenEvolve | Low | Document: use dedicated `FileHandler` on named logger, not `basicConfig()` |
 
+## Addendum (2026-06-11, ADR-007)
+
+This ADR remains valid and unchanged for the OpenEvolve backend. With the pluggable-backend
+abstraction ([ADR-007](ADR-007-pluggable-evolution-backend.md)), the ShinkaEvolve backend reuses
+the **same inputs** — the `REVOLVER_*` env vars and the user's `evaluate_instance()` from the
+problem snapshot — but its generated wrapper has a **different output shape**: a subprocess CLI
+script writing `metrics.json`/`correct.json` (ShinkaEvolve's file-based evaluator contract)
+instead of the in-process dual-mode `evaluate()` returning a dict. See DES-006 §1.3.
+
 ## References
 
 - [POC #12 — OpenEvolve Integration](../../pocs/poc-openevolve-integration.md) (full report in `/home/mathi/revolver-pocs/openevolve-integration/`)

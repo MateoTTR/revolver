@@ -382,7 +382,7 @@
 
 ### Hotfix (post-v0.12.0) — Typer/click dependency drift + CI conda runner
 
-Not a sprint — a single hotfix bundled in one PR, tracked here for traceability.
+Not a sprint — a single hotfix bundled in one PR, tracked here for traceability. **Released as v0.12.1** (session 047, tag `v0.12.1` on `main`).
 
 | # | Task | Status | Ref |
 |---|---|---|---|
@@ -402,9 +402,30 @@ The first impact analysis is strong but **bottom-up** (from `infra/`). The compl
 
 | # | Task | Status | Ref |
 |---|---|---|---|
-| 266 | **Phase 0 spike** — dependency cohabitation test: fresh conda env, `pip install` Revolver + `shinka-evolve`, observe conflicts (`httpx==0.27`, `hydra-core==1.3.2`, heavy stack). Decide the founding question: co-install (`revolver[shinka]` extra) vs isolated subprocess. This determines `launch()` shape, dep strategy, async/token handling | [ ] | next session |
-| 267 | **Top-down complementary analysis** (post-spike) — walk each Revolver CLI command to (a) confirm the engine-coupled vs engine-neutral partition, (b) validate/finalize the draft `EvolutionBackend` interface against real command needs, (c) resolve the LLM-registration mapping and the parameter/config-surface questions above. Then extend to the **full engineering impact**: proposed changes to specs (FR/NFR), design (architecture + DES-005/006), and validation (strategy + traceability), plus a **preliminary incremental dev+validation sprint plan**. Output = preliminary material ready to feed the project agents | [ ] | next session |
-| 268 | **Formalize the plan via the project agents** — from 266/267, drive structuring with the existing agents: backend-abstraction **ADR(s)**, spec updates (→ spec-reviewer), design/architecture/DES-005/006 revisions, validation updates (→ validation-reviewer), sprint structuring (→ scrum-master), user-doc pass (→ doc-reviewer). Then phased implementation (P1 refactor no-behavior-change → P2 Shinka MVP → P3 parity) | [ ] | TBD |
+| 266 | **Phase 0 spike** — dependency cohabitation test: fresh conda env, `pip install` Revolver + `shinka-evolve`, observe conflicts (`httpx==0.27`, `hydra-core==1.3.2`, heavy stack). Decide the founding question: co-install (`revolver[shinka]` extra) vs isolated subprocess. This determines `launch()` shape, dep strategy, async/token handling. **DONE (session 047)** → co-install VIABLE (pip check clean, +75 deps), recommend opt-in `revolver[shinka]` extra + in-process programmatic launch. See [shinka-spike-266.md](../analysis/shinka-spike-266.md) | [x] | 047 |
+| 267 | **Top-down complementary analysis** (post-spike) — walk each Revolver CLI command to (a) confirm the engine-coupled vs engine-neutral partition, (b) validate/finalize the draft `EvolutionBackend` interface against real command needs, (c) resolve the LLM-registration mapping and the parameter/config-surface questions above. Then extend to the **full engineering impact**: proposed changes to specs (FR/NFR), design (architecture + DES-005/006), and validation (strategy + traceability), plus a **preliminary incremental dev+validation sprint plan**. Output = preliminary material ready to feed the project agents. **DONE (session 047)** → only 4 commands engine-coupled (~82% CLI neutral); no LLM-registry schema change; neutral `ResolvedConfig`+`backend_extras`; refined interface (capabilities/resume/config_template); specs/design/validation impact + S13→S14→S15 sprint plan. See [shinka-topdown-267.md](../analysis/shinka-topdown-267.md) | [x] | 047 |
+| 268 | **Formalize the plan via the project agents** — from 266/267, drive structuring with the existing agents: backend-abstraction **ADR(s)**, spec updates (→ spec-reviewer), design/architecture/DES-005/006 revisions, validation updates (→ validation-reviewer), sprint structuring (→ scrum-master), user-doc pass (→ doc-reviewer). Then phased implementation (P1 refactor no-behavior-change → P2 Shinka MVP → P3 parity). **IN PROGRESS (session 048, 2026-06-11)**: 3 open questions arbitrated (Q1 repro per-backend; Q2 **token-primary kept** — reverses #267, Shinka persists per-program tokens in `programs.sqlite`; Q3 `backend_extras` dict first) → **ADR-007 written (Accepted)** → specs updated (FR-RUN-047/048, NFR-024, conops v0.4) → design updated (DES-005 §14.1, DES-006 §1.3, DES-001 migration v9, architecture) → validation updated (L2-Shinka planned, traceability v0.4) → spec-reviewer (0 FAIL/5 WARN) + validation-reviewer (3 FAIL/5 WARN) findings fixed. Commits 528f5c1..f26069a. Sprint S13 planned → [sprint-013.md](../sprints/sprint-013.md) + tasks 269–282 below — **all implemented and merged** (session 048). Doc-reviewer pass folded into the v0.13.0 release checklist. **DONE** | [x] | 048 |
+
+### Sprint 013 — Backend Abstraction Refactor (v0.13.0)
+
+Per ADR-007 (P1 phase — zero behavior change). Plan: [sprint-013.md](../sprints/sprint-013.md). **Complete** — 4 PRs merged (session 048), 91 new tests, suite 1175 passed.
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 269 | `infra/backends/base.py` — `EvolutionBackend` protocol, `BackendCapabilities`, `BackendRunSpec`/`BackendRunResult`, `BackendUnavailableError`, `get_backend()` factory (S13-01) | [x] | S13 — session 048, PR #184 |
+| 270 | `infra/backends/openevolve.py` — `OpenEvolveBackend` (move `infra/openevolve.py` behind the interface); re-export shim kept until S15 (S13-02) | [x] | S13 — session 048, PR #184 |
+| 271 | `infra/backends/shinka.py` — registered stub: `is_available()=(False, install hint)`, capabilities per ADR-007, methods raise `BackendUnavailableError` (S13-03) | [x] | S13 — session 048, PR #184 |
+| 272 | `models/run.py` — neutral `ResolvedConfig` + `backend_extras` replacing `ResolvedOEConfig` (S13-04) | [x] | S13 — session 048, PR #185 |
+| 273 | `models/run.py` — `backend` field on `RunConfig`/`RunManifest`/`RunSummary`/`RunInfo` (S13-05) | [x] | S13 — session 048, PR #185 |
+| 274 | `infra/db.py` — migration v9: `runs.backend TEXT NOT NULL DEFAULT 'openevolve'`; run queries updated (S13-06) | [x] | S13 — session 048, PR #185 |
+| 275 | `core/run.py` — `launch_run()` backend-mediated (build/validate/wrapper/launch/proxy decision/token via `backend.*`); backend stored in record + manifest (S13-07) | [x] | S13 — session 048, PR #188 |
+| 276 | `core/run.py` — `resume_run()` inherits parent backend (cross-backend rejected); `get_run_status()` active-path + `get_population()` via backend (S13-08) | [x] | S13 — session 048, PR #188 |
+| 277 | `core/run.py` — `_extract_resolved_config()` → neutral `ResolvedConfig`, OE-only keys into `backend_extras` (S13-09) | [x] | S13 — session 048, PR #188 |
+| 278 | `cli/run.py` — `--backend` option (default `openevolve`; unknown → exit 1; stub → exit 3 + install hint); backend-aware copy (S13-10) | [x] | S13 — session 048, PR #188 |
+| 279 | `cli/run.py` — surface backend in `run info`/`run list`/dry-run (FR-RUN-047) (S13-11) | [x] | S13 — session 048, PR #188 |
+| 280 | `core/doctor.py` per-backend `is_available()` loop (ShinkaEvolve informational) + `core/setup.py` install entries (S13-12) | [x] | S13 — session 048, PR #189 |
+| 281 | `core/project.py` config template via `backend.config_template()` + `core/problem.py` validate dispatch via `backend.validate_config()` (S13-13) | [x] | S13 — session 048, PR #189 |
+| 282 | L2 tests: backend default end-to-end, resume inheritance, unknown/not-installed errors, doctor informational + full regression zero-behavior-change (S13-14) | [x] | S13 — session 048, included in PRs #184/#185/#188/#189 |
 
 ### Unscheduled — Release Process
 

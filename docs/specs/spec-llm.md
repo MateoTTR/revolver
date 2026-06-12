@@ -372,13 +372,20 @@ Ensemble "multi-model-v1" removed (2 members deleted)
 | FR-LLM-016 | SHOULD | Support `--provider openai-compat` for arbitrary OpenAI-compatible endpoints | §3.2 |
 | FR-LLM-017 | MUST | API keys are never stored in Revolver files — only the env var name is stored | NFR-050 |
 | FR-LLM-018 | SHOULD | Support optional `--input-cost` and `--output-cost` pricing (USD per Mtok) for cost estimation in `revolver run` | POC #13 |
-| FR-LLM-019 | SHOULD | LLM temperature stored in registry and injected into OpenEvolve config when present | — |
+| FR-LLM-019 | SHOULD | LLM temperature stored in registry and injected into the backend config when present | — |
 | FR-LLM-020 | MUST | Create a named ensemble in the global registry with a unique name | — |
 | FR-LLM-021 | MUST | Add a member LLM to an ensemble with a sampling weight (and optional per-member temperature/max_tokens overrides) | — |
 | FR-LLM-022 | MUST | List all registered ensembles with member counts | — |
 | FR-LLM-023 | MUST | Show ensemble details including members, weights, and per-member overrides | — |
 | FR-LLM-024 | MUST | Remove an ensemble with cascade deletion of its members | — |
 | FR-LLM-025 | SHOULD | Warn if member weights do not sum to approximately 1.0 when adding a member | — |
+
+> **Note — per-backend projection (ADR-007 D5)**: the registry stores backend-agnostic data; each
+> evolution backend projects it at run time. The registry schema is unchanged by ADR-007. On
+> ShinkaEvolve: local entries map to `local/<model>@<base_url>?api_key_env=…`; remote entries
+> require the model id to be recognized by Shinka's pricing table (documented limitation); custom
+> `api_key_env` names are bridged by exporting the provider-standard variable; ensemble **weights
+> and per-member overrides are dropped** (bandit selection) with a warning at run launch.
 
 ---
 

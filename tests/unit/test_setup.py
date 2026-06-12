@@ -244,6 +244,36 @@ def test_plan_reports_install_method() -> None:
 
 
 @pytest.mark.unit
+def test_plan_optional_backend_never_auto_installed() -> None:
+    """compute_install_plan reports optional backends (INFO) as manual-only.
+
+    Validates: FR-SET-002 — an absent optional evolution backend
+    (ShinkaEvolve) is never auto-installed; its install instruction is
+    surfaced separately and does not count as an installable issue.
+    """
+    report = DoctorReport(
+        checks=[
+            DependencyStatus(
+                name="shinkaevolve",
+                type="python",
+                status=CheckStatus.INFO,
+                message="not installed (optional). Install with: pip install 'revolver[shinka]'",
+                fixable=False,
+            ),
+        ]
+    )
+    managers = {"pip": True, "conda": True, "mamba": False}
+    plan = compute_install_plan(report, managers)
+
+    assert plan.items == []
+    assert plan.has_installable is False
+    assert plan.manual_instructions == []
+    assert len(plan.optional_instructions) == 1
+    assert plan.optional_instructions[0].startswith("shinkaevolve:")
+    assert "revolver[shinka]" in plan.optional_instructions[0]
+
+
+@pytest.mark.unit
 def test_plan_ok_deps_skipped() -> None:
     """compute_install_plan skips deps with OK status."""
     report = DoctorReport(

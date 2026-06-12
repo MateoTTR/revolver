@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Revolver** is a MLOps CLI platform that orchestrates OpenEvolve to let users define optimization problems, manage LLMs (local or API), version problems and datasets, generate solutions via LLM-guided evolution, and benchmark results with full traceability.
+**Revolver** is a MLOps CLI platform that orchestrates a pluggable evolution backend (OpenEvolve by default, ShinkaEvolve optional — ADR-007) to let users define optimization problems, manage LLMs (local or API), version problems and datasets, generate solutions via LLM-guided evolution, and benchmark results with full traceability.
 
 ## How to Use This File
 
@@ -32,6 +32,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [ADR-004](docs/architecture/adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
 | [ADR-005](docs/architecture/adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
 | [ADR-006](docs/architecture/adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
+| [ADR-007](docs/architecture/adr/ADR-007-pluggable-evolution-backend.md) | Pluggable evolution backend (OpenEvolve default, ShinkaEvolve optional) | Accepted |
 
 ### Design Documents (DES)
 
@@ -183,9 +184,9 @@ Independent PRs are developed in parallel using separate worktree agents. Depend
 ## Key Constraints
 
 - **CLI-first**: all functionality exposed as CLI commands, composable in scripts
-- **OpenEvolve-based**: solution generation relies on OpenEvolve's evolutionary loop
+- **Backend-based**: solution generation relies on a pluggable evolution backend — OpenEvolve by default, ShinkaEvolve optional (ADR-007)
 - **LLM-agnostic**: must support local models and multiple API providers (Anthropic, Google, OpenAI)
 - **LLM interface**: all LLMs must expose an OpenAI-compatible API (native or via adapter)
 - **Full traceability**: every solution must trace back to problem version, dataset, LLM, and config
-- **Reproducibility**: runs must be reproducible given the same config and seed
+- **Reproducibility**: a backend capability — guaranteed on OpenEvolve given the same config and seed; not guaranteed on ShinkaEvolve (no global search seed — ADR-007)
 
