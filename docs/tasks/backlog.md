@@ -433,10 +433,10 @@ Per ADR-007 (P2 phase — real `ShinkaBackend`, opt-in `revolver[shinka]` extra)
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 283 | Fixture `programs.sqlite` factory (verified 0.0.7 schema: `metadata.api_costs` + nested `llm_result` tokens) + golden wrapper helper (S14-01) | [ ] | S14 — PR-A |
-| 284 | R4 contract tests for `generate_wrapper()` — 5 scenarios on generated `evaluate.py` (S14-02) | [ ] | S14 — PR-A |
-| 285 | Contract tests for DB-reading methods — tokens/population/count/progress vs fixture DB (S14-03) | [ ] | S14 — PR-A |
-| 286 | `pyproject.toml` — `[project.optional-dependencies] shinka = ["shinka-evolve>=0.0.7,<0.1"]` (S14-04) | [ ] | S14 — PR-A |
+| 283 | Fixture `programs.sqlite` factory (verified 0.0.7 schema: `metadata.api_costs` + nested `llm_result` tokens) + golden wrapper helper (S14-01) | [x] | S14 — session 049, PR #192 |
+| 284 | R4 contract tests for `generate_wrapper()` — 5 scenarios on generated `evaluate.py` (S14-02) | [x] | S14 — session 049, PR #192 |
+| 285 | Contract tests for DB-reading methods — tokens/population/count/progress vs fixture DB (S14-03) | [x] | S14 — session 049, PR #192 |
+| 286 | `pyproject.toml` — `[project.optional-dependencies] shinka = ["shinka-evolve>=0.0.7,<0.1"]` (S14-04) | [x] | S14 — session 049, PR #192 |
 | 287 | Orchestrator seams 2+3 — `backend.default_output_subdir`, single-owner iterations resolution (S14-05) | [ ] | S14 — PR-B |
 | 288 | Orchestrator seam 1 — `_determine_crash_status()` delegates to `backend.count_valid()` (S14-06) | [ ] | S14 — PR-B |
 | 289 | `ShinkaBackend.is_available()` real import check + `config_template()` + `validate_config()` (S14-07) | [ ] | S14 — PR-B |
