@@ -54,15 +54,15 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 45 | 2026-04-02 | session-045 | ~2h30 | Phase 5 | Demo feedback analysis, Sprint 012 (5 PRs, ~30 tests), release v0.12.0, 1086 tests |
 | 46 | 2026-06-02 | session-046 | ~2h00 | Phase 5 | Project reprise (new machine), conda env setup, hotfix #181 (Typer/click drift + CI conda), self-hosted runner provisioned, ShinkaEvolve backend investigation (2 analyses) |
 | 47 | 2026-06-07 | session-047 | ~1h00 | Phase 5 | Release v0.12.1 (hotfix #181), ShinkaEvolve spike #266 (co-install viable), top-down analysis #267 (CLI partition, EvolutionBackend interface, S13→S15 plan), local-LLM de-risk deferred to P2 |
-| 48 | 2026-06-11/12 | session-048 | ~5h30 | Phase 5 | #268 done (ADR-007 + spec/design/validation cascades + reviewers), Sprint 013 planned AND fully delivered (4 PRs #184/#185/#188/#189 merged, 91 new tests, 1175 passed) — backend abstraction, zero behavior change; first session on Fable agents |
+| 48 | 2026-06-11/12 | session-048 | ~6h30 | Phase 5 | #268 done (ADR-007 + spec/design/validation cascades + reviewers), Sprint 013 planned AND fully delivered (4 PRs merged, 91 new tests, 1175 passed), release v0.13.0 (tag + doc-reviewer pass) — backend abstraction, zero behavior change; first session on Fable agents |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
 | **Total sessions** | 49 |
-| **Total duration** | ~94h00 |
-| **Avg duration/session** | ~1h55 |
+| **Total duration** | ~95h00 |
+| **Avg duration/session** | ~1h56 |
 
 ## Notes
 

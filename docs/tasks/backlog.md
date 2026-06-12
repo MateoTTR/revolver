@@ -408,7 +408,7 @@ The first impact analysis is strong but **bottom-up** (from `infra/`). The compl
 
 ### Sprint 013 — Backend Abstraction Refactor (v0.13.0)
 
-Per ADR-007 (P1 phase — zero behavior change). Plan: [sprint-013.md](../sprints/sprint-013.md). **Complete** — 4 PRs merged (session 048), 91 new tests, suite 1175 passed.
+Per ADR-007 (P1 phase — zero behavior change). Plan: [sprint-013.md](../sprints/sprint-013.md). **Complete** — 4 PRs merged (session 048), 91 new tests, suite 1175 passed. **Released as v0.13.0** (tag on `main`, session 048).
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
