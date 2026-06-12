@@ -442,11 +442,11 @@ Per ADR-007 (P2 phase — real `ShinkaBackend`, opt-in `revolver[shinka]` extra)
 | 289 | `ShinkaBackend.is_available()` real import check + `config_template()` + `validate_config()` (S14-07) | [x] | S14 — session 049, PR #193 |
 | 290 | `ShinkaBackend.build_config()` — spec→`EvolutionConfig`/`DatabaseConfig`/`LocalJobConfig` projection + `resolved_config()` (S14-08) | [x] | S14 — session 049, PR #193 |
 | 291 | `ShinkaBackend.generate_wrapper()` — Shinka `evaluate.py` adapting `evaluate_instance()` over dataset (S14-09) | [x] | S14 — session 049, PR #193 |
-| 292 | `ShinkaBackend.launch()` via `ShinkaEvolveRunner` + `default_output_subdir` (S14-10) | [ ] | S14 — PR-C |
-| 293 | `ShinkaBackend.collect_token_usage()` — `metadata.api_costs` + `metadata.llm_result.*` from `programs.sqlite` (S14-11) | [ ] | S14 — PR-C |
-| 294 | `ShinkaBackend.parse_population()`, `count_valid()`, `read_progress()` from `programs.sqlite` (S14-12) | [ ] | S14 — PR-C |
-| 295 | `ShinkaBackend.resume()` — reuse parent `results_dir` (clone parity → S15) (S14-13) | [ ] | S14 — PR-C |
-| 296 | L2-Shinka integration tests — 5 mocked-runner scenarios in `test_run_shinka.py` (S14-14) | [ ] | S14 — PR-C |
+| 292 | `ShinkaBackend.launch()` via `ShinkaEvolveRunner` + `default_output_subdir` (S14-10) | [x] | S14 — session 049, PR #196 |
+| 293 | `ShinkaBackend.collect_token_usage()` — `metadata.api_costs` + `metadata.llm_result.*` from `programs.sqlite` (S14-11) | [x] | S14 — session 049, PR #196 |
+| 294 | `ShinkaBackend.parse_population()`, `count_valid()`, `read_progress()` from `programs.sqlite` (S14-12) | [x] | S14 — session 049, PR #196 |
+| 295 | `ShinkaBackend.resume()` — reuse parent `results_dir` (clone parity → S15) (S14-13) | [x] | S14 — session 049, PR #196 |
+| 296 | L2-Shinka integration tests — 5 mocked-runner scenarios in `test_run_shinka.py` (S14-14) | [x] | S14 — session 049, PR #196 |
 | 297 | Doctor/setup/project/problem shims reflect real Shinka availability + install path (S14-15) | [ ] | S14 — PR-D |
 | 298 | L3 E2E Scenario 3 — Shinka happy path with fake LLM server (S14-16) | [ ] | S14 — PR-D |
 
