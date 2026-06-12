@@ -1,7 +1,8 @@
-"""ShinkaEvolve backend — config tier (ADR-007, Sprint 014 PR-B).
+"""ShinkaEvolve backend — config + engine tiers (ADR-007, Sprint 014).
 
-Implements the configuration surface of the ``EvolutionBackend`` protocol
-for ShinkaEvolve:
+Implements the ``EvolutionBackend`` protocol for ShinkaEvolve:
+
+Config tier (PR-B):
 
 - :meth:`ShinkaBackend.is_available` — real ``import shinka.core`` probe;
 - :meth:`ShinkaBackend.config_template` — Shinka-flavored ``config.yaml``
@@ -18,26 +19,41 @@ for ShinkaEvolve:
   script (``--program_path``/``--results_dir`` argv contract) adapting the
   user's ``evaluate_instance()`` over the dataset (R4 risk materializer).
 
-The engine tier (``launch``/``resume``/``read_progress``/
-``parse_population``/``count_valid``/``collect_token_usage``) lands in
-Sprint 014 PR-C and still raises
-:class:`~revolver.infra.backends.base.BackendUnavailableError`.
+Engine tier (PR-C, S14-10..13):
 
-Traceable to: ADR-007 (decisions D1/D4/D5), DES-005 §14.1, DES-006 §1.3,
-FR-RUN-047/048, sprint-014 S14-07..09.
+- :meth:`ShinkaBackend.launch` — exports the ``llm_env`` map, constructs
+  ``ShinkaEvolveRunner`` from the built config, runs the evolution, and
+  materializes the best ranked program(s) into ``<results_dir>/best/``;
+- :meth:`ShinkaBackend.resume` — DB-driven in-place continuation in the
+  parent run's ``shinka-output/`` (clone-based parity is S15);
+- :meth:`ShinkaBackend.read_progress` / :meth:`ShinkaBackend.parse_population`
+  / :meth:`ShinkaBackend.count_valid` — read ``programs.sqlite``;
+- :meth:`ShinkaBackend.collect_token_usage` — engine-native token/cost
+  accounting from per-program ``metadata`` JSON (ADR-007 D2).
+
+Traceable to: ADR-007 (decisions D1/D2/D4/D5/D6), DES-005 §14.1,
+DES-006 §1.3, FR-RUN-047/048, sprint-014 S14-07..13.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 import dataclasses
+import json
+import os
 from pathlib import Path
+import sqlite3
 import sys
 from typing import Any
 
 import yaml
 
-from revolver.core.exceptions import EvaluatorLoadError, ValidationError
+from revolver.core.exceptions import (
+    EvaluatorLoadError,
+    ExternalError,
+    RevolverError,
+    ValidationError,
+)
 from revolver.infra.backends.base import (
     BackendCapabilities,
     BackendRunResult,
@@ -52,6 +68,7 @@ from revolver.infra.backends.openevolve import (
     _load_evaluator_module,
     _parse_value,
     _set_nested,
+    revolver_env,
 )
 from revolver.models.llm import LLMEntry
 from revolver.models.run import ResolvedConfig, TokenUsage
@@ -61,14 +78,28 @@ _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
 # Filename of the generated Shinka CLI evaluator inside a run dir.
 SHINKA_WRAPPER_FILENAME = "_shinka_evaluator.py"
 
+# ShinkaEvolve's program database inside its results dir (dbase.py 0.0.7).
+SHINKA_PROGRAMS_DB = "programs.sqlite"
+
+# Placeholder API key exported for key-less local OpenAI-compatible
+# endpoints — Shinka's resolve_local_openai_api_key() raises when a named
+# api_key_env is unset (mirrors OE's "ollama" placeholder key).
+_LOCAL_API_KEY_PLACEHOLDER = "ollama"
+
+# Number of ranked programs materialized into <results_dir>/best/ after a
+# run. Mirrors OpenEvolve's output (a single best/best_program.py) so the
+# orchestrator's program collection behaves identically across backends;
+# top-N extraction (capabilities().top_n_extraction) is an S15 extension.
+_BEST_PROGRAMS_COUNT = 1
+
 # Default env var name synthesized for local OpenAI-compatible endpoints
-# when the registry entry has no api_key_env (ADR-007 D5). launch() (PR-C)
-# must export a placeholder value when this variable is unset — Shinka
+# when the registry entry has no api_key_env (ADR-007 D5). launch()
+# exports a placeholder value when this variable is unset — Shinka
 # raises on a named-but-unset api_key_env, mirroring OE's "ollama" key.
 _DEFAULT_LOCAL_API_KEY_ENV = "OLLAMA_API_KEY"
 
 # Provider-standard env vars read by Shinka's native SDK clients
-# (shinka/llm/client.py — ADR-007 D5). launch() (PR-C) exports each target
+# (shinka/llm/client.py — ADR-007 D5). launch() exports each target
 # var from the Revolver-resolved source before starting the engine.
 _PROVIDER_ENV_VARS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -384,16 +415,22 @@ def _ensure_section(config: dict[str, Any], name: str) -> dict[str, Any]:
     return section
 
 
-class ShinkaBackend:
-    """``EvolutionBackend`` adapter for ShinkaEvolve (config tier — S14 PR-B).
+def _as_number(value: Any) -> float:
+    """Coerce a best-effort numeric JSON field to ``float`` (default 0.0)."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
 
-    The engine tier (launch/resume/inspection/token collection) lands in
-    PR-C; those methods still raise :class:`BackendUnavailableError`.
-    """
+
+class ShinkaBackend:
+    """``EvolutionBackend`` adapter for ShinkaEvolve (ADR-007, Sprint 014)."""
 
     name: str = "shinka"
     # Engine output directory name inside a run dir (ADR-007, S14-05).
     default_output_subdir: str = "shinka-output"
+    # Wrapper evaluator filename inside a run dir (S14-13: the resume
+    # orchestrator copies the parent's wrapper by this backend-owned name).
+    wrapper_filename: str = SHINKA_WRAPPER_FILENAME
 
     def capabilities(self) -> BackendCapabilities:
         """Return the ShinkaEvolve capability matrix (ADR-007)."""
@@ -737,7 +774,7 @@ class ShinkaBackend:
         output_path.write_text(wrapper_code)
         return output_path
 
-    # ── Engine tier — PR-C (S14-10..13) ──────────────────────────────────────
+    # ── Engine tier — S14-10..13 ──────────────────────────────────────────────
 
     def launch(
         self,
@@ -745,8 +782,35 @@ class ShinkaBackend:
         config: dict[str, Any],
         on_progress: Callable[[ProgressInfo], None] | None = None,
     ) -> BackendRunResult:
-        """Not available until S14 PR-C."""
-        raise self._unavailable()
+        """Launch a fresh ShinkaEvolve run (S14-10).
+
+        Exports the ``llm_env`` map (ADR-007 D5), constructs
+        ``ShinkaEvolveRunner`` from the built config dict sections, runs
+        the evolution synchronously, then materializes the best ranked
+        program from ``programs.sqlite`` into ``<results_dir>/best/`` so
+        the orchestrator's backend-neutral program collection picks it up
+        (without this, the collection would fall through to the engine's
+        own root ``init_program.py`` — a silent wrong-solution bug).
+
+        *on_progress* is ignored: live progress is served by
+        :meth:`read_progress` polling (run status path).
+
+        Raises:
+            BackendUnavailableError: When shinka is not installed.
+            ExternalError: When the engine fails (exit code 4); the
+                orchestrator's crash-status path relies on this.
+        """
+        run_dir = self._require_run_dir(spec)
+        output_dir = run_dir / self.default_output_subdir
+        output_dir.mkdir(exist_ok=True)
+        config["output_dir"] = str(output_dir)
+        self._run_engine(spec, config, output_dir)
+        best_score, best_program = self._materialize_best_programs(output_dir)
+        return BackendRunResult(
+            best_score=best_score,
+            best_program=best_program,
+            output_dir=output_dir,
+        )
 
     def resume(
         self,
@@ -755,24 +819,487 @@ class ShinkaBackend:
         parent_run_dir: Path,
         on_progress: Callable[[ProgressInfo], None] | None = None,
     ) -> BackendRunResult:
-        """Not available until S14 PR-C."""
-        raise self._unavailable()
+        """Resume by continuing evolution in the parent's results dir (S14-13).
+
+        ShinkaEvolve resume is DB-driven: when ``results_dir`` contains a
+        ``programs.sqlite`` with ``last_iteration > 0``, the runner
+        auto-resumes from it. The S14 implementation therefore points the
+        engine at the **parent run's** ``shinka-output/`` and extends the
+        generation target by ``spec.iterations`` (the already-resolved
+        count per FR-RUN-024 — "run N more generations", mirroring the
+        OpenEvolve checkpoint-resume semantics). After the engine
+        completes, the programs database and the best ranked program are
+        materialized into the **new** run dir so backend-neutral
+        post-processing (program collection, ``count_valid``,
+        ``collect_token_usage``, ``parse_population``) reads the new run
+        dir as usual.
+
+        Known S14 limitations (full clone-based parity — copying
+        ``programs.sqlite`` + ``gen_*`` dirs into the new run dir *before*
+        the run — is deferred to Sprint 015):
+
+        - the parent's ``shinka-output/`` is mutated in place: the resumed
+          run is a logical continuation, not a separate artifact tree;
+        - token usage, valid-program counts, and population reported for
+          the resumed run include the parent chain's programs (cumulative
+          accounting over the shared database).
+
+        Raises:
+            RevolverError: When the parent has no programs database
+                (fallback only — the orchestrator owns the fail-fast
+                precheck before the run-record insert, DES-005 §14.1).
+            BackendUnavailableError: When shinka is not installed.
+            ExternalError: When the engine fails (exit code 4).
+        """
+        run_dir = self._require_run_dir(spec)
+        parent_output_dir = parent_run_dir / self.default_output_subdir
+        parent_db = parent_output_dir / SHINKA_PROGRAMS_DB
+        if not parent_db.exists():
+            raise RevolverError(
+                f"No programs database found in parent run '{parent_run_dir.name}'. "
+                "The run may have been too short to produce any programs."
+            )
+
+        # Extend the generation target: ShinkaEvolve's num_generations is a
+        # *total* target over the shared database, so continuing for
+        # spec.iterations more generations means last_iteration + N.
+        last_iteration = self._read_last_iteration_from_db(parent_db)
+        if spec.iterations is not None and last_iteration is not None:
+            _ensure_section(config, "evo_config")["num_generations"] = (
+                last_iteration + spec.iterations
+            )
+
+        config["output_dir"] = str(parent_output_dir)
+        self._run_engine(spec, config, parent_output_dir)
+
+        # Materialize results into the new run dir (see docstring).
+        new_output_dir = run_dir / self.default_output_subdir
+        new_output_dir.mkdir(exist_ok=True)
+        self._snapshot_programs_db(parent_db, new_output_dir / SHINKA_PROGRAMS_DB)
+        best_score, best_program = self._materialize_best_programs(new_output_dir)
+        return BackendRunResult(
+            best_score=best_score,
+            best_program=best_program,
+            output_dir=new_output_dir,
+        )
 
     def read_progress(self, run_dir: Path) -> tuple[int | None, float | None]:
-        """Not available until S14 PR-C."""
-        raise self._unavailable()
+        """Cheap live-progress read from ``programs.sqlite`` (S14-12).
+
+        Returns:
+            ``(last_generation, best_combined_score)`` — both ``None``
+            when the database does not exist yet or cannot be read (the
+            engine may be mid-write).
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return (None, None)
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                last_generation = self._read_last_iteration(conn)
+                row = conn.execute("SELECT MAX(combined_score) FROM programs").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return (None, None)
+        best_score = float(row[0]) if row is not None and row[0] is not None else None
+        return (last_generation, best_score)
 
     def parse_population(self, run_dir: Path) -> list[dict[str, Any]] | None:
-        """Not available until S14 PR-C."""
-        raise self._unavailable()
+        """Parse the population from ``programs.sqlite``, ranked by score.
+
+        Programs are ranked by ``combined_score`` descending; rows with a
+        SQL ``NULL`` score (failed evaluations) are excluded from the
+        ranking order and listed last. Each entry carries ``id``,
+        ``generation``, ``combined_score``, ``correct``, and
+        ``public_metrics`` (S14-12 contract), plus the display-oriented
+        aliases the ``run population`` renderer expects (``rank``,
+        ``score``, ``metrics``, ``iteration_found``, ``parent_id``).
+
+        .. warning::
+            ShinkaEvolve has no MAP-Elites feature grid: entries carry
+            **no** ``cell_indices`` and **no** ``island`` fields — callers
+            must not assume them (ADR-007 D1). ``iteration_found`` aliases
+            ``generation`` (the engine has no separate iteration counter).
+
+        Returns:
+            The ranked population, or ``None`` when the database does not
+            exist yet (no population state).
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT id, generation, combined_score, correct, "
+                    "public_metrics, parent_id FROM programs "
+                    "ORDER BY (combined_score IS NULL), combined_score DESC, "
+                    "timestamp"
+                ).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+
+        population: list[dict[str, Any]] = []
+        for rank, (prog_id, generation, score, correct, metrics_json, parent_id) in enumerate(
+            rows, start=1
+        ):
+            public_metrics: dict[str, Any] = {}
+            if metrics_json:
+                try:
+                    loaded = json.loads(metrics_json)
+                    if isinstance(loaded, dict):
+                        public_metrics = loaded
+                except ValueError:
+                    pass
+            population.append(
+                {
+                    "rank": rank,
+                    "id": prog_id,
+                    "score": float(score) if score is not None else 0.0,
+                    "combined_score": float(score) if score is not None else None,
+                    "correct": bool(correct),
+                    "metrics": public_metrics,
+                    "public_metrics": public_metrics,
+                    "generation": generation,
+                    "iteration_found": generation,
+                    "parent_id": parent_id,
+                }
+            )
+        return population
 
     def count_valid(self, run_dir: Path) -> int | None:
-        """Not available until S14 PR-C."""
-        raise self._unavailable()
+        """Count programs marked ``correct = 1`` in ``programs.sqlite``.
+
+        Returns ``None`` when the database does not exist or cannot be
+        read (e.g. the run failed before producing any programs).
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM programs WHERE correct = 1").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+        return int(row[0]) if row is not None else None
 
     def collect_token_usage(self, run_dir: Path) -> TokenUsage | None:
-        """Not available until S14 PR-C."""
-        raise self._unavailable()
+        """Collect engine-native token/cost accounting (ADR-007 D2, S14-11).
+
+        Sums, across all rows of the ``programs`` table (verified
+        shinka-evolve 0.0.7 schema — sprint-014 §"Verified schema facts"):
+
+        - USD cost from the top-level ``metadata.api_costs`` key
+          (canonical: includes retry attempts);
+        - prompt tokens from ``metadata.llm_result.input_tokens``;
+        - completion tokens as ``metadata.llm_result.output_tokens`` +
+          ``metadata.llm_result.thinking_tokens`` (the sum equals the
+          total completion-side token count across all 0.0.7 providers).
+
+        ``llm_result`` may be absent or ``null`` (file-based init program,
+        failed attempts) and the ``metadata`` column itself may be SQL
+        ``NULL`` — all fields are best-effort with default 0. Token counts
+        slightly undercount retried generations (``llm_result`` is the
+        last response only — acceptable per ADR-007 D2).
+
+        Returns:
+            The accumulated :class:`TokenUsage`, or ``None`` when the
+            database does not exist (run failed before any programs).
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT metadata FROM programs").fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        cost_usd = 0.0
+        for (metadata_json,) in rows:
+            if not metadata_json:
+                continue
+            try:
+                metadata = json.loads(metadata_json)
+            except ValueError:
+                continue
+            if not isinstance(metadata, dict):
+                continue
+            cost_usd += _as_number(metadata.get("api_costs"))
+            llm_result = metadata.get("llm_result")
+            if isinstance(llm_result, dict):
+                prompt_tokens += int(_as_number(llm_result.get("input_tokens")))
+                completion_tokens += int(_as_number(llm_result.get("output_tokens"))) + int(
+                    _as_number(llm_result.get("thinking_tokens"))
+                )
+        return TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            estimated_cost_usd=cost_usd,
+        )
+
+    # ── Engine-tier internals ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _require_run_dir(spec: BackendRunSpec) -> Path:
+        """Return ``spec.run_dir``, raising when missing."""
+        if spec.run_dir is None:
+            raise ValidationError("BackendRunSpec.run_dir is required for this operation.")
+        return spec.run_dir
+
+    def _programs_db_path(self, run_dir: Path) -> Path:
+        """Return the conventional ``programs.sqlite`` path for a run dir."""
+        return run_dir / self.default_output_subdir / SHINKA_PROGRAMS_DB
+
+    def _engine_classes(self) -> tuple[Any, Any, Any, Any]:
+        """Import the engine classes; raise the typed error when absent.
+
+        Returns:
+            ``(ShinkaEvolveRunner, EvolutionConfig, DatabaseConfig,
+            LocalJobConfig)``.
+        """
+        try:
+            from shinka.core import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
+                EvolutionConfig,
+                ShinkaEvolveRunner,
+            )
+            from shinka.database import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
+                DatabaseConfig,
+            )
+            from shinka.launch import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
+                LocalJobConfig,
+            )
+        except ImportError as exc:
+            raise self._unavailable() from exc
+        return ShinkaEvolveRunner, EvolutionConfig, DatabaseConfig, LocalJobConfig
+
+    @staticmethod
+    def _dataclass_kwargs(
+        section: dict[str, Any],
+        dataclass_type: Any,
+        section_name: str,
+    ) -> dict[str, Any]:
+        """Filter a config section to the dataclass's declared fields.
+
+        Unknown keys (e.g. typos that survived ``--config-override``) are
+        dropped with a stderr warning naming the keys — never their values
+        — instead of crashing the engine construction.
+        """
+        valid_keys = {f.name for f in dataclasses.fields(dataclass_type)}
+        unknown = sorted(set(section) - valid_keys)
+        if unknown:
+            sys.stderr.write(
+                f"Warning: ignoring unknown {section_name} key(s) for the "
+                f"shinka backend: {', '.join(unknown)}.\n"
+            )
+        return {key: value for key, value in section.items() if key in valid_keys}
+
+    @staticmethod
+    def _env_exports(config: dict[str, Any]) -> dict[str, str]:
+        """Build the env-var exports for the ``llm_env`` map (ADR-007 D5).
+
+        For each ``target: source`` entry produced by ``build_config()``:
+
+        - target already set (non-empty) → leave the ambient value;
+        - source ``None`` (key-less local endpoint) → export the
+          placeholder value;
+        - source set and present in the environment → copy its value to
+          the target var;
+        - source named but unset → leave the target unset so the engine
+          raises its own explicit missing-env error at construction.
+
+        Values are NEVER logged; the export is applied via
+        :func:`revolver_env` so the ambient environment is restored after
+        the run.
+        """
+        exports: dict[str, str] = {}
+        llm_env = config.get("llm_env")
+        if not isinstance(llm_env, dict):
+            return exports
+        for target, source in llm_env.items():
+            if os.environ.get(target, "").strip():
+                continue
+            if source is None:
+                exports[target] = _LOCAL_API_KEY_PLACEHOLDER
+            elif isinstance(source, str) and os.environ.get(source, "").strip():
+                exports[target] = os.environ[source]
+        return exports
+
+    def _run_engine(
+        self,
+        spec: BackendRunSpec,
+        config: dict[str, Any],
+        results_dir: Path,
+    ) -> None:
+        """Construct ``ShinkaEvolveRunner`` from *config* and run it.
+
+        The ``llm_env`` exports MUST be active before construction:
+        ``_validate_evo_config_model_env_access()`` runs in the runner's
+        ``__init__``. The initial program and the generated wrapper are
+        passed as string contents (``init_program_str``/``evaluate_str``)
+        — shinka saves them into *results_dir* and updates the config
+        paths itself.
+
+        Raises:
+            ExternalError: Wrapping any engine failure (construction or
+                run) so the orchestrator's crash-status flow applies.
+        """
+        runner_cls, evo_cls, db_cls, job_cls = self._engine_classes()
+
+        initial_program = spec.snapshot_dir / "initial_program.py"
+        if not initial_program.exists():
+            raise FileNotFoundError(f"Initial program not found: {initial_program}")
+        wrapper_path = spec.wrapper_path
+        if wrapper_path is None:
+            run_dir = self._require_run_dir(spec)
+            wrapper_path = run_dir / SHINKA_WRAPPER_FILENAME
+        if not wrapper_path.exists():
+            raise FileNotFoundError(f"Wrapper evaluator not found: {wrapper_path}")
+        init_program_str = initial_program.read_text(encoding="utf-8")
+        evaluate_str = wrapper_path.read_text(encoding="utf-8")
+
+        evo_section = dict(config.get("evo_config") or {})
+        evo_section["results_dir"] = str(results_dir)
+        db_section = dict(config.get("db_config") or {})
+        job_section = dict(config.get("job_config") or {})
+
+        # Ensure unbuffered output for real-time progress (S8a-09); this
+        # affects the evaluation jobs the engine spawns.
+        os.environ["PYTHONUNBUFFERED"] = "1"
+
+        exports = self._env_exports(config)
+        try:
+            with revolver_env(exports):
+                runner = runner_cls(
+                    evo_config=evo_cls(
+                        **self._dataclass_kwargs(evo_section, evo_cls, "evo_config")
+                    ),
+                    job_config=job_cls(
+                        **self._dataclass_kwargs(job_section, job_cls, "job_config")
+                    ),
+                    db_config=db_cls(**self._dataclass_kwargs(db_section, db_cls, "db_config")),
+                    init_program_str=init_program_str,
+                    evaluate_str=evaluate_str,
+                    verbose=True,
+                )
+                runner.run()
+        except RevolverError:
+            raise
+        except Exception as exc:
+            raise ExternalError(f"ShinkaEvolve run failed: {exc}") from exc
+
+    def _materialize_best_programs(self, results_dir: Path) -> tuple[float | None, Path | None]:
+        """Write the top ranked program(s) into ``<results_dir>/best/``.
+
+        ShinkaEvolve keeps evolved programs in ``programs.sqlite`` only
+        and writes its ``init_program.py`` + ``evaluate.py`` at the
+        results-dir root; without this materialization the orchestrator's
+        program collection (which scans ``best/`` then falls back to root
+        ``*.py``) would silently collect the initial program as rank-1.
+
+        Programs with a non-NULL ``combined_score`` are ranked descending
+        (ties broken by insertion timestamp) and the top
+        :data:`_BEST_PROGRAMS_COUNT` are written as ``best_program.py``
+        (then ``best_program_NN.py``), matching OpenEvolve's single
+        best-program output count.
+
+        Returns:
+            ``(best_score, best_program_path)`` — both ``None`` when no
+            scored program exists.
+        """
+        db_path = results_dir / SHINKA_PROGRAMS_DB
+        if not db_path.exists():
+            return (None, None)
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT id, code, combined_score FROM programs "
+                    "WHERE combined_score IS NOT NULL "
+                    "ORDER BY combined_score DESC, timestamp LIMIT ?",
+                    (_BEST_PROGRAMS_COUNT,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return (None, None)
+        if not rows:
+            return (None, None)
+
+        best_dir = results_dir / "best"
+        best_dir.mkdir(parents=True, exist_ok=True)
+        best_path: Path | None = None
+        for rank, (_prog_id, code, _score) in enumerate(rows, start=1):
+            name = "best_program.py" if rank == 1 else f"best_program_{rank:02d}.py"
+            path = best_dir / name
+            path.write_text(code or "", encoding="utf-8")
+            if rank == 1:
+                best_path = path
+        return (float(rows[0][2]), best_path)
+
+    @staticmethod
+    def _read_last_iteration(conn: sqlite3.Connection) -> int | None:
+        """Read the last completed generation from an open connection.
+
+        Prefers Shinka's own ``metadata_store.last_iteration`` bookkeeping
+        and falls back to ``MAX(generation)`` over the programs table.
+        """
+        try:
+            row = conn.execute(
+                "SELECT value FROM metadata_store WHERE key = 'last_iteration'"
+            ).fetchone()
+            if row is not None and row[0] is not None:
+                return int(row[0])
+        except (sqlite3.Error, ValueError):
+            pass
+        try:
+            row = conn.execute("SELECT MAX(generation) FROM programs").fetchone()
+        except sqlite3.Error:
+            return None
+        if row is None or row[0] is None:
+            return None
+        return int(row[0])
+
+    def _read_last_iteration_from_db(self, db_path: Path) -> int | None:
+        """Open *db_path* read-only and return the last completed generation."""
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                return self._read_last_iteration(conn)
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+
+    @staticmethod
+    def _snapshot_programs_db(source: Path, destination: Path) -> None:
+        """Copy a programs database via the SQLite backup API.
+
+        Safer than a file copy: pending WAL content is included in the
+        snapshot regardless of the journal mode the engine left behind.
+        """
+        src = sqlite3.connect(source)
+        try:
+            dst = sqlite3.connect(destination)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
 
 
-__all__ = ["SHINKA_WRAPPER_FILENAME", "ShinkaBackend"]
+__all__ = ["SHINKA_PROGRAMS_DB", "SHINKA_WRAPPER_FILENAME", "ShinkaBackend"]

@@ -166,10 +166,16 @@ class EvolutionBackend(Protocol):
             ShinkaEvolve — S14-05). The orchestrator stages
             ``<run_dir>/<default_output_subdir>`` and never hard-codes an
             engine-specific name.
+        wrapper_filename: Name of the generated wrapper evaluator inside a
+            run dir (``"_revolver_evaluator.py"`` for OpenEvolve,
+            ``"_shinka_evaluator.py"`` for ShinkaEvolve — S14-13). The
+            resume orchestrator copies the parent run's wrapper by this
+            backend-owned name instead of hard-coding it.
     """
 
     name: str
     default_output_subdir: str
+    wrapper_filename: str
 
     def capabilities(self) -> BackendCapabilities:
         """Return the static capability matrix for this backend."""
