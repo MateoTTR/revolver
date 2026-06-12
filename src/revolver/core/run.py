@@ -52,9 +52,10 @@ from revolver.infra.backends.base import (
     EvolutionBackend,
 )
 from revolver.infra.backends.openevolve import (
-    # Backward-compatibility re-exports: wrapper generation moved into
+    # DEPRECATED shim re-exports: wrapper generation moved into
     # OpenEvolveBackend in Sprint 013 PR-C (ADR-007); these aliases keep
-    # pre-existing ``core.run`` imports working until S15.
+    # pre-existing ``core.run`` imports working. Scheduled for removal in
+    # Sprint 015 (grep marker: DEPRECATED shim).
     _WRAPPER_TEMPLATE as _WRAPPER_TEMPLATE,
     # Engine helpers still owned by the orchestrator: the resume
     # checkpoint-staging precheck and the crash-status fallback must run

@@ -18,6 +18,7 @@ from revolver.cli import run_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import run as core_run
 from revolver.core.exceptions import ValidationError
+from revolver.infra.backends.base import AVAILABLE_BACKENDS
 from revolver.infra.output import print_confirmation, render
 from revolver.models.run import RunConfig
 
@@ -43,7 +44,7 @@ def run_launch(
         str,
         typer.Option(
             "--backend",
-            help="Evolution backend: openevolve (default) or shinka.",
+            help=f"Evolution backend: {', '.join(AVAILABLE_BACKENDS)} (default: openevolve).",
         ),
     ] = "openevolve",
     iterations: Annotated[
