@@ -6,8 +6,9 @@ shinka-evolve 0.0.7 — see sprint-014 §"Verified shinka-evolve 0.0.7 schema
 facts"):
 
 - ``collect_token_usage()`` sums tokens from ``metadata.llm_result.*`` and
-  USD cost from the top-level ``metadata.api_costs`` key; a row with
-  ``llm_result: null`` (init program) must not crash and counts 0 tokens.
+  USD cost from the top-level ``metadata.api_costs`` key; a file-based
+  init row (NO ``llm_result`` key at all) and a row with a SQL ``NULL``
+  ``metadata`` column must not crash and count 0 tokens.
 - ``parse_population()`` returns programs ranked by ``combined_score``
   descending, with **no** ``cell_indices`` field (no MAP-Elites on Shinka).
 - ``count_valid()`` counts rows where ``correct = 1``.
@@ -65,11 +66,13 @@ class TestShinkaDbContract:
     def test_collect_token_usage_sums_metadata(self, shinka_run_dir: Path) -> None:
         """(a) Tokens from metadata.llm_result.*, cost from metadata.api_costs.
 
-        The init-program row carries ``llm_result: null`` and must count 0
-        tokens without crashing; its ``api_costs`` still contributes to the
-        USD total. Completion tokens are ``output_tokens + thinking_tokens``
-        (Shinka's ``output_tokens`` excludes thinking — verified in
-        shinka/llm/providers/*).
+        The file-based init row has NO ``llm_result`` key at all (the shape
+        every real Revolver Shinka run produces for generation 0) and one
+        row has a SQL ``NULL`` ``metadata`` column — both must count 0
+        tokens without crashing; the init row's ``api_costs`` still
+        contributes to the USD total. Completion tokens are
+        ``output_tokens + thinking_tokens`` (sum equals total
+        completion-side tokens across all shinka 0.0.7 providers).
         """
         usage = ShinkaBackend().collect_token_usage(shinka_run_dir)
 

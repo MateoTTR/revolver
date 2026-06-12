@@ -24,11 +24,19 @@ Verified schema facts encoded here:
 - Per-program token counts are nested under ``metadata.llm_result`` —
   the ``QueryResult.to_dict()`` of the last LLM response
   (``input_tokens``, ``output_tokens``, ``thinking_tokens``, ``cost``,
-  ``model_name``, …). ``llm_result`` may be ``null`` (file-based init
-  program, failed attempts) — all fields are best-effort with default 0.
-- Shinka's ``output_tokens`` **excludes** ``thinking_tokens`` (providers
-  subtract reasoning tokens), so the completion-side total is
-  ``output_tokens + thinking_tokens``.
+  ``model_name``, …). The ``llm_result`` key is **absent** for file-based
+  init programs (``async_runner.py`` ~L1583 writes only ``api_costs`` +
+  ``patch_*`` keys), explicitly ``null`` on the LLM-init-without-response
+  path, and the whole ``metadata`` column may be SQL ``NULL`` (Shinka's
+  own ``_get_total_api_costs()`` guards against it). Readers must treat
+  every field as best-effort with default 0.
+- Completion-side totals must be computed as ``output_tokens +
+  thinking_tokens``. Provider behavior differs (verified in
+  shinka/llm/providers/* 0.0.7): openai/deepseek/local_openai subtract
+  reasoning tokens from ``output_tokens``, gemini reports the two counts
+  natively disjoint, anthropic reports ``thinking_tokens = 0`` with an
+  inclusive ``output_tokens`` — in all cases the sum equals the total
+  completion-side token count.
 """
 
 from __future__ import annotations
@@ -104,6 +112,10 @@ _COMPANION_TABLES_SQL = (
     """,
 )
 
+#: Backend output sub-directory convention (S14): ``<run_dir>/shinka-output``.
+#: Exported for reuse by the PR-C engine-tier tests.
+SHINKA_OUTPUT_SUBDIR = "shinka-output"
+
 # ── Default fixture rows ──────────────────────────────────────────────────────
 
 _BASE_TIMESTAMP = 1718000000.0
@@ -138,9 +150,11 @@ def _llm_result(
     }
 
 
-#: Five program rows: a file-based init program (``llm_result: null``),
+#: Six program rows: a file-based init program (**no** ``llm_result`` key —
+#: the shape every real Revolver Shinka run produces for generation 0),
 #: two generation-1 children (one invalid), the generation-2 best program,
-#: and a generation-2 failed program with a NULL ``combined_score``.
+#: a generation-2 failed program with a NULL ``combined_score``, and a row
+#: whose ``metadata`` column is SQL ``NULL``.
 FIXTURE_PROGRAM_ROWS: tuple[dict[str, Any], ...] = (
     {
         "id": "prog-init",
@@ -154,8 +168,14 @@ FIXTURE_PROGRAM_ROWS: tuple[dict[str, Any], ...] = (
         "private_metrics": {},
         "correct": 1,
         "island_idx": 0,
-        # Init-program case: api_costs written, llm_result is null.
-        "metadata": {"api_costs": 0.0, "llm_result": None},
+        # File-based init program (async_runner.py ~L1583): api_costs +
+        # patch_* keys only — NO llm_result key at all.
+        "metadata": {
+            "api_costs": 0.0,
+            "patch_type": "init",
+            "patch_name": "initial_program",
+            "patch_description": "Initial program setup",
+        },
     },
     {
         "id": "prog-gen1-a",
@@ -225,6 +245,22 @@ FIXTURE_PROGRAM_ROWS: tuple[dict[str, Any], ...] = (
             "llm_result": _llm_result(700, 0, 0, 0.004),
         },
     },
+    {
+        "id": "prog-gen2-meta-null",
+        "code": _PROGRAM_CODE,
+        "language": "python",
+        "parent_id": "prog-gen1-b",
+        "generation": 2,
+        "timestamp": _BASE_TIMESTAMP + 130.0,
+        "combined_score": None,
+        "public_metrics": {},
+        "private_metrics": {},
+        "correct": 0,
+        "island_idx": 1,
+        # Defensive case: the metadata column itself can be SQL NULL —
+        # Shinka's own _get_total_api_costs() guards against it.
+        "metadata": None,
+    },
 )
 
 # ── Expected aggregates over FIXTURE_PROGRAM_ROWS (contract constants) ────────
@@ -232,11 +268,13 @@ FIXTURE_PROGRAM_ROWS: tuple[dict[str, Any], ...] = (
 #: Sum of top-level ``metadata.api_costs`` across all rows (USD, canonical).
 EXPECTED_COST_USD = 0.0 + 0.012 + 0.008 + 0.021 + 0.005
 
-#: Sum of ``metadata.llm_result.input_tokens`` (null llm_result counts 0).
+#: Sum of ``metadata.llm_result.input_tokens`` (rows without an
+#: ``llm_result`` key or with a NULL ``metadata`` column count 0).
 EXPECTED_PROMPT_TOKENS = 1200 + 900 + 1500 + 700
 
-#: Sum of ``output_tokens + thinking_tokens`` (Shinka's ``output_tokens``
-#: excludes thinking tokens — verified in shinka/llm/providers/*).
+#: Sum of ``output_tokens + thinking_tokens`` (the sum equals the total
+#: completion-side token count across all shinka 0.0.7 providers — see
+#: the module docstring for the per-provider invariant).
 EXPECTED_COMPLETION_TOKENS = (340 + 0) + (210 + 64) + (480 + 128) + (0 + 0)
 
 #: Number of rows with ``correct = 1``.
@@ -313,7 +351,7 @@ def build_programs_db(
                     None,
                     row["correct"],
                     0,
-                    json.dumps(row["metadata"]),
+                    json.dumps(row["metadata"]) if row["metadata"] is not None else None,
                     None,
                     row["island_idx"],
                     None,
@@ -346,5 +384,5 @@ def build_shinka_run_dir(
     Returns:
         *run_dir*, for chaining.
     """
-    build_programs_db(run_dir / "shinka-output" / "programs.sqlite", rows=rows)
+    build_programs_db(run_dir / SHINKA_OUTPUT_SUBDIR / "programs.sqlite", rows=rows)
     return run_dir

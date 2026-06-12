@@ -77,10 +77,12 @@ def _load_evaluate_instance():
 
 
 def _instances():
-    """List dataset instance paths from $REVOLVER_DATASET_DIR (sorted)."""
+    """List dataset instance files from $REVOLVER_DATASET_DIR (sorted)."""
     dataset_dir = os.environ["REVOLVER_DATASET_DIR"]
     return sorted(
-        str(p) for p in Path(dataset_dir).iterdir() if not p.name.startswith(".")
+        str(p)
+        for p in Path(dataset_dir).iterdir()
+        if p.is_file() and not p.name.startswith(".")
     )
 
 
