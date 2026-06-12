@@ -375,6 +375,115 @@ def test_problem_version_validates_config_when_backend_available(tmp_project: Pa
     assert warnings == ["some warning"]
 
 
+# ── S14-15: --backend shinka validation dispatch (ADR-007) ───────────────────
+
+
+def _copy_problem_fixtures(tmp_project: Path) -> None:
+    """Copy the minimal problem files into the project root."""
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+
+@pytest.mark.integration
+def test_problem_version_create_backend_shinka_dispatch(tmp_project: Path) -> None:
+    """--backend shinka: validation dispatched to ShinkaBackend (S14-15).
+
+    Pins availability via the is_available() seam so the test runs
+    without the shinka extra; the dispatched validate_config receives
+    the SNAPSHOT config.yaml and its warnings surface in the output.
+
+    Validates: ADR-007 (backend-dispatched validate_config), S14-15.
+    """
+    from unittest.mock import patch
+
+    from revolver.infra.backends.openevolve import OpenEvolveBackend
+    from revolver.infra.backends.shinka import ShinkaBackend
+
+    _copy_problem_fixtures(tmp_project)
+
+    with (
+        patch("pathlib.Path.cwd", return_value=tmp_project),
+        patch.object(ShinkaBackend, "is_available", return_value=(True, None)),
+        patch.object(
+            ShinkaBackend, "validate_config", return_value=["shinka warning"]
+        ) as mock_shinka_validate,
+        patch.object(OpenEvolveBackend, "validate_config") as mock_oe_validate,
+    ):
+        result = runner.invoke(
+            app,
+            ["problem", "version", "create", "--tag", "v-shinka", "--backend", "shinka"],
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {output}"
+
+    # Dispatched to the shinka backend, not the default OpenEvolve one
+    mock_shinka_validate.assert_called_once()
+    (validated_path,) = mock_shinka_validate.call_args.args
+    assert validated_path == tmp_project / ".revolver" / "problem" / "v-shinka" / "config.yaml"
+    mock_oe_validate.assert_not_called()
+
+    # Warning surfaced to the user
+    assert "shinka warning" in output
+
+
+@pytest.mark.integration
+def test_problem_version_create_backend_shinka_graceful_without_engine(
+    tmp_project: Path,
+) -> None:
+    """--backend shinka without the extra installed: silent skip (S14-15).
+
+    Mirrors the OpenEvolve-absent semantics: no warnings, no failure,
+    the snapshot is still created (graceful no-shinka path).
+    """
+    from unittest.mock import patch
+
+    from revolver.infra.backends.shinka import ShinkaBackend
+
+    _copy_problem_fixtures(tmp_project)
+
+    with (
+        patch.object(
+            ShinkaBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+        ),
+        patch.object(ShinkaBackend, "validate_config") as mock_validate,
+    ):
+        from revolver.core.problem import create_version
+
+        pv, warnings = create_version(
+            tag="v-shinka-skip", message="", project_root=tmp_project, backend="shinka"
+        )
+
+    mock_validate.assert_not_called()
+    assert warnings == []
+    assert pv.tag == "v-shinka-skip"
+    assert (tmp_project / ".revolver" / "problem" / "v-shinka-skip" / "config.yaml").is_file()
+
+
+@pytest.mark.integration
+def test_problem_version_create_unknown_backend_fails_fast(tmp_project: Path) -> None:
+    """Unknown --backend: exit 1, no snapshot created (fail fast)."""
+    from unittest.mock import patch
+
+    _copy_problem_fixtures(tmp_project)
+
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(
+            app,
+            ["problem", "version", "create", "--tag", "v-bad", "--backend", "nope"],
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}: {output}"
+    assert "Unknown backend 'nope'" in output
+
+    # Fail fast: no snapshot dir, no DB record
+    assert not (tmp_project / ".revolver" / "problem" / "v-bad").exists()
+
+
 @pytest.mark.integration
 def test_problem_version_missing_evaluator(tmp_project: Path) -> None:
     """Missing evaluator.py causes exit code 1 with error message."""

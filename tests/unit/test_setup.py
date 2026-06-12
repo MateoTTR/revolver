@@ -274,6 +274,34 @@ def test_plan_optional_backend_never_auto_installed() -> None:
 
 
 @pytest.mark.unit
+def test_plan_installed_optional_backend_not_listed() -> None:
+    """compute_install_plan drops the shinka entry once installed (S14-15).
+
+    Validates: FR-SET-002 — with the shinka extra installed the doctor
+    entry is a plain OK check, so setup must list neither an install
+    item nor an optional instruction for it.
+    """
+    report = DoctorReport(
+        checks=[
+            DependencyStatus(
+                name="shinkaevolve",
+                type="python",
+                status=CheckStatus.OK,
+                version="0.0.7",
+                fixable=True,
+            ),
+        ]
+    )
+    managers = {"pip": True, "conda": True, "mamba": False}
+    plan = compute_install_plan(report, managers)
+
+    assert plan.items == []
+    assert plan.has_installable is False
+    assert plan.manual_instructions == []
+    assert plan.optional_instructions == []
+
+
+@pytest.mark.unit
 def test_plan_ok_deps_skipped() -> None:
     """compute_install_plan skips deps with OK status."""
     report = DoctorReport(

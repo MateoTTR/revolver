@@ -271,7 +271,7 @@ def _invoke_with_mocks(
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=run_id),
         patch("revolver.core.run.generate_solution_id", return_value=sol_id),
-        patch("revolver.core.run.count_valid_programs", return_value=10),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=10),
     ):
         return runner.invoke(app, args, catch_exceptions=False)
 
@@ -2041,7 +2041,7 @@ def test_resume_llm_ensemble_override(
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
         patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
-        patch("revolver.core.run.count_valid_programs", return_value=3),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=3),
     ):
         result = runner.invoke(
             app,
@@ -2380,9 +2380,10 @@ def test_run_unknown_backend_exit1(project_with_prereqs: dict[str, Path]) -> Non
 
 @pytest.mark.integration
 def test_run_shinka_stub_not_installed_exit3(
+    no_shinka: None,
     project_with_prereqs: dict[str, Path],
 ) -> None:
-    """``run --backend shinka`` exits 3 with the install hint (stub backend)."""
+    """``run --backend shinka`` exits 3 with the install hint (not installed)."""
     root = project_with_prereqs["root"]
     global_db_path = project_with_prereqs["global_db_path"]
 

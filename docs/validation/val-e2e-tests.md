@@ -43,31 +43,24 @@ For E2E tests in CI, a lightweight **fake OpenAI-compatible server** replaces a 
 tests/fixtures/fake_llm_server.py
 ```
 
-This server:
-- Exposes `POST /v1/chat/completions` (OpenAI-compatible)
-- Returns valid Python code (pre-defined, deterministic responses)
+This server (**implemented in S14** — stdlib-only `ThreadingHTTPServer`, no network egress possible):
+- Exposes `POST /v1/chat/completions` (OpenAI-compatible, plain chat completions — no structured output)
+- Exposes the minimal Ollama-native endpoints so `revolver llm add --source local` works for real
+- Returns valid Python code via a configurable deterministic response (`response_content` attribute)
 - Includes `usage.prompt_tokens` / `usage.completion_tokens` in responses
-- Simulates realistic latency (~100ms per request)
-- Starts as a pytest fixture (`fake_llm_server`) on a random port
+- No artificial latency by default (configurable if a scenario needs it)
+- Starts as a pytest fixture (`fake_llm_server`) on a random port; `start()` guards against double start
 
 Revolver registers it as:
 ```bash
-revolver llm add fake-llm --provider openai-compat --base-url http://localhost:<port>/v1
+revolver llm add fake-llm -s local --model <name> --base-url http://localhost:<port>/v1
 ```
 
-This validates the entire chain (CLI → token proxy → "LLM" → OpenEvolve → evaluation) without a real model.
+This validates the entire chain (CLI → "LLM" → engine → evaluation) without a real model — including the engines' native clients (ShinkaEvolve's `local/<model>@<url>` path).
 
 ### 2.3 Response behavior
 
-The fake server returns different responses based on the request content:
-
-| Request context | Response |
-|---|---|
-| Code generation (contains `EVOLVE-BLOCK`) | Pre-defined Python function with minor variation |
-| System prompt / planning | Generic acknowledgment response |
-| Any request | Includes `usage: {prompt_tokens: 150, completion_tokens: 50}` |
-
-The responses must produce valid Python that the evaluator can execute. Pre-defined responses are stored alongside the server fixture.
+The fake server returns a configurable deterministic completion (set per test via `response_content`); every response includes a `usage` block so token accounting can be asserted. The content must produce valid Python that the evaluator can execute (Scenario 3 uses a full-rewrite response combined with `--rewrite-mode` for a stable mini-evolution).
 
 ### 2.4 Variants by environment
 
@@ -133,19 +126,25 @@ A scenario validating Revolver behavior without Ollama or GPU. Defined during Ph
 
 **CI suitability**: runs on any runner (no GPU required).
 
-### 3.3 Scenario 3 — ShinkaEvolve Backend Happy Path (planned — S14, ADR-007)
+### 3.3 Scenario 3 — ShinkaEvolve Backend Happy Path (**implemented — S14**, ADR-007)
 
-A mirror of the Scenario 1 happy path on the ShinkaEvolve backend (`revolver run --backend
-shinka`): same problem/dataset/evaluator, fake LLM server (or tiny local model), asserting the
-post-engine boundary — `programs/rank-N.py` + manifest with `backend: shinka` — and that the
-engine-neutral downstream (`solution`, `eval`, `benchmark`) works identically on the produced
-artifacts. Requires the `revolver[shinka]` extra; uses `@pytest.mark.e2e` plus
-`pytest.importorskip("shinka.database")` for auto-skip when not installed (no dedicated marker).
+`tests/e2e/test_shinka_backend.py` — a mirror of the Scenario 1 happy path on the ShinkaEvolve
+backend, running the **real** `ShinkaEvolveRunner` against the fake LLM server (registered as a
+local model, exercising Shinka's `local/<model>@<url>` native client path): `project init
+--backend shinka` (scaffold validates cleanly) → `llm add` → `problem version create` → datasets
+→ `run --backend shinka --iterations 2 --rewrite-mode` → asserts `programs/rank-1.py` exists and
+is **not** the initial program, manifest + run record carry `backend: shinka`, native token
+accounting > 0 (ADR-007 D2), and the engine-neutral downstream (`solution list`, `eval`,
+`eval results`) works on the produced artifacts. Requires the `revolver[shinka]` extra; gated by
+`@pytest.mark.e2e` (module `pytestmark`) plus `pytest.importorskip("shinka.database")` for
+auto-skip when not installed (no dedicated marker). Runtime ≈ 6 s.
 
 **FRs covered**: FR-RUN-047/048, NFR-024 (seed warning), NFR-061 (extra install), FR-SET-002
 (doctor reports ShinkaEvolve availability as informational)
 
-**CI suitability**: runs on any runner (no GPU required); non-blocking like L2-Shinka.
+**CI suitability**: runs on any runner (no GPU required); non-blocking like L2-Shinka. E2E tests
+are **deselected by default** (`addopts = "-m 'not e2e'"` in pyproject) — run explicitly with
+`pytest -m e2e`.
 
 ---
 
@@ -154,12 +153,12 @@ artifacts. Requires the `revolver[shinka]` extra; uses `@pytest.mark.e2e` plus
 - **File layout**:
   ```
   tests/e2e/
-  ├── test_alice_jobshop.py     # Scenario 1 (fake LLM + optional real Ollama)
-  ├── test_remote_only.py       # Scenario 2 (TBD in Phase 5)
-  └── test_shinka_backend.py    # Scenario 3 (planned — S14, ADR-007)
+  ├── test_alice_jobshop.py     # Scenario 1 (planned)
+  ├── test_remote_only.py       # Scenario 2 (planned)
+  └── test_shinka_backend.py    # Scenario 3 (implemented — S14, ADR-007)
   ```
 - **Markers**:
-  - `@pytest.mark.e2e` — runs with fake LLM server (no GPU)
+  - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`
   - `@pytest.mark.e2e_gpu` — runs with real Ollama + GPU
   - `@pytest.mark.slow` — always applied to E2E tests
 - **Not blocking CI on push** — runs nightly or on manual trigger only

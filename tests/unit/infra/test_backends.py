@@ -405,11 +405,21 @@ class TestOpenEvolveBackendCheckpointReads:
         assert OpenEvolveBackend().count_valid(tmp_path) == 3
 
 
-# ── ShinkaBackend stub tests ──────────────────────────────────────────────────
+# ── ShinkaBackend availability contract ──────────────────────────────────────
 
 
-class TestShinkaBackendStub:
-    """Tests for the registered ShinkaEvolve stub (S13-03)."""
+class TestShinkaBackendAvailability:
+    """ShinkaEvolve availability surface on an env WITHOUT shinka.
+
+    The config tier is covered by ``tests/unit/infra/test_shinka_backend.py``
+    (S14 PR-B), the engine tier by the same file's launch/resume classes
+    (S14 PR-C, fake runner). This class pins the run-path fail-fast: the
+    engine-launching methods raise the typed not-installed error (exit 3)
+    before any side effect. The ``programs.sqlite`` readers
+    (read_progress/parse_population/count_valid/collect_token_usage) are
+    pure SQLite readers since PR-C and intentionally work without shinka
+    (they return ``None``-ish values for a missing database instead).
+    """
 
     def test_capabilities_match_adr007(self) -> None:
         """Capabilities follow the ADR-007 matrix for ShinkaEvolve."""
@@ -423,7 +433,7 @@ class TestShinkaBackendStub:
             top_n_extraction=True,
         )
 
-    def test_is_available_false_with_install_hint(self) -> None:
+    def test_is_available_false_with_install_hint(self, no_shinka: None) -> None:
         """is_available() reports not installed with the install hint."""
         available, hint = ShinkaBackend().is_available()
         assert available is False
@@ -437,32 +447,35 @@ class TestShinkaBackendStub:
     @pytest.mark.parametrize(
         "call",
         [
-            pytest.param(lambda b, s: b.config_template(), id="config_template"),
-            pytest.param(lambda b, s: b.validate_config({}), id="validate_config"),
+            # build_config gates on is_available() so `run --backend shinka`
+            # keeps failing fast (exit 3) before any side effect (S14-08);
+            # launch()/resume() gate again when reached directly (S14-10/13;
+            # resume's not-installed path needs a parent programs DB and is
+            # covered in test_shinka_backend.py::TestShinkaResume).
             pytest.param(lambda b, s: b.build_config(s), id="build_config"),
-            pytest.param(lambda b, s: b.resolved_config({}), id="resolved_config"),
-            pytest.param(lambda b, s: b.generate_wrapper(s), id="generate_wrapper"),
             pytest.param(lambda b, s: b.launch(s, {}), id="launch"),
-            pytest.param(lambda b, s: b.resume(s, {}, Path("/parent")), id="resume"),
-            pytest.param(lambda b, s: b.read_progress(Path("/run")), id="read_progress"),
-            pytest.param(lambda b, s: b.parse_population(Path("/run")), id="parse_population"),
-            pytest.param(lambda b, s: b.count_valid(Path("/run")), id="count_valid"),
-            pytest.param(
-                lambda b, s: b.collect_token_usage(Path("/run")), id="collect_token_usage"
-            ),
         ],
     )
-    def test_engine_methods_raise_backend_unavailable(
+    def test_engine_launch_methods_raise_backend_unavailable(
         self,
+        no_shinka: None,
         call: Callable[[ShinkaBackend, BackendRunSpec], object],
         tmp_path: Path,
     ) -> None:
-        """Every engine method raises BackendUnavailableError (exit 3)."""
+        """Engine-launching methods raise BackendUnavailableError (exit 3)."""
         spec = _make_spec(tmp_path)
         with pytest.raises(BackendUnavailableError) as exc_info:
             call(ShinkaBackend(), spec)
         assert exc_info.value.exit_code == 3
         assert "pip install 'revolver[shinka]'" in str(exc_info.value)
+
+    def test_db_readers_tolerate_missing_database(self, tmp_path: Path) -> None:
+        """The sqlite readers need no engine install (ADR-007 D2)."""
+        backend = ShinkaBackend()
+        assert backend.read_progress(tmp_path) == (None, None)
+        assert backend.parse_population(tmp_path) is None
+        assert backend.count_valid(tmp_path) is None
+        assert backend.collect_token_usage(tmp_path) is None
 
 
 # ── Re-export shim tests ──────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ from revolver.core.doctor import (
     run_doctor,
 )
 from revolver.infra.backends.openevolve import OpenEvolveBackend
+from revolver.infra.backends.shinka import ShinkaBackend
 from revolver.infra.gpu import GpuInfo
 
 # ── DoctorReport dataclass ────────────────────────────────────────────────────
@@ -155,8 +156,18 @@ def test_check_openevolve_missing() -> None:
 
 @pytest.mark.unit
 def test_check_backend_shinka_informational() -> None:
-    """_check_backend('shinka') reports INFO (optional, not a failure)."""
-    result = _check_backend("shinka")
+    """_check_backend('shinka') reports INFO (optional, not a failure).
+
+    Availability is pinned to not-installed via the is_available() seam
+    (a real import probe since S14 PR-B) so the test stays deterministic
+    on machines where the optional shinka extra happens to be installed.
+    """
+    with patch.object(
+        ShinkaBackend,
+        "is_available",
+        return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+    ):
+        result = _check_backend("shinka")
 
     assert result.status == CheckStatus.INFO
     assert result.name == "shinkaevolve"
@@ -164,6 +175,49 @@ def test_check_backend_shinka_informational() -> None:
     assert result.fixable is False
     assert "optional" in (result.message or "")
     assert "revolver[shinka]" in (result.message or "")
+
+
+@pytest.mark.unit
+def test_check_backend_shinka_installed() -> None:
+    """_check_backend('shinka') reports OK with version when installed.
+
+    S14-15: with the shinka extra installed, the doctor entry becomes a
+    regular OK package check (version from the 'shinka-evolve'
+    distribution metadata, no install hint).
+    """
+    with (
+        patch.object(ShinkaBackend, "is_available", return_value=(True, None)),
+        patch(
+            "revolver.core.doctor.importlib.metadata.version", return_value="0.0.7"
+        ) as mock_version,
+    ):
+        result = _check_backend("shinka")
+
+    assert result.status == CheckStatus.OK
+    assert result.name == "shinkaevolve"
+    assert result.type == "python"
+    assert result.version == "0.0.7"
+    assert result.fixable is True
+    assert result.message is None
+    # Version is looked up under the PyPI distribution name, not the
+    # backend or check name (the package ships as 'shinka-evolve').
+    mock_version.assert_called_once_with("shinka-evolve")
+
+
+@pytest.mark.unit
+def test_check_backend_shinka_installed_without_metadata() -> None:
+    """Importable shinka without package metadata: OK with version=None."""
+    with (
+        patch.object(ShinkaBackend, "is_available", return_value=(True, None)),
+        patch(
+            "revolver.core.doctor.importlib.metadata.version",
+            side_effect=importlib.metadata.PackageNotFoundError("shinka-evolve"),
+        ),
+    ):
+        result = _check_backend("shinka")
+
+    assert result.status == CheckStatus.OK
+    assert result.version is None
 
 
 # ── Ollama check ──────────────────────────────────────────────────────────────
@@ -301,6 +355,13 @@ def test_run_doctor_all_pass() -> None:
     with (
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
         patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
+        # Pin "shinka absent" so the INFO assertion below holds identically
+        # in a real-shinka env (e.g. shinka-spike).
+        patch.object(
+            ShinkaBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+        ),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
         patch("revolver.core.doctor._detect_conda", return_value=True),

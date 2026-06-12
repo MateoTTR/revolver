@@ -53,16 +53,21 @@ from revolver.infra.backends.base import (
 )
 from revolver.infra.backends.openevolve import (
     # DEPRECATED shim re-exports: wrapper generation moved into
-    # OpenEvolveBackend in Sprint 013 PR-C (ADR-007); these aliases keep
-    # pre-existing ``core.run`` imports working. Scheduled for removal in
-    # Sprint 015 (grep marker: DEPRECATED shim).
+    # OpenEvolveBackend in Sprint 013 PR-C (ADR-007); valid-program
+    # counting moved behind backend.count_valid() in Sprint 014 PR-B
+    # (S14-06); the wrapper filename moved behind backend.wrapper_filename
+    # in Sprint 014 PR-C (S14-13). These aliases keep pre-existing
+    # ``core.run`` imports working. Scheduled for removal in Sprint 015
+    # (grep marker: DEPRECATED shim).
     _WRAPPER_TEMPLATE as _WRAPPER_TEMPLATE,
     # Engine helpers still owned by the orchestrator: the resume
-    # checkpoint-staging precheck and the crash-status fallback must run
-    # in core (fail fast BEFORE the run-record insert — DES-005 §14.1).
+    # checkpoint-staging precheck must run in core (fail fast BEFORE the
+    # run-record insert — DES-005 §14.1). count_valid_programs,
+    # generate_wrapper and WRAPPER_FILENAME are DEPRECATED shim
+    # re-exports only.
     EVALUATOR_FILENAME,
-    WRAPPER_FILENAME,
-    count_valid_programs,
+    WRAPPER_FILENAME as WRAPPER_FILENAME,
+    count_valid_programs as count_valid_programs,
     find_latest_checkpoint,
     generate_wrapper as generate_wrapper,
     resolve_api_keys,
@@ -126,6 +131,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BACKEND = "openevolve"
 
+# Revolver default when neither the CLI nor the problem config provides an
+# iteration count. The orchestrator owns this single resolution point
+# (S14-05); backends never apply their own fallback on the run path.
+DEFAULT_ITERATIONS = 10
+
 
 def _determine_run_status(
     valid_iters: int | None, total_iters: int
@@ -152,17 +162,23 @@ def _determine_run_status(
 
 
 def _determine_crash_status(
-    run_dir: Path, iterations: int
+    run_dir: Path,
+    iterations: int,
+    backend: EvolutionBackend | None = None,
 ) -> tuple[Literal["failed", "completed_with_errors"], int | None]:
-    """Determine status for a run that crashed (OE exception).
+    """Determine status for a run that crashed (engine exception).
 
-    Checks whether the run produced any valid programs in its checkpoint
-    before the crash. If valid programs exist, the status is derived from
+    Checks whether the run produced any valid programs before the crash
+    by delegating the counting to the run's backend
+    (:meth:`EvolutionBackend.count_valid` — ADR-007 D1, S14-06). If valid
+    programs exist, the status is derived from
     :func:`_determine_run_status`; otherwise ``"failed"`` is returned.
 
     Args:
-        run_dir: Path to the run directory containing ``oe-output/``.
+        run_dir: Path to the run directory.
         iterations: Total number of iterations requested for the run.
+        backend: Resolved evolution backend of the crashed run. Defaults
+            to the OpenEvolve backend for backward compatibility.
 
     Returns:
         A tuple of (status, valid_iterations) where status is
@@ -170,14 +186,15 @@ def _determine_crash_status(
         is the count of valid programs found (or ``None`` if none were
         found).
     """
+    if backend is None:
+        backend = get_backend(DEFAULT_BACKEND)
     valid_iters: int | None = None
-    latest_ckpt = find_latest_checkpoint(run_dir)
-    if latest_ckpt is not None:
-        valid_iters = count_valid_programs(latest_ckpt)
-    if valid_iters is None:
-        oe_output_dir = run_dir / "oe-output"
-        if oe_output_dir.exists():
-            valid_iters = count_valid_programs(oe_output_dir)
+    try:
+        valid_iters = backend.count_valid(run_dir)
+    except Exception:
+        # Crash-status determination runs inside exception handlers — a
+        # backend counting failure must never mask the original error.
+        logger.debug("backend.count_valid() failed during crash handling", exc_info=True)
 
     if valid_iters is not None and valid_iters > 0:
         status = _determine_run_status(valid_iters, iterations)
@@ -533,6 +550,17 @@ def launch_run(
         )
         oe_config = backend.build_config(spec)
 
+        # Single-owner iterations resolution (S14-05, ADR-007 D4): the
+        # orchestrator owns the canonical value — CLI flag first, then the
+        # backend-neutral reading of the built config (max_iterations on
+        # OE, num_generations on Shinka), then the Revolver default.
+        iterations = (
+            config.iterations
+            or backend.resolved_config(oe_config).iterations
+            or DEFAULT_ITERATIONS
+        )
+        spec.iterations = iterations
+
         # Build LLM snapshot for traceability (S11-08)
         llm_type, llm_model_str, llm_snapshot_json = _build_llm_snapshot(
             llm_or_ensemble, global_conn
@@ -561,7 +589,7 @@ def launch_run(
                 problem_version=config.problem_version,
                 llm=config.llm_name,
                 dataset=config.dataset_name,
-                iterations=config.iterations or oe_config.get("max_iterations", 10),
+                iterations=iterations,
                 generation_time_s=0.0,
                 token_usage=None,
                 resolved_config=resolved,
@@ -586,13 +614,10 @@ def launch_run(
         # Set output dir in config BEFORE the snapshot is persisted:
         # backend.launch() overwrites config['output_dir'] (same value),
         # and the stored snapshot must keep containing it (DES-005 §14.1).
-        oe_output_dir = run_dir / "oe-output"
-        oe_output_dir.mkdir(exist_ok=True)
-        oe_config["output_dir"] = str(oe_output_dir)
-
-        # Determine iterations
-        iterations = config.iterations or oe_config.get("max_iterations", 10)
-        spec.iterations = iterations
+        # The directory name is backend-owned (S14-05, ADR-007 D1).
+        engine_output_dir = run_dir / backend.default_output_subdir
+        engine_output_dir.mkdir(exist_ok=True)
+        oe_config["output_dir"] = str(engine_output_dir)
 
         # 13. FR-RUN-014/015: check concurrency (lock files for local LLM)
         if llm.source == "local":
@@ -763,16 +788,11 @@ def launch_run(
                         native_usage.completion_tokens,
                     )
 
-            # Collect programs from OpenEvolve output dir
-            programs = _collect_programs(oe_output_dir, run_dir / "programs")
+            # Collect programs from the engine output dir
+            programs = _collect_programs(engine_output_dir, run_dir / "programs")
 
-            # Count valid iterations from checkpoint database
-            valid_iters: int | None = None
-            latest_ckpt = find_latest_checkpoint(run_dir)
-            if latest_ckpt is not None:
-                valid_iters = count_valid_programs(latest_ckpt)
-            if valid_iters is None and oe_output_dir.exists():
-                valid_iters = count_valid_programs(oe_output_dir)
+            # Count valid iterations via the backend (ADR-007 D1, S14-06)
+            valid_iters: int | None = backend.count_valid(run_dir)
             if valid_iters is not None:
                 update_run_valid_iterations(proj_conn, run_id, valid_iters)
 
@@ -892,7 +912,9 @@ def launch_run(
                     re_exc,
                 )
             else:
-                crash_status, crash_valid = _determine_crash_status(run_dir, iterations)
+                crash_status, crash_valid = _determine_crash_status(
+                    run_dir, iterations, backend=backend
+                )
                 update_run_status(proj_conn, run_id, crash_status)
                 if crash_valid is not None:
                     update_run_valid_iterations(proj_conn, run_id, crash_valid)
@@ -924,7 +946,9 @@ def launch_run(
                     f"Error details in: {run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                crash_status, crash_valid = _determine_crash_status(run_dir, iterations)
+                crash_status, crash_valid = _determine_crash_status(
+                    run_dir, iterations, backend=backend
+                )
                 update_run_status(proj_conn, run_id, crash_status)
                 if crash_valid is not None:
                     update_run_valid_iterations(proj_conn, run_id, crash_valid)
@@ -1177,26 +1201,40 @@ def resume_run(
 
         parent_run_dir = get_run_dir(root, run_id)
 
-        # 5. Copy wrapper from parent run dir (FR-RUN-024)
-        parent_wrapper = parent_run_dir / WRAPPER_FILENAME
+        # 5. Copy wrapper from parent run dir (FR-RUN-024). The wrapper
+        # filename is backend-owned (S14-13: _revolver_evaluator.py on OE,
+        # _shinka_evaluator.py on Shinka).
+        parent_wrapper = parent_run_dir / backend.wrapper_filename
         if parent_wrapper.exists():
-            copy_run_file(parent_wrapper, new_run_dir / WRAPPER_FILENAME)
+            copy_run_file(parent_wrapper, new_run_dir / backend.wrapper_filename)
 
-        # 6. Copy checkpoint from parent run dir.
-        # The orchestrator owns this fail-fast staging precheck: it must
-        # run BEFORE the run-record insert and lock acquisition so a
-        # checkpoint-less parent aborts cleanly (DES-005 §14.1). The
-        # backend's resume() self-staging branch is a fallback only.
-        parent_checkpoint = find_latest_checkpoint(parent_run_dir)
-        if parent_checkpoint is None:
-            raise RevolverError(
-                f"No checkpoint found in parent run '{run_id}'. "
-                "The run may have been too short to produce a checkpoint."
-            )
-        # oe-checkpoint is the *input* checkpoint fed to OE for resume.
-        # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
-        new_checkpoint: Path = new_run_dir / "oe-checkpoint"
-        copy_run_file(parent_checkpoint, new_checkpoint)
+        # 6. Backend-aware resume staging precheck (S14-13, ADR-007 D6).
+        # The orchestrator owns this fail-fast precheck: it must run BEFORE
+        # the run-record insert and lock acquisition so a resume-state-less
+        # parent aborts cleanly (DES-005 §14.1). Resume state formats are
+        # backend-specific, hence the dispatch.
+        if backend.name == "openevolve":
+            # Copy checkpoint from parent run dir. The backend's resume()
+            # self-staging branch is a fallback only.
+            parent_checkpoint = find_latest_checkpoint(parent_run_dir)
+            if parent_checkpoint is None:
+                raise RevolverError(
+                    f"No checkpoint found in parent run '{run_id}'. "
+                    "The run may have been too short to produce a checkpoint."
+                )
+            # oe-checkpoint is the *input* checkpoint fed to OE for resume.
+            # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
+            new_checkpoint: Path = new_run_dir / "oe-checkpoint"
+            copy_run_file(parent_checkpoint, new_checkpoint)
+        else:
+            # ShinkaEvolve auto-resumes from the parent's programs database
+            # (reused in place by ShinkaBackend.resume() — no staging copy).
+            parent_programs_db = parent_run_dir / backend.default_output_subdir / "programs.sqlite"
+            if not parent_programs_db.exists():
+                raise RevolverError(
+                    f"No programs database found in parent run '{run_id}'. "
+                    "The run may have been too short to produce any programs."
+                )
 
         # Resolve paths
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version
@@ -1226,7 +1264,7 @@ def resume_run(
             rewrite_mode=rewrite_mode,
             ensemble=ensemble,
             conn=global_conn,
-            wrapper_path=new_run_dir / WRAPPER_FILENAME,
+            wrapper_path=new_run_dir / backend.wrapper_filename,
         )
         oe_config = backend.build_config(spec)
 
@@ -1238,9 +1276,10 @@ def resume_run(
         # Set output dir in config BEFORE the snapshot is persisted:
         # backend.resume() overwrites config['output_dir'] (same value),
         # and the stored snapshot must keep containing it (DES-005 §14.1).
-        oe_output_dir = new_run_dir / "oe-output"
-        oe_output_dir.mkdir(exist_ok=True)
-        oe_config["output_dir"] = str(oe_output_dir)
+        # The directory name is backend-owned (S14-05, ADR-007 D1).
+        engine_output_dir = new_run_dir / backend.default_output_subdir
+        engine_output_dir.mkdir(exist_ok=True)
+        oe_config["output_dir"] = str(engine_output_dir)
 
         # Insert run record — store UNRESOLVED config (no secrets in snapshot)
         now = datetime.now(UTC)
@@ -1302,7 +1341,7 @@ def resume_run(
                 start_time = time.monotonic()
 
                 # Pre-flight check: evaluate initial program on first instance
-                wrapper_path = new_run_dir / WRAPPER_FILENAME
+                wrapper_path = new_run_dir / backend.wrapper_filename
                 initial_program = snapshot_dir / "initial_program.py"
                 preflight_instances = sorted(
                     (
@@ -1394,15 +1433,10 @@ def resume_run(
                     )
 
             # Collect programs
-            programs = _collect_programs(oe_output_dir, new_run_dir / "programs")
+            programs = _collect_programs(engine_output_dir, new_run_dir / "programs")
 
-            # Count valid iterations from checkpoint database
-            valid_iters: int | None = None
-            latest_ckpt_resume = find_latest_checkpoint(new_run_dir)
-            if latest_ckpt_resume is not None:
-                valid_iters = count_valid_programs(latest_ckpt_resume)
-            if valid_iters is None and oe_output_dir.exists():
-                valid_iters = count_valid_programs(oe_output_dir)
+            # Count valid iterations via the backend (ADR-007 D1, S14-06)
+            valid_iters: int | None = backend.count_valid(new_run_dir)
             if valid_iters is not None:
                 update_run_valid_iterations(proj_conn, new_run_id, valid_iters)
 
@@ -1520,7 +1554,9 @@ def resume_run(
                     re_exc,
                 )
             else:
-                crash_status, crash_valid = _determine_crash_status(new_run_dir, actual_iterations)
+                crash_status, crash_valid = _determine_crash_status(
+                    new_run_dir, actual_iterations, backend=backend
+                )
                 update_run_status(proj_conn, new_run_id, crash_status)
                 if crash_valid is not None:
                     update_run_valid_iterations(proj_conn, new_run_id, crash_valid)
@@ -1552,7 +1588,9 @@ def resume_run(
                     f"Error details in: {new_run_dir / 'run-error.log'}"
                 ) from exc
             else:
-                crash_status, crash_valid = _determine_crash_status(new_run_dir, actual_iterations)
+                crash_status, crash_valid = _determine_crash_status(
+                    new_run_dir, actual_iterations, backend=backend
+                )
                 update_run_status(proj_conn, new_run_id, crash_status)
                 if crash_valid is not None:
                     update_run_valid_iterations(proj_conn, new_run_id, crash_valid)
@@ -1996,21 +2034,29 @@ def _collect_programs(oe_output_dir: Path, programs_dir: Path) -> list[ProgramEn
     programs: list[ProgramEntry] = []
     programs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Look for top_programs/ or best_programs/ or best/ or just .py files
-    source_dirs = [
+    # Look for top_programs/ or best_programs/ or best/; fall back to loose
+    # .py files at the output-dir root ONLY when no named dir exists. An
+    # existing-but-empty named dir is terminal: engines that keep their
+    # programs in a database (ShinkaEvolve) also write their own scripts at
+    # the root (init_program.py, evaluate.py) — the root fallback would
+    # collect those as solutions of a programless run (review #196 W2).
+    named_dirs = [
         oe_output_dir / "top_programs",
         oe_output_dir / "best_programs",
         oe_output_dir / "best",
-        oe_output_dir,
     ]
 
     py_files: list[Path] = []
-    for source in source_dirs:
+    named_dir_found = False
+    for source in named_dirs:
         if source.exists():
+            named_dir_found = True
             found = sorted(source.glob("*.py"))
             if found:
                 py_files = found
                 break
+    if not named_dir_found:
+        py_files = sorted(oe_output_dir.glob("*.py"))
 
     for rank, py_file in enumerate(py_files, start=1):
         dest = programs_dir / f"rank-{rank}.py"

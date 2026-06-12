@@ -162,6 +162,7 @@ def create_version(
     tag: str,
     message: str = "",
     project_root: Path | None = None,
+    backend: str = "openevolve",
 ) -> tuple[ProblemVersion, list[str]]:
     """Create a new problem version snapshot.
 
@@ -172,17 +173,28 @@ def create_version(
         tag: Human-readable version tag (e.g. ``"v1.0"``).
         message: Optional descriptive message for the version.
         project_root: Explicit project root, or ``None`` to auto-detect.
+        backend: Evolution backend that validates ``config.yaml``
+            (ADR-007, S14-15). Defaults to ``"openevolve"``.
 
     Returns:
         A tuple of (ProblemVersion, config_warnings) where config_warnings
-        is a list of validation warning strings from OE config checking
-        (empty when config is valid or OpenEvolve is not installed).
+        is a list of validation warning strings from the backend's config
+        checking (empty when config is valid or the engine package is not
+        installed).
 
     Raises:
-        ValidationError: If required files are missing (FR-PRB-010).
+        ValidationError: If required files are missing (FR-PRB-010), or
+            if *backend* is not a registered backend name (raised before
+            any snapshot is created — fail fast).
         DuplicateNameError: If *tag* already exists (FR-PRB-008).
         DuplicateNameError: If content is identical to an existing version.
     """
+    from revolver.infra.backends.base import get_backend
+
+    # Resolve the backend first: an unknown name must fail before any
+    # side effect (no snapshot dir, no DB record) — raises ValidationError.
+    backend_obj = get_backend(backend)
+
     root = _resolve_project_root(project_root)
 
     # FR-PRB-010: check required files
@@ -220,18 +232,16 @@ def create_version(
             (snapshot_dir / fname).chmod(0o444)
 
         # S9a-04: Validate config if config.yaml exists in snapshot.
-        # S13-13: dispatched via the evolution backend (ADR-007); validation
-        # is skipped silently when the engine package is absent, preserving
-        # the pre-S13 conditional-import semantics.
+        # S13-13/S14-15: dispatched via the selected evolution backend
+        # (ADR-007); validation is skipped silently when the engine package
+        # is absent, preserving the pre-S13 conditional-import semantics
+        # (graceful no-engine path for optional backends such as shinka).
         config_warnings: list[str] = []
         config_path = snapshot_dir / "config.yaml"
         if config_path.exists():
-            from revolver.infra.backends.base import get_backend
-
-            backend = get_backend("openevolve")
-            available, _hint = backend.is_available()
+            available, _hint = backend_obj.is_available()
             if available:
-                config_warnings = backend.validate_config(config_path)
+                config_warnings = backend_obj.validate_config(config_path)
 
         # Compute per-file SHA-256 on the SNAPSHOT copies
         file_snapshots: list[FileSnapshot] = []

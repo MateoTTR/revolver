@@ -84,6 +84,7 @@ Create an immutable snapshot of the current problem definition.
 |---|---|---|---|
 | `--tag <version>` | string | Yes | Version tag (e.g., `v1.0`, `v2.1`) |
 | `--message <text>` | string | No | Description of what changed. Default: `""` |
+| `--backend <name>` | string | No | Evolution backend that validates `config.yaml` before snapshotting (`openevolve` or `shinka`, default `openevolve` — ADR-007). Validation degrades gracefully when the backend package is not installed; unknown names fail fast (exit 1) before snapshot creation. |
 
 **Behavior**:
 1. Copy `initial_program.py`, `evaluator.py`, `config.yaml`, and `problem.md` (if present) to `.revolver/problem/<tag>/`

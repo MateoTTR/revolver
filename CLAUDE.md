@@ -142,6 +142,7 @@ Before tagging a release (`vX.Y.Z`):
    - *(release steps 1–6 below)*
    - **doc-reviewer** → fix all FAIL/WARN findings → commit + push (runs post-release because it checks version numbers in README/guides)
 1. **Version bump** — Update `version` in **both** `pyproject.toml` and `src/revolver/__init__.py`
+1b. **README update (when the release changes user-facing behavior)** — Refresh `README.md` on `develop` before the merge to `main`: features list, release/sprint table, install instructions (extras), CLI examples, test counts. The post-release doc-reviewer validates it but must not be the first time the README sees the release.
 2. **Merge completeness** — Ensure ALL sprint PRs are merged into `develop`
 3. **Commit + push** — Commit the version bump on `develop`, push
 4. **Merge `develop` → `main`** — `git checkout main && git merge develop`

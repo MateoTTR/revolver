@@ -1247,6 +1247,11 @@ class OpenEvolveBackend:
     """
 
     name: str = "openevolve"
+    # Engine output directory name inside a run dir (ADR-007, S14-05).
+    default_output_subdir: str = "oe-output"
+    # Wrapper evaluator filename inside a run dir (S14-13: the resume
+    # orchestrator copies the parent's wrapper by this backend-owned name).
+    wrapper_filename: str = WRAPPER_FILENAME
 
     def capabilities(self) -> BackendCapabilities:
         """Return the OpenEvolve capability matrix (ADR-007)."""
@@ -1360,6 +1365,9 @@ class OpenEvolveBackend:
         _run_dir, initial_program, evaluator, output_dir = self._runner_inputs(spec)
         output_dir.mkdir(exist_ok=True)
         config["output_dir"] = str(output_dir)
+        # Defensive only: the orchestrator resolves iterations into
+        # spec.iterations before calling (single owner — core.run, S14-05);
+        # keep this fallback aligned with core.run.DEFAULT_ITERATIONS.
         iterations = spec.iterations or config.get("max_iterations", 10)
         runner = OpenEvolveRunner(
             initial_program=initial_program,
@@ -1411,6 +1419,9 @@ class OpenEvolveBackend:
 
         output_dir.mkdir(exist_ok=True)
         config["output_dir"] = str(output_dir)
+        # Defensive only: the orchestrator resolves iterations into
+        # spec.iterations before calling (single owner — core.run, S14-05);
+        # keep this fallback aligned with core.run.DEFAULT_ITERATIONS.
         iterations = spec.iterations or config.get("max_iterations", 10)
         runner = OpenEvolveRunner(
             initial_program=initial_program,

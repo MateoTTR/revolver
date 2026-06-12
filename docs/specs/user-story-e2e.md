@@ -15,8 +15,9 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.11.0
+    ✓ revolver         0.13.0
     ✓ openevolve       0.2.0
+    ℹ shinkaevolve     not installed (optional). Install with: pip install 'revolver[shinka]'
 
   External tools:
     ✓ ollama           0.6.2      running (http://localhost:11434)

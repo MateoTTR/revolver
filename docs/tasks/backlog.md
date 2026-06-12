@@ -408,7 +408,7 @@ The first impact analysis is strong but **bottom-up** (from `infra/`). The compl
 
 ### Sprint 013 — Backend Abstraction Refactor (v0.13.0)
 
-Per ADR-007 (P1 phase — zero behavior change). Plan: [sprint-013.md](../sprints/sprint-013.md). **Complete** — 4 PRs merged (session 048), 91 new tests, suite 1175 passed.
+Per ADR-007 (P1 phase — zero behavior change). Plan: [sprint-013.md](../sprints/sprint-013.md). **Complete** — 4 PRs merged (session 048), 91 new tests, suite 1175 passed. **Released as v0.13.0** (tag on `main`, session 048).
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
@@ -426,6 +426,29 @@ Per ADR-007 (P1 phase — zero behavior change). Plan: [sprint-013.md](../sprint
 | 280 | `core/doctor.py` per-backend `is_available()` loop (ShinkaEvolve informational) + `core/setup.py` install entries (S13-12) | [x] | S13 — session 048, PR #189 |
 | 281 | `core/project.py` config template via `backend.config_template()` + `core/problem.py` validate dispatch via `backend.validate_config()` (S13-13) | [x] | S13 — session 048, PR #189 |
 | 282 | L2 tests: backend default end-to-end, resume inheritance, unknown/not-installed errors, doctor informational + full regression zero-behavior-change (S13-14) | [x] | S13 — session 048, included in PRs #184/#185/#188/#189 |
+
+### Sprint 014 — ShinkaEvolve MVP (v0.14.0)
+
+Per ADR-007 (P2 phase — real `ShinkaBackend`, opt-in `revolver[shinka]` extra). Plan: [sprint-014.md](../sprints/sprint-014.md). R4 risk (wrapper correctness) front-loaded in PR-A; S13 carry-over seams absorbed in PR-B.
+
+| # | Task | Status | Sprint |
+|---|---|---|---|
+| 283 | Fixture `programs.sqlite` factory (verified 0.0.7 schema: `metadata.api_costs` + nested `llm_result` tokens) + golden wrapper helper (S14-01) | [x] | S14 — session 049, PR #192 |
+| 284 | R4 contract tests for `generate_wrapper()` — 5 scenarios on generated `evaluate.py` (S14-02) | [x] | S14 — session 049, PR #192 |
+| 285 | Contract tests for DB-reading methods — tokens/population/count/progress vs fixture DB (S14-03) | [x] | S14 — session 049, PR #192 |
+| 286 | `pyproject.toml` — `[project.optional-dependencies] shinka = ["shinka-evolve>=0.0.7,<0.1"]` (S14-04) | [x] | S14 — session 049, PR #192 |
+| 287 | Orchestrator seams 2+3 — `backend.default_output_subdir`, single-owner iterations resolution (S14-05) | [x] | S14 — session 049, PR #193 |
+| 288 | Orchestrator seam 1 — `_determine_crash_status()` delegates to `backend.count_valid()` (S14-06) | [x] | S14 — session 049, PR #193 |
+| 289 | `ShinkaBackend.is_available()` real import check + `config_template()` + `validate_config()` (S14-07) | [x] | S14 — session 049, PR #193 |
+| 290 | `ShinkaBackend.build_config()` — spec→`EvolutionConfig`/`DatabaseConfig`/`LocalJobConfig` projection + `resolved_config()` (S14-08) | [x] | S14 — session 049, PR #193 |
+| 291 | `ShinkaBackend.generate_wrapper()` — Shinka `evaluate.py` adapting `evaluate_instance()` over dataset (S14-09) | [x] | S14 — session 049, PR #193 |
+| 292 | `ShinkaBackend.launch()` via `ShinkaEvolveRunner` + `default_output_subdir` (S14-10) | [x] | S14 — session 049, PR #196 |
+| 293 | `ShinkaBackend.collect_token_usage()` — `metadata.api_costs` + `metadata.llm_result.*` from `programs.sqlite` (S14-11) | [x] | S14 — session 049, PR #196 |
+| 294 | `ShinkaBackend.parse_population()`, `count_valid()`, `read_progress()` from `programs.sqlite` (S14-12) | [x] | S14 — session 049, PR #196 |
+| 295 | `ShinkaBackend.resume()` — reuse parent `results_dir` (clone parity → S15) (S14-13) | [x] | S14 — session 049, PR #196 |
+| 296 | L2-Shinka integration tests — 5 mocked-runner scenarios in `test_run_shinka.py` (S14-14) | [x] | S14 — session 049, PR #196 |
+| 297 | Doctor/setup/project/problem shims reflect real Shinka availability + install path (S14-15) | [x] | S14 — session 049, PR #197 |
+| 298 | L3 E2E Scenario 3 — Shinka happy path with fake LLM server (S14-16) | [x] | S14 — session 049, PR #197 |
 
 ### Unscheduled — Release Process
 

@@ -566,7 +566,7 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
             "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
-        patch("revolver.core.run.count_valid_programs", return_value=5),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
     ):
         mock_global_db.return_value = MagicMock()
 
@@ -1276,7 +1276,7 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
             "revolver.core.run.eval_run_instance",
             return_value=preflight_ok,
         ),
-        patch("revolver.core.run.count_valid_programs", return_value=5),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
     ):
         mock_global_db.return_value = MagicMock()
 

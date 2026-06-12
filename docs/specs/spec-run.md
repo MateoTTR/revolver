@@ -136,13 +136,13 @@ Resume an interrupted run from its checkpoint. Creates a NEW run from the parent
 | `--llm <name>` | string | No | Override the LLM or ensemble used for the resumed run. Accepts both single LLM and ensemble names, allowing switching between single and ensemble mode. |
 
 **Behavior**:
-1. Locate the parent run's backend resume state (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir)
-2. Verify the resume state is valid and resumable
-3. Create a new run (`resumed_from: <parent-run-id>`). The parent run's resume state is READ but not modified
+1. Locate the parent run's backend resume state (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir with `programs.sqlite`)
+2. Verify the resume state is valid and resumable (fail fast, exit 1, before any record is created)
+3. Create a new run (`resumed_from: <parent-run-id>`). On **OpenEvolve** the parent's resume state is READ but not modified (the checkpoint is copied into the new run dir). On **ShinkaEvolve** the engine continues **in place** in the parent's results dir (DB-driven resume); the programs database and best program are then snapshotted into the new run dir. Consequences (documented S14 limitation, clone parity planned for S15): the resumed run's token/valid counts are cumulative over the parent chain, and the parent's `run population`/`run status` reflect the continued database.
 4. The resumed run uses the **parent run's backend** (cross-backend resume is not supported)
 5. If `--llm` is provided, use the specified LLM or ensemble instead of the parent run's LLM
 6. Reuse the parent run's wrapper evaluator (no regeneration)
-7. Re-launch the backend from the parent's resume state with the (optionally overridden) configuration
+7. Re-launch the backend from the parent's resume state with the (optionally overridden) configuration. `--iterations N` means **N more iterations on top of the parent chain** on both backends (when omitted, the parent run's iteration count is reused)
 8. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
 
 **Exit codes**: 0 success, 1 if run or resume state not found, 4 if the backend fails

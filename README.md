@@ -31,7 +31,7 @@ revolver problem test                  # Validate evaluator against instances
 revolver problem version create/list/delete  # Create, list and delete immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
 revolver dataset list/info             # Inspect datasets
-revolver run/run resume                # Launch or resume OpenEvolve optimization runs
+revolver run/run resume                # Launch or resume evolution runs (--backend openevolve|shinka, OpenEvolve by default)
 revolver run status/list/info/delete   # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
@@ -68,6 +68,9 @@ Three-layer architecture: **CLI → Core → Infra**. Each layer only depends on
 git clone https://github.com/MateoTTR/revolver.git
 cd revolver
 pip install -e ".[dev]"
+
+# Optional: ShinkaEvolve backend (run --backend shinka)
+pip install -e ".[shinka]"
 ```
 
 ### Initialize a project
@@ -127,6 +130,9 @@ revolver dataset add eval-set --path data/eval/ --split eval
 ```bash
 revolver run --version v1.0 --llm claude --dataset training-set
 revolver run status
+
+# Or on the ShinkaEvolve backend (requires the [shinka] extra)
+revolver run --version v1.0 --llm claude --dataset training-set --backend shinka
 ```
 
 ### Evaluate and benchmark solutions
@@ -157,7 +163,8 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 - **SQLite** — structured storage (project DB + global LLM registry)
 - **[Rich](https://rich.readthedocs.io/)** — human-friendly tables and progress bars
 - **[httpx](https://www.python-httpx.org/)** — HTTP client for Ollama REST API
-- **[OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve)** — evolutionary optimization engine
+- **[OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve)** — default evolutionary optimization engine
+- **[ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve)** — optional evolution backend (`pip install 'revolver[shinka]'`, ADR-007)
 
 ## Development
 
@@ -165,7 +172,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1050+ tests, ~15s)
+# Run tests (1240+ tests, ~25s; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
@@ -201,13 +208,16 @@ mypy
 | Sprint 010 | Resume, Robustness & UX | v0.10.0 | Done |
 | Sprint 011 | Multi-Model Ensemble Support | v0.11.0 | Done |
 | Sprint 012 | Demo feedback: UX & reliability | v0.12.0 | Done |
+| Hotfix | Typer/click dependency drift + CI conda runner | v0.12.1 | Done |
+| Sprint 013 | Backend abstraction (ADR-007): pluggable evolution backend | v0.13.0 | Done |
+| Sprint 014 | ShinkaEvolve MVP: real `--backend shinka` end-to-end, `[shinka]` extra | v0.14.0 | Done |
 
 ## Documentation
 
 Detailed documentation lives in `docs/`:
 
 - [ConOps](docs/conops/conops.md) — concept of operations, personas, workflows
-- [Specifications](docs/specs/specifications.md) — 227 functional + 20 non-functional requirements
+- [Specifications](docs/specs/specifications.md) — functional (FR-*) and non-functional (NFR-*) requirements by command group
 - [Architecture](docs/architecture/architecture.md) — system design, ADRs, design documents
 - [Validation](docs/validation/validation.md) — test strategy, traceability matrix
 
