@@ -433,7 +433,7 @@ class TestShinkaBackendAvailability:
             top_n_extraction=True,
         )
 
-    def test_is_available_false_with_install_hint(self) -> None:
+    def test_is_available_false_with_install_hint(self, no_shinka: None) -> None:
         """is_available() reports not installed with the install hint."""
         available, hint = ShinkaBackend().is_available()
         assert available is False
@@ -458,6 +458,7 @@ class TestShinkaBackendAvailability:
     )
     def test_engine_launch_methods_raise_backend_unavailable(
         self,
+        no_shinka: None,
         call: Callable[[ShinkaBackend, BackendRunSpec], object],
         tmp_path: Path,
     ) -> None:

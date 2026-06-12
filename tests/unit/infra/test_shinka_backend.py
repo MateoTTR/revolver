@@ -154,16 +154,8 @@ def fake_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "shinka.launch", launch)
 
 
-@pytest.fixture
-def no_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force shinka to be un-importable, even when actually installed.
-
-    Setting a ``sys.modules`` entry to ``None`` makes ``import x`` raise
-    ``ImportError`` — so the "not installed" tests pass identically in the
-    no-shinka dev env and in a real-shinka env (e.g. ``shinka-spike``).
-    """
-    for module_name in ("shinka", "shinka.core", "shinka.database", "shinka.launch"):
-        monkeypatch.setitem(sys.modules, module_name, None)  # type: ignore[arg-type]
+# The "shinka not installed" tests use the shared ``no_shinka`` fixture
+# from tests/conftest.py (sys.modules None injection — env-independent).
 
 
 # ── default_output_subdir seam (S14-05) ──────────────────────────────────────

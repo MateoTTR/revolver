@@ -2380,9 +2380,10 @@ def test_run_unknown_backend_exit1(project_with_prereqs: dict[str, Path]) -> Non
 
 @pytest.mark.integration
 def test_run_shinka_stub_not_installed_exit3(
+    no_shinka: None,
     project_with_prereqs: dict[str, Path],
 ) -> None:
-    """``run --backend shinka`` exits 3 with the install hint (stub backend)."""
+    """``run --backend shinka`` exits 3 with the install hint (not installed)."""
     root = project_with_prereqs["root"]
     global_db_path = project_with_prereqs["global_db_path"]
 
