@@ -16,6 +16,7 @@ import typer
 from revolver.cli import project_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core.project import init_project
+from revolver.infra.backends.base import AVAILABLE_BACKENDS
 from revolver.infra.output import print_confirmation, render
 
 
@@ -44,6 +45,16 @@ def project_init(
             help="Skip writing template files (evaluator.py, initial_program.py, config.yaml).",
         ),
     ] = False,
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            help=(
+                f"Evolution backend whose config.yaml template to scaffold: "
+                f"{', '.join(AVAILABLE_BACKENDS)} (default: openevolve)."
+            ),
+        ),
+    ] = "openevolve",
 ) -> None:
     """Initialize a new Revolver project."""
     with cli_error_boundary():
@@ -54,6 +65,7 @@ def project_init(
             name=name,
             description=description,
             no_templates=no_templates,
+            backend=backend,
         )
 
         resolved = target.resolve()

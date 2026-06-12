@@ -283,27 +283,29 @@ def test_doctor_ollama_missing() -> None:
 # ── Tests 8-9: ShinkaEvolve informational entry (FR-SET-002, S13-12) ─────────
 
 
-def _healthy_env_patches() -> list[object]:
+def _healthy_env_patches(*, shinka_available: bool = False) -> list[object]:
     """Patches simulating a healthy environment for the REAL run_doctor.
 
     OpenEvolve availability is pinned (env-independent), Ollama/GPU/conda
-    boundaries are mocked. ShinkaEvolve availability is pinned to
-    not-installed so these tests stay deterministic once S14 lands (and
-    on machines where the shinka extra happens to be installed).
+    boundaries are mocked. ShinkaEvolve availability is pinned via
+    *shinka_available* so these tests stay deterministic regardless of
+    whether the optional shinka extra happens to be installed (the
+    is_available() seam is the real import probe since S14 PR-B).
     """
     gpu = GpuInfo(name="NVIDIA RTX 4090", vram_used_mib=0, vram_total_mib=24576)
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"version": "0.6.2"}
     mock_resp.raise_for_status = MagicMock()
+    shinka_availability: tuple[bool, str | None] = (
+        (True, None)
+        if shinka_available
+        else (False, "Install with: pip install 'revolver[shinka]'")
+    )
     return [
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
         patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
-        patch.object(
-            ShinkaBackend,
-            "is_available",
-            return_value=(False, "Install with: pip install 'revolver[shinka]'"),
-        ),
+        patch.object(ShinkaBackend, "is_available", return_value=shinka_availability),
         patch("revolver.core.doctor.httpx.get", return_value=mock_resp),
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
         patch("revolver.core.doctor._detect_conda", return_value=True),
@@ -363,6 +365,66 @@ def test_doctor_json_includes_shinka_entry() -> None:
     assert "revolver[shinka]" in shinka["message"]
 
     # Informational entry does not degrade the overall report
+    assert data["status"] == "ok"
+    assert data["errors"] == 0
+    assert data["warnings"] == 0
+
+
+# ── Tests 10-11: ShinkaEvolve installed entry (FR-SET-002, S14-15) ───────────
+
+
+@pytest.mark.integration
+def test_doctor_shinka_installed() -> None:
+    """ShinkaEvolve installed: regular OK entry with version, no hint.
+
+    S14-15: ``ShinkaBackend.is_available()`` is a real import probe since
+    PR-B. Availability is pinned via the backend seam (no shinka install
+    needed) so this test passes on both shinka-less CI and dev machines
+    with the extra; the doctor must report the backend like any other
+    installed package check.
+
+    Validates: FR-SET-002 (doctor reflects real Shinka availability).
+    """
+    with contextlib.ExitStack() as stack:
+        for p in _healthy_env_patches(shinka_available=True):
+            stack.enter_context(p)
+        result = runner.invoke(app, ["doctor"])
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    assert "shinkaevolve" in output
+    # Version resolved via importlib.metadata (patched to 1.0.0)
+    assert "1.0.0" in output
+    # No informational not-installed message, no install hint
+    assert "not installed (optional)" not in output
+    assert "revolver[shinka]" not in output
+    assert "All checks passed" in output
+
+
+@pytest.mark.integration
+def test_doctor_json_shinka_installed() -> None:
+    """--json with shinka installed: OK entry, version, fixable, no message.
+
+    Validates: FR-SET-002 (doctor reflects real Shinka availability).
+    """
+    with contextlib.ExitStack() as stack:
+        for p in _healthy_env_patches(shinka_available=True):
+            stack.enter_context(p)
+        result = runner.invoke(app, ["--json", "doctor"])
+
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {_get_all_output(result)}"
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    checks = {c["name"]: c for c in data["checks"]}
+
+    shinka = checks["shinkaevolve"]
+    assert shinka["status"] == "ok"
+    assert shinka["type"] == "python"
+    assert shinka["version"] == "1.0.0"
+    assert shinka["fixable"] is True
+    assert "message" not in shinka
+    assert "error" not in shinka
+
     assert data["status"] == "ok"
     assert data["errors"] == 0
     assert data["warnings"] == 0

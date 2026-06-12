@@ -18,6 +18,7 @@ from revolver.cli._global_options import GlobalOptionGroup
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import problem as core_problem
 from revolver.core.exceptions import ValidationError
+from revolver.infra.backends.base import AVAILABLE_BACKENDS
 from revolver.infra.output import print_confirmation, render
 
 # ── version sub-app ──────────────────────────────────────────────────────────
@@ -163,13 +164,25 @@ def problem_version_create(
             help="Optional description for this version.",
         ),
     ] = "",
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            help=(
+                f"Evolution backend that validates config.yaml: "
+                f"{', '.join(AVAILABLE_BACKENDS)} (default: openevolve)."
+            ),
+        ),
+    ] = "openevolve",
 ) -> None:
     """Create a new problem version snapshot."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
-        pv, config_warnings = core_problem.create_version(tag=tag, message=message)
+        pv, config_warnings = core_problem.create_version(
+            tag=tag, message=message, backend=backend
+        )
 
         if json_mode:
             render(
@@ -193,7 +206,7 @@ def problem_version_create(
                 quiet=quiet,
             )
 
-        # S9a-04: Display OE config validation warnings
+        # S9a-04/S14-15: Display backend config validation warnings
         if config_warnings and not quiet:
             from rich.console import Console
 

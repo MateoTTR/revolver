@@ -76,6 +76,7 @@ markers = [
     "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
     "shinkaevolve: L2-Shinka tests requiring the shinka-evolve package (no LLM needed)",
     "e2e: L3 end-to-end tests",
+    "slow: long-running tests (always applied to E2E tests)",
 ]
 
 # ── Coverage ──────────────────────────────────────────────────────────────────
