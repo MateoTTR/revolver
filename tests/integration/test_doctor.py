@@ -9,15 +9,19 @@ Traceable to: val-integration-tests.md section 2.9 (doctor scenarios).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
 from revolver.cli import app
 from revolver.core.doctor import CheckStatus, DependencyStatus, DoctorReport
+from revolver.infra.backends.openevolve import OpenEvolveBackend
+from revolver.infra.backends.shinka import ShinkaBackend
+from revolver.infra.gpu import GpuInfo
 
 pytestmark = pytest.mark.integration
 
@@ -274,3 +278,91 @@ def test_doctor_ollama_missing() -> None:
     # Should show actionable advice
     assert "ollama" in output.lower()
     assert "setup" in output.lower() or "install" in output.lower()
+
+
+# ── Tests 8-9: ShinkaEvolve informational entry (FR-SET-002, S13-12) ─────────
+
+
+def _healthy_env_patches() -> list[object]:
+    """Patches simulating a healthy environment for the REAL run_doctor.
+
+    OpenEvolve availability is pinned (env-independent), Ollama/GPU/conda
+    boundaries are mocked. ShinkaEvolve availability is pinned to
+    not-installed so these tests stay deterministic once S14 lands (and
+    on machines where the shinka extra happens to be installed).
+    """
+    gpu = GpuInfo(name="NVIDIA RTX 4090", vram_used_mib=0, vram_total_mib=24576)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"version": "0.6.2"}
+    mock_resp.raise_for_status = MagicMock()
+    return [
+        patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
+        patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
+        patch.object(
+            ShinkaBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+        ),
+        patch("revolver.core.doctor.httpx.get", return_value=mock_resp),
+        patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
+        patch("revolver.core.doctor._detect_conda", return_value=True),
+    ]
+
+
+@pytest.mark.integration
+def test_doctor_shinka_informational() -> None:
+    """ShinkaEvolve absent: informational entry, exit 0, overall OK.
+
+    Validates: FR-SET-002, spec-setup error case "ShinkaEvolve not
+    installed (optional backend)" — INFO, exit 0 (info only).
+    """
+    with contextlib.ExitStack() as stack:
+        for p in _healthy_env_patches():
+            stack.enter_context(p)
+        result = runner.invoke(app, ["doctor"])
+
+    output = _get_all_output(result)
+    # Informational only — never a failure, exit 0
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    assert "shinkaevolve" in output
+    assert "optional" in output
+    assert "revolver[shinka]" in output
+    # No error/warning attributed to the optional backend
+    assert "All checks passed" in output
+
+
+@pytest.mark.integration
+def test_doctor_json_includes_shinka_entry() -> None:
+    """--json: additive shinkaevolve entry; openevolve entry unchanged.
+
+    Validates: FR-SET-002 (additive entry, backward-compatible report shape).
+    """
+    with contextlib.ExitStack() as stack:
+        for p in _healthy_env_patches():
+            stack.enter_context(p)
+        result = runner.invoke(app, ["--json", "doctor"])
+
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {_get_all_output(result)}"
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    checks = {c["name"]: c for c in data["checks"]}
+
+    # OpenEvolve entry keeps its pre-S13 name/status semantics
+    assert checks["openevolve"]["status"] == "ok"
+    assert checks["openevolve"]["type"] == "python"
+    assert checks["openevolve"]["fixable"] is True
+
+    # Additive ShinkaEvolve entry: informational, not fixable, no "error" key
+    shinka = checks["shinkaevolve"]
+    assert shinka["status"] == "info"
+    assert shinka["type"] == "python"
+    assert shinka["fixable"] is False
+    assert "error" not in shinka
+    assert "optional" in shinka["message"]
+    assert "revolver[shinka]" in shinka["message"]
+
+    # Informational entry does not degrade the overall report
+    assert data["status"] == "ok"
+    assert data["errors"] == 0
+    assert data["warnings"] == 0

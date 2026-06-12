@@ -1,6 +1,7 @@
 """Domain logic for ``revolver doctor`` — dependency health checks.
 
-Checks Python packages, OpenEvolve, Ollama, nvidia-smi, and Revolver
+Checks Python packages, evolution backends (OpenEvolve required,
+ShinkaEvolve optional — ADR-007), Ollama, nvidia-smi, and Revolver
 itself, producing a structured ``DoctorReport``.
 
 Traceable to: spec-setup.md, FR-SET-001..006, FR-SET-012, FR-SET-013.
@@ -16,13 +17,20 @@ from typing import Literal
 
 import httpx
 
+from revolver.infra.backends.base import AVAILABLE_BACKENDS, get_backend
 from revolver.infra.gpu import get_gpu_info
 
 
 class CheckStatus(StrEnum):
-    """Health check result status."""
+    """Health check result status.
+
+    ``INFO`` marks informational entries (e.g. an optional evolution
+    backend that is not installed — FR-SET-002): they never affect the
+    overall status, error count, or warning count.
+    """
 
     OK = "ok"
+    INFO = "info"
     WARN = "warn"
     FAIL = "fail"
 
@@ -94,25 +102,74 @@ def _check_python_package(name: str) -> DependencyStatus:
         )
 
 
-def _check_openevolve() -> DependencyStatus:
-    """Check if OpenEvolve is importable and report its version."""
-    try:
-        version = importlib.metadata.version("openevolve")
+# ── Evolution backend checks (FR-SET-002, ADR-007) ──────────────────────────
+
+# Backends required for core workflows; absence is a FAIL (today's
+# OpenEvolve semantics). All other registered backends are optional:
+# absence is reported as informational, never a failure.
+_REQUIRED_BACKENDS: frozenset[str] = frozenset({"openevolve"})
+
+# Doctor check names per backend name (package-style, e.g. the doctor
+# entry for the "shinka" backend is "shinkaevolve", matching "openevolve").
+_BACKEND_CHECK_NAMES: dict[str, str] = {"openevolve": "openevolve", "shinka": "shinkaevolve"}
+
+# Distribution names for importlib.metadata version lookup — the check
+# name is a display name and does NOT always match the PyPI distribution
+# (the "shinka" backend ships as the "shinka-evolve" distribution).
+_BACKEND_DIST_NAMES: dict[str, str] = {"openevolve": "openevolve", "shinka": "shinka-evolve"}
+
+
+def _check_backend(backend_name: str) -> DependencyStatus:
+    """Check an evolution backend's availability (FR-SET-002).
+
+    Required backends (OpenEvolve) report FAIL when absent, with the
+    same message and fixable-via-``revolver setup`` behavior as before.
+    Optional backends (ShinkaEvolve) report INFO when absent — not a
+    failure, not auto-fixable (ADR-007, spec-setup error cases).
+
+    Availability is decided by ``backend.is_available()`` (import-based),
+    not by package metadata. Two edge cases follow: a backend importable
+    without metadata reports OK with ``version=None`` (pre-S13: FAIL),
+    and stale metadata without an importable package reports FAIL
+    (pre-S13: OK) — the import-based answer is the truthful one.
+    """
+    backend = get_backend(backend_name)
+    available, hint = backend.is_available()
+    check_name = _BACKEND_CHECK_NAMES.get(backend_name, backend_name)
+
+    if available:
+        dist_name = _BACKEND_DIST_NAMES.get(backend_name, backend_name)
+        try:
+            version: str | None = importlib.metadata.version(dist_name)
+        except importlib.metadata.PackageNotFoundError:
+            version = None
         return DependencyStatus(
-            name="openevolve",
+            name=check_name,
             type="python",
             status=CheckStatus.OK,
             version=version,
             fixable=True,
         )
-    except importlib.metadata.PackageNotFoundError:
+
+    if backend_name in _REQUIRED_BACKENDS:
         return DependencyStatus(
-            name="openevolve",
+            name=check_name,
             type="python",
             status=CheckStatus.FAIL,
             message="not installed",
             fixable=True,
         )
+
+    message = "not installed (optional)."
+    if hint:
+        message = f"{message} {hint}"
+    return DependencyStatus(
+        name=check_name,
+        type="python",
+        status=CheckStatus.INFO,
+        message=message,
+        fixable=False,
+    )
 
 
 # ── External tool checks ─────────────────────────────────────────────────────
@@ -244,7 +301,7 @@ def run_doctor() -> DoctorReport:
     Checks (in order):
     1. Revolver itself
     2. Core Python packages (typer, pydantic, pyyaml, rich, httpx)
-    3. OpenEvolve
+    3. Evolution backends (OpenEvolve required, ShinkaEvolve informational)
     4. Ollama (HTTP API) — status depends on conda availability
     5. nvidia-smi / GPU
 
@@ -260,8 +317,10 @@ def run_doctor() -> DoctorReport:
     for pkg in _PYTHON_DEPS:
         report.checks.append(_check_python_package(pkg))
 
-    # 3. OpenEvolve
-    report.checks.append(_check_openevolve())
+    # 3. Evolution backends (FR-SET-002): OpenEvolve required; optional
+    #    backends (ShinkaEvolve) are informational when absent (ADR-007).
+    for backend_name in AVAILABLE_BACKENDS:
+        report.checks.append(_check_backend(backend_name))
 
     # 4. Ollama — per spec, status depends on conda availability
     has_conda = _detect_conda()
