@@ -966,6 +966,34 @@ def count_valid_programs(checkpoint_dir: Path) -> int | None:
     return None
 
 
+# ── Project-init config template (S13-13, FR-PRJ-005) ────────────────────────
+# Moved from revolver.core.project (template ownership inverted per ADR-007:
+# the backend serves its own config.yaml scaffold via config_template()).
+# Content must stay byte-identical to the pre-S13 core/project template.
+
+_CONFIG_TEMPLATE = """\
+# OpenEvolve configuration — edit to match your problem.
+#
+# See OpenEvolve documentation for all available options.
+# Revolver passes this file to OpenEvolve via --config.
+
+# Number of evolutionary iterations (generations).
+num_iterations: 10
+
+# Population size — number of candidate programs per generation.
+population_size: 10
+
+# LLM sampling settings.
+llm:
+  temperature: 0.8
+  max_tokens: 4096
+
+# Evaluation settings.
+evaluation:
+  timeout_per_instance: 30  # seconds
+"""
+
+
 # ── EvolutionBackend adapter (ADR-007 D1) ─────────────────────────────────────
 
 
@@ -1000,14 +1028,6 @@ class OpenEvolveBackend:
 
     def config_template(self) -> str:
         """Return the OE-shaped ``config.yaml`` scaffold (project init)."""
-        # The template is currently owned by core/project.py; ownership moves
-        # into this backend with the project-init shim (S13-13, PR-D), at
-        # which point the cross-layer private import below disappears.
-        # TODO(S13 PR-D): invert ownership; promote to a public name if any
-        # interim core access remains. Imported lazily to avoid a
-        # core <-> infra import cycle.
-        from revolver.core.project import _CONFIG_TEMPLATE
-
         return _CONFIG_TEMPLATE
 
     def validate_config(self, config: Path | dict[str, Any]) -> list[str]:

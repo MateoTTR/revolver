@@ -245,3 +245,51 @@ def test_project_init_no_templates_json(tmp_path: pytest.TempPathFactory) -> Non
     # Core entries must still be present
     assert ".revolver/" in data["files_created"]
     assert "project.yaml" in data["files_created"]
+
+
+# ── S13-13: config.yaml template served by the evolution backend ─────────────
+
+# Byte-for-byte copy of the pre-S13 core/project.py template: `project init`
+# output must stay identical after the ownership move into
+# OpenEvolveBackend.config_template() (ADR-007, sprint-013 S13-13).
+_EXPECTED_CONFIG_TEMPLATE = """\
+# OpenEvolve configuration — edit to match your problem.
+#
+# See OpenEvolve documentation for all available options.
+# Revolver passes this file to OpenEvolve via --config.
+
+# Number of evolutionary iterations (generations).
+num_iterations: 10
+
+# Population size — number of candidate programs per generation.
+population_size: 10
+
+# LLM sampling settings.
+llm:
+  temperature: 0.8
+  max_tokens: 4096
+
+# Evaluation settings.
+evaluation:
+  timeout_per_instance: 30  # seconds
+"""
+
+
+@pytest.mark.integration
+def test_init_config_template_served_by_backend(tmp_path: pytest.TempPathFactory) -> None:
+    """config.yaml comes from the backend and is byte-identical to pre-S13.
+
+    Validates: FR-PRJ-005, ADR-007 (S13-13 template ownership move).
+    """
+    from revolver.infra.backends.base import get_backend
+
+    result = runner.invoke(app, ["project", "init", "tpl-project", "--path", str(tmp_path)])
+    assert result.exit_code == 0, f"stdout: {result.stdout}"
+
+    content = (tmp_path / "config.yaml").read_text(encoding="utf-8")
+
+    # Served by the OpenEvolve backend (no core-owned template left)
+    assert content == get_backend("openevolve").config_template()
+
+    # Byte-identical to the historical template
+    assert content == _EXPECTED_CONFIG_TEMPLATE

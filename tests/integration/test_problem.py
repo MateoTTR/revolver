@@ -312,6 +312,70 @@ def test_problem_version_includes_problem_md(tmp_project: Path) -> None:
 
 
 @pytest.mark.integration
+def test_problem_version_skips_validation_when_backend_absent(tmp_project: Path) -> None:
+    """Engine absent at version-create: validation silently skipped (S13-13).
+
+    Preserves the pre-S13 semantics: no warnings, no failure, the
+    snapshot is still created.
+
+    Validates: FR-PRB-006/010, ADR-007 (backend-dispatched validate_config).
+    """
+    from unittest.mock import patch
+
+    from revolver.core.problem import create_version
+    from revolver.infra.backends.openevolve import OpenEvolveBackend
+
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+    with (
+        patch.object(
+            OpenEvolveBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[openevolve]'"),
+        ),
+        patch.object(OpenEvolveBackend, "validate_config") as mock_validate,
+    ):
+        pv, warnings = create_version(tag="v-skip", message="", project_root=tmp_project)
+
+    mock_validate.assert_not_called()
+    assert warnings == []
+    assert pv.tag == "v-skip"
+    assert (tmp_project / ".revolver" / "problem" / "v-skip" / "config.yaml").is_file()
+
+
+@pytest.mark.integration
+def test_problem_version_validates_config_when_backend_available(tmp_project: Path) -> None:
+    """Engine present at version-create: config validated via the backend.
+
+    Validates: S9a-04 warning surfacing, ADR-007 (S13-13 dispatch).
+    """
+    from unittest.mock import patch
+
+    from revolver.core.problem import create_version
+    from revolver.infra.backends.openevolve import OpenEvolveBackend
+
+    shutil.copy2(_FIXTURES / "evaluator_simple.py", tmp_project / "evaluator.py")
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    shutil.copy2(_FIXTURES / "config_simple.yaml", tmp_project / "config.yaml")
+
+    with (
+        patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
+        patch.object(
+            OpenEvolveBackend, "validate_config", return_value=["some warning"]
+        ) as mock_validate,
+    ):
+        _pv, warnings = create_version(tag="v-val", message="", project_root=tmp_project)
+
+    mock_validate.assert_called_once()
+    # The validated path is the SNAPSHOT copy of config.yaml
+    (validated_path,) = mock_validate.call_args.args
+    assert validated_path == tmp_project / ".revolver" / "problem" / "v-val" / "config.yaml"
+    assert warnings == ["some warning"]
+
+
+@pytest.mark.integration
 def test_problem_version_missing_evaluator(tmp_project: Path) -> None:
     """Missing evaluator.py causes exit code 1 with error message."""
     # Only copy some files — skip evaluator.py

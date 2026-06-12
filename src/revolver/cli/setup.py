@@ -49,17 +49,24 @@ def setup_command(
         # 3. Compute install plan
         plan = compute_install_plan(report, managers)
 
-        # Nothing to do?
+        # Nothing to do? (optional-only entries are informational, not issues)
         if not plan.items and not plan.manual_instructions:
             if json_mode:
-                render(
-                    {"status": "ok", "message": "All dependencies are satisfied."},
-                    json_mode=True,
-                )
+                payload: dict[str, object] = {
+                    "status": "ok",
+                    "message": "All dependencies are satisfied.",
+                }
+                if plan.optional_instructions:
+                    payload["optional"] = plan.optional_instructions
+                render(payload, json_mode=True)
             else:
                 from rich.console import Console
+                from rich.markup import escape
 
-                Console().print("[green]All dependencies are already satisfied.[/green]")
+                ok_console = Console()
+                ok_console.print("[green]All dependencies are already satisfied.[/green]")
+                for instruction in plan.optional_instructions:
+                    ok_console.print(f"  [dim]{escape(instruction)}[/dim]")
             return
 
         # 4. Display plan
@@ -78,6 +85,7 @@ def setup_command(
                     for item in auto_items
                 ],
                 "manual": plan.manual_instructions,
+                "optional": plan.optional_instructions,
             }
 
             if dry_run:
@@ -87,6 +95,7 @@ def setup_command(
 
         if not json_mode:
             from rich.console import Console
+            from rich.markup import escape
 
             console = Console()
 
@@ -107,7 +116,16 @@ def setup_command(
                     for item in manual_items:
                         console.print(f"  {item.name}")
                 for instruction in plan.manual_instructions:
-                    console.print(f"  [dim]{instruction}[/dim]")
+                    console.print(f"  [dim]{escape(instruction)}[/dim]")
+
+            if plan.optional_instructions:
+                # Escape: instructions may contain literal brackets (e.g.
+                # "pip install 'revolver[shinka]'") that rich would
+                # otherwise swallow as markup tags.
+                console.print()
+                console.print("Optional (not installed automatically):")
+                for instruction in plan.optional_instructions:
+                    console.print(f"  [dim]{escape(instruction)}[/dim]")
 
             if dry_run:
                 console.print("\n[yellow]No changes made (dry run).[/yellow]")
@@ -147,6 +165,7 @@ def setup_command(
                 "status": "fail" if any_failure else "ok",
                 "results": results_data,
                 "manual": plan.manual_instructions,
+                "optional": plan.optional_instructions,
                 "post_check": {
                     "status": post_report.overall_status.value,
                     "errors": post_report.error_count,

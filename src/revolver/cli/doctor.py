@@ -19,6 +19,7 @@ from revolver.infra.output import render
 
 _STATUS_ICONS: dict[CheckStatus, str] = {
     CheckStatus.OK: "\u2713",  # check mark
+    CheckStatus.INFO: "\u2139",  # information source
     CheckStatus.WARN: "\u26a0",  # warning sign
     CheckStatus.FAIL: "\u2717",  # cross mark
 }
@@ -27,6 +28,7 @@ _STATUS_ICONS: dict[CheckStatus, str] = {
 def _render_human(report: DoctorReport) -> None:
     """Render a DoctorReport as human-readable output."""
     from rich.console import Console
+    from rich.markup import escape
 
     console = Console()
 
@@ -41,15 +43,22 @@ def _render_human(report: DoctorReport) -> None:
         console.print("  Python packages:")
         for check in python_checks:
             icon = _STATUS_ICONS[check.status]
-            version_str = check.version or check.message or ""
+            # Escape: messages may contain literal brackets (e.g. the
+            # "pip install 'revolver[shinka]'" hint) that rich would
+            # otherwise swallow as markup tags.
+            version_str = escape(check.version or check.message or "")
             line = f"    {icon} {check.name:<16s} {version_str}"
             if check.status == CheckStatus.OK:
                 console.print(f"[green]{line}[/green]")
+            elif check.status == CheckStatus.INFO:
+                # Informational entry (optional backend): the message
+                # already carries its own install instruction.
+                console.print(f"[dim]{line}[/dim]")
             elif check.status == CheckStatus.WARN:
                 console.print(f"[yellow]{line}[/yellow]")
             else:
                 console.print(f"[red]{line}[/red]")
-            if check.status != CheckStatus.OK and check.message:
+            if check.status in (CheckStatus.WARN, CheckStatus.FAIL) and check.message:
                 console.print("      [dim]\u2192 Run `revolver setup` to install it[/dim]")
         console.print()
 
@@ -113,7 +122,10 @@ def _render_json(report: DoctorReport) -> None:
         }
         if check.version is not None:
             entry["version"] = check.version
-        if check.status != CheckStatus.OK and check.message:
+        if check.status == CheckStatus.INFO and check.message:
+            # Informational entries (optional backends) are not errors.
+            entry["message"] = check.message
+        elif check.status != CheckStatus.OK and check.message:
             entry["error"] = check.message
         if check.name == "ollama" and check.status == CheckStatus.OK and check.message:
             entry["url"] = "http://localhost:11434"

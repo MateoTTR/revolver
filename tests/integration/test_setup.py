@@ -155,6 +155,20 @@ def _make_report_missing_nvidia() -> DoctorReport:
     return report
 
 
+def _append_shinka_info(report: DoctorReport) -> DoctorReport:
+    """Append the additive ShinkaEvolve informational entry (S13, FR-SET-002)."""
+    report.checks.append(
+        DependencyStatus(
+            name="shinkaevolve",
+            type="python",
+            status=CheckStatus.INFO,
+            message="not installed (optional). Install with: pip install 'revolver[shinka]'",
+            fixable=False,
+        )
+    )
+    return report
+
+
 # ── Test 1: test_setup_dry_run ───────────────────────────────────────────────
 
 
@@ -414,3 +428,65 @@ def test_setup_manual_instructions_no_conda() -> None:
     assert (
         "no conda" in output.lower() or "manual" in output.lower() or "install" in output.lower()
     )
+
+
+# ── Tests 8-9: optional ShinkaEvolve backend (FR-SET-002, S13-12) ────────────
+
+
+@pytest.mark.integration
+def test_setup_dry_run_lists_shinka_optional() -> None:
+    """Optional ShinkaEvolve backend listed as manual/optional, never installed.
+
+    Uses the REAL compute_install_plan to validate the per-backend
+    derivation from the doctor report (S13-12).
+
+    Validates: FR-SET-002, NFR-064/065 (no auto-install of optional extras)
+    """
+    report = _append_shinka_info(_make_all_ok_report())
+    managers = {"pip": True, "conda": False, "mamba": False}
+
+    with (
+        patch("revolver.cli.setup.run_doctor", return_value=report),
+        patch("revolver.cli.setup.detect_package_managers", return_value=managers),
+        patch("revolver.core.setup.subprocess.run") as mock_subprocess,
+    ):
+        result = runner.invoke(app, ["setup", "--dry-run"])
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    # Shinka listed as optional with its install instruction
+    assert "shinkaevolve" in output
+    assert "optional" in output.lower()
+    assert "revolver[shinka]" in output
+    # Required deps all satisfied — nothing is installed
+    assert "satisfied" in output.lower()
+    mock_subprocess.assert_not_called()
+
+
+@pytest.mark.integration
+def test_setup_dry_run_shinka_optional_with_pip_item() -> None:
+    """Dry-run with a missing required dep still lists shinka as optional.
+
+    Validates: FR-SET-002, FR-SET-011, FR-SET-016
+    """
+    report = _append_shinka_info(_make_report_missing_openevolve())
+    managers = {"pip": True, "conda": False, "mamba": False}
+
+    with (
+        patch("revolver.cli.setup.run_doctor", return_value=report),
+        patch("revolver.cli.setup.detect_package_managers", return_value=managers),
+        patch("revolver.core.setup.subprocess.run") as mock_subprocess,
+    ):
+        result = runner.invoke(app, ["setup", "--dry-run"])
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}: {output}"
+    # OpenEvolve proposed via pip (unchanged behavior)
+    assert "openevolve" in output
+    assert "pip" in output
+    # Shinka listed as optional, not part of the install items
+    assert "shinkaevolve" in output
+    assert "optional" in output.lower()
+    assert "revolver[shinka]" in output
+    assert "dry run" in output.lower() or "no changes" in output.lower()
+    mock_subprocess.assert_not_called()
