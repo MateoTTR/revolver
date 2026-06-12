@@ -158,9 +158,18 @@ class EvolutionBackend(Protocol):
     ``run resume``, ``run status`` (active path), ``run population``,
     ``--dry-run``, plus the four shims (``doctor``/``setup``,
     ``project init``, ``problem version create``).
+
+    Attributes:
+        name: Registry name of the backend (``"openevolve"``/``"shinka"``).
+        default_output_subdir: Name of the engine output directory inside a
+            run dir (``"oe-output"`` for OpenEvolve, ``"shinka-output"`` for
+            ShinkaEvolve — S14-05). The orchestrator stages
+            ``<run_dir>/<default_output_subdir>`` and never hard-codes an
+            engine-specific name.
     """
 
     name: str
+    default_output_subdir: str
 
     def capabilities(self) -> BackendCapabilities:
         """Return the static capability matrix for this backend."""

@@ -409,7 +409,14 @@ class TestOpenEvolveBackendCheckpointReads:
 
 
 class TestShinkaBackendStub:
-    """Tests for the registered ShinkaEvolve stub (S13-03)."""
+    """Tests for the not-yet-implemented ShinkaEvolve surface.
+
+    The config tier (config_template/validate_config/resolved_config/
+    generate_wrapper) was implemented in S14 PR-B and is covered by
+    ``tests/unit/infra/test_shinka_backend.py``; this class keeps the
+    stub contract for the engine tier (PR-C) and the run-path fail-fast
+    (build_config gates on availability — exit 3 before side effects).
+    """
 
     def test_capabilities_match_adr007(self) -> None:
         """Capabilities follow the ADR-007 matrix for ShinkaEvolve."""
@@ -437,11 +444,9 @@ class TestShinkaBackendStub:
     @pytest.mark.parametrize(
         "call",
         [
-            pytest.param(lambda b, s: b.config_template(), id="config_template"),
-            pytest.param(lambda b, s: b.validate_config({}), id="validate_config"),
+            # build_config gates on is_available() so `run --backend shinka`
+            # keeps failing fast (exit 3) before any side effect (S14-08).
             pytest.param(lambda b, s: b.build_config(s), id="build_config"),
-            pytest.param(lambda b, s: b.resolved_config({}), id="resolved_config"),
-            pytest.param(lambda b, s: b.generate_wrapper(s), id="generate_wrapper"),
             pytest.param(lambda b, s: b.launch(s, {}), id="launch"),
             pytest.param(lambda b, s: b.resume(s, {}, Path("/parent")), id="resume"),
             pytest.param(lambda b, s: b.read_progress(Path("/run")), id="read_progress"),
@@ -457,7 +462,7 @@ class TestShinkaBackendStub:
         call: Callable[[ShinkaBackend, BackendRunSpec], object],
         tmp_path: Path,
     ) -> None:
-        """Every engine method raises BackendUnavailableError (exit 3)."""
+        """Every engine-tier method raises BackendUnavailableError (exit 3)."""
         spec = _make_spec(tmp_path)
         with pytest.raises(BackendUnavailableError) as exc_info:
             call(ShinkaBackend(), spec)

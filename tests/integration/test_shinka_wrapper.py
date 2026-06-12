@@ -10,10 +10,9 @@ must produce in S14 PR-B. Two tiers:
   and pinning the expected ``metrics.json`` / ``correct.json`` behavior
   before any implementation exists.
 - ``TestGenerateWrapperContract`` runs the same five scenarios against
-  ``ShinkaBackend.generate_wrapper()`` output. The backend is still the
-  S13 stub (raises ``BackendUnavailableError``), so these are marked
-  ``xfail(strict=False)`` until the implementation lands (S14 PR-B),
-  keeping PR-A independently mergeable.
+  ``ShinkaBackend.generate_wrapper()`` output (implemented in S14 PR-B;
+  the ``xfail`` markers from PR-A were removed when the implementation
+  landed).
 
 Skipped automatically when shinka-evolve is not installed (mirrors L2-OE).
 
@@ -47,11 +46,6 @@ from tests.fixtures.shinka_evaluate_py import (
 
 # Path to test fixtures
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
-
-xfail_stub = pytest.mark.xfail(
-    strict=False,
-    reason="ShinkaBackend.generate_wrapper() is the S13 stub — implementation lands in S14 PR-B",
-)
 
 # ── Inline evaluator sources for failure-path scenarios ──────────────────────
 
@@ -252,7 +246,7 @@ class TestGoldenWrapperContract:
         assert correct["correct"] is False
 
 
-# ── ShinkaBackend.generate_wrapper() — xfail until S14 PR-B ──────────────────
+# ── ShinkaBackend.generate_wrapper() — implemented in S14 PR-B ───────────────
 
 
 @pytest.mark.integration
@@ -260,7 +254,6 @@ class TestGoldenWrapperContract:
 class TestGenerateWrapperContract:
     """Same five scenarios against the backend-generated wrapper (S14-02)."""
 
-    @xfail_stub
     def test_wrapper_calls_run_shinka_eval_with_correct_args(self, tmp_path: Path) -> None:
         """(a) Generated evaluate.py calls run_shinka_eval with correct args."""
         wrapper = _generate_wrapper(tmp_path, FIXTURES / "evaluator_instance.py")
@@ -270,7 +263,6 @@ class TestGenerateWrapperContract:
         for marker in GOLDEN_WRAPPER_MARKERS:
             assert marker in content, f"generated wrapper is missing marker: {marker}"
 
-    @xfail_stub
     def test_wrapper_calls_evaluate_instance_not_evaluate(self, tmp_path: Path) -> None:
         """(b) Wrapper imports/calls evaluate_instance(), not legacy evaluate()."""
         wrapper = _generate_wrapper(tmp_path, _EVALUATOR_BOTH_MODES)
@@ -285,7 +277,6 @@ class TestGenerateWrapperContract:
         assert metrics["combined_score"] == pytest.approx(0.5)
         assert metrics["via_instance"] == pytest.approx(1.0)
 
-    @xfail_stub
     def test_wrapper_writes_metrics_and_correct_json(self, tmp_path: Path) -> None:
         """(c) Wrapper writes metrics.json (combined_score) + correct.json."""
         wrapper = _generate_wrapper(tmp_path, FIXTURES / "evaluator_instance.py")
@@ -299,7 +290,6 @@ class TestGenerateWrapperContract:
         assert metrics["combined_score"] == pytest.approx(len(_PROGRAM_SOURCE) / 100.0)
         assert correct["correct"] is True
 
-    @xfail_stub
     def test_wrapper_failing_evaluator_marks_incorrect(self, tmp_path: Path) -> None:
         """(d) Wrapper with a failing evaluator writes correct: false."""
         wrapper = _generate_wrapper(tmp_path, _EVALUATOR_FAILING)
@@ -311,7 +301,6 @@ class TestGenerateWrapperContract:
         correct = _read_json(results_dir / "correct.json")
         assert correct["correct"] is False
 
-    @xfail_stub
     def test_wrapper_missing_combined_score_raises_or_incorrect(self, tmp_path: Path) -> None:
         """(e) Missing combined_score in metrics raises or marks incorrect."""
         wrapper = _generate_wrapper(tmp_path, _EVALUATOR_NO_COMBINED_SCORE)
