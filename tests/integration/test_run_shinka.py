@@ -52,6 +52,7 @@ from tests.fixtures.programs_sqlite import (
     EXPECTED_PROMPT_TOKENS,
     EXPECTED_RANKED_IDS,
     EXPECTED_VALID_COUNT,
+    FIXTURE_PROGRAM_ROWS,
     SHINKA_OUTPUT_SUBDIR,
     build_programs_db,
 )
@@ -349,6 +350,67 @@ def test_shinka_launch_mocked(project_with_prereqs: dict[str, Path]) -> None:
     assert rank1.read_text() != initial_program
     assert "def solve(data)" in rank1.read_text()  # fixture best-program code
     assert not (run_dir / "programs" / "rank-2.py").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_zero_scored_programs_collects_nothing(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Engine completes with no scored program → no bogus solutions (review #196 W2).
+
+    The mocked engine writes a ``programs.sqlite`` whose rows all have a
+    NULL ``combined_score`` AND its own root scripts (``init_program.py``,
+    ``evaluate.py``) — the real engine always writes those. The
+    orchestrator's collection must NOT fall back to those root files: the
+    run is ``failed`` with zero collected programs.
+    """
+    root = project_with_prereqs["root"]
+
+    null_score_rows = tuple(
+        {**row, "combined_score": None, "correct": 0, "public_metrics": {}}
+        for row in FIXTURE_PROGRAM_ROWS
+    )
+
+    def _factory(**kwargs: Any) -> MagicMock:
+        instance = MagicMock()
+
+        def _run() -> None:
+            results_dir = Path(kwargs["evo_config"].results_dir)
+            build_programs_db(results_dir / "programs.sqlite", rows=null_score_rows)
+            # The real engine writes its own scripts at the results root.
+            (results_dir / "init_program.py").write_text("def solve(data):\n    return 0\n")
+            (results_dir / "evaluate.py").write_text("# engine evaluate script\n")
+
+        instance.run.side_effect = _run
+        return instance
+
+    result, _runner_cls, run_id = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "shinka",
+            "--iterations",
+            str(_ITERATIONS),
+        ],
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+        mock_runner_cls=MagicMock(side_effect=_factory),
+    )
+
+    row = _get_run_row(root, run_id)
+    assert row["status"] == "failed"
+
+    run_dir = root / REVOLVER_DIR / "runs" / run_id
+    programs_dir = run_dir / "programs"
+    collected = sorted(programs_dir.glob("*.py")) if programs_dir.exists() else []
+    assert collected == [], f"bogus programs collected: {collected}\n{_get_all_output(result)}"
 
 
 # ── (b) Dry-run (S14-08, ADR-007 D4) ─────────────────────────────────────────

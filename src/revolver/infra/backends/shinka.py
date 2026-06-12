@@ -842,7 +842,11 @@ class ShinkaBackend:
           run is a logical continuation, not a separate artifact tree;
         - token usage, valid-program counts, and population reported for
           the resumed run include the parent chain's programs (cumulative
-          accounting over the shared database).
+          accounting over the shared database — benchmarks and cost
+          tracking over-attribute the child run);
+        - conversely, ``run population``/``run status`` on the **parent**
+          run read its mutated database and therefore show the resumed
+          child's generations too.
 
         Raises:
             RevolverError: When the parent has no programs database
@@ -1216,10 +1220,18 @@ class ShinkaBackend:
         (then ``best_program_NN.py``), matching OpenEvolve's single
         best-program output count.
 
+        ``best/`` is created even when no scored program exists: an
+        existing (possibly empty) named dir is what keeps the
+        orchestrator's collection from falling back to the root ``*.py``
+        files (review #196 W2).
+
         Returns:
             ``(best_score, best_program_path)`` — both ``None`` when no
             scored program exists.
         """
+        best_dir = results_dir / "best"
+        best_dir.mkdir(parents=True, exist_ok=True)
+
         db_path = results_dir / SHINKA_PROGRAMS_DB
         if not db_path.exists():
             return (None, None)
@@ -1239,8 +1251,6 @@ class ShinkaBackend:
         if not rows:
             return (None, None)
 
-        best_dir = results_dir / "best"
-        best_dir.mkdir(parents=True, exist_ok=True)
         best_path: Path | None = None
         for rank, (_prog_id, code, _score) in enumerate(rows, start=1):
             name = "best_program.py" if rank == 1 else f"best_program_{rank:02d}.py"

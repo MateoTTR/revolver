@@ -154,6 +154,18 @@ def fake_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "shinka.launch", launch)
 
 
+@pytest.fixture
+def no_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force shinka to be un-importable, even when actually installed.
+
+    Setting a ``sys.modules`` entry to ``None`` makes ``import x`` raise
+    ``ImportError`` — so the "not installed" tests pass identically in the
+    no-shinka dev env and in a real-shinka env (e.g. ``shinka-spike``).
+    """
+    for module_name in ("shinka", "shinka.core", "shinka.database", "shinka.launch"):
+        monkeypatch.setitem(sys.modules, module_name, None)  # type: ignore[arg-type]
+
+
 # ── default_output_subdir seam (S14-05) ──────────────────────────────────────
 
 
@@ -257,7 +269,7 @@ class TestDetermineCrashStatusDelegation:
 class TestShinkaIsAvailable:
     """is_available() probes the real shinka import."""
 
-    def test_unavailable_without_shinka(self) -> None:
+    def test_unavailable_without_shinka(self, no_shinka: None) -> None:
         """Without shinka installed: (False, install hint)."""
         available, hint = ShinkaBackend().is_available()
         assert available is False
@@ -296,7 +308,7 @@ class TestShinkaConfigTemplate:
 class TestShinkaValidateConfig:
     """validate_config() checks keys against the Shinka dataclasses."""
 
-    def test_graceful_without_shinka(self) -> None:
+    def test_graceful_without_shinka(self, no_shinka: None) -> None:
         """Without shinka the validation degrades to no warnings."""
         warnings = ShinkaBackend().validate_config({"evo_config": {"bogus_key": 1}})
         assert warnings == []
@@ -347,7 +359,7 @@ class TestShinkaValidateConfig:
 class TestShinkaBuildConfig:
     """build_config() projects BackendRunSpec into the nested Shinka dict."""
 
-    def test_unavailable_raises_backend_unavailable(self, tmp_path: Path) -> None:
+    def test_unavailable_raises_backend_unavailable(self, no_shinka: None, tmp_path: Path) -> None:
         """Without shinka, build_config fails fast (exit-3 contract)."""
         with pytest.raises(BackendUnavailableError):
             ShinkaBackend().build_config(_make_spec(tmp_path))
@@ -811,7 +823,7 @@ def _write_fixture_db(call: dict[str, Any]) -> None:
 class TestShinkaLaunch:
     """launch() constructs the runner, runs it, materializes best/."""
 
-    def test_unavailable_without_shinka(self, tmp_path: Path) -> None:
+    def test_unavailable_without_shinka(self, no_shinka: None, tmp_path: Path) -> None:
         """launch() raises the typed not-installed error (exit 3)."""
         spec = _make_spec(tmp_path)
         with pytest.raises(BackendUnavailableError):
@@ -923,7 +935,13 @@ class TestShinkaLaunch:
     def test_no_scored_programs_yields_no_best(
         self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """A DB without scored programs materializes nothing."""
+        """A DB without scored programs materializes an EMPTY best/ dir.
+
+        The empty ``best/`` is deliberate (review #196 W2): an existing
+        named dir keeps the orchestrator's program collection from falling
+        back to the engine's own root scripts (``init_program.py``,
+        ``evaluate.py``) and collecting them as bogus solutions.
+        """
         unscored = tuple(row for row in FIXTURE_PROGRAM_ROWS if row["combined_score"] is None)
 
         def _write_unscored(call: dict[str, Any]) -> None:
@@ -939,7 +957,9 @@ class TestShinkaLaunch:
         assert result.best_score is None
         assert result.best_program is None
         assert spec.run_dir is not None
-        assert not (spec.run_dir / "shinka-output" / "best").exists()
+        best_dir = spec.run_dir / "shinka-output" / "best"
+        assert best_dir.exists()
+        assert sorted(best_dir.glob("*.py")) == []
 
     def test_missing_run_dir_raises(self, fake_shinka: None, tmp_path: Path) -> None:
         """launch() requires spec.run_dir."""
@@ -988,7 +1008,7 @@ class TestShinkaResume:
         with pytest.raises(RevolverError, match="programs database"):
             ShinkaBackend().resume(spec, {}, parent_run_dir)
 
-    def test_unavailable_without_shinka(self, tmp_path: Path) -> None:
+    def test_unavailable_without_shinka(self, no_shinka: None, tmp_path: Path) -> None:
         """resume() raises the typed not-installed error (exit 3)."""
         parent_run_dir = tmp_path / "parent"
         build_shinka_run_dir(parent_run_dir)

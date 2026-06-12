@@ -2034,21 +2034,29 @@ def _collect_programs(oe_output_dir: Path, programs_dir: Path) -> list[ProgramEn
     programs: list[ProgramEntry] = []
     programs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Look for top_programs/ or best_programs/ or best/ or just .py files
-    source_dirs = [
+    # Look for top_programs/ or best_programs/ or best/; fall back to loose
+    # .py files at the output-dir root ONLY when no named dir exists. An
+    # existing-but-empty named dir is terminal: engines that keep their
+    # programs in a database (ShinkaEvolve) also write their own scripts at
+    # the root (init_program.py, evaluate.py) — the root fallback would
+    # collect those as solutions of a programless run (review #196 W2).
+    named_dirs = [
         oe_output_dir / "top_programs",
         oe_output_dir / "best_programs",
         oe_output_dir / "best",
-        oe_output_dir,
     ]
 
     py_files: list[Path] = []
-    for source in source_dirs:
+    named_dir_found = False
+    for source in named_dirs:
         if source.exists():
+            named_dir_found = True
             found = sorted(source.glob("*.py"))
             if found:
                 py_files = found
                 break
+    if not named_dir_found:
+        py_files = sorted(oe_output_dir.glob("*.py"))
 
     for rank, py_file in enumerate(py_files, start=1):
         dest = programs_dir / f"rank-{rank}.py"
