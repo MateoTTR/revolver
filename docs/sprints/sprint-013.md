@@ -1,6 +1,6 @@
 # Sprint 013 — Backend Abstraction Refactor (v0.13.0)
 
-**Status**: Planning
+**Status**: Done — v0.13.0 (session 048; PRs #184/#185/#188/#189 merged)
 **Goal**: Introduce the `EvolutionBackend` abstraction (ADR-007) behind the 4 engine-coupled commands and the 4 single-call shims, wrap the existing OpenEvolve code as `OpenEvolveBackend`, add `runs.backend` traceability (migration v9) and the `--backend` CLI flag — with **zero behavior change**: the full pre-existing L0/L1/L2 suite passes unmodified (imports excepted where files move).
 **Source**: ADR-007 (P1 phase), top-down analysis #267 §6 (S13 plan) and §2.2 (interface), DES-005 §14.1, DES-001 §5.8, spec-run FR-RUN-047/048.
 **Predecessor**: Sprint 012 (v0.12.0) + hotfix v0.12.1
@@ -48,20 +48,20 @@ Create `infra/backends/shinka.py` as a **stub registered in the factory**: `is_a
 
 | # | Task | Layer | PR | Status |
 |---|---|---|---|---|
-| S13-01 | `infra/backends/base.py`: `EvolutionBackend` protocol (per #267 §2.2: `capabilities`, `is_available`, `config_template`, `validate_config`, `build_config`, `resolved_config`, `generate_wrapper`, `launch`, `resume`, `read_progress`, `parse_population`, `count_valid`, `wants_http_proxy`, `collect_token_usage`), `BackendCapabilities`, `BackendRunSpec`, `BackendRunResult`, `BackendUnavailableError`, `get_backend()` factory | infra | PR-A | [ ] |
-| S13-02 | `infra/backends/openevolve.py`: `OpenEvolveBackend` — move `infra/openevolve.py` content behind the interface (`wants_http_proxy()=True`); `infra/openevolve.py` becomes a thin re-export shim with deprecation comment (removal in S15) | infra | PR-A | [ ] |
-| S13-03 | `infra/backends/shinka.py`: stub backend registered in the factory — `is_available()=(False, install hint)`, `capabilities()` per ADR-007, engine methods raise `BackendUnavailableError` | infra | PR-A | [ ] |
-| S13-04 | `models/run.py`: neutral `ResolvedConfig` (`backend`, `iterations`, `num_islands`, `temperature`, `language`, `llm_models`, `config_overrides`, `backend_extras: dict`) replacing `ResolvedOEConfig`; `RunResult.resolved_config` type updated | domain | PR-B | [ ] |
-| S13-05 | `models/run.py`: `backend: str = "openevolve"` field on `RunConfig`, `RunManifest`, `RunSummary`, `RunInfo` | domain | PR-B | [ ] |
-| S13-06 | `infra/db.py`: migration v9 (`ALTER TABLE runs ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve'`); `insert_run()`/`get_run()`/`list_runs()` updated | infra | PR-B | [ ] |
-| S13-07 | `core/run.py`: `launch_run()` resolves the backend via `get_backend(name)`; config build, validation, wrapper generation, launch, proxy decision (`wants_http_proxy()`) and token collection (`collect_token_usage()`) go through `backend.*`; backend stored in run record + manifest | domain | PR-C | [ ] |
-| S13-08 | `core/run.py`: `resume_run()` inherits the parent run's backend (cross-backend resume rejected with a clear error); `get_run_status()` active-path via `backend.read_progress()`; `get_population()` via `backend.parse_population()` | domain | PR-C | [ ] |
-| S13-09 | `core/run.py`: `_extract_resolved_config()` produces the neutral `ResolvedConfig`, OE-only keys (`checkpoint_interval`, `feature_dimensions`, `max_code_length`, …) routed into `backend_extras` | domain | PR-C | [ ] |
-| S13-10 | `cli/run.py`: `--backend TEXT` option on `run` (default `openevolve`; unknown name → exit 1; stub backend not installed → exit 3 with install hint); OE-hardcoded progress/help copy made backend-aware | cli | PR-C | [ ] |
-| S13-11 | `cli/run.py`: surface backend in `run info` (line), `run list` (column), dry-run output (neutral fields + generic `backend_extras` loop) — FR-RUN-047 | cli | PR-C | [ ] |
-| S13-12 | `core/doctor.py`: replace `_check_openevolve()` with a per-backend `is_available()` loop (OpenEvolve required, ShinkaEvolve informational); `core/setup.py`: per-backend install entries | domain | PR-D | [ ] |
-| S13-13 | `core/project.py`: `config.yaml` template served by `backend.config_template()`; `core/problem.py`: `validate_oe_config()` call dispatched via `backend.validate_config()` | domain | PR-D | [ ] |
-| S13-14 | L2 integration tests: `test_run_backend_flag_and_default`, `test_resume_inherits_parent_backend`, `test_run_unknown_backend_exit1`, `test_run_shinka_stub_not_installed_exit3`, `test_doctor_shinka_informational` + **full regression (zero behavior change)** | test | all PRs | [ ] |
+| S13-01 | `infra/backends/base.py`: `EvolutionBackend` protocol (per #267 §2.2: `capabilities`, `is_available`, `config_template`, `validate_config`, `build_config`, `resolved_config`, `generate_wrapper`, `launch`, `resume`, `read_progress`, `parse_population`, `count_valid`, `wants_http_proxy`, `collect_token_usage`), `BackendCapabilities`, `BackendRunSpec`, `BackendRunResult`, `BackendUnavailableError`, `get_backend()` factory | infra | PR-A | [x] |
+| S13-02 | `infra/backends/openevolve.py`: `OpenEvolveBackend` — move `infra/openevolve.py` content behind the interface (`wants_http_proxy()=True`); `infra/openevolve.py` becomes a thin re-export shim with deprecation comment (removal in S15) | infra | PR-A | [x] |
+| S13-03 | `infra/backends/shinka.py`: stub backend registered in the factory — `is_available()=(False, install hint)`, `capabilities()` per ADR-007, engine methods raise `BackendUnavailableError` | infra | PR-A | [x] |
+| S13-04 | `models/run.py`: neutral `ResolvedConfig` (`backend`, `iterations`, `num_islands`, `temperature`, `language`, `llm_models`, `config_overrides`, `backend_extras: dict`) replacing `ResolvedOEConfig`; `RunResult.resolved_config` type updated | domain | PR-B | [x] |
+| S13-05 | `models/run.py`: `backend: str = "openevolve"` field on `RunConfig`, `RunManifest`, `RunSummary`, `RunInfo` | domain | PR-B | [x] |
+| S13-06 | `infra/db.py`: migration v9 (`ALTER TABLE runs ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve'`); `insert_run()`/`get_run()`/`list_runs()` updated | infra | PR-B | [x] |
+| S13-07 | `core/run.py`: `launch_run()` resolves the backend via `get_backend(name)`; config build, validation, wrapper generation, launch, proxy decision (`wants_http_proxy()`) and token collection (`collect_token_usage()`) go through `backend.*`; backend stored in run record + manifest | domain | PR-C | [x] |
+| S13-08 | `core/run.py`: `resume_run()` inherits the parent run's backend (cross-backend resume rejected with a clear error); `get_run_status()` active-path via `backend.read_progress()`; `get_population()` via `backend.parse_population()` | domain | PR-C | [x] |
+| S13-09 | `core/run.py`: `_extract_resolved_config()` produces the neutral `ResolvedConfig`, OE-only keys (`checkpoint_interval`, `feature_dimensions`, `max_code_length`, …) routed into `backend_extras` | domain | PR-C | [x] |
+| S13-10 | `cli/run.py`: `--backend TEXT` option on `run` (default `openevolve`; unknown name → exit 1; stub backend not installed → exit 3 with install hint); OE-hardcoded progress/help copy made backend-aware | cli | PR-C | [x] |
+| S13-11 | `cli/run.py`: surface backend in `run info` (line), `run list` (column), dry-run output (neutral fields + generic `backend_extras` loop) — FR-RUN-047 | cli | PR-C | [x] |
+| S13-12 | `core/doctor.py`: replace `_check_openevolve()` with a per-backend `is_available()` loop (OpenEvolve required, ShinkaEvolve informational); `core/setup.py`: per-backend install entries | domain | PR-D | [x] |
+| S13-13 | `core/project.py`: `config.yaml` template served by `backend.config_template()`; `core/problem.py`: `validate_oe_config()` call dispatched via `backend.validate_config()` | domain | PR-D | [x] |
+| S13-14 | L2 integration tests: `test_run_backend_flag_and_default`, `test_resume_inherits_parent_backend`, `test_run_unknown_backend_exit1`, `test_run_shinka_stub_not_installed_exit3`, `test_doctor_shinka_informational` + **full regression (zero behavior change)** | test | all PRs | [x] |
 
 ---
 
@@ -141,18 +141,25 @@ Sprint 012 / v0.12.1 complete ────────────────�
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Completed in session 048 (2026-06-11/12).** Delivery: 4 PRs (#184 PR-A, #185 PR-B, #188 PR-C, #189 PR-D), each issue → worktree dev agent → draft PR → code review → fixes → CI → user merge. Waves as planned (A+B parallel, then C+D parallel; one merge conflict C↔D in `backends/openevolve.py`, resolved by keeping both inserted sections).
 
 ### Tests passing
-- X / ~7 new integration tests passing
-- Full pre-existing suite: X / X unmodified (zero behavior change criterion)
+- **91 new tests** (47 PR-A + 24 PR-B + 9 PR-C + 11 PR-D) — final suite **1175 passed, 7 skipped** (the 7 = L2-OE auto-skip without `openevolve`), coverage ~87%.
+- Zero-behavior-change criterion **held**: no pre-existing test modified outside three traced categories (mechanical `patch()`-target relocation, additive backend surfacing, removed legacy `ResolvedOEConfig`).
+- CI green on 3.12 + 3.14 for all four PRs (one transient 10-min hang of the 3.14 job on the self-hosted runner, attempt 2 passed).
+- Code reviews: #184 0C/4W/5S, #185 0C/1W/4S, #188 0C/2W/3S, #189 0C/1W/4S — all CRITICAL-free; actionable findings fixed in-PR, S14-seam WARNINGs carried over below.
 
 ### Demo-able features
-- [ ] `revolver run` unchanged for users — same outputs, same artifacts (regression green)
-- [ ] `run info` / `run list` / dry-run show `backend: openevolve` (FR-RUN-047)
-- [ ] `run --backend shinka` fails cleanly with the install hint (stub)
-- [ ] `revolver doctor` reports ShinkaEvolve availability as informational
-- [ ] DB migration v9 applied transparently on first command
+- [x] `revolver run` unchanged for users — same outputs, same artifacts (regression green)
+- [x] `run info` / `run list` / dry-run show `backend: openevolve` (FR-RUN-047)
+- [x] `run --backend shinka` fails cleanly with the install hint (stub, exit 3); unknown backend → exit 1
+- [x] `revolver doctor` reports ShinkaEvolve availability as informational
+- [x] DB migration v9 applied transparently on first command
 
-### Carry-over
-_TBD at sprint end._
+### Carry-over (feed into the S14 issue)
+- **OE layout still hardcoded in the orchestrator** (`oe-output/`, crash-status counting, resume staging precheck in `core/run.py`) — S14 needs a neutral staging/counting hook or per-backend prechecks (review #188 W1).
+- **Iterations fallback duplicated** between orchestrator and backend (`max_iterations` default) — make the orchestrator the single owner in S14 (review #188 W2).
+- `launch_run` fallback reads `cfg.get("max_iterations", 10)`: Shinka's `build_config` must populate it or the fallback must be generalized (PR-C dev note).
+- Token path ready for Shinka: when `wants_http_proxy()` is False, core already calls `collect_token_usage(run_dir)` and stores via `update_run_tokens`; native `cost_usd` is the backend's responsibility (ADR-007 D2).
+- Dist-name mapping `shinka` → `shinka-evolve` already in place in doctor (review #189 W1, fixed in-PR).
+- Pre-existing minor doc debts (deferred): FR-RUN-042 numbering gap, FR-RUN-036..039 traceability rows, DES-005 title rename (S15).
