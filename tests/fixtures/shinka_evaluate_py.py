@@ -28,6 +28,13 @@ module to ``run_shinka_eval`` (which loads ``program_path`` and calls
 via an environment variable. Implementations are free to use another
 technique (e.g. a synthesized shim module) as long as the observable
 contract above holds.
+
+Partial-failure semantics are **implementation-defined** and NOT part of
+the contract: this golden (one shinka run per instance) marks the whole
+evaluation incorrect when any instance fails, while the production
+wrapper (S14-09) skips failing instances and averages the rest —
+matching the OpenEvolve wrapper for cross-backend score comparability.
+Contract tests must only pin the all-instances-fail case.
 """
 
 from __future__ import annotations

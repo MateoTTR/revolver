@@ -31,7 +31,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import dataclasses
-import logging
 from pathlib import Path
 import sys
 from typing import Any
@@ -56,8 +55,6 @@ from revolver.infra.backends.openevolve import (
 )
 from revolver.models.llm import LLMEntry
 from revolver.models.run import ResolvedConfig, TokenUsage
-
-logger = logging.getLogger(__name__)
 
 _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
 
@@ -264,6 +261,9 @@ def aggregate_metrics(results):
         ]
         if values:
             aggregated[key] = statistics.mean(values)
+    # Shinka's metrics consumers (DB scoring, display) expect combined_score
+    # to exist; validate_result() independently marks the run incorrect when
+    # the user metrics lacked it, so this default never masks a failure.
     aggregated.setdefault("combined_score", 0.0)
     return aggregated
 
@@ -355,7 +355,10 @@ def _project_llm_model(llm: LLMEntry) -> tuple[str, dict[str, str | None]]:
     if llm.source == "local":
         base_url = llm.base_url or "http://localhost:11434/v1"
         env_name = llm.api_key_env or _DEFAULT_LOCAL_API_KEY_ENV
-        model_string = f"local/{llm.model}@{base_url}?api_key_env={env_name}"
+        # Keep the URL valid when a registered base_url already carries a
+        # query string (Shinka strips the api_key_env param on parse).
+        separator = "&" if "?" in base_url else "?"
+        model_string = f"local/{llm.model}@{base_url}{separator}api_key_env={env_name}"
         return model_string, {env_name: llm.api_key_env}
 
     provider = (llm.provider or "").lower()
