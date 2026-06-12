@@ -31,7 +31,7 @@ from revolver.infra.backends import (
 )
 from revolver.infra.backends.openevolve import RunOutput
 from revolver.models.llm import LLMEntry
-from revolver.models.run import ResolvedOEConfig
+from revolver.models.run import ResolvedConfig
 
 pytestmark = [pytest.mark.unit]
 
@@ -211,18 +211,41 @@ class TestOpenEvolveBackendDelegation:
         assert config["checkpoint_interval"] == 7
 
     def test_resolved_config_extracts_dry_run_fields(self) -> None:
-        """resolved_config() produces the dry-run ResolvedOEConfig."""
+        """resolved_config() produces the neutral ResolvedConfig (ADR-007 D4)."""
         config = {
             "max_iterations": 5,
             "database": {"num_islands": 3},
             "llm": {"temperature": 0.4},
         }
         resolved = OpenEvolveBackend().resolved_config(config, {"k": "v"})
-        assert isinstance(resolved, ResolvedOEConfig)
+        assert isinstance(resolved, ResolvedConfig)
+        assert resolved.backend == "openevolve"
         assert resolved.iterations == 5
         assert resolved.num_islands == 3
         assert resolved.temperature == 0.4
         assert resolved.config_overrides == {"k": "v"}
+        # No OE-exclusive key is set in this config → extras stay empty
+        assert resolved.backend_extras == {}
+
+    def test_resolved_config_routes_oe_keys_into_backend_extras(self) -> None:
+        """OE-exclusive parameters land in backend_extras (ADR-007 D4)."""
+        config = {
+            "max_iterations": 5,
+            "checkpoint_interval": 2,
+            "diff_based_evolution": False,
+            "max_code_length": 50000,
+            "database": {"feature_dimensions": ["complexity"], "feature_bins": 7},
+            "evaluator": {"parallel_evaluations": 4},
+        }
+        resolved = OpenEvolveBackend().resolved_config(config)
+        assert resolved.backend_extras == {
+            "checkpoint_interval": 2,
+            "feature_dimensions": ["complexity"],
+            "feature_bins": 7,
+            "parallel_evaluations": 4,
+            "diff_based_evolution": False,
+            "max_code_length": 50000,
+        }
 
     def test_generate_wrapper_writes_into_run_dir(self, tmp_path: Path) -> None:
         """generate_wrapper() generates the wrapper evaluator in run_dir."""

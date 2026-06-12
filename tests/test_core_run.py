@@ -559,7 +559,7 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
@@ -735,7 +735,7 @@ def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
             "revolver.core.run.eval_run_instance",
@@ -901,7 +901,7 @@ def test_preflight_check_pass(project_with_prereqs: dict, capsys: pytest.Capture
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
@@ -1125,7 +1125,7 @@ def test_preflight_check_score_zero(
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
@@ -1269,7 +1269,7 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
@@ -1449,6 +1449,41 @@ def test_resume_run_not_found(project_with_prereqs: dict) -> None:
 
 
 @pytest.mark.unit
+def test_resume_run_rejects_cross_backend(project_with_prereqs: dict) -> None:
+    """resume_run rejects an explicit backend conflicting with the parent's.
+
+    Cross-backend resume is not supported (FR-RUN-047, spec-run §2.3
+    step 4): the resume state formats are backend-specific.
+    """
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    parent_id = "run-20260310-144500"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    with patch("revolver.core.run.get_global_db") as mock_global_db:
+        mock_global_db.return_value = MagicMock()
+        with pytest.raises(RevolverError, match="Cross-backend resume"):
+            resume_run(parent_id, backend_name="shinka", project_root=root)
+
+
+@pytest.mark.unit
 def test_resume_llm_override(project_with_prereqs: dict) -> None:
     """resume_run with llm_name must use the override LLM, not the parent's."""
     root = project_with_prereqs["root"]
@@ -1510,7 +1545,7 @@ def test_resume_llm_override(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
@@ -1644,9 +1679,11 @@ def test_resume_config_override_single(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.build_config", return_value={}) as mock_build_config,
+        patch(
+            "revolver.infra.backends.openevolve.build_config", return_value={}
+        ) as mock_build_config,
         patch("revolver.core.run.resolve_api_keys", return_value={}),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
@@ -1732,9 +1769,11 @@ def test_resume_config_override_multiple(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.build_config", return_value={}) as mock_build_config,
+        patch(
+            "revolver.infra.backends.openevolve.build_config", return_value={}
+        ) as mock_build_config,
         patch("revolver.core.run.resolve_api_keys", return_value={}),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
@@ -2325,7 +2364,7 @@ def test_launch_run_post_processing_failure_sets_completed_with_errors(
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch(
@@ -2422,7 +2461,7 @@ def test_launch_run_oe_failure_sets_failed(
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
             "revolver.core.run.eval_run_instance",
@@ -2504,7 +2543,7 @@ def test_launch_run_post_eval_message(
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
@@ -2572,7 +2611,7 @@ def test_launch_run_post_eval_message_suppressed_when_quiet(
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
@@ -2641,7 +2680,7 @@ def test_run_oe_failure_marks_failed(project_with_prereqs: dict) -> None:
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
             "revolver.core.run.eval_run_instance",
@@ -2732,7 +2771,7 @@ def test_run_keyboard_interrupt_marks_interrupted(project_with_prereqs: dict) ->
             "revolver.core.run.resolve_dataset_path",
             return_value=project_with_prereqs["dataset_dir"],
         ),
-        patch("revolver.core.run.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
         patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
         patch(
             "revolver.core.run.eval_run_instance",
