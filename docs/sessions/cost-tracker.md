@@ -56,14 +56,15 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 47 | 2026-06-07 | session-047 | ~1h00 | Phase 5 | Release v0.12.1 (hotfix #181), ShinkaEvolve spike #266 (co-install viable), top-down analysis #267 (CLI partition, EvolutionBackend interface, S13→S15 plan), local-LLM de-risk deferred to P2 |
 | 48 | 2026-06-11/12 | session-048 | ~6h30 | Phase 5 | #268 done (ADR-007 + spec/design/validation cascades + reviewers), Sprint 013 planned AND fully delivered (4 PRs merged, 91 new tests, 1175 passed), release v0.13.0 (tag + doc-reviewer pass) — backend abstraction, zero behavior change; first session on Fable agents |
 | 49 | 2026-06-12/13 | session-049 | ~4h15 | Phase 5 | Sprint 014 planned AND fully delivered (ShinkaEvolve MVP: 4 PRs merged, real ShinkaBackend engine, [shinka] extra, E2E Scenario 3 passes on the real engine; 1248 tests no-shinka / 1269 real-shinka, suite env-independent); shinka 0.0.7 schema facts verified (Q2 premise corrected); 4 agent deaths handled (2 code reviews + spec pass done in main session); release v0.14.0 (doc cascade + README step added to checklist + tag + doc-reviewer) |
+| 50 | 2026-06-13 | session-050 | ~3h | Phase 5 | Real Shinka smoke test (new revolver-demos repo + dedicated env, TSP demo): working recipe gemini-3-flash-preview + max_tokens 16384 + max_patch_attempts 10 → +21% vs baseline. Surfaced backlog 300–306 incl. 🔴 cost under-report ~20× (thinking tokens billed but uncaptured). Claude Max via Agent SDK explored + ToS-verified on primary sources, scoped as side project (claude-ollama-bridge scaffold, reuses bard-ai). Sprint 015 planned (sprint-015.md, 9 PRs / 2 waves). |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 50 |
-| **Total duration** | ~99h15 |
-| **Avg duration/session** | ~1h59 |
+| **Total sessions** | 51 |
+| **Total duration** | ~102h15 |
+| **Avg duration/session** | ~2h00 |
 
 ## Notes
 
