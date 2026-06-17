@@ -92,6 +92,17 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # top-N extraction (capabilities().top_n_extraction) is an S15 extension.
 _BEST_PROGRAMS_COUNT = 1
 
+# Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
+# ShinkaEvolve's own defaults are tuned for cheap non-thinking models and
+# silently break thinking-capable ones:
+#   - llm_kwargs.max_tokens defaults to 4096 → thinking models exhaust the
+#     budget on reasoning and return ``None`` content (revolver task #120);
+#     ShinkaEvolve's example configs use 16384.
+#   - EvolutionConfig.max_patch_attempts defaults to 1 → a single malformed
+#     patch loses the whole generation; ShinkaEvolve's examples use 10.
+_SHINKA_DEFAULT_MAX_TOKENS = 16384
+_SHINKA_DEFAULT_MAX_PATCH_ATTEMPTS = 10
+
 # Default env var name synthesized for local OpenAI-compatible endpoints
 # when the registry entry has no api_key_env (ADR-007 D5). launch()
 # exports a placeholder value when this variable is unset — Shinka
@@ -155,6 +166,21 @@ evo_config:
   language: python
   # Hard cap on LLM API spend in USD (null = no cap).
   max_api_costs: null
+  # Max LLM patch attempts per generation before giving up. Shinka's own
+  # default is 1 → one malformed patch loses the generation. Revolver
+  # defaults to 10 (matches ShinkaEvolve's example configs).
+  max_patch_attempts: 10
+  # Per-query LLM sampling settings (ShinkaEvolve llm_kwargs).
+  llm_kwargs:
+    # Output token budget. Revolver defaults to 16384 (Shinka's 4096 starves
+    # thinking-capable models, which then return empty content). Raising this
+    # increases thinking-token spend.
+    max_tokens: 16384
+    # Reasoning effort for thinking-capable models — the primary cost lever
+    # (lower effort = fewer billed thinking tokens). Provider-specific values
+    # (e.g. "low"/"medium"/"high"); leave unset for the provider default.
+    # Uncomment to control thinking-token spend:
+    # reasoning_efforts: low
 
 db_config:
   # Number of evolution islands.
@@ -607,8 +633,16 @@ class ShinkaBackend:
         temperature = spec.temperature if spec.temperature is not None else spec.llm.temperature
         if temperature is not None:
             llm_kwargs["temperatures"] = [temperature]
-        if spec.llm.max_tokens is not None:
-            llm_kwargs.setdefault("max_tokens", spec.llm.max_tokens)
+        # B (#301/S15-06): always set max_tokens — prefer the registered
+        # LLMEntry value, else default to 16384 (Shinka's 4096 default
+        # starves thinking models). An explicit config.yaml
+        # llm_kwargs.max_tokens still wins (setdefault). Raising max_tokens
+        # inflates thinking-token spend — reasoning_efforts (see the config
+        # template) is the cost lever.
+        default_max_tokens = (
+            spec.llm.max_tokens if spec.llm.max_tokens is not None else _SHINKA_DEFAULT_MAX_TOKENS
+        )
+        llm_kwargs.setdefault("max_tokens", default_max_tokens)
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
 
@@ -638,6 +672,12 @@ class ShinkaBackend:
         elif "patch_types" not in evo:
             evo["patch_types"] = ["diff", "full"]
             evo.setdefault("patch_type_probs", [0.6, 0.4])
+
+        # B (#301/S15-05): default max_patch_attempts to 10. Shinka's own
+        # default of 1 loses a whole generation on a single malformed patch
+        # (the dominant cheap-model failure mode). An explicit config.yaml
+        # value or --config-override (applied last) still wins.
+        evo.setdefault("max_patch_attempts", _SHINKA_DEFAULT_MAX_PATCH_ATTEMPTS)
 
         # Fixed S14 MVP projections
         evo["language"] = "python"
@@ -697,16 +737,33 @@ class ShinkaBackend:
         # Single global temperature only when unambiguous (Shinka uses a
         # per-query temperatures list in llm_kwargs).
         temperature: float | None = None
+        max_tokens: Any = None
+        reasoning_efforts: Any = None
         llm_kwargs = evo.get("llm_kwargs")
         if isinstance(llm_kwargs, dict):
             temps = llm_kwargs.get("temperatures")
             if isinstance(temps, list) and len(temps) == 1 and isinstance(temps[0], int | float):
                 temperature = float(temps[0])
+            max_tokens = llm_kwargs.get("max_tokens")
+            # Surface reasoning_efforts only when meaningfully set (not the
+            # Shinka "" default), so a plain run's dry-run stays uncluttered.
+            # The value may legitimately be list-valued (Shinka accepts
+            # Union[List[str], str]) — keep the membership check, do not
+            # narrow it to a string-only test.
+            # NOTE: a misspelled nested key (e.g. ``reasoning_effort``) lands
+            # silently in llm_kwargs and Shinka ignores it; validating known
+            # llm_kwargs keys is the deferred Scope G concern (S15-23 → S16).
+            effort = llm_kwargs.get("reasoning_efforts")
+            if effort not in (None, "", []):
+                reasoning_efforts = effort
 
         backend_extras: dict[str, Any] = {}
         for key, value in (
             ("patch_types", evo.get("patch_types")),
             ("llm_dynamic_selection", evo.get("llm_dynamic_selection")),
+            ("max_patch_attempts", evo.get("max_patch_attempts")),
+            ("max_tokens", max_tokens),
+            ("reasoning_efforts", reasoning_efforts),
             ("max_api_costs", evo.get("max_api_costs")),
             ("embedding_model", evo.get("embedding_model")),
             ("archive_size", db.get("archive_size")),
