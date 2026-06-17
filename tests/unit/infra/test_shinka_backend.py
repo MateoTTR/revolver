@@ -115,6 +115,7 @@ class _FakeEvolutionConfig:
     init_program_path: str | None = "initial.py"
     results_dir: str | None = None
     max_api_costs: float | None = None
+    max_patch_attempts: int = 1
 
 
 @dataclasses.dataclass
@@ -292,6 +293,13 @@ class TestShinkaConfigTemplate:
         """The shipped template raises no validation warnings."""
         data = yaml.safe_load(ShinkaBackend().config_template())
         assert ShinkaBackend().validate_config(data) == []
+
+    def test_template_documents_llm_settings(self) -> None:
+        """B (#301): the scaffold surfaces the thinking-model defaults."""
+        template = ShinkaBackend().config_template()
+        assert "max_patch_attempts: 10" in template
+        assert "max_tokens: 16384" in template
+        assert "reasoning_efforts" in template
 
 
 # ── validate_config (S14-07) ─────────────────────────────────────────────────
@@ -531,6 +539,49 @@ class TestShinkaBuildConfig:
         with pytest.raises(ValidationError, match="Malformed config override"):
             ShinkaBackend().build_config(_make_spec(tmp_path, config_overrides=["num_islands"]))
 
+    # ── B (#301/S15-05..07): thinking-model LLM-setting defaults ──────────────
+
+    def test_max_patch_attempts_default(self, fake_shinka: None, tmp_path: Path) -> None:
+        """S15-05: max_patch_attempts defaults to 10 (Shinka's own default is 1)."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path))
+        assert config["evo_config"]["max_patch_attempts"] == 10
+
+    def test_max_patch_attempts_config_value_respected(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """An explicit config.yaml value wins over the Revolver default."""
+        spec = _make_spec(tmp_path)
+        (spec.snapshot_dir / "config.yaml").write_text("evo_config:\n  max_patch_attempts: 3\n")
+        config = ShinkaBackend().build_config(spec)
+        assert config["evo_config"]["max_patch_attempts"] == 3
+
+    def test_max_patch_attempts_override_wins(self, fake_shinka: None, tmp_path: Path) -> None:
+        """--config-override (applied last) wins over the default."""
+        config = ShinkaBackend().build_config(
+            _make_spec(tmp_path, config_overrides=["evo_config.max_patch_attempts=1"])
+        )
+        assert config["evo_config"]["max_patch_attempts"] == 1
+
+    def test_max_tokens_default_escalation(self, fake_shinka: None, tmp_path: Path) -> None:
+        """S15-06: max_tokens defaults to 16384 when the LLM entry sets none."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm()))
+        assert config["evo_config"]["llm_kwargs"]["max_tokens"] == 16384
+
+    def test_max_tokens_registry_value_preferred(self, fake_shinka: None, tmp_path: Path) -> None:
+        """A registered LLMEntry.max_tokens is preferred over the 16384 default."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm(max_tokens=2048)))
+        assert config["evo_config"]["llm_kwargs"]["max_tokens"] == 2048
+
+    def test_reasoning_efforts_via_override(self, fake_shinka: None, tmp_path: Path) -> None:
+        """S15-07: reasoning_efforts is reachable via a dotted --config-override."""
+        config = ShinkaBackend().build_config(
+            _make_spec(
+                tmp_path,
+                config_overrides=["evo_config.llm_kwargs.reasoning_efforts=low"],
+            )
+        )
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "low"
+
     def test_evaluation_section_passthrough(self, fake_shinka: None, tmp_path: Path) -> None:
         """The Revolver 'evaluation' section survives the projection."""
         spec = _make_spec(tmp_path)
@@ -595,6 +646,30 @@ class TestShinkaResolvedConfig:
             {"evo_config": {"llm_kwargs": {"temperatures": [0.0, 0.5, 1.0]}}}
         )
         assert resolved.temperature is None
+
+    def test_surfaces_llm_settings(self, fake_shinka: None, tmp_path: Path) -> None:
+        """S15-07: max_patch_attempts + max_tokens surfaced for dry-run."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path))
+        resolved = backend.resolved_config(config)
+        assert resolved.backend_extras["max_patch_attempts"] == 10
+        assert resolved.backend_extras["max_tokens"] == 16384
+        # reasoning_efforts is not set on a plain run → stays out of dry-run
+        assert "reasoning_efforts" not in resolved.backend_extras
+
+    def test_surfaces_reasoning_efforts_when_set(self) -> None:
+        """reasoning_efforts appears in backend_extras only when meaningfully set."""
+        resolved = ShinkaBackend().resolved_config(
+            {"evo_config": {"llm_kwargs": {"reasoning_efforts": "high"}}}
+        )
+        assert resolved.backend_extras["reasoning_efforts"] == "high"
+
+    def test_empty_reasoning_efforts_not_surfaced(self) -> None:
+        """The Shinka \"\" default for reasoning_efforts stays out of dry-run."""
+        resolved = ShinkaBackend().resolved_config(
+            {"evo_config": {"llm_kwargs": {"reasoning_efforts": ""}}}
+        )
+        assert "reasoning_efforts" not in resolved.backend_extras
 
 
 # ── generate_wrapper (S14-09, R4) ─────────────────────────────────────────────
