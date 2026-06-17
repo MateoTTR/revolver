@@ -577,6 +577,10 @@ def run_info(
 
             render(data, json_mode=False)
 
+            # Unproductive-run warning (#302): completed but 0 evolved children
+            if info.produced_no_children:
+                sys.stderr.write(f"WARNING: {core_run.UNPRODUCTIVE_RUN_MESSAGE}.\n")
+
             # Display solutions
             if info.solutions:
                 sol_rows = [

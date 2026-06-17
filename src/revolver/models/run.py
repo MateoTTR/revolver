@@ -341,6 +341,11 @@ class RunInfo(BaseModel):
     llm_type: str = "single"
     llm_snapshot: str | None = None
     backend: str = "openevolve"
+    produced_no_children: bool = False
+    """True when the run completed but produced no evolved child programs —
+    only the initial seed(s) remain (the unproductive-run case, backlog
+    #302). Computed at read time; only meaningful on backends that can
+    distinguish children from seeds."""
 
 
 class ProgressInfo(BaseModel):

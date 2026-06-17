@@ -280,6 +280,11 @@ EXPECTED_COMPLETION_TOKENS = (340 + 0) + (210 + 64) + (480 + 128) + (0 + 0)
 #: Number of rows with ``correct = 1``.
 EXPECTED_VALID_COUNT = 3
 
+#: Number of evolved children — rows carrying a ``metadata.llm_result`` dict
+#: (the file-based init seed and the NULL-metadata row are excluded). Used by
+#: the unproductive-run check (#302): ``count_evolved_children``.
+EXPECTED_CHILDREN_COUNT = 4
+
 #: ``(last_generation, best_combined_score)`` for read_progress().
 EXPECTED_LAST_GENERATION = 2
 EXPECTED_BEST_SCORE = 0.91

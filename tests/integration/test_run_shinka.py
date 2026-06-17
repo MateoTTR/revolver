@@ -43,6 +43,7 @@ pytest.importorskip("shinka.database", reason="shinka-evolve not installed")
 
 from revolver.cli import app
 from revolver.core.project import init_project
+from revolver.core.run import get_run_info
 from revolver.infra.db import get_global_db_at
 from revolver.infra.store import REVOLVER_DIR, read_run_manifest
 from tests.fixtures.programs_sqlite import (
@@ -411,6 +412,69 @@ def test_shinka_zero_scored_programs_collects_nothing(
     programs_dir = run_dir / "programs"
     collected = sorted(programs_dir.glob("*.py")) if programs_dir.exists() else []
     assert collected == [], f"bogus programs collected: {collected}\n{_get_all_output(result)}"
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_unproductive_run_completed_with_errors(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Init-only run (0 evolved children) → completed_with_errors + warning (#302).
+
+    The mocked engine writes a ``programs.sqlite`` holding only the
+    file-based init program (no ``llm_result``). The orchestrator must flag
+    the run ``completed_with_errors``, set ``RunInfo.produced_no_children``,
+    and surface a user-visible warning both at run time and in ``run info``.
+    """
+    root = project_with_prereqs["root"]
+    init_only_rows = (FIXTURE_PROGRAM_ROWS[0],)
+
+    def _factory(**kwargs: Any) -> MagicMock:
+        instance = MagicMock()
+
+        def _run() -> None:
+            results_dir = Path(kwargs["evo_config"].results_dir)
+            build_programs_db(results_dir / "programs.sqlite", rows=init_only_rows)
+            (results_dir / "init_program.py").write_text("def solve(data):\n    return 0\n")
+            (results_dir / "evaluate.py").write_text("# engine evaluate script\n")
+
+        instance.run.side_effect = _run
+        return instance
+
+    result, _runner_cls, run_id = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "shinka",
+            "--iterations",
+            str(_ITERATIONS),
+        ],
+        root,
+        project_with_prereqs["global_db_path"],
+        mock_runner_cls=MagicMock(side_effect=_factory),
+    )
+
+    # Status downgraded to completed_with_errors (not a plain 'completed').
+    assert _get_run_row(root, run_id)["status"] == "completed_with_errors"
+    # Run-time warning surfaced.
+    assert "no evolved child programs" in _get_all_output(result)
+    # RunInfo carries the unproductive flag.
+    assert get_run_info(run_id, project_root=root).produced_no_children is True
+
+    # `run info` renders the warning line.
+    info_result, _cls, _rid = _invoke_with_mocks(
+        ["run", "info", run_id],
+        root,
+        project_with_prereqs["global_db_path"],
+        run_id=run_id,
+    )
+    assert "no evolved child programs" in _get_all_output(info_result)
 
 
 # ── (b) Dry-run (S14-08, ADR-007 D4) ─────────────────────────────────────────

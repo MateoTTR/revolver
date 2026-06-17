@@ -1468,6 +1468,14 @@ class OpenEvolveBackend:
             valid = count_valid_programs(oe_output_dir)
         return valid
 
+    def count_evolved_children(self, run_dir: Path) -> int | None:
+        """Return ``None`` — the checkpoint does not distinguish the initial
+        program from evolved children, so the unproductive-run check
+        (backlog #302) is skipped on OpenEvolve, which keeps its existing
+        ratio-based status determination.
+        """
+        return None
+
     def wants_http_proxy(self) -> bool:
         """OpenEvolve tokens are measured via the HTTP proxy (ADR-007 D2)."""
         return True

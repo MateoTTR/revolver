@@ -22,6 +22,7 @@ import pytest
 
 from revolver.core.exceptions import ExternalError, IntegrityError, RevolverError
 from revolver.core.run import (
+    _apply_unproductive_override,
     _collect_programs,
     _determine_crash_status,
     _determine_run_status,
@@ -2850,6 +2851,69 @@ class TestDetermineRunStatus:
     def test_run_all_valid_status_completed(self) -> None:
         """A run where all iterations are valid should be 'completed'."""
         assert _determine_run_status(valid_iters=20, total_iters=20) == "completed"
+
+
+@pytest.mark.unit
+class TestApplyUnproductiveOverride:
+    """L2 tests for _apply_unproductive_override() — unproductive runs (#302)."""
+
+    @staticmethod
+    def _backend(children: int | None) -> MagicMock:
+        backend = MagicMock()
+        backend.count_evolved_children.return_value = children
+        return backend
+
+    def test_zero_children_downgrades_completed(self, tmp_path: Path) -> None:
+        """0 evolved children flips 'completed' to 'completed_with_errors'."""
+        assert (
+            _apply_unproductive_override(self._backend(0), tmp_path, 3, "completed", quiet=True)
+            == "completed_with_errors"
+        )
+
+    def test_zero_children_keeps_completed_with_errors(self, tmp_path: Path) -> None:
+        """An already-degraded status stays 'completed_with_errors'."""
+        assert (
+            _apply_unproductive_override(
+                self._backend(0), tmp_path, 3, "completed_with_errors", quiet=True
+            )
+            == "completed_with_errors"
+        )
+
+    def test_some_children_leaves_completed(self, tmp_path: Path) -> None:
+        """A run with evolved children keeps its 'completed' status."""
+        assert (
+            _apply_unproductive_override(self._backend(4), tmp_path, 3, "completed", quiet=True)
+            == "completed"
+        )
+
+    def test_none_children_leaves_status_untouched(self, tmp_path: Path) -> None:
+        """A backend that cannot distinguish children (OE → None) is a no-op."""
+        assert (
+            _apply_unproductive_override(self._backend(None), tmp_path, 3, "completed", quiet=True)
+            == "completed"
+        )
+
+    def test_failed_status_not_upgraded(self, tmp_path: Path) -> None:
+        """'failed' is never turned into 'completed_with_errors'."""
+        backend = self._backend(0)
+        assert _apply_unproductive_override(backend, tmp_path, 3, "failed", quiet=True) == "failed"
+        backend.count_evolved_children.assert_not_called()
+
+    def test_zero_iterations_skips_check(self, tmp_path: Path) -> None:
+        """Dry/zero-iteration runs skip the unproductive check."""
+        backend = self._backend(0)
+        assert (
+            _apply_unproductive_override(backend, tmp_path, 0, "completed", quiet=True)
+            == "completed"
+        )
+        backend.count_evolved_children.assert_not_called()
+
+    def test_warning_emitted_when_not_quiet(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A user-visible warning is written to stderr when not quiet."""
+        _apply_unproductive_override(self._backend(0), tmp_path, 3, "completed", quiet=False)
+        assert "no evolved child programs" in capsys.readouterr().err
 
 
 @pytest.mark.integration

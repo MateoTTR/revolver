@@ -1052,6 +1052,38 @@ class ShinkaBackend:
             return None
         return int(row[0]) if row is not None else None
 
+    def count_evolved_children(self, run_dir: Path) -> int | None:
+        """Count evolved children (programs carrying an ``llm_result``).
+
+        Initial seed programs are stored with ``metadata.llm_result`` null
+        (no LLM call produced them); each evolved child carries the full
+        ``QueryResult`` dict. A return of ``0`` after the engine completes
+        means the run was unproductive (backlog #302, S15-09). Returns
+        ``None`` when the database is absent or unreadable.
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT metadata FROM programs").fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+        children = 0
+        for (metadata_json,) in rows:
+            if not metadata_json:
+                continue
+            try:
+                metadata = json.loads(metadata_json)
+            except ValueError:
+                continue
+            if isinstance(metadata, dict) and isinstance(metadata.get("llm_result"), dict):
+                children += 1
+        return children
+
     def collect_token_usage(self, run_dir: Path) -> TokenUsage | None:
         """Collect engine-native token/cost accounting (ADR-007 D2, S14-11).
 

@@ -205,6 +205,53 @@ def _determine_crash_status(
     return "failed", valid_iters
 
 
+# Shared wording for the unproductive-run signal so the run-time warning and
+# the ``run info`` warning line stay in lockstep (#302). "evolved child
+# programs" (not "successful"): the flag fires only when zero children of any
+# kind were produced — count_evolved_children counts every llm_result row,
+# including ones that failed evaluation.
+UNPRODUCTIVE_RUN_MESSAGE = (
+    "run produced no evolved child programs (only the initial program(s) remain)"
+)
+
+
+def _apply_unproductive_override(
+    backend: EvolutionBackend,
+    run_dir: Path,
+    iterations: int,
+    final_status: Literal["failed", "completed_with_errors", "completed"],
+    *,
+    quiet: bool,
+) -> Literal["failed", "completed_with_errors", "completed"]:
+    """Downgrade an unproductive run to ``completed_with_errors`` (#302).
+
+    A run can complete without producing a single evolved child program —
+    every proposal failed, only the initial seed(s) remain — yet
+    :func:`_determine_run_status` may still report ``"completed"`` (the
+    seeds count as valid programs). Backends that can tell children from
+    seeds (:meth:`EvolutionBackend.count_evolved_children` returns an int)
+    let us detect this and flag it distinctly, with a user-visible warning.
+    Backends returning ``None`` (e.g. OpenEvolve) are left untouched, as are
+    already-``"failed"`` runs and zero-iteration (dry) runs.
+
+    Returns:
+        ``"completed_with_errors"`` when the run is unproductive, else the
+        unchanged *final_status*.
+    """
+    if final_status == "failed" or iterations <= 0:
+        return final_status
+    try:
+        children = backend.count_evolved_children(run_dir)
+    except Exception:
+        logger.debug("backend.count_evolved_children() failed", exc_info=True)
+        return final_status
+    if children != 0:
+        return final_status
+    if not quiet:
+        sys.stderr.write(f"Warning: {UNPRODUCTIVE_RUN_MESSAGE}.\n")
+    return "completed_with_errors"
+
+
 # ── ID generation (FR-RUN-007) ────────────────────────────────────────────────
 
 
@@ -808,8 +855,12 @@ def launch_run(
                 alias=config.alias,
             )
 
-            # Determine final status based on valid iteration ratio
+            # Determine final status based on valid iteration ratio, then
+            # flag unproductive runs (0 evolved children — backlog #302).
             final_status = _determine_run_status(valid_iters, iterations)
+            final_status = _apply_unproductive_override(
+                backend, run_dir, iterations, final_status, quiet=quiet
+            )
 
             # Atomically update generation_time_s and status
             update_run_generation_time(proj_conn, run_id, generation_time_s, status=final_status)
@@ -1451,8 +1502,17 @@ def resume_run(
                 best_score=best_score,
             )
 
-            # Determine final status based on valid iteration ratio
+            # Determine final status based on valid iteration ratio, then
+            # flag unproductive runs (0 evolved children — backlog #302).
+            # NOTE: on Shinka, count_evolved_children reads the cumulative
+            # parent-chain DB (ShinkaBackend.resume() reuses the parent
+            # results_dir), so a resume that evolves nothing but inherits a
+            # productive parent is not flagged — consistent with the cumulative
+            # token/valid-iteration accounting on the same DB.
             final_status = _determine_run_status(valid_iters, actual_iterations)
+            final_status = _apply_unproductive_override(
+                backend, new_run_dir, actual_iterations, final_status, quiet=quiet
+            )
 
             # Atomically update generation_time_s and status
             update_run_generation_time(
@@ -1918,6 +1978,20 @@ def get_run_info(
                 completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[call-overload]
             )
 
+        # 6. Detect an unproductive run (0 evolved children — #302). Only
+        #    meaningful for a completed_with_errors status on a backend that
+        #    distinguishes children from seeds (others return None → False).
+        status_str = str(run_data["status"])
+        produced_no_children = False
+        if status_str == "completed_with_errors":
+            try:
+                run_backend = get_backend(str(run_data.get("backend") or DEFAULT_BACKEND))
+                produced_no_children = (
+                    run_backend.count_evolved_children(get_run_dir(root, run_id)) == 0
+                )
+            except Exception:
+                logger.debug("unproductive-run check failed in get_run_info", exc_info=True)
+
         return RunInfo(
             run_id=str(run_data["id"]),
             problem_version=str(run_data["problem_version"]),
@@ -1947,6 +2021,7 @@ def get_run_info(
             llm_type=str(run_data.get("llm_type", "single")),
             llm_snapshot=(str(run_data["llm_snapshot"]) if run_data.get("llm_snapshot") else None),
             backend=str(run_data.get("backend") or DEFAULT_BACKEND),
+            produced_no_children=produced_no_children,
         )
     finally:
         conn.close()
