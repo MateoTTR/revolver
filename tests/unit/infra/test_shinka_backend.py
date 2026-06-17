@@ -572,6 +572,13 @@ class TestShinkaBuildConfig:
         config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm(max_tokens=2048)))
         assert config["evo_config"]["llm_kwargs"]["max_tokens"] == 2048
 
+    def test_max_tokens_override_wins(self, fake_shinka: None, tmp_path: Path) -> None:
+        """--config-override (applied last) wins over the 16384 default."""
+        config = ShinkaBackend().build_config(
+            _make_spec(tmp_path, config_overrides=["evo_config.llm_kwargs.max_tokens=8192"])
+        )
+        assert config["evo_config"]["llm_kwargs"]["max_tokens"] == 8192
+
     def test_reasoning_efforts_via_override(self, fake_shinka: None, tmp_path: Path) -> None:
         """S15-07: reasoning_efforts is reachable via a dotted --config-override."""
         config = ShinkaBackend().build_config(

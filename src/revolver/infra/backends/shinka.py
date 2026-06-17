@@ -747,6 +747,12 @@ class ShinkaBackend:
             max_tokens = llm_kwargs.get("max_tokens")
             # Surface reasoning_efforts only when meaningfully set (not the
             # Shinka "" default), so a plain run's dry-run stays uncluttered.
+            # The value may legitimately be list-valued (Shinka accepts
+            # Union[List[str], str]) — keep the membership check, do not
+            # narrow it to a string-only test.
+            # NOTE: a misspelled nested key (e.g. ``reasoning_effort``) lands
+            # silently in llm_kwargs and Shinka ignores it; validating known
+            # llm_kwargs keys is the deferred Scope G concern (S15-23 → S16).
             effort = llm_kwargs.get("reasoning_efforts")
             if effort not in (None, "", []):
                 reasoning_efforts = effort
