@@ -463,7 +463,7 @@ def test_shinka_unproductive_run_completed_with_errors(
     # Status downgraded to completed_with_errors (not a plain 'completed').
     assert _get_run_row(root, run_id)["status"] == "completed_with_errors"
     # Run-time warning surfaced.
-    assert "no successful child programs" in _get_all_output(result)
+    assert "no evolved child programs" in _get_all_output(result)
     # RunInfo carries the unproductive flag.
     assert get_run_info(run_id, project_root=root).produced_no_children is True
 
@@ -474,7 +474,7 @@ def test_shinka_unproductive_run_completed_with_errors(
         project_with_prereqs["global_db_path"],
         run_id=run_id,
     )
-    assert "no successful child programs" in _get_all_output(info_result)
+    assert "no evolved child programs" in _get_all_output(info_result)
 
 
 # ── (b) Dry-run (S14-08, ADR-007 D4) ─────────────────────────────────────────

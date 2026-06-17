@@ -205,6 +205,16 @@ def _determine_crash_status(
     return "failed", valid_iters
 
 
+# Shared wording for the unproductive-run signal so the run-time warning and
+# the ``run info`` warning line stay in lockstep (#302). "evolved child
+# programs" (not "successful"): the flag fires only when zero children of any
+# kind were produced — count_evolved_children counts every llm_result row,
+# including ones that failed evaluation.
+UNPRODUCTIVE_RUN_MESSAGE = (
+    "run produced no evolved child programs (only the initial program(s) remain)"
+)
+
+
 def _apply_unproductive_override(
     backend: EvolutionBackend,
     run_dir: Path,
@@ -238,10 +248,7 @@ def _apply_unproductive_override(
     if children != 0:
         return final_status
     if not quiet:
-        sys.stderr.write(
-            "Warning: run completed but produced no successful child programs "
-            "(only the initial program(s) remain).\n"
-        )
+        sys.stderr.write(f"Warning: {UNPRODUCTIVE_RUN_MESSAGE}.\n")
     return "completed_with_errors"
 
 
@@ -1497,6 +1504,11 @@ def resume_run(
 
             # Determine final status based on valid iteration ratio, then
             # flag unproductive runs (0 evolved children — backlog #302).
+            # NOTE: on Shinka, count_evolved_children reads the cumulative
+            # parent-chain DB (ShinkaBackend.resume() reuses the parent
+            # results_dir), so a resume that evolves nothing but inherits a
+            # productive parent is not flagged — consistent with the cumulative
+            # token/valid-iteration accounting on the same DB.
             final_status = _determine_run_status(valid_iters, actual_iterations)
             final_status = _apply_unproductive_override(
                 backend, new_run_dir, actual_iterations, final_status, quiet=quiet

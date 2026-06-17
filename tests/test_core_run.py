@@ -2913,7 +2913,7 @@ class TestApplyUnproductiveOverride:
     ) -> None:
         """A user-visible warning is written to stderr when not quiet."""
         _apply_unproductive_override(self._backend(0), tmp_path, 3, "completed", quiet=False)
-        assert "no successful child programs" in capsys.readouterr().err
+        assert "no evolved child programs" in capsys.readouterr().err
 
 
 @pytest.mark.integration
