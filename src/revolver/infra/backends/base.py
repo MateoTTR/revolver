@@ -265,6 +265,18 @@ class EvolutionBackend(Protocol):
         """Count valid programs produced so far (``None`` if unknown)."""
         ...
 
+    def count_evolved_children(self, run_dir: Path) -> int | None:
+        """Count successfully evolved child programs, excluding seed(s).
+
+        Distinct from :meth:`count_valid`, which counts all valid programs
+        including the initial seed(s): a run whose evolved-children count is
+        ``0`` produced no useful evolution even though the seeds remain
+        valid (the unproductive-run case — backlog #302). Returns ``None``
+        when the backend cannot distinguish children from seeds, in which
+        case the caller skips the unproductive-run check.
+        """
+        ...
+
     def wants_http_proxy(self) -> bool:
         """Whether token usage must be measured via the HTTP proxy."""
         ...

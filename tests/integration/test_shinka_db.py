@@ -35,12 +35,14 @@ pytest.importorskip("shinka.database", reason="shinka-evolve not installed")
 from revolver.infra.backends.shinka import ShinkaBackend
 from tests.fixtures.programs_sqlite import (
     EXPECTED_BEST_SCORE,
+    EXPECTED_CHILDREN_COUNT,
     EXPECTED_COMPLETION_TOKENS,
     EXPECTED_COST_USD,
     EXPECTED_LAST_GENERATION,
     EXPECTED_PROMPT_TOKENS,
     EXPECTED_RANKED_IDS,
     EXPECTED_VALID_COUNT,
+    FIXTURE_PROGRAM_ROWS,
     build_shinka_run_dir,
 )
 
@@ -106,6 +108,19 @@ class TestShinkaDbContract:
     def test_count_valid_counts_correct_rows(self, shinka_run_dir: Path) -> None:
         """(c) count_valid() counts rows where correct = 1."""
         assert ShinkaBackend().count_valid(shinka_run_dir) == EXPECTED_VALID_COUNT
+
+    def test_count_evolved_children_counts_llm_result_rows(self, shinka_run_dir: Path) -> None:
+        """(#302) count_evolved_children() counts rows with an llm_result."""
+        assert ShinkaBackend().count_evolved_children(shinka_run_dir) == EXPECTED_CHILDREN_COUNT
+
+    def test_count_evolved_children_init_only_is_zero(self, tmp_path: Path) -> None:
+        """A DB with only the file-based init seed (no llm_result) → 0 children."""
+        run_dir = build_shinka_run_dir(tmp_path / "run", rows=(FIXTURE_PROGRAM_ROWS[0],))
+        assert ShinkaBackend().count_evolved_children(run_dir) == 0
+
+    def test_count_evolved_children_missing_db_returns_none(self, tmp_path: Path) -> None:
+        """No programs.sqlite → None (run failed before producing any program)."""
+        assert ShinkaBackend().count_evolved_children(tmp_path) is None
 
     def test_read_progress_returns_last_generation_and_best_score(
         self, shinka_run_dir: Path

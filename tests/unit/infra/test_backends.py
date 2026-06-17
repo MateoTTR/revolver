@@ -163,6 +163,10 @@ class TestOpenEvolveBackendCapabilities:
         """No engine-native token accounting — proxy stays in core.run."""
         assert OpenEvolveBackend().collect_token_usage(Path("/nonexistent")) is None
 
+    def test_count_evolved_children_returns_none(self) -> None:
+        """OE cannot tell seeds from children → unproductive check skipped (#302)."""
+        assert OpenEvolveBackend().count_evolved_children(Path("/nonexistent")) is None
+
     def test_is_available_reflects_package_presence(self) -> None:
         """is_available() reports the openevolve package install state."""
         available, hint = OpenEvolveBackend().is_available()
