@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from revolver.core.exceptions import ExternalError, ValidationError
-from revolver.infra.openevolve import (
+from revolver.infra.backends.openevolve import (
     SYSTEM_PROMPT_TEMPLATE,
     OpenEvolveRunner,
     RunOutput,
@@ -67,7 +67,9 @@ class TestOpenEvolveRunner:
             output_dir=tmp_path / "output",
         )
 
-        with patch("revolver.infra.openevolve.OpenEvolveRunner._init_controller") as mock_init:
+        with patch(
+            "revolver.infra.backends.openevolve.OpenEvolveRunner._init_controller"
+        ) as mock_init:
 
             def set_controller() -> None:
                 runner._controller = mock_controller
@@ -101,6 +103,41 @@ class TestOpenEvolveRunner:
         assert call_kwargs[1]["checkpoint_path"] == str(checkpoint)
         assert isinstance(result, RunOutput)
         assert result.best_score == pytest.approx(0.8)
+
+    def _runner_with_mock_controller(self, tmp_path: Path) -> OpenEvolveRunner:
+        mock_controller = MagicMock()
+        mock_controller.run = AsyncMock(return_value=0.5)
+        runner = OpenEvolveRunner(
+            initial_program=tmp_path / "prog.py",
+            evaluator=tmp_path / "eval.py",
+            config={},
+            output_dir=tmp_path / "output",
+        )
+        runner._controller = mock_controller
+        return runner
+
+    def test_pythonunbuffered_restored_when_absent(self, tmp_path: Path) -> None:
+        """run() leaves PYTHONUNBUFFERED unset when it was absent (S15-15)."""
+        original = os.environ.pop("PYTHONUNBUFFERED", None)
+        try:
+            self._runner_with_mock_controller(tmp_path).run(iterations=1)
+            assert "PYTHONUNBUFFERED" not in os.environ
+        finally:
+            if original is not None:
+                os.environ["PYTHONUNBUFFERED"] = original
+
+    def test_pythonunbuffered_restored_to_prior_value(self, tmp_path: Path) -> None:
+        """run() restores the caller's prior PYTHONUNBUFFERED value (S15-15)."""
+        original = os.environ.get("PYTHONUNBUFFERED")
+        os.environ["PYTHONUNBUFFERED"] = "0"
+        try:
+            self._runner_with_mock_controller(tmp_path).run(iterations=1)
+            assert os.environ["PYTHONUNBUFFERED"] == "0"
+        finally:
+            if original is None:
+                os.environ.pop("PYTHONUNBUFFERED", None)
+            else:
+                os.environ["PYTHONUNBUFFERED"] = original
 
     def test_run_openevolve_not_installed(self, tmp_path: Path) -> None:
         """ExternalError raised when openevolve is not importable."""

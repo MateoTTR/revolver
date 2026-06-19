@@ -1270,10 +1270,11 @@ class ShinkaBackend:
         job_section = dict(config.get("job_config") or {})
 
         # Ensure unbuffered output for real-time progress (S8a-09); this
-        # affects the evaluation jobs the engine spawns.
-        os.environ["PYTHONUNBUFFERED"] = "1"
-
+        # affects the evaluation jobs the engine spawns. Carried inside the
+        # revolver_env block so the caller's PYTHONUNBUFFERED is restored on
+        # exit (S15-15) — the env mutation must not leak past the run.
         exports = self._env_exports(config)
+        exports["PYTHONUNBUFFERED"] = "1"
         try:
             with revolver_env(exports):
                 runner = runner_cls(

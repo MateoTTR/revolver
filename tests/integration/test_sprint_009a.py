@@ -21,7 +21,7 @@ import pytest
 from typer.testing import CliRunner
 
 from revolver.cli import app
-from revolver.infra.openevolve import (
+from revolver.infra.backends.openevolve import (
     build_config,
     find_latest_checkpoint,
     validate_oe_config,
@@ -413,8 +413,8 @@ def _invoke_with_mocks(
     mock_proxy: MagicMock | None = None,
 ) -> object:
     """Invoke CLI with mocked OpenEvolveRunner, TokenCountingProxy, and global DB."""
+    from revolver.infra.backends.openevolve import RunOutput
     from revolver.infra.db import get_global_db_at
-    from revolver.infra.openevolve import RunOutput
     from revolver.infra.token_proxy import TokenUsage as ProxyTokenUsage
 
     if mock_runner is None:

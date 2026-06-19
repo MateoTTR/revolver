@@ -18,8 +18,8 @@ from typer.testing import CliRunner
 
 from revolver.cli import app
 from revolver.core.run import get_population
+from revolver.infra.backends.openevolve import parse_population, read_checkpoint_best_score
 from revolver.infra.db import get_project_db, insert_run
-from revolver.infra.openevolve import parse_population, read_checkpoint_best_score
 from revolver.infra.store import REVOLVER_DIR, init_project_store
 
 runner = CliRunner()

@@ -23,13 +23,13 @@ from typer.testing import CliRunner
 
 from revolver.cli import app
 from revolver.core.project import init_project
+from revolver.infra.backends.openevolve import RunOutput
 from revolver.infra.db import (
     add_ensemble_member,
     get_global_db_at,
     get_project_db,
     insert_ensemble,
 )
-from revolver.infra.openevolve import RunOutput
 from revolver.infra.store import REVOLVER_DIR
 from revolver.infra.token_proxy import TokenUsage as ProxyTokenUsage
 

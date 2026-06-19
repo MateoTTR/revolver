@@ -90,7 +90,7 @@ class RunOutput:
 
 # NOTE: ProgressInfo moved to revolver.infra.backends.base (ADR-007 D1) —
 # it is part of the backend-neutral interface vocabulary. Re-exported here
-# (and via the revolver.infra.openevolve shim) for compatibility.
+# for compatibility.
 
 
 # ── Known misplaced database keys ─────────────────────────────────────────────
@@ -301,26 +301,27 @@ class OpenEvolveRunner:
         if self._controller is None:
             self._init_controller()
 
-        # Ensure unbuffered output for real-time progress (S8a-09).
-        # This affects any child processes OpenEvolve may spawn.
-        os.environ["PYTHONUNBUFFERED"] = "1"
-
-        try:
-            checkpoint_str = str(checkpoint) if checkpoint else None
-            best = asyncio.run(
-                self._controller.run(
-                    iterations=iterations,
-                    checkpoint_path=checkpoint_str,
+        # Ensure unbuffered output for real-time progress (S8a-09); this
+        # affects any child processes OpenEvolve may spawn. Scoped through
+        # revolver_env so the caller's PYTHONUNBUFFERED is restored on exit
+        # (S15-15) — the env mutation must not leak past the run.
+        with revolver_env({"PYTHONUNBUFFERED": "1"}):
+            try:
+                checkpoint_str = str(checkpoint) if checkpoint else None
+                best = asyncio.run(
+                    self._controller.run(
+                        iterations=iterations,
+                        checkpoint_path=checkpoint_str,
+                    )
                 )
-            )
-            best_score = _extract_best_score(best)
-            return RunOutput(
-                best_score=best_score,
-                best_program=best,
-                output_dir=self.output_dir,
-            )
-        except Exception as exc:
-            raise ExternalError(f"OpenEvolve run failed: {exc}") from exc
+                best_score = _extract_best_score(best)
+                return RunOutput(
+                    best_score=best_score,
+                    best_program=best,
+                    output_dir=self.output_dir,
+                )
+            except Exception as exc:
+                raise ExternalError(f"OpenEvolve run failed: {exc}") from exc
 
 
 # ── Config builder (DES-005 §4.2) ────────────────────────────────────────────
@@ -1242,8 +1243,8 @@ class OpenEvolveBackend:
     Mechanical wrapping of the module-level functions above behind the
     protocol defined in :mod:`revolver.infra.backends.base`. Since the
     orchestration switch (S13 PR-C), ``core.run`` drives evolution through
-    this adapter; the ``revolver.infra.openevolve`` shim remains only for
-    pre-existing imports (removal in S15).
+    this adapter (the deprecated ``revolver.infra.openevolve`` re-export
+    shim was removed in S15).
     """
 
     name: str = "openevolve"
@@ -1365,10 +1366,16 @@ class OpenEvolveBackend:
         _run_dir, initial_program, evaluator, output_dir = self._runner_inputs(spec)
         output_dir.mkdir(exist_ok=True)
         config["output_dir"] = str(output_dir)
-        # Defensive only: the orchestrator resolves iterations into
-        # spec.iterations before calling (single owner — core.run, S14-05);
-        # keep this fallback aligned with core.run.DEFAULT_ITERATIONS.
-        iterations = spec.iterations or config.get("max_iterations", 10)
+        # Iterations are resolved by the single owner (core.run, S14-05),
+        # which defaults to core.run.DEFAULT_ITERATIONS, into spec.iterations
+        # before this call. The dead engine-config fallback was removed in
+        # S15-16; guard the contract instead of silently defaulting.
+        if spec.iterations is None:  # pragma: no cover - core.run guarantees it
+            raise ValidationError(
+                "BackendRunSpec.iterations must be resolved before launch "
+                "(core.run is the single owner — S14-05)."
+            )
+        iterations = spec.iterations
         runner = OpenEvolveRunner(
             initial_program=initial_program,
             evaluator=evaluator,
@@ -1419,10 +1426,16 @@ class OpenEvolveBackend:
 
         output_dir.mkdir(exist_ok=True)
         config["output_dir"] = str(output_dir)
-        # Defensive only: the orchestrator resolves iterations into
-        # spec.iterations before calling (single owner — core.run, S14-05);
-        # keep this fallback aligned with core.run.DEFAULT_ITERATIONS.
-        iterations = spec.iterations or config.get("max_iterations", 10)
+        # Iterations are resolved by the single owner (core.run, S14-05),
+        # which defaults to core.run.DEFAULT_ITERATIONS, into spec.iterations
+        # before this call. The dead engine-config fallback was removed in
+        # S15-16; guard the contract instead of silently defaulting.
+        if spec.iterations is None:  # pragma: no cover - core.run guarantees it
+            raise ValidationError(
+                "BackendRunSpec.iterations must be resolved before launch "
+                "(core.run is the single owner — S14-05)."
+            )
+        iterations = spec.iterations
         runner = OpenEvolveRunner(
             initial_program=initial_program,
             evaluator=evaluator,
