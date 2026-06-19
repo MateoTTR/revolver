@@ -174,7 +174,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1240+ tests, ~25s; L3 e2e tests are deselected by default — run with -m e2e)
+# Run tests (1270+ tests, ~25s; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
@@ -213,6 +213,7 @@ mypy
 | Hotfix | Typer/click dependency drift + CI conda runner | v0.12.1 | Done |
 | Sprint 013 | Backend abstraction (ADR-007): pluggable evolution backend | v0.13.0 | Done |
 | Sprint 014 | ShinkaEvolve MVP: real `--backend shinka` end-to-end, `[shinka]` extra | v0.14.0 | Done |
+| Sprint 015 | Thinking-model usability, token honesty (cost removed), slow-local-endpoint timeout, shim cleanup | v0.15.0 | Done |
 
 ## Documentation
 
