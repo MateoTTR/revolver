@@ -11,6 +11,8 @@ but a few have significant impact on optimization quality and cost. This guide
 focuses on the parameters you are most likely to tune through `revolver run`
 flags and `--config-override`.
 
+> **Backend scope**: this guide applies to the default **OpenEvolve** backend. The ShinkaEvolve backend (`--backend shinka`) uses a different `config.yaml` shape (`evo_config`/`db_config`/`job_config`) — these keys and overrides do not apply there; a dedicated Shinka tuning guide is planned (S15).
+
 **Key principle**: OpenEvolve is an *evolutionary* system. It needs enough
 iterations to explore, diversify, and converge. Tuning the parameters below
 determines the balance between exploration breadth, exploitation depth, and
@@ -237,6 +239,58 @@ Temperature is resolved with last-wins semantics:
 models. Local models (7B-22B parameters) produce more formatting errors at
 high temperatures, so keeping temperature moderate helps maintain a usable
 valid-diff rate.
+
+---
+
+## Slow local endpoints & request timeout
+
+On the **OpenEvolve** backend, every LLM call is routed through Revolver's
+HTTP `TokenCountingProxy` (token accounting). OpenEvolve's own OpenAI client
+defaults to a **60-second** request timeout. A slow local endpoint — for
+example the `claude-ollama-bridge` exposing a Claude subscription, where a
+single call can take 50–530 s — therefore aborts at 60 s, triggers a retry
+storm, and ultimately fails with a proxy `BrokenPipeError` (the late upstream
+response is written into an already-closed connection).
+
+**Default behavior (#307)**: when an OpenEvolve run uses an LLM registered
+with `--source local` and **no explicit `--timeout`**, Revolver raises the
+injected `llm.timeout` to **600 s** so slow local endpoints survive. Remote
+API models keep OpenEvolve's 60-s default (they are fast and a long hang is
+better surfaced as an error).
+
+Precedence (last wins): OpenEvolve default → Revolver's 600 s local default →
+the LLM entry's `--timeout` → `--config-override llm.timeout=…`.
+
+```bash
+# Override the per-call timeout on a slow local endpoint explicitly:
+revolver llm update my-bridge --timeout 600
+
+# Or for a single run, via config override:
+revolver run --version v1.0 --llm my-bridge --dataset train \
+  --config-override llm.timeout=900
+```
+
+> Note: this applies to the OpenEvolve path only. The **ShinkaEvolve**
+> backend does not use the HTTP proxy (it reads `programs.sqlite`), so the
+> 60-s trap does not apply there.
+
+---
+
+## Token accounting (and why there is no cost figure)
+
+`run info` reports a prompt / completion / total **token** breakdown, but
+**no cost** (#300). The breakdown counts the LLM responses recorded for
+stored programs only:
+
+- **Retry and failed-attempt tokens are not counted.** Both engines keep
+  only the last response per program; intermediate retries are not summed.
+- **Reasoning / thinking tokens are not counted.** Thinking-capable models
+  (e.g. Gemini, Claude) bill large hidden reasoning-token totals that the
+  engines never persist to disk — so they are unrecoverable for reporting.
+
+Cost was removed because no realistic figure is reachable from the persisted
+data and API pricing drifts. For thinking-model spend, **watch the provider
+console** rather than relying on Revolver's token counts.
 
 ---
 

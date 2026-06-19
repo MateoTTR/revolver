@@ -65,22 +65,14 @@ Run completed: run-20260310-143000
   200 iterations in 3h45m
   Solution: sol-20260310-143000 (rank #1, alias: claude-small-v1.1)
   Best combined_score: 0.91
-  Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
+  Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
-  Estimated cost: $5.65 (based on claude-opus pricing)
   Stored in: .revolver/runs/run-20260310-143000/
 ```
 
-**Output** (human, on completion — local LLM, no pricing):
-```
-Run completed: run-20260310-143000
-  100 iterations in 1h30m
-  Solution: sol-20260310-143000 (rank #1, alias: codestral-v1.0)
-  Best combined_score: 0.74
-  Programs stored: 5 (use `run info` to inspect, `solution extract` to promote)
-  Tokens: 890,000 prompt + 215,000 completion = 1,105,000 total
-  Stored in: .revolver/runs/run-20260310-143000/
-```
+Cost is not reported (S15 / #300): no realistic figure is reachable since
+the engines do not persist per-attempt or reasoning/thinking tokens. Token
+counts cover stored programs only.
 
 **Output** (JSON, on completion):
 ```json
@@ -95,8 +87,7 @@ Run completed: run-20260310-143000
   "token_usage": {
     "prompt_tokens": 1245000,
     "completion_tokens": 328000,
-    "total_tokens": 1573000,
-    "estimated_cost_usd": 5.65
+    "total_tokens": 1573000
   },
   "solution": {
     "solution_id": "sol-20260310-143000",
@@ -192,7 +183,8 @@ Run: run-20260310-143000
   Iterations: 200
   Generation time: 3h45m
   Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
-  Estimated cost: $5.65
+  Note: token counts cover stored programs only; retry/failed-attempt and
+  reasoning/thinking tokens are not counted — watch the provider console.
   Resumed from: —
   Directory: .revolver/runs/run-20260310-143000/
 
@@ -298,9 +290,9 @@ Deleted run "run-20260310-143000"
 | FR-RUN-023 | MUST | `--dry-run` validates all inputs and displays the resolved config (neutral fields + backend extras) without launching | ADR-007 D4 |
 | FR-RUN-024 | MUST | Resume reuses the parent run's wrapper evaluator (no regeneration) and backend resume state; the resume mechanism is backend-defined (OpenEvolve: copy checkpoint; ShinkaEvolve: reuse results DB) | ADR-007 |
 | FR-RUN-025 | SHOULD | Per-run lock files in `.revolver/runs/locks/` enable concurrent run tracking | §3.3 |
-| FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run. The accounting source is backend-defined: HTTP response interception (OpenEvolve) or the engine's native per-program accounting (ShinkaEvolve) — token-primary on all backends (ADR-007 D2) | §4.6, POC #13 |
-| FR-RUN-029 | SHOULD | Display token usage in run completion output and `run info` | §4.6 |
-| FR-RUN-030 | SHOULD | Estimate cost from token usage and optional LLM pricing (if configured). Display in run output when pricing is available. On backends with native cost tracking (ShinkaEvolve), report the native USD cost as a supplementary field (ADR-007 D2) | §4.6, POC #13 |
+| FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run. The accounting source is backend-defined: HTTP response interception (OpenEvolve) or the engine's native per-program accounting (ShinkaEvolve) — token-primary on all backends (ADR-007 D2). Counts cover **stored programs only**: retry/failed-attempt and reasoning/thinking tokens are not counted (the engines do not persist them — S15 / #300) | §4.6, POC #13 |
+| FR-RUN-029 | SHOULD | Display token usage (prompt/completion/total breakdown) in run completion output and `run info`, with a caveat that retry and reasoning/thinking tokens are not counted | §4.6 |
+| FR-RUN-030 | ~~SHOULD~~ | **Removed (S15 / #300).** Cost estimation was dropped from reported output: no realistic figure is reachable since the engines never persist per-attempt or reasoning/thinking tokens (verified by the session-051 spike). The `estimate_cost()` helper and the LLM `--input-cost`/`--output-cost` pricing fields are left inert for one release (removal + DB migration → S16) | §4.6, POC #13 |
 | FR-RUN-031 | MUST | If the evolution backend throws an exception during execution, run status is set to `failed` in DB, `run-error.log` is written to the run directory, and the lock file is removed | — |
 | FR-RUN-032 | MUST | Post-processing errors are logged to `run-error.log` in the run directory | — |
 | FR-RUN-033 | MUST | `solution extract` accepts runs with status `completed_with_errors` if the program file exists | — |
@@ -361,8 +353,7 @@ iterations: 200
 token_usage:
   prompt_tokens: 1245000
   completion_tokens: 328000
-  total_tokens: 1573000
-  estimated_cost_usd: 5.65      # null if no pricing configured
+  total_tokens: 1573000          # cost not reported (S15 / #300)
 
 lineage:
   problem_version: "v1.1"

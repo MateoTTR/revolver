@@ -1,8 +1,7 @@
 """Tests for the evolution backend abstraction (S13 PR-A, ADR-007).
 
 Covers the ``get_backend()`` factory, the ``OpenEvolveBackend`` adapter
-delegation, the ``ShinkaBackend`` stub, and the ``revolver.infra.openevolve``
-re-export shim.
+delegation, and the ``ShinkaBackend`` stub.
 """
 
 from __future__ import annotations
@@ -163,6 +162,10 @@ class TestOpenEvolveBackendCapabilities:
         """No engine-native token accounting — proxy stays in core.run."""
         assert OpenEvolveBackend().collect_token_usage(Path("/nonexistent")) is None
 
+    def test_count_evolved_children_returns_none(self) -> None:
+        """OE cannot tell seeds from children → unproductive check skipped (#302)."""
+        assert OpenEvolveBackend().count_evolved_children(Path("/nonexistent")) is None
+
     def test_is_available_reflects_package_presence(self) -> None:
         """is_available() reports the openevolve package install state."""
         available, hint = OpenEvolveBackend().is_available()
@@ -272,7 +275,8 @@ class TestOpenEvolveBackendLaunch:
 
     def test_launch_runs_openevolve_and_maps_result(self, tmp_path: Path) -> None:
         """launch() drives OpenEvolveRunner and maps RunOutput."""
-        spec = _make_spec(tmp_path)
+        # iterations resolved by core.run into spec.iterations (S14-05/S15-16)
+        spec = _make_spec(tmp_path, iterations=3)
         config: dict[str, Any] = {"max_iterations": 3}
         output_dir = spec.run_dir / "oe-output"  # type: ignore[operator]
 
@@ -318,7 +322,8 @@ class TestOpenEvolveBackendLaunch:
         parent_run_dir = tmp_path / "parent"
         parent_run_dir.mkdir()
         _write_checkpoint(parent_run_dir, n=5)
-        spec = _make_spec(tmp_path)
+        # iterations resolved by core.run into spec.iterations (S14-05/S15-16)
+        spec = _make_spec(tmp_path, iterations=4)
         staged = spec.run_dir / "oe-checkpoint"  # type: ignore[operator]
 
         with patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_runner_cls:
@@ -336,7 +341,8 @@ class TestOpenEvolveBackendLaunch:
         """resume() leaves an already-staged oe-checkpoint untouched."""
         parent_run_dir = tmp_path / "parent"
         parent_run_dir.mkdir()
-        spec = _make_spec(tmp_path)
+        # iterations resolved by core.run into spec.iterations (S14-05/S15-16)
+        spec = _make_spec(tmp_path, iterations=7)
         staged = spec.run_dir / "oe-checkpoint"  # type: ignore[operator]
         staged.mkdir()
         (staged / "marker.txt").write_text("staged")
@@ -476,42 +482,3 @@ class TestShinkaBackendAvailability:
         assert backend.parse_population(tmp_path) is None
         assert backend.count_valid(tmp_path) is None
         assert backend.collect_token_usage(tmp_path) is None
-
-
-# ── Re-export shim tests ──────────────────────────────────────────────────────
-
-
-class TestOpenEvolveReexportShim:
-    """The deprecated revolver.infra.openevolve shim keeps old imports working."""
-
-    def test_public_names_resolve_to_backend_module(self) -> None:
-        """Every name in the shim's __all__ is the backends.openevolve object."""
-        from revolver.infra import openevolve as shim
-        from revolver.infra.backends import openevolve as impl
-
-        for name in shim.__all__:
-            assert getattr(shim, name) is getattr(impl, name), name
-
-    def test_legacy_imports_still_work(self) -> None:
-        """Existing import style (incl. private helpers) keeps working."""
-        from revolver.infra.openevolve import (
-            SYSTEM_PROMPT_TEMPLATE,
-            OpenEvolveRunner,
-            RunOutput,
-            _extract_best_score,
-            _parse_value,
-            build_config,
-            resolve_api_keys,
-            revolver_env,
-            validate_oe_config,
-        )
-
-        assert callable(build_config)
-        assert callable(resolve_api_keys)
-        assert callable(validate_oe_config)
-        assert callable(_extract_best_score)
-        assert _parse_value("42") == 42
-        assert "{problem_description}" in SYSTEM_PROMPT_TEMPLATE
-        assert OpenEvolveRunner is not None
-        assert RunOutput is not None
-        assert revolver_env is not None

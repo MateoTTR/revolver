@@ -161,7 +161,10 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-027 | SHOULD | DES-005 | L1 | `unit/core/test_run::test_sets_eval_log_env` | Planned |
 | FR-RUN-028 | SHOULD | DES-005 §4.5, DD-14 | L1 | `unit/infra/test_token_proxy::test_captures_tokens` | Implemented |
 | FR-RUN-029 | SHOULD | DES-005 §4.5 | L2 | `integration/test_run::test_run_with_token_usage` | Implemented |
-| FR-RUN-030 | SHOULD | DES-005 §4.5 | L1 | `unit/infra/test_token_proxy::test_with_pricing` | Implemented |
+| FR-RUN-029 | SHOULD | DES-005 §4.5 | L2 | `integration/test_run::test_run_info_token_caveat` | Implemented (S15 caveat #300) |
+| FR-RUN-030 | ~~SHOULD~~ | DES-005 §4.5 | — | — | Removed (S15 / #300) — `estimate_cost()` inert, removal + DB migration → S16 |
+| #307 (no FR) | bug-fix | DES-005 §4.5, tuning guide | L1 | `test_llm_config::test_build_config_local_default_timeout` (+3 variants) | Implemented (S15) — `--source local` default LLM timeout |
+| Scope F (no FR) | infra | DES-005 §env | L1 | `unit/infra/test_openevolve::test_pythonunbuffered_restored_when_absent` (+ prior-value) | Implemented (S15) — PYTHONUNBUFFERED restore |
 | FR-RUN-001 | MUST | DES-005 §2.1 | L1 | `test_core_run::test_preflight_check_pass` | Implemented |
 | FR-RUN-001 | MUST | DES-005 §2.1 | L1 | `test_core_run::test_preflight_check_evaluator_crash` | Implemented |
 | FR-RUN-001 | MUST | DES-005 §2.1 | L1 | `test_core_run::test_preflight_check_timeout` | Implemented |
@@ -374,7 +377,7 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | E2E Scenario | FRs Covered | Status |
 |---|---|---|
 | **Scenario 1 — Alice / Job-Shop** | FR-SET-001..005, FR-LLM-001..010, FR-PRJ-001..006, FR-PRB-001..009, FR-DAT-001..007, FR-RUN-001..012, FR-SOL-001..008, FR-EVL-001..007, FR-BEN-001..009 | Planned |
-| **Scenario 2 — Remote-Only (TBD)** | FR-LLM-001/015/017/018, FR-RUN-015/028..030, NFR-043 | Planned |
+| **Scenario 2 — Remote-Only (TBD)** | FR-LLM-001/015/017/018, FR-RUN-015/028/029, NFR-043 | Planned |
 
 ---
 
@@ -386,16 +389,17 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-llm | 25 | 16 | 9 | 0 | 4 | 15 | via Sc.1 | 6 |
 | spec-problem | 15 | 10 | 4 | 1 | 1 | 10 | via Sc.1 | 3 |
 | spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
-| spec-run | 54 | 41 | 11 | 0 | 30 | 16 | via Sc.1 | 6 |
+| spec-run | 53 | 41 | 10 | 0 | 30 | 17 | via Sc.1 | 6 |
 | spec-eval | 23 | 17 | 3 | 1 | 7 | 9 | via Sc.1 | 5 (incl. 1 deferred) |
 | spec-solution | 20 | 18 | 2 | 0 | 2 | 16 | via Sc.1 | 2 |
 | spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
 | NFR (direct) | 28 | 19 | 9 | 0 | 6 | 12 | — | 5 (3 perf manual + 2 planned) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **239** | **172** | **56** | **2** | **73** | **133** | **3 scenarios (1 planned)** | **28** |
+| **Total** | **238** | **172** | **55** | **2** | **73** | **134** | **3 scenarios (1 planned)** | **28** |
 
 Notes:
+- FR-RUN-030 (cost estimation) was **removed in S15 (#300)**: cost is no longer reported; `estimate_cost()` and the LLM pricing fields are inert pending removal in S16. The spec-run and Total rows are decremented accordingly. S15 also added non-FR test rows for the token caveat (FR-RUN-029), the `--source local` default timeout (#307), and the PYTHONUNBUFFERED restore (Scope F).
 - Run delete (FR-RUN-035) adds 11 new test entries covering DB layer, core logic, CLI, and edge cases.
 - Benchmark delete (FR-BEN-018) adds 3 new test entries covering confirmation, nonexistent, and force delete.
 - Many FR-level tests cover multiple requirements. The total counts distinct test assignments (some FRs have both L1 and L2 tests).

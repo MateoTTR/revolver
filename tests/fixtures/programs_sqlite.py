@@ -265,8 +265,9 @@ FIXTURE_PROGRAM_ROWS: tuple[dict[str, Any], ...] = (
 
 # ── Expected aggregates over FIXTURE_PROGRAM_ROWS (contract constants) ────────
 
-#: Sum of top-level ``metadata.api_costs`` across all rows (USD, canonical).
-EXPECTED_COST_USD = 0.0 + 0.012 + 0.008 + 0.021 + 0.005
+# Note: the fixture rows still carry ``metadata.api_costs`` (real 0.0.7
+# shape), but Revolver no longer reports cost (S15 / #300), so there is no
+# EXPECTED_COST_USD aggregate.
 
 #: Sum of ``metadata.llm_result.input_tokens`` (rows without an
 #: ``llm_result`` key or with a NULL ``metadata`` column count 0).
@@ -279,6 +280,11 @@ EXPECTED_COMPLETION_TOKENS = (340 + 0) + (210 + 64) + (480 + 128) + (0 + 0)
 
 #: Number of rows with ``correct = 1``.
 EXPECTED_VALID_COUNT = 3
+
+#: Number of evolved children — rows carrying a ``metadata.llm_result`` dict
+#: (the file-based init seed and the NULL-metadata row are excluded). Used by
+#: the unproductive-run check (#302): ``count_evolved_children``.
+EXPECTED_CHILDREN_COUNT = 4
 
 #: ``(last_generation, best_combined_score)`` for read_progress().
 EXPECTED_LAST_GENERATION = 2

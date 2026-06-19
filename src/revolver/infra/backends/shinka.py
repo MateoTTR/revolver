@@ -92,6 +92,17 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # top-N extraction (capabilities().top_n_extraction) is an S15 extension.
 _BEST_PROGRAMS_COUNT = 1
 
+# Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
+# ShinkaEvolve's own defaults are tuned for cheap non-thinking models and
+# silently break thinking-capable ones:
+#   - llm_kwargs.max_tokens defaults to 4096 → thinking models exhaust the
+#     budget on reasoning and return ``None`` content (revolver task #120);
+#     ShinkaEvolve's example configs use 16384.
+#   - EvolutionConfig.max_patch_attempts defaults to 1 → a single malformed
+#     patch loses the whole generation; ShinkaEvolve's examples use 10.
+_SHINKA_DEFAULT_MAX_TOKENS = 16384
+_SHINKA_DEFAULT_MAX_PATCH_ATTEMPTS = 10
+
 # Default env var name synthesized for local OpenAI-compatible endpoints
 # when the registry entry has no api_key_env (ADR-007 D5). launch()
 # exports a placeholder value when this variable is unset — Shinka
@@ -155,6 +166,21 @@ evo_config:
   language: python
   # Hard cap on LLM API spend in USD (null = no cap).
   max_api_costs: null
+  # Max LLM patch attempts per generation before giving up. Shinka's own
+  # default is 1 → one malformed patch loses the generation. Revolver
+  # defaults to 10 (matches ShinkaEvolve's example configs).
+  max_patch_attempts: 10
+  # Per-query LLM sampling settings (ShinkaEvolve llm_kwargs).
+  llm_kwargs:
+    # Output token budget. Revolver defaults to 16384 (Shinka's 4096 starves
+    # thinking-capable models, which then return empty content). Raising this
+    # increases thinking-token spend.
+    max_tokens: 16384
+    # Reasoning effort for thinking-capable models — the primary cost lever
+    # (lower effort = fewer billed thinking tokens). Provider-specific values
+    # (e.g. "low"/"medium"/"high"); leave unset for the provider default.
+    # Uncomment to control thinking-token spend:
+    # reasoning_efforts: low
 
 db_config:
   # Number of evolution islands.
@@ -607,8 +633,16 @@ class ShinkaBackend:
         temperature = spec.temperature if spec.temperature is not None else spec.llm.temperature
         if temperature is not None:
             llm_kwargs["temperatures"] = [temperature]
-        if spec.llm.max_tokens is not None:
-            llm_kwargs.setdefault("max_tokens", spec.llm.max_tokens)
+        # B (#301/S15-06): always set max_tokens — prefer the registered
+        # LLMEntry value, else default to 16384 (Shinka's 4096 default
+        # starves thinking models). An explicit config.yaml
+        # llm_kwargs.max_tokens still wins (setdefault). Raising max_tokens
+        # inflates thinking-token spend — reasoning_efforts (see the config
+        # template) is the cost lever.
+        default_max_tokens = (
+            spec.llm.max_tokens if spec.llm.max_tokens is not None else _SHINKA_DEFAULT_MAX_TOKENS
+        )
+        llm_kwargs.setdefault("max_tokens", default_max_tokens)
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
 
@@ -638,6 +672,12 @@ class ShinkaBackend:
         elif "patch_types" not in evo:
             evo["patch_types"] = ["diff", "full"]
             evo.setdefault("patch_type_probs", [0.6, 0.4])
+
+        # B (#301/S15-05): default max_patch_attempts to 10. Shinka's own
+        # default of 1 loses a whole generation on a single malformed patch
+        # (the dominant cheap-model failure mode). An explicit config.yaml
+        # value or --config-override (applied last) still wins.
+        evo.setdefault("max_patch_attempts", _SHINKA_DEFAULT_MAX_PATCH_ATTEMPTS)
 
         # Fixed S14 MVP projections
         evo["language"] = "python"
@@ -697,16 +737,33 @@ class ShinkaBackend:
         # Single global temperature only when unambiguous (Shinka uses a
         # per-query temperatures list in llm_kwargs).
         temperature: float | None = None
+        max_tokens: Any = None
+        reasoning_efforts: Any = None
         llm_kwargs = evo.get("llm_kwargs")
         if isinstance(llm_kwargs, dict):
             temps = llm_kwargs.get("temperatures")
             if isinstance(temps, list) and len(temps) == 1 and isinstance(temps[0], int | float):
                 temperature = float(temps[0])
+            max_tokens = llm_kwargs.get("max_tokens")
+            # Surface reasoning_efforts only when meaningfully set (not the
+            # Shinka "" default), so a plain run's dry-run stays uncluttered.
+            # The value may legitimately be list-valued (Shinka accepts
+            # Union[List[str], str]) — keep the membership check, do not
+            # narrow it to a string-only test.
+            # NOTE: a misspelled nested key (e.g. ``reasoning_effort``) lands
+            # silently in llm_kwargs and Shinka ignores it; validating known
+            # llm_kwargs keys is the deferred Scope G concern (S15-23 → S16).
+            effort = llm_kwargs.get("reasoning_efforts")
+            if effort not in (None, "", []):
+                reasoning_efforts = effort
 
         backend_extras: dict[str, Any] = {}
         for key, value in (
             ("patch_types", evo.get("patch_types")),
             ("llm_dynamic_selection", evo.get("llm_dynamic_selection")),
+            ("max_patch_attempts", evo.get("max_patch_attempts")),
+            ("max_tokens", max_tokens),
+            ("reasoning_efforts", reasoning_efforts),
             ("max_api_costs", evo.get("max_api_costs")),
             ("embedding_model", evo.get("embedding_model")),
             ("archive_size", db.get("archive_size")),
@@ -995,24 +1052,59 @@ class ShinkaBackend:
             return None
         return int(row[0]) if row is not None else None
 
+    def count_evolved_children(self, run_dir: Path) -> int | None:
+        """Count evolved children (programs carrying an ``llm_result``).
+
+        Initial seed programs are stored with ``metadata.llm_result`` null
+        (no LLM call produced them); each evolved child carries the full
+        ``QueryResult`` dict. A return of ``0`` after the engine completes
+        means the run was unproductive (backlog #302, S15-09). Returns
+        ``None`` when the database is absent or unreadable.
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT metadata FROM programs").fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+        children = 0
+        for (metadata_json,) in rows:
+            if not metadata_json:
+                continue
+            try:
+                metadata = json.loads(metadata_json)
+            except ValueError:
+                continue
+            if isinstance(metadata, dict) and isinstance(metadata.get("llm_result"), dict):
+                children += 1
+        return children
+
     def collect_token_usage(self, run_dir: Path) -> TokenUsage | None:
-        """Collect engine-native token/cost accounting (ADR-007 D2, S14-11).
+        """Collect engine-native token accounting (ADR-007 D2, S14-11).
 
         Sums, across all rows of the ``programs`` table (verified
         shinka-evolve 0.0.7 schema — sprint-014 §"Verified schema facts"):
 
-        - USD cost from the top-level ``metadata.api_costs`` key
-          (canonical: includes retry attempts);
         - prompt tokens from ``metadata.llm_result.input_tokens``;
         - completion tokens as ``metadata.llm_result.output_tokens`` +
           ``metadata.llm_result.thinking_tokens`` (the sum equals the
           total completion-side token count across all 0.0.7 providers).
 
+        Cost is intentionally not collected (S15 / backlog #300): the
+        per-attempt and reasoning/thinking tokens are never persisted by
+        the engine, so no realistic cost figure is reachable. Token counts
+        cover stored programs only and slightly undercount retried
+        generations (``llm_result`` is the last response only) — retry/
+        failed-attempt and thinking tokens are not counted.
+
         ``llm_result`` may be absent or ``null`` (file-based init program,
         failed attempts) and the ``metadata`` column itself may be SQL
-        ``NULL`` — all fields are best-effort with default 0. Token counts
-        slightly undercount retried generations (``llm_result`` is the
-        last response only — acceptable per ADR-007 D2).
+        ``NULL`` — all fields are best-effort with default 0.
 
         Returns:
             The accumulated :class:`TokenUsage`, or ``None`` when the
@@ -1032,7 +1124,6 @@ class ShinkaBackend:
 
         prompt_tokens = 0
         completion_tokens = 0
-        cost_usd = 0.0
         for (metadata_json,) in rows:
             if not metadata_json:
                 continue
@@ -1042,7 +1133,6 @@ class ShinkaBackend:
                 continue
             if not isinstance(metadata, dict):
                 continue
-            cost_usd += _as_number(metadata.get("api_costs"))
             llm_result = metadata.get("llm_result")
             if isinstance(llm_result, dict):
                 prompt_tokens += int(_as_number(llm_result.get("input_tokens")))
@@ -1052,7 +1142,6 @@ class ShinkaBackend:
         return TokenUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            estimated_cost_usd=cost_usd,
         )
 
     # ── Engine-tier internals ─────────────────────────────────────────────────
@@ -1181,10 +1270,11 @@ class ShinkaBackend:
         job_section = dict(config.get("job_config") or {})
 
         # Ensure unbuffered output for real-time progress (S8a-09); this
-        # affects the evaluation jobs the engine spawns.
-        os.environ["PYTHONUNBUFFERED"] = "1"
-
+        # affects the evaluation jobs the engine spawns. Carried inside the
+        # revolver_env block so the caller's PYTHONUNBUFFERED is restored on
+        # exit (S15-15) — the env mutation must not leak past the run.
         exports = self._env_exports(config)
+        exports["PYTHONUNBUFFERED"] = "1"
         try:
             with revolver_env(exports):
                 runner = runner_cls(

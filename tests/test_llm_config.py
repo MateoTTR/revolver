@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from revolver.infra.backends.openevolve import DEFAULT_LOCAL_LLM_TIMEOUT_S, build_config
 from revolver.infra.db import get_global_db_at, get_llm, insert_llm, list_llms
-from revolver.infra.openevolve import build_config
 from revolver.models.llm import LLMEntry
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -175,6 +175,45 @@ def test_build_config_override_wins_over_llm_config() -> None:
     # Config overrides (step 5) should win over LLM config (step 2b)
     assert result["llm"]["max_tokens"] == 4096
     assert result["llm"]["timeout"] == 60
+
+
+# ── #307: slow-local-endpoint default timeout ────────────────────────────────
+
+
+@pytest.mark.unit
+def test_build_config_local_default_timeout() -> None:
+    """#307: a --source local LLM without explicit timeout gets the raised default."""
+    llm = _make_llm(source="local")
+    result = build_config(problem_config=None, llm=llm)
+    assert result["llm"]["timeout"] == DEFAULT_LOCAL_LLM_TIMEOUT_S
+
+
+@pytest.mark.unit
+def test_build_config_remote_no_default_timeout() -> None:
+    """#307: a remote LLM keeps OpenEvolve's own default (no timeout injected)."""
+    llm = _make_llm(source="remote")
+    result = build_config(problem_config=None, llm=llm)
+    assert "timeout" not in result.get("llm", {})
+
+
+@pytest.mark.unit
+def test_build_config_local_explicit_timeout_wins() -> None:
+    """#307: an explicit LLMEntry.timeout_s wins over the local default."""
+    llm = _make_llm(source="local", timeout_s=120)
+    result = build_config(problem_config=None, llm=llm)
+    assert result["llm"]["timeout"] == 120
+
+
+@pytest.mark.unit
+def test_build_config_local_timeout_override_wins() -> None:
+    """#307: --config-override llm.timeout=… still wins over the local default."""
+    llm = _make_llm(source="local")
+    result = build_config(
+        problem_config=None,
+        llm=llm,
+        config_overrides=["llm.timeout=45"],
+    )
+    assert result["llm"]["timeout"] == 45
 
 
 # ── DB migration test ────────────────────────────────────────────────────────

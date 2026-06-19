@@ -153,7 +153,7 @@ recorded end-to-end by default.
 | `run` | Dataset split=eval | Warning on stderr, run proceeds | FR-RUN-002 |
 | `run` | Dataset incompatible with version | Warning on stderr, run proceeds | FR-RUN-003 |
 | `run` | Completion with tokens | Token usage displayed, stored in DB | FR-RUN-028, 029 |
-| `run` | LLM has pricing set | Estimated cost displayed | FR-RUN-030 |
+| `run` | LLM has (now-inert) pricing set | Tokens displayed, **no cost** shown (S15 / #300) | FR-RUN-028, 029 |
 | `run` | Post-run eval on train set | Rank-1 program evaluated, results in DB | FR-RUN-019, 020 |
 | `run` (pre-flight) | Evaluator returns score > 0 on first instance | Pre-flight passes, run proceeds | FR-RUN-001 |
 | `run` (pre-flight) | Evaluator raises exception | Run aborts with RevolverError | FR-RUN-001 |
@@ -295,7 +295,7 @@ tests/fixtures/
 **Principles**:
 - Scenarios must be trivially fast (no real LLM, no real evolution)
 - Fixtures are committed to the repo and versioned with the tests
-- OpenEvolve is mocked at the `infra.openevolve` boundary — integration tests never run real evolution
+- OpenEvolve is mocked at the `infra.backends.openevolve` boundary — integration tests never run real evolution
 - Mock OpenEvolve returns deterministic program code and scores
 
 ---

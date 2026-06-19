@@ -11,7 +11,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // \"\"'); if echo \"$cmd\" | grep -q 'gh pr create'; then pr_url=$(echo \"$input\" | jq -r '.tool_result.stdout // \"\"' | grep -oE 'https://github.com/[^ ]+' | head -1); pr_num=$(echo \"$pr_url\" | grep -oE '[0-9]+$'); if [ -n \"$pr_num\" ]; then echo \"{\\\"decision\\\": \\\"approve\\\", \\\"reason\\\": \\\"PR created\\\", \\\"systemMessage\\\": \\\"PR #${pr_num} created. Launch the code-reviewer agent to review it: use the code-reviewer agent with prompt 'Review PR #${pr_num}' and post findings as a GitHub comment.\\\"}\"; else echo '{\"decision\": \"approve\"}'; fi; else echo '{\"decision\": \"approve\"}'; fi"
+            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // \"\"'); if echo \"$cmd\" | grep -q 'gh pr create'; then pr_num=$(echo \"$input\" | grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' | head -1 | grep -oE '[0-9]+$'); if [ -n \"$pr_num\" ]; then jq -cn --arg c \"PR #${pr_num} created. Launch the code-reviewer agent to review it: use the code-reviewer agent with prompt 'Review PR #${pr_num}' and post findings as a GitHub comment.\" '{decision:\"approve\",reason:\"PR created\",hookSpecificOutput:{hookEventName:\"PostToolUse\",additionalContext:$c}}'; else echo '{\"decision\":\"approve\"}'; fi; else echo '{\"decision\":\"approve\"}'; fi"
           }
         ]
       }

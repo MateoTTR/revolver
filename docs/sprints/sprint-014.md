@@ -306,4 +306,5 @@ The sprint is complete when ALL of the following hold:
 - Top-N extraction: `_BEST_PROGRAMS_COUNT = 1` mirrors OE's single best program; `capabilities().top_n_extraction` full support is S15.
 - `--config-override` typos on shinka warn at launch (`_dataclass_kwargs` drop) instead of failing at dry-run (review #196 S3).
 - Pre-existing S13 doc debts (unchanged): FR-RUN-042 numbering gap, FR-RUN-036..039 traceability rows, DES-005 title rename.
+- DES-005 still narrates the abandoned top-N on-demand promotion model (§ run dir layout ~966, §1246-1249: "rank-N.py files, others promoted via `solution extract`") — reality since S9-B2: single rank-1 materialized and auto-promoted, extract is rank-1 re-promotion only. User-facing docs (user-story, spec-run output examples, conops §4.1) were corrected post-v0.14.0; fold the DES-005 cleanup into its planned S15 rewrite.
 - `infra/openevolve.py` re-export shim removal (incl. `WRAPPER_FILENAME`, `count_valid_programs`, `generate_wrapper` aliases) — S15.
