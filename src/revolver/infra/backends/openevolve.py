@@ -114,6 +114,13 @@ _DATABASE_KEYS = frozenset(
 
 REVOLVER_KEYS = frozenset({"initial_program", "num_generations", "timeout_per_instance"})
 
+# Default LLM request timeout (seconds) injected for ``--source local``
+# endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
+# OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
+# endpoints (e.g. the claude-ollama-bridge at 50-530 s/call) -> a retry
+# storm and a proxy BrokenPipeError. Remote APIs keep OpenEvolve's default.
+DEFAULT_LOCAL_LLM_TIMEOUT_S = 600
+
 
 def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     """Validate a config dict or YAML file against the OpenEvolve Config schema.
@@ -507,6 +514,14 @@ def build_config(
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
             config["llm"]["timeout"] = llm.timeout_s
+    elif llm.source == "local":
+        # #307: a slow local endpoint aborts at OpenEvolve's 60 s OpenAI-client
+        # default. When the registered LLM has no explicit timeout, raise the
+        # default for --source local. setdefault respects a config.yaml
+        # llm.timeout, and --config-override llm.timeout=… (step 5) still wins.
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"].setdefault("timeout", DEFAULT_LOCAL_LLM_TIMEOUT_S)
     if llm.temperature is not None:
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
