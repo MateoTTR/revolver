@@ -1085,23 +1085,26 @@ class ShinkaBackend:
         return children
 
     def collect_token_usage(self, run_dir: Path) -> TokenUsage | None:
-        """Collect engine-native token/cost accounting (ADR-007 D2, S14-11).
+        """Collect engine-native token accounting (ADR-007 D2, S14-11).
 
         Sums, across all rows of the ``programs`` table (verified
         shinka-evolve 0.0.7 schema — sprint-014 §"Verified schema facts"):
 
-        - USD cost from the top-level ``metadata.api_costs`` key
-          (canonical: includes retry attempts);
         - prompt tokens from ``metadata.llm_result.input_tokens``;
         - completion tokens as ``metadata.llm_result.output_tokens`` +
           ``metadata.llm_result.thinking_tokens`` (the sum equals the
           total completion-side token count across all 0.0.7 providers).
 
+        Cost is intentionally not collected (S15 / backlog #300): the
+        per-attempt and reasoning/thinking tokens are never persisted by
+        the engine, so no realistic cost figure is reachable. Token counts
+        cover stored programs only and slightly undercount retried
+        generations (``llm_result`` is the last response only) — retry/
+        failed-attempt and thinking tokens are not counted.
+
         ``llm_result`` may be absent or ``null`` (file-based init program,
         failed attempts) and the ``metadata`` column itself may be SQL
-        ``NULL`` — all fields are best-effort with default 0. Token counts
-        slightly undercount retried generations (``llm_result`` is the
-        last response only — acceptable per ADR-007 D2).
+        ``NULL`` — all fields are best-effort with default 0.
 
         Returns:
             The accumulated :class:`TokenUsage`, or ``None`` when the
@@ -1121,7 +1124,6 @@ class ShinkaBackend:
 
         prompt_tokens = 0
         completion_tokens = 0
-        cost_usd = 0.0
         for (metadata_json,) in rows:
             if not metadata_json:
                 continue
@@ -1131,7 +1133,6 @@ class ShinkaBackend:
                 continue
             if not isinstance(metadata, dict):
                 continue
-            cost_usd += _as_number(metadata.get("api_costs"))
             llm_result = metadata.get("llm_result")
             if isinstance(llm_result, dict):
                 prompt_tokens += int(_as_number(llm_result.get("input_tokens")))
@@ -1141,7 +1142,6 @@ class ShinkaBackend:
         return TokenUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            estimated_cost_usd=cost_usd,
         )
 
     # ── Engine-tier internals ─────────────────────────────────────────────────
@@ -1270,10 +1270,11 @@ class ShinkaBackend:
         job_section = dict(config.get("job_config") or {})
 
         # Ensure unbuffered output for real-time progress (S8a-09); this
-        # affects the evaluation jobs the engine spawns.
-        os.environ["PYTHONUNBUFFERED"] = "1"
-
+        # affects the evaluation jobs the engine spawns. Carried inside the
+        # revolver_env block so the caller's PYTHONUNBUFFERED is restored on
+        # exit (S15-15) — the env mutation must not leak past the run.
         exports = self._env_exports(config)
+        exports["PYTHONUNBUFFERED"] = "1"
         try:
             with revolver_env(exports):
                 runner = runner_cls(

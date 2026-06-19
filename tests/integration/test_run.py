@@ -23,13 +23,13 @@ from typer.testing import CliRunner
 
 from revolver.cli import app
 from revolver.core.project import init_project
+from revolver.infra.backends.openevolve import RunOutput
 from revolver.infra.db import (
     add_ensemble_member,
     get_global_db_at,
     get_project_db,
     insert_ensemble,
 )
-from revolver.infra.openevolve import RunOutput
 from revolver.infra.store import REVOLVER_DIR
 from revolver.infra.token_proxy import TokenUsage as ProxyTokenUsage
 
@@ -595,16 +595,17 @@ def test_run_with_token_usage(project_with_prereqs: dict[str, Path]) -> None:
         conn.close()
 
 
-# ── Test 9: run — LLM has pricing → estimated cost displayed (FR-RUN-030) ──
+# ── Test 9: run — cost is never displayed, even with pricing (S15 / #300) ──
 
 
 @pytest.mark.integration
-def test_run_with_pricing(
+def test_run_pricing_no_cost_displayed(
     tmp_project: Path,
     dataset_dir: Path,
     global_db_path: Path,
 ) -> None:
-    """LLM with pricing: estimated cost displayed."""
+    """Cost is not reported (S15 / #300): tokens shown, no cost even when
+    the LLM carries (now inert) pricing fields."""
     _create_problem_version(tmp_project, "v1.0")
     _register_dataset(tmp_project, dataset_dir, compatible_with=["v1.0"])
     _register_llm(
@@ -637,9 +638,13 @@ def test_run_with_pricing(
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
 
-    # Verify estimated cost is displayed
-    # Expected: (1000 * 3.0 + 2000 * 15.0) / 1_000_000 = 0.033
-    assert "cost" in output.lower() or "$" in output
+    # Tokens are still shown ...
+    assert "1000" in output
+    assert "2000" in output
+    # ... but cost is never reported, even though priced-llm has pricing (#300).
+    assert "cost" not in output.lower()
+    assert "$" not in output
+    assert "estimated_cost" not in output
 
 
 # ── Test 10: run — post-run eval on train set (FR-RUN-019, 020) ─────────────
@@ -826,14 +831,72 @@ def test_run_info_full_details(project_with_prereqs: dict[str, Path]) -> None:
     assert "dataset_hash" in info
     assert "llm_model" in info
 
-    # Verify token usage
+    # Verify token usage breakdown (prompt/completion/total)
     assert info["token_usage"] is not None
     assert info["token_usage"]["prompt_tokens"] == 500
     assert info["token_usage"]["completion_tokens"] == 1000
+    assert info["token_usage"]["total_tokens"] == 1500
+    # Cost is not reported (S15 / #300): no cost key in --json output.
+    assert "estimated_cost_usd" not in info["token_usage"]
 
     # Verify solutions
     assert len(info["solutions"]) >= 1
     assert info["solutions"][0]["rank"] == 1
+
+
+# ── Test 12b: run info — token-honesty caveat in human output (S15-03) ─────
+
+
+@pytest.mark.integration
+def test_run_info_token_caveat(project_with_prereqs: dict[str, Path]) -> None:
+    """Human run info shows the token breakdown and the #300 honesty caveat,
+    and never a cost figure."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    mock_runner = _make_mock_runner()
+    mock_proxy = _make_mock_proxy(prompt_tokens=500, completion_tokens=1000)
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+        mock_runner=mock_runner,
+        mock_proxy=mock_proxy,
+    )
+    assert result.exit_code == 0
+    run_id = _parse_json_output(result)["run_id"]
+
+    # Human (non-JSON) run info
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+    ):
+        result = runner.invoke(app, ["run", "info", run_id], catch_exceptions=False)
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # Token breakdown present ...
+    assert "500" in output
+    assert "1000" in output
+    # ... honesty caveat present ...
+    assert "not counted" in output
+    assert "provider console" in output
+    # ... and no cost figure anywhere.
+    assert "$" not in output
+    assert "estimated_cost" not in output
 
 
 # ── Test 13: run resume — existing checkpoint (FR-RUN-013, 024) ─────────────

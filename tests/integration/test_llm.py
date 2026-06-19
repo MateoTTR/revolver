@@ -1157,7 +1157,7 @@ def test_llm_temperature_injected_in_build_config() -> None:
     """LLM with temperature -> build_config includes it in config['llm']['temperature']."""
     from datetime import datetime
 
-    from revolver.infra.openevolve import build_config
+    from revolver.infra.backends.openevolve import build_config
     from revolver.models.llm import LLMEntry
 
     llm = LLMEntry(
@@ -1181,7 +1181,7 @@ def test_run_temperature_overrides_llm_registry() -> None:
     """CLI --temperature flag (via config_overrides) overrides LLM registry temperature."""
     from datetime import datetime
 
-    from revolver.infra.openevolve import build_config
+    from revolver.infra.backends.openevolve import build_config
     from revolver.models.llm import LLMEntry
 
     llm = LLMEntry(

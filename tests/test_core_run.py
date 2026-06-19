@@ -37,13 +37,13 @@ from revolver.core.run import (
     list_runs,
     resume_run,
 )
+from revolver.infra.backends.openevolve import RunOutput
 from revolver.infra.db import (
     get_project_db,
     get_run,
     insert_run,
     insert_solution,
 )
-from revolver.infra.openevolve import RunOutput
 from revolver.infra.store import (
     REVOLVER_DIR,
     create_run_dir,

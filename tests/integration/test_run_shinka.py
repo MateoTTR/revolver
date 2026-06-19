@@ -48,7 +48,6 @@ from revolver.infra.db import get_global_db_at
 from revolver.infra.store import REVOLVER_DIR, read_run_manifest
 from tests.fixtures.programs_sqlite import (
     EXPECTED_COMPLETION_TOKENS,
-    EXPECTED_COST_USD,
     EXPECTED_LAST_GENERATION,
     EXPECTED_PROMPT_TOKENS,
     EXPECTED_RANKED_IDS,
@@ -579,7 +578,8 @@ def test_shinka_token_collection(project_with_prereqs: dict[str, Path]) -> None:
     token_usage = manifest["token_usage"]
     assert token_usage["prompt_tokens"] == EXPECTED_PROMPT_TOKENS
     assert token_usage["completion_tokens"] == EXPECTED_COMPLETION_TOKENS
-    assert token_usage["estimated_cost_usd"] == pytest.approx(EXPECTED_COST_USD)
+    # Cost is not reported (S15 / #300): no cost key in the manifest.
+    assert "estimated_cost_usd" not in token_usage
 
 
 # ── (e) run population (S14-12) ───────────────────────────────────────────────

@@ -70,12 +70,17 @@ Key interface points (full signature in [shinka-topdown-267.md §2.2](../../anal
   `output_tokens`, `thinking_tokens` *and* USD costs per program in its metadata
   (`shinka/core/prompt_evolver.py::_extract_llm_metadata`); no proxy
   (`wants_http_proxy() = False`).
-- A supplementary **`cost_usd`** field carries native USD on Shinka (computed from its bundled
+- **Cost removed in S15 (#300, supersedes the `cost_usd` field below).** Revolver no longer reports
+  any USD figure: the session-051 spike showed neither engine persists per-attempt or
+  reasoning/thinking tokens, so no realistic cost is reachable. Token counts cover stored programs
+  only; the `estimate_cost()` helper and the LLM pricing fields are inert pending removal in S16.
+  The paragraphs below describe the original (now-inert) design and are kept for history.
+- ~~A supplementary **`cost_usd`** field carries native USD on Shinka (computed from its bundled
   `shinka/llm/providers/pricing.csv`, prices per 1M tokens, accessible via
-  `pricing.calculate_cost()`) and the Revolver estimate on OE.
-- **Known asymmetry (accepted)**: Shinka's auxiliary LLM spend (embeddings/novelty, meta-LLM,
+  `pricing.calculate_cost()`) and the Revolver estimate on OE.~~
+- ~~**Known asymmetry (accepted)**: Shinka's auxiliary LLM spend (embeddings/novelty, meta-LLM,
   summarizer) is tracked in USD only (`embed_cost`, `novelty_cost`, `meta_cost`); token totals on
-  Shinka cover the evolution queries, the USD total covers everything.
+  Shinka cover the evolution queries, the USD total covers everything.~~
 
 ### D3 — Reproducibility scoped per backend
 

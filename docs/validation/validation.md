@@ -137,7 +137,7 @@ Unit tests cover individual functions and classes in the **domain layer** (`revo
 | `core.llm` | Registration validation, status logic | Mock `infra.ollama`, `infra.db` |
 | `core.problem` | Version snapshotting, hash computation | Mock `infra.store`, `infra.hashing` |
 | `core.dataset` | Registration, integrity check logic, compat rules | Mock `infra.store`, `infra.db`, `infra.hashing` |
-| `core.run` | Run configuration, env var setup, lineage recording | Mock `infra.openevolve`, `infra.db`, `infra.store` |
+| `core.run` | Run configuration, env var setup, lineage recording | Mock `infra.backends.openevolve`, `infra.db`, `infra.store` |
 | `core.eval` | Per-instance iteration logic, aggregate computation | Mock `infra.db`, `infra.evaluator_loader` |
 | `core.solution` | Query filtering, alias logic, on-demand extraction | Mock `infra.db`, `infra.store` |
 | `core.benchmark` | Result reuse logic, comparison stats | Mock `infra.db` |

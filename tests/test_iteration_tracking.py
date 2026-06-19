@@ -15,13 +15,13 @@ from pathlib import Path
 
 import pytest
 
+from revolver.infra.backends.openevolve import count_valid_programs
 from revolver.infra.db import (
     get_project_db,
     get_run,
     insert_run,
     update_run_valid_iterations,
 )
-from revolver.infra.openevolve import count_valid_programs
 from revolver.models.run import (
     RunInfo,
     RunManifest,

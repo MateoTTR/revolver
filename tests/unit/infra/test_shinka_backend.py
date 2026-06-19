@@ -54,7 +54,6 @@ from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
 from tests.fixtures.programs_sqlite import (
     EXPECTED_BEST_SCORE,
     EXPECTED_COMPLETION_TOKENS,
-    EXPECTED_COST_USD,
     EXPECTED_LAST_GENERATION,
     EXPECTED_PROMPT_TOKENS,
     EXPECTED_RANKED_IDS,
@@ -1103,14 +1102,14 @@ def shinka_run_dir(tmp_path: Path) -> Path:
 class TestShinkaCollectTokenUsage:
     """collect_token_usage() per the verified 0.0.7 metadata schema."""
 
-    def test_sums_tokens_and_costs(self, shinka_run_dir: Path) -> None:
-        """api_costs + llm_result token sums; null metadata tolerated."""
+    def test_sums_tokens(self, shinka_run_dir: Path) -> None:
+        """llm_result token sums; null metadata tolerated; no cost (#300)."""
         usage = ShinkaBackend().collect_token_usage(shinka_run_dir)
 
         assert usage is not None
         assert usage.prompt_tokens == EXPECTED_PROMPT_TOKENS
         assert usage.completion_tokens == EXPECTED_COMPLETION_TOKENS
-        assert usage.estimated_cost_usd == pytest.approx(EXPECTED_COST_USD)
+        assert not hasattr(usage, "estimated_cost_usd")
 
     def test_missing_db_returns_none(self, tmp_path: Path) -> None:
         """No programs.sqlite (run died early) -> None, no crash."""

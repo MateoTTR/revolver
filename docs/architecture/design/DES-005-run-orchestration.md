@@ -684,7 +684,15 @@ class TokenCountingProxy:
 - **Best-effort**: if a response lacks `usage` data (e.g., streaming without final usage), the count is incomplete. Token columns are NULLable for this reason.
 - **No overhead**: the proxy adds negligible latency (< 1ms per request) compared to LLM inference time
 
-**Cost estimation** (computed at read time, not stored):
+> **Cost removed (S15 / #300).** Revolver no longer reports a cost figure.
+> The session-051 spike confirmed that neither engine persists per-attempt or
+> reasoning/thinking tokens, so no realistic cost is reachable; token counts
+> cover stored programs only. The `estimate_cost()` helper below and the LLM
+> `--input-cost`/`--output-cost` pricing fields are kept **inert** for one
+> release (removal + DB migration → S16). This section is retained for
+> history; the full §4.5 rewrite is deferred to S16.
+
+**Cost estimation** (deprecated — inert, not called by any code path):
 
 ```python
 def estimate_cost(
@@ -844,8 +852,9 @@ class TokenUsage(BaseModel):
     """Token usage accumulated during a run."""
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    total_tokens: int = 0              # prompt + completion (convenience, NOT persisted in DB)
-    estimated_cost_usd: float | None = None  # computed at read time, NOT persisted in DB
+    total_tokens: int = 0              # prompt + completion (computed, NOT persisted in DB)
+    # estimated_cost_usd removed in S15 (#300): no realistic cost figure is
+    # reachable; tokens cover stored programs only.
 
 class RunManifest(BaseModel):
     """Manifest stored in .revolver/runs/<id>/manifest.yaml."""
@@ -943,7 +952,7 @@ class RunInfo(BaseModel):
     dataset_hash: str
     iterations: int
     generation_time_s: float | None = None
-    token_usage: TokenUsage | None = None  # Token counts + cost estimate
+    token_usage: TokenUsage | None = None  # Token counts (no cost — S15 / #300)
     status: str
     resumed_from: str | None = None
     created_at: datetime
@@ -1385,7 +1394,7 @@ parsing / token collection through the `EvolutionBackend` interface:
 | **Backend selection** | `--backend {openevolve,shinka}` (default `openevolve`); stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047) |
 | **Resume semantics** | Backend-defined (FR-RUN-024): OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve reuses the parent `results_dir` (its SQLite DB is the resume state) |
 | **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
-| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.5, DD-14); Shinka: native per-program accounting read from `programs.sqlite`, plus a supplementary native `cost_usd` |
+| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.5, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable (removal of inert pricing → S16) |
 | **Capabilities** | `capabilities()` drives map-with-warn behavior for unsupported options (FR-RUN-048) and the per-backend reproducibility caveat (NFR-024) |
 
 The post-engine boundary is unchanged: `launch_run` writes Revolver-owned artifacts

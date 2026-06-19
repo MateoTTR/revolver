@@ -15,7 +15,7 @@ OpenEvolve provides the core evolutionary loop for LLM-guided code optimization.
 | Dataset management | Hardcoded in evaluator | Named, versioned, split (train/eval) |
 | Traceability | Partial checkpoints | Full lineage: problem + dataset + LLM + config → solution |
 | Benchmarking | Single run | Multi-solution comparison on same evaluation dataset |
-| Cost tracking | None | Token usage, API cost estimates, compute time |
+| Run metrics | None | Token usage (no cost — see note), compute time |
 | Result export | Raw logs | Structured CSV/JSON with full metadata |
 
 ## Features

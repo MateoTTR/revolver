@@ -41,20 +41,12 @@ class TestTokenUsage:
         assert usage.completion_tokens == 0
 
     @pytest.mark.unit
-    def test_estimated_cost_nullable(self) -> None:
-        """estimated_cost_usd defaults to None."""
-        usage = TokenUsage(prompt_tokens=10, completion_tokens=20)
-        assert usage.estimated_cost_usd is None
-
-    @pytest.mark.unit
-    def test_estimated_cost_set(self) -> None:
-        """estimated_cost_usd can be set explicitly."""
-        usage = TokenUsage(
-            prompt_tokens=1000,
-            completion_tokens=500,
-            estimated_cost_usd=0.05,
-        )
-        assert usage.estimated_cost_usd == 0.05
+    def test_no_cost_field(self) -> None:
+        """Cost is not reported (S15 / #300): the field is gone from the model."""
+        usage = TokenUsage(prompt_tokens=1000, completion_tokens=500)
+        assert not hasattr(usage, "estimated_cost_usd")
+        data = usage.model_dump()
+        assert "estimated_cost_usd" not in data
         assert usage.total_tokens == 1500
 
     @pytest.mark.unit

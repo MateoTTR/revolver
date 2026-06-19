@@ -21,6 +21,7 @@ import pytest
 
 from revolver.core.exceptions import RevolverError
 from revolver.core.llm import resolve_llm_or_ensemble
+from revolver.infra.backends.openevolve import build_config
 from revolver.infra.db import (
     add_ensemble_member,
     get_global_db_at,
@@ -29,7 +30,6 @@ from revolver.infra.db import (
     insert_llm,
     insert_run,
 )
-from revolver.infra.openevolve import build_config
 from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
@@ -429,7 +429,7 @@ class TestResolveApiKeysEnsemble:
 
     def test_resolves_env_var_syntax(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """${ENV_NAME} in models[].api_key is resolved from environment."""
-        from revolver.infra.openevolve import resolve_api_keys
+        from revolver.infra.backends.openevolve import resolve_api_keys
 
         monkeypatch.setenv("GEMINI_API_KEY", "my-secret-key")
 
@@ -450,7 +450,7 @@ class TestResolveApiKeysEnsemble:
     def test_missing_env_var_raises_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing env var in ${ENV_NAME} syntax raises ValidationError."""
         from revolver.core.exceptions import ValidationError
-        from revolver.infra.openevolve import resolve_api_keys
+        from revolver.infra.backends.openevolve import resolve_api_keys
 
         monkeypatch.delenv("MISSING_KEY", raising=False)
 

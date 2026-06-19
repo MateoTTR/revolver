@@ -200,17 +200,13 @@ def run_launch(
                     render(config_data, json_mode=False)
             return
 
-        # Display token usage on stderr if available
+        # Display token usage on stderr if available (tokens only, no cost — #300)
         if result.token_usage is not None:
             sys.stderr.write(
                 f"Token usage: {result.token_usage.prompt_tokens} prompt + "
                 f"{result.token_usage.completion_tokens} completion = "
                 f"{result.token_usage.total_tokens} total\n"
             )
-            if result.token_usage.estimated_cost_usd is not None:
-                sys.stderr.write(
-                    f"Estimated cost: ${result.token_usage.estimated_cost_usd:.4f} USD\n"
-                )
 
         # Display post-run evaluation info on stderr
         sys.stderr.write(
@@ -240,9 +236,9 @@ def run_launch(
             if result.solution.alias:
                 data["alias"] = result.solution.alias
             if result.token_usage is not None:
+                data["prompt_tokens"] = result.token_usage.prompt_tokens
+                data["completion_tokens"] = result.token_usage.completion_tokens
                 data["total_tokens"] = result.token_usage.total_tokens
-                if result.token_usage.estimated_cost_usd is not None:
-                    data["estimated_cost_usd"] = f"${result.token_usage.estimated_cost_usd:.4f}"
             if result.resumed_from:
                 data["resumed_from"] = result.resumed_from
             render(data, json_mode=False)
@@ -392,17 +388,13 @@ def run_resume(
             quiet=(json_mode or quiet),
         )
 
-        # Display token usage on stderr
+        # Display token usage on stderr (tokens only, no cost — #300)
         if result.token_usage is not None:
             sys.stderr.write(
                 f"Token usage: {result.token_usage.prompt_tokens} prompt + "
                 f"{result.token_usage.completion_tokens} completion = "
                 f"{result.token_usage.total_tokens} total\n"
             )
-            if result.token_usage.estimated_cost_usd is not None:
-                sys.stderr.write(
-                    f"Estimated cost: ${result.token_usage.estimated_cost_usd:.4f} USD\n"
-                )
 
         sys.stderr.write(
             f"Resumed run completed: {result.run_id} "
@@ -430,6 +422,8 @@ def run_resume(
             if result.solution.best_score is not None:
                 data["best_score"] = result.solution.best_score
             if result.token_usage is not None:
+                data["prompt_tokens"] = result.token_usage.prompt_tokens
+                data["completion_tokens"] = result.token_usage.completion_tokens
                 data["total_tokens"] = result.token_usage.total_tokens
             render(data, json_mode=False)
 
@@ -572,10 +566,19 @@ def run_info(
                 data["prompt_tokens"] = info.token_usage.prompt_tokens
                 data["completion_tokens"] = info.token_usage.completion_tokens
                 data["total_tokens"] = info.token_usage.total_tokens
-                if info.token_usage.estimated_cost_usd is not None:
-                    data["estimated_cost_usd"] = f"${info.token_usage.estimated_cost_usd:.4f}"
 
             render(data, json_mode=False)
+
+            # Token-honesty caveat (#300): the engines do not persist
+            # per-attempt or reasoning/thinking tokens, so the breakdown
+            # counts stored programs only — flag the limit explicitly.
+            if info.token_usage is not None:
+                sys.stderr.write(
+                    "Note: token counts cover stored programs only; "
+                    "retry/failed-attempt and reasoning/thinking tokens are "
+                    "not counted — watch the provider console for "
+                    "thinking-model spend.\n"
+                )
 
             # Unproductive-run warning (#302): completed but 0 evolved children
             if info.produced_no_children:

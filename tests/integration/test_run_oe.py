@@ -22,7 +22,7 @@ pytest.importorskip("openevolve.controller", reason="openevolve not installed")
 from openevolve.config import Config as OEConfig
 from openevolve.controller import OpenEvolve as OEController
 
-from revolver.infra.openevolve import OpenEvolveRunner, build_config, resolve_api_keys
+from revolver.infra.backends.openevolve import OpenEvolveRunner, build_config, resolve_api_keys
 from revolver.models.llm import LLMEntry
 
 # Path to test fixtures

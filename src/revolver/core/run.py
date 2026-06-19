@@ -113,7 +113,7 @@ from revolver.infra.store import (
     write_run_lock,
     write_run_manifest,
 )
-from revolver.infra.token_proxy import TokenCountingProxy, estimate_cost
+from revolver.infra.token_proxy import TokenCountingProxy
 from revolver.models.llm import EnsembleEntry, LLMEntry
 from revolver.models.run import (
     ProgramEntry,
@@ -806,16 +806,10 @@ def launch_run(
             token_usage_model: PydanticTokenUsage | None = None
             if proxy is not None:
                 proxy_usage = proxy.stop()
-                estimated = estimate_cost(
-                    proxy_usage.prompt_tokens,
-                    proxy_usage.completion_tokens,
-                    llm.input_cost_per_mtok,
-                    llm.output_cost_per_mtok,
-                )
+                # Cost is not reported (S15 / #300): tokens only.
                 token_usage_model = PydanticTokenUsage(
                     prompt_tokens=proxy_usage.prompt_tokens,
                     completion_tokens=proxy_usage.completion_tokens,
-                    estimated_cost_usd=estimated,
                 )
                 # Update run with tokens
                 update_run_tokens(
@@ -1455,16 +1449,10 @@ def resume_run(
             token_usage_model: PydanticTokenUsage | None = None
             if proxy is not None:
                 proxy_usage = proxy.stop()
-                estimated = estimate_cost(
-                    proxy_usage.prompt_tokens,
-                    proxy_usage.completion_tokens,
-                    llm.input_cost_per_mtok,
-                    llm.output_cost_per_mtok,
-                )
+                # Cost is not reported (S15 / #300): tokens only.
                 token_usage_model = PydanticTokenUsage(
                     prompt_tokens=proxy_usage.prompt_tokens,
                     completion_tokens=proxy_usage.completion_tokens,
-                    estimated_cost_usd=estimated,
                 )
                 update_run_tokens(
                     proj_conn,

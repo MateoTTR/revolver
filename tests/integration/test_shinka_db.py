@@ -37,7 +37,6 @@ from tests.fixtures.programs_sqlite import (
     EXPECTED_BEST_SCORE,
     EXPECTED_CHILDREN_COUNT,
     EXPECTED_COMPLETION_TOKENS,
-    EXPECTED_COST_USD,
     EXPECTED_LAST_GENERATION,
     EXPECTED_PROMPT_TOKENS,
     EXPECTED_RANKED_IDS,
@@ -64,17 +63,17 @@ class TestShinkaDbContract:
         The file-based init row has NO ``llm_result`` key at all (the shape
         every real Revolver Shinka run produces for generation 0) and one
         row has a SQL ``NULL`` ``metadata`` column — both must count 0
-        tokens without crashing; the init row's ``api_costs`` still
-        contributes to the USD total. Completion tokens are
+        tokens without crashing. Completion tokens are
         ``output_tokens + thinking_tokens`` (sum equals total
-        completion-side tokens across all shinka 0.0.7 providers).
+        completion-side tokens across all shinka 0.0.7 providers). Cost is
+        not collected (S15 / #300).
         """
         usage = ShinkaBackend().collect_token_usage(shinka_run_dir)
 
         assert usage is not None
         assert usage.prompt_tokens == EXPECTED_PROMPT_TOKENS
         assert usage.completion_tokens == EXPECTED_COMPLETION_TOKENS
-        assert usage.estimated_cost_usd == pytest.approx(EXPECTED_COST_USD)
+        assert not hasattr(usage, "estimated_cost_usd")
 
     def test_collect_token_usage_missing_db_returns_none(self, tmp_path: Path) -> None:
         """(a-bis) No programs.sqlite (run died early) → None, no crash (S14-11)."""

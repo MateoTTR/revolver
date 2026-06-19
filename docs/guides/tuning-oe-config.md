@@ -242,6 +242,58 @@ valid-diff rate.
 
 ---
 
+## Slow local endpoints & request timeout
+
+On the **OpenEvolve** backend, every LLM call is routed through Revolver's
+HTTP `TokenCountingProxy` (token accounting). OpenEvolve's own OpenAI client
+defaults to a **60-second** request timeout. A slow local endpoint — for
+example the `claude-ollama-bridge` exposing a Claude subscription, where a
+single call can take 50–530 s — therefore aborts at 60 s, triggers a retry
+storm, and ultimately fails with a proxy `BrokenPipeError` (the late upstream
+response is written into an already-closed connection).
+
+**Default behavior (#307)**: when an OpenEvolve run uses an LLM registered
+with `--source local` and **no explicit `--timeout`**, Revolver raises the
+injected `llm.timeout` to **600 s** so slow local endpoints survive. Remote
+API models keep OpenEvolve's 60-s default (they are fast and a long hang is
+better surfaced as an error).
+
+Precedence (last wins): OpenEvolve default → Revolver's 600 s local default →
+the LLM entry's `--timeout` → `--config-override llm.timeout=…`.
+
+```bash
+# Override the per-call timeout on a slow local endpoint explicitly:
+revolver llm update my-bridge --timeout 600
+
+# Or for a single run, via config override:
+revolver run --version v1.0 --llm my-bridge --dataset train \
+  --config-override llm.timeout=900
+```
+
+> Note: this applies to the OpenEvolve path only. The **ShinkaEvolve**
+> backend does not use the HTTP proxy (it reads `programs.sqlite`), so the
+> 60-s trap does not apply there.
+
+---
+
+## Token accounting (and why there is no cost figure)
+
+`run info` reports a prompt / completion / total **token** breakdown, but
+**no cost** (#300). The breakdown counts the LLM responses recorded for
+stored programs only:
+
+- **Retry and failed-attempt tokens are not counted.** Both engines keep
+  only the last response per program; intermediate retries are not summed.
+- **Reasoning / thinking tokens are not counted.** Thinking-capable models
+  (e.g. Gemini, Claude) bill large hidden reasoning-token totals that the
+  engines never persist to disk — so they are unrecoverable for reporting.
+
+Cost was removed because no realistic figure is reachable from the persisted
+data and API pricing drifts. For thinking-model spend, **watch the provider
+console** rather than relying on Revolver's token counts.
+
+---
+
 ## Recommended profiles
 
 These profiles combine the parameters above into ready-to-use configurations
