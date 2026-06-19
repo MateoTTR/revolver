@@ -22,7 +22,7 @@ The evolution backend (OpenEvolve by default) provides the core evolutionary loo
 | Dataset management | Hardcoded in evaluator | Named, versioned, split (train/eval), decoupled from evaluator |
 | Solution traceability | Partial (checkpoints) | Full: problem version + dataset + LLM + config → solution |
 | Benchmarking | Single run only | Multi-solution comparison on same evaluation dataset |
-| Cost metrics | None | Generation time, per-instance compute time, API cost |
+| Run metrics | None | Generation time, per-instance compute time, token usage (no cost — S15 / #300) |
 | Result export | Raw logs + checkpoints | Structured export (CSV, JSON) with metadata |
 | Run resume | Checkpoint-based (manual) | Integrated resume with full context preservation |
 
@@ -232,7 +232,7 @@ A **Run** is the first-class physical entity that owns all artifacts from an evo
 - **Config**: The backend config used for this run
 - **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)
 - **Manifest**: Full lineage metadata (problem version, dataset, LLM, backend, iterations, generation time, status)
-- **Token usage**: Total prompt and completion tokens consumed during the evolution — token-primary on all backends (OpenEvolve: transparent proxy; ShinkaEvolve: native per-program accounting). Combined with optional LLM pricing to estimate cost per run; ShinkaEvolve additionally reports its native USD cost.
+- **Token usage**: Total prompt and completion tokens consumed during the evolution — token-primary on all backends (OpenEvolve: transparent proxy; ShinkaEvolve: native per-program accounting). Counts cover stored programs only; retry/failed-attempt and reasoning/thinking tokens are not counted, and **no cost is reported** — no realistic figure is reachable because the engines never persist those tokens (S15 / #300). Watch the provider console for thinking-model spend.
 
 ### 4.7 Benchmark
 
@@ -489,7 +489,7 @@ revolver benchmark export --latest --format csv --output results.csv
 │  │                                                                  │    │
 │  │  problem/           datasets/           revolver.db              │    │
 │  │  ├── v1.0/          ├── train-small/    (metrics, lineage,      │    │
-│  │  │   ├── prog.py    │   └── manifest     timestamps, costs)     │    │
+│  │  │   ├── prog.py    │   └── manifest     timestamps, tokens)    │    │
 │  │  │   ├── eval.py    └── eval-bench/      runs/                  │    │
 │  │  │   └── manifest       └── manifest     ├── <run-id>/          │    │
 │  │  └── v1.1/              └── ...          │   ├── programs/      │    │
@@ -642,7 +642,7 @@ bench-20260310-170000,sol-20260310-150000,gemma-small-v1.1,run-20260310-150000,s
 - Standalone solution evaluation with aggregate statistics (mean, min, max, percentiles, std)
 - Multi-solution benchmarking
 - Full traceability (problem version, dataset, LLM, config → solution)
-- Cost metrics (generation time, per-instance compute time, token usage, estimated API cost)
+- Run metrics (generation time, per-instance compute time, token usage — no cost, S15 / #300)
 - Result export (CSV, JSON)
 - Sequential local LLM runs, parallel remote LLM runs
 - Automatic rank-1 solution creation, on-demand extraction for other ranks

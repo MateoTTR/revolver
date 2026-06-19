@@ -244,7 +244,6 @@ Run completed: run-20260310-190000
   Best combined_score: 0.91
   Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 2,100,000 prompt + 510,000 completion = 2,610,000 total
-  Estimated cost: $12.40 (based on ensemble pricing)
   Stored in: .revolver/runs/run-20260310-190000/
 ```
 
@@ -300,7 +299,6 @@ Run completed: run-20260310-173000
   Best combined_score: 0.82
   Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
-  Estimated cost: $43.28 (based on claude-opus pricing)
   Stored in: .revolver/runs/run-20260310-173000/
 ```
 

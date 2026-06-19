@@ -117,16 +117,16 @@ Derived from [user-story-e2e.md](../specs/user-story-e2e.md). Tests the canonica
 A scenario validating Revolver behavior without Ollama or GPU. Defined during Phase 5, it will cover:
 
 - Remote LLM only (fake server registered as `--provider openai-compat`)
-- Token tracking with pricing (`--input-cost 10.0 --output-cost 30.0`)
-- Estimated cost displayed in run output
+- Token tracking with now-inert pricing flags (`--input-cost 10.0 --output-cost 30.0` accepted without error, no effect on output)
+- Token breakdown (prompt/completion/total) displayed in run output with the honesty caveat — **no cost figure** (S15 / #300)
 - Graceful degradation: `revolver doctor` reports Ollama/GPU as WARN, not FAIL
 - `revolver llm status` shows remote LLM as `ready`
 
-**FRs covered**: FR-LLM-001/015/017/018, FR-RUN-015/028..030, NFR-043, NFR-067
+**FRs covered**: FR-LLM-001/015/017/018, FR-RUN-015/028/029, NFR-043, NFR-067
 
 **CI suitability**: runs on any runner (no GPU required).
 
-### 3.3 Scenario 3 — ShinkaEvolve Backend Happy Path (**implemented — S14**, ADR-007)
+### 3.3 Scenario 3 — ShinkaEvolve Backend Happy Path (**implemented & passing — S14**, ADR-007)
 
 `tests/e2e/test_shinka_backend.py` — a mirror of the Scenario 1 happy path on the ShinkaEvolve
 backend, running the **real** `ShinkaEvolveRunner` against the fake LLM server (registered as a
@@ -155,7 +155,7 @@ are **deselected by default** (`addopts = "-m 'not e2e'"` in pyproject) — run 
   tests/e2e/
   ├── test_alice_jobshop.py     # Scenario 1 (planned)
   ├── test_remote_only.py       # Scenario 2 (planned)
-  └── test_shinka_backend.py    # Scenario 3 (implemented — S14, ADR-007)
+  └── test_shinka_backend.py    # Scenario 3 (implemented & passing — S14, ADR-007)
   ```
 - **Markers**:
   - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`

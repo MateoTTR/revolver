@@ -38,8 +38,8 @@ Register a new LLM in the global registry.
 | `--api-key-env <var>` | string | For remote | Environment variable name holding the API key (e.g., `ANTHROPIC_API_KEY`) |
 | `--base-url <url>` | string | No | Override API base URL. Auto-set to `http://localhost:11434/v1` for Ollama |
 | `--pull` | flag | No | For Ollama: immediately pull the model after registration (default: prompt user) |
-| `--input-cost <price>` | float | No | Cost per million input tokens in USD (e.g., `3.0` for $3/Mtok). Used for cost estimation. |
-| `--output-cost <price>` | float | No | Cost per million output tokens in USD (e.g., `15.0` for $15/Mtok). Used for cost estimation. |
+| `--input-cost <price>` | float | No | **Inert since S15 (#300)**: cost is no longer reported (no realistic figure is reachable). Accepted and stored for compatibility; removal + DB migration → S16. |
+| `--output-cost <price>` | float | No | **Inert since S15 (#300)**: cost is no longer reported. Accepted and stored for compatibility; removal + DB migration → S16. |
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Injected into OpenEvolve config at run time. |
 | `--timeout <seconds>` | int | No | Request timeout in seconds. Injected into OpenEvolve config at run time. |
 | `--temperature <float>` | float | No | Sampling temperature (0.0–2.0). Injected into OpenEvolve config at run time. |
@@ -51,11 +51,12 @@ Model pulled successfully (12 GB, digest: sha256:0898a8b2...)
 ```
 
 ```bash
-# Example with pricing for cost estimation
+# The --input-cost/--output-cost flags are still accepted but inert since
+# S15 (#300): cost is no longer reported (removal + DB migration → S16).
 $ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
 ```
 ```
-LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6, pricing: $15.00/$75.00 per Mtok)
+LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6)
 ```
 
 **Output** (JSON):
@@ -219,8 +220,8 @@ Update configuration fields of a registered LLM. At least one option must be pro
 |---|---|---|---|
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response |
 | `--timeout <seconds>` | int | No | Request timeout in seconds |
-| `--input-cost <price>` | float | No | Cost per million input tokens in USD |
-| `--output-cost <price>` | float | No | Cost per million output tokens in USD |
+| `--input-cost <price>` | float | No | Inert since S15 (#300): stored, not used for any reported figure |
+| `--output-cost <price>` | float | No | Inert since S15 (#300): stored, not used for any reported figure |
 | `--temperature <float>` | float | No | Sampling temperature (0.0–2.0) |
 
 **Output** (human):
