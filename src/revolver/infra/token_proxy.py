@@ -69,6 +69,14 @@ def estimate_cost(
 ) -> float | None:
     """Estimate cost in USD from token counts and per-million-token pricing.
 
+    .. deprecated:: 0.15.0
+        Cost is no longer reported by Revolver (S15 / backlog #300): no
+        realistic figure is reachable since the engines do not persist
+        per-attempt or reasoning/thinking tokens. This helper and the LLM
+        pricing fields are kept inert for one release; their removal (with
+        the DB migration) is scheduled for Sprint 016. Not called by any
+        production code path.
+
     Args:
         prompt_tokens: Number of prompt/input tokens.
         completion_tokens: Number of completion/output tokens.

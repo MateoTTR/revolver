@@ -265,8 +265,9 @@ FIXTURE_PROGRAM_ROWS: tuple[dict[str, Any], ...] = (
 
 # ── Expected aggregates over FIXTURE_PROGRAM_ROWS (contract constants) ────────
 
-#: Sum of top-level ``metadata.api_costs`` across all rows (USD, canonical).
-EXPECTED_COST_USD = 0.0 + 0.012 + 0.008 + 0.021 + 0.005
+# Note: the fixture rows still carry ``metadata.api_costs`` (real 0.0.7
+# shape), but Revolver no longer reports cost (S15 / #300), so there is no
+# EXPECTED_COST_USD aggregate.
 
 #: Sum of ``metadata.llm_result.input_tokens`` (rows without an
 #: ``llm_result`` key or with a NULL ``metadata`` column count 0).

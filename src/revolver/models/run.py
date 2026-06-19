@@ -17,17 +17,20 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 class TokenUsage(BaseModel):
     """Token usage accumulated during a run.
 
+    Cost is intentionally not reported (S15 / backlog #300): no realistic
+    figure is reachable — the engines do not persist per-attempt or
+    reasoning/thinking tokens, so any cost estimate would be misleading.
+    Token counts cover stored programs only; watch the provider console
+    for thinking-model spend.
+
     Attributes:
         prompt_tokens: Total input tokens consumed (0 if unavailable).
         completion_tokens: Total output tokens consumed (0 if unavailable).
         total_tokens: Sum of prompt + completion tokens (computed).
-        estimated_cost_usd: Estimated cost in USD, computed at read time
-            from LLM pricing. ``None`` if pricing is unavailable.
     """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    estimated_cost_usd: float | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
