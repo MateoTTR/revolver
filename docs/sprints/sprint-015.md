@@ -169,18 +169,22 @@ The sprint is complete when ALL hold:
 
 ## Sprint Review
 
-_Filled at sprint end._
+**Complete — released as v0.15.0** (tag on `main`). Scopes B/C shipped in session 051 (PRs #199/#201); F, A, #307, Doc shipped in session 052 (PR #202, grouped single-branch, 4 commits).
 
 ### Tests passing
-- X / Y integration tests passing (target: 1248 + ~10 new S15 L2 scenarios on no-shinka env; all Shinka L2 tests on shinka env)
+- **No-shinka env: 1271 passed, 11 skipped.** Shinka env (`revolver-demos`, shinka 0.0.7): **1311 passed** — all `@shinkaevolve` L2 + e2e Scenario 3 green. `ruff` + `mypy` clean. CI green (Lint + Test 3.12/3.14).
 
 ### Demo-able features
-- [ ] `run info` shows tokens only (no cost) + honesty caveat
-- [ ] Gemini thinking-model Shinka run completes (16384 / max_patch_attempts 10 defaults)
-- [ ] `reasoning_efforts` configurable as a thinking-cost lever
-- [ ] Unproductive run → `completed_with_errors` + visible warning
-- [ ] Slow-local-endpoint OE run no longer aborts at 60 s
-- [ ] `infra/openevolve.py` shim deleted; imports clean
+- [x] `run info` shows tokens only (no cost) + honesty caveat
+- [x] Gemini thinking-model Shinka run completes (16384 / max_patch_attempts 10 defaults) — session 051 (PR #199)
+- [x] `reasoning_efforts` configurable as a thinking-cost lever — session 051 (PR #199)
+- [x] Unproductive run → `completed_with_errors` + visible warning — session 051 (PR #201)
+- [x] Slow-local-endpoint OE run no longer aborts at 60 s (600 s default for `--source local`)
+- [x] `infra/openevolve.py` shim deleted; imports clean
 
-### Carry-over
-_To be filled at sprint end._
+### Reviews
+- spec-reviewer: 0 FAIL / 4 WARN → all fixed. validation-reviewer: 4 FAIL / 5 WARN → all fixed.
+- code-reviewer + doc-reviewer agents hit repeated stream-idle timeouts; both reviews completed in the main session (findings posted to PR #202; README "see note" doc-fix applied post-release).
+
+### Carry-over → Sprint 016
+- Top-N extraction (#299); resume clone parity + `resume_precheck`; removal of the inert pricing fields/flags + DB migration; full DES-005 §4 rewrite; CLI/UX polish (#303–306); `--config-override` validation / ensemble→bandit / multi-language passthrough; #308 (bridge `total_cost_usd`) reduced to a one-line doc note by the cost removal.

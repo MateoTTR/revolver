@@ -58,13 +58,14 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 49 | 2026-06-12/13 | session-049 | ~4h15 | Phase 5 | Sprint 014 planned AND fully delivered (ShinkaEvolve MVP: 4 PRs merged, real ShinkaBackend engine, [shinka] extra, E2E Scenario 3 passes on the real engine; 1248 tests no-shinka / 1269 real-shinka, suite env-independent); shinka 0.0.7 schema facts verified (Q2 premise corrected); 4 agent deaths handled (2 code reviews + spec pass done in main session); release v0.14.0 (doc cascade + README step added to checklist + tag + doc-reviewer) |
 | 50 | 2026-06-13 | session-050 | ~3h | Phase 5 | Real Shinka smoke test (new revolver-demos repo + dedicated env, TSP demo): working recipe gemini-3-flash-preview + max_tokens 16384 + max_patch_attempts 10 → +21% vs baseline. Surfaced backlog 300–306 incl. 🔴 cost under-report ~20× (thinking tokens billed but uncaptured). Claude Max via Agent SDK explored + ToS-verified on primary sources, scoped as side project (claude-ollama-bridge scaffold, reuses bard-ai). Sprint 015 planned (sprint-015.md, 9 PRs / 2 waves). |
 | 51 | 2026-06-17/18 | session-051 | ~4h | Phase 5 | Backlog pass + Sprint 015 re-scoped 9→6 (cost removed per user steer; token counting kept). Spike #300 (real artifacts): attempt/failure files carry only cost, thinking_tokens always 0 → token recovery infeasible, cost dropped from output. Executed S15 Scope B (#301 Shinka thinking-model LLM defaults, PR #199) + Scope C (#302 unproductive-run detection, PR #201), both merged; 1267 no-shinka / 1307 real-shinka. Fixed code-review PR hook (systemMessage→additionalContext + field-agnostic extraction). Clarified CI runs on the user's laptop (self-hosted runner, systemd user service). |
+| 52 | 2026-06-20 | session-052 | ~3h | Phase 5 | **Sprint 015 closed + v0.15.0 released.** Remaining scopes on one grouped branch (PR #202, 4 commits): F (shim removal + PYTHONUNBUFFERED restore + dead iterations-fallback removal), A/#300 (cost removed from output, honest prompt/completion/total token breakdown + caveat), #307 (OE 600 s default timeout for `--source local`), Doc (specs/conops/DES/ADR/README/validation). spec-reviewer 0 FAIL/4 WARN→fixed; validation-reviewer 4 FAIL/5 WARN→fixed. 1271 no-shinka / 1311 real-shinka, CI green. Release v0.15.0 (bump, merge→main, tag, install verified). code-reviewer/doc-reviewer agents repeatedly stream-timed-out → reviews done in main session. |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 52 |
-| **Total duration** | ~106h15 |
+| **Total sessions** | 53 |
+| **Total duration** | ~109h15 |
 | **Avg duration/session** | ~2h00 |
 
 ## Notes
