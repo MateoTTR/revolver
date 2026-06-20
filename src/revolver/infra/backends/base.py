@@ -243,9 +243,11 @@ class EvolutionBackend(Protocol):
         and raises a clear :class:`~revolver.core.exceptions.RevolverError`
         (or subclass) when they are not met.
 
-        The default implementation is a **no-op**: backends without resume
-        preconditions (e.g. OpenEvolve, whose checkpoint staging is handled
-        by the orchestrator) inherit it unchanged.
+        The default implementation is a **no-op**. Because ``EvolutionBackend``
+        is a structural :class:`~typing.Protocol` (not subclassed), concrete
+        backends without resume preconditions (e.g. OpenEvolve, whose
+        checkpoint staging is handled by the orchestrator) provide their own
+        explicit no-op rather than inheriting this body.
 
         Args:
             parent_run_dir: Directory of the parent run being resumed.

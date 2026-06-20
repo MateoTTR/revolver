@@ -1115,18 +1115,31 @@ class TestShinkaResume:
     def test_parent_dir_untouched(
         self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """The parent's programs.sqlite is byte-unchanged after a resume."""
+        """The engine writes only to the clone; the parent dir is untouched."""
         parent_run_dir = tmp_path / "parent"
         build_shinka_run_dir(parent_run_dir)
-        parent_db = parent_run_dir / "shinka-output" / SHINKA_PROGRAMS_DB
+        parent_output = parent_run_dir / "shinka-output"
+        parent_db = parent_output / SHINKA_PROGRAMS_DB
         parent_bytes_before = parent_db.read_bytes()
 
-        _install_fake_runner(monkeypatch)
+        # The fake engine writes a marker into whatever results_dir it is
+        # handed; a parent-mutation regression would drop it in the parent.
+        def _write_marker(call: dict[str, Any]) -> None:
+            results_dir = Path(call["evo_config"].results_dir)
+            (results_dir / "engine_marker.txt").write_text("ran here")
+
+        _install_fake_runner(monkeypatch, on_run=_write_marker)
         backend = ShinkaBackend()
         spec = _make_engine_spec(tmp_path, iterations=4)
 
         backend.resume(spec, backend.build_config(spec), parent_run_dir)
 
+        assert spec.run_dir is not None
+        clone_output = spec.run_dir / "shinka-output"
+        # The engine ran on the clone, not the parent.
+        assert (clone_output / "engine_marker.txt").exists()
+        assert not (parent_output / "engine_marker.txt").exists()
+        # And the parent's DB is byte-unchanged.
         assert parent_db.read_bytes() == parent_bytes_before
 
     def test_missing_parent_db_raises(self, fake_shinka: None, tmp_path: Path) -> None:
