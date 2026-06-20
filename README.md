@@ -15,7 +15,7 @@ OpenEvolve provides the core evolutionary loop for LLM-guided code optimization.
 | Dataset management | Hardcoded in evaluator | Named, versioned, split (train/eval) |
 | Traceability | Partial checkpoints | Full lineage: problem + dataset + LLM + config → solution |
 | Benchmarking | Single run | Multi-solution comparison on same evaluation dataset |
-| Run metrics | None | Token usage (no cost — see note), compute time |
+| Run metrics | None | Token usage (prompt/completion/total — no cost reported), compute time |
 | Result export | Raw logs | Structured CSV/JSON with full metadata |
 
 ## Features
@@ -174,7 +174,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1270+ tests, ~25s; L3 e2e tests are deselected by default — run with -m e2e)
+# Run tests (1289+ tests, ~25s; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
@@ -214,6 +214,7 @@ mypy
 | Sprint 013 | Backend abstraction (ADR-007): pluggable evolution backend | v0.13.0 | Done |
 | Sprint 014 | ShinkaEvolve MVP: real `--backend shinka` end-to-end, `[shinka]` extra | v0.14.0 | Done |
 | Sprint 015 | Thinking-model usability, token honesty (cost removed), slow-local-endpoint timeout, shim cleanup | v0.15.0 | Done |
+| Sprint 016 | Tech-debt + UX polish: pricing removal (migration v10), dataset `split=both` (v11), `run info` program counters, Shinka resume clone parity, CI version/tag guard | v0.16.0 | Done |
 
 ## Documentation
 

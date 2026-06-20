@@ -294,6 +294,47 @@ console** rather than relying on Revolver's token counts.
 
 ---
 
+## Subscription-backed and single-GPU local endpoints
+
+A `--source local` endpoint is often a **serialized** backend: a single GPU
+serving one request at a time, or a subscription bridge (e.g. the
+`claude-ollama-bridge` exposing a Claude Max subscription) that processes one
+call at a time. Fanning out parallel generation requests to such an endpoint
+queues them rather than running them concurrently — and can trip rate limits.
+Pin concurrency to 1:
+
+- **OpenEvolve path** — pass `--parallel 1` so the engine issues one
+  evaluation (and therefore one LLM call) at a time:
+
+  ```bash
+  revolver run --llm codestral-local --source local --parallel 1
+  ```
+
+  See also *Slow local endpoints & request timeout* above — Revolver already
+  raises the per-call timeout to 600 s for `--source local` LLMs.
+
+- **ShinkaEvolve path** — Revolver **auto-pins** `job_config.max_proposal_jobs`
+  to `1` whenever the run's LLM has `--source local`, so Shinka does not launch
+  several proposal jobs against a serialized endpoint. You can override the
+  auto-pin explicitly:
+
+  ```bash
+  # Allow 3 concurrent proposal jobs against a local endpoint that can take it:
+  revolver run --backend shinka --llm codestral-local \
+    --config-override job_config.max_proposal_jobs=3
+  ```
+
+  A `--dry-run` shows the resolved `max_proposal_jobs` value under the Shinka
+  backend extras.
+
+> **Subscription spend is not tracked by Revolver.** When you drive a Claude
+> Max (or similar) subscription through a local bridge, the spend is recorded
+> on the **Anthropic console**, not by Revolver. Revolver does not capture the
+> `total_cost_usd` field returned by the bridge — watch the provider console
+> for subscription usage.
+
+---
+
 ## Recommended profiles
 
 These profiles combine the parameters above into ready-to-use configurations
@@ -683,7 +724,8 @@ Common per-model settings:
 ### Cost implications
 
 Ensemble runs can dramatically reduce cost by routing most iterations
-through cheap models. Approximate Gemini pricing as of early 2026:
+through cheap models. Approximate Gemini pricing as of early 2026 (provider
+list prices — for your own budgeting):
 
 | Model | Input cost (per 1M tokens) | Output cost (per 1M tokens) | Relative cost |
 |-------|---------------------------|----------------------------|---------------|
@@ -696,9 +738,12 @@ With an 80/20 Flash-Lite/Pro ensemble over 500 iterations:
 - Estimated 5-7x cheaper than running all 500 on Pro alone
 - Quality benefit: Pro's occasional contributions lift the population
 
-Use `revolver llm update <name> --input-cost <X> --output-cost <Y>` to
-register per-model costs, then `revolver run info` will report estimated
-run cost.
+> **Revolver does not report cost (#300).** Cost estimation was removed:
+> Revolver reports **tokens only** (`run info` shows the prompt/completion
+> token breakdown, not a USD figure), because neither engine persists
+> per-attempt or reasoning/thinking tokens, so no realistic cost is reachable.
+> Use the per-model token counts above plus your provider console to reason
+> about spend.
 
 ### Ensemble vs sequential resume
 

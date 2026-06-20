@@ -30,8 +30,6 @@ def test_llm_entry_valid() -> None:
         source="local",
         base_url="http://localhost:11434",
         api_key_env=None,
-        input_cost_per_mtok=None,
-        output_cost_per_mtok=None,
         registered_at=datetime(2026, 3, 14, 10, 0, 0, tzinfo=UTC),
     )
     assert entry.name == "codestral-local"
@@ -51,8 +49,6 @@ def test_llm_entry_minimal() -> None:
     assert entry.provider is None
     assert entry.base_url is None
     assert entry.api_key_env is None
-    assert entry.input_cost_per_mtok is None
-    assert entry.output_cost_per_mtok is None
 
 
 @pytest.mark.unit
@@ -79,8 +75,6 @@ def test_llm_entry_model_dump() -> None:
         source="remote",
         base_url="https://api.anthropic.com",
         api_key_env="ANTHROPIC_API_KEY",
-        input_cost_per_mtok=15.0,
-        output_cost_per_mtok=75.0,
         registered_at=ts,
     )
     dumped = entry.model_dump()
@@ -90,8 +84,6 @@ def test_llm_entry_model_dump() -> None:
     assert dumped["source"] == "remote"
     assert dumped["base_url"] == "https://api.anthropic.com"
     assert dumped["api_key_env"] == "ANTHROPIC_API_KEY"
-    assert dumped["input_cost_per_mtok"] == 15.0
-    assert dumped["output_cost_per_mtok"] == 75.0
     assert dumped["registered_at"] == ts
 
 

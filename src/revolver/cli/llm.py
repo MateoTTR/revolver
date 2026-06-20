@@ -74,20 +74,6 @@ def llm_add(
             help="Pull the model from Ollama registry (local only).",
         ),
     ] = False,
-    input_cost: Annotated[
-        float | None,
-        typer.Option(
-            "--input-cost",
-            help="Cost per million input tokens (USD).",
-        ),
-    ] = None,
-    output_cost: Annotated[
-        float | None,
-        typer.Option(
-            "--output-cost",
-            help="Cost per million output tokens (USD).",
-        ),
-    ] = None,
     max_tokens: Annotated[
         int | None,
         typer.Option(
@@ -129,8 +115,6 @@ def llm_add(
                     api_key_env=api_key_env,
                     base_url=base_url,
                     pull=pull,
-                    input_cost_per_mtok=input_cost,
-                    output_cost_per_mtok=output_cost,
                     max_tokens=max_tokens,
                     timeout_s=timeout,
                     temperature=temperature,
@@ -154,8 +138,6 @@ def llm_add(
                     "provider": entry.provider,
                     "base_url": entry.base_url,
                     "api_key_env": entry.api_key_env,
-                    "input_cost_per_mtok": entry.input_cost_per_mtok,
-                    "output_cost_per_mtok": entry.output_cost_per_mtok,
                     "max_tokens": entry.max_tokens,
                     "timeout_s": entry.timeout_s,
                     "temperature": entry.temperature,
@@ -413,20 +395,6 @@ def llm_update(
             help="Request timeout in seconds (injected into OE config).",
         ),
     ] = None,
-    input_cost: Annotated[
-        float | None,
-        typer.Option(
-            "--input-cost",
-            help="Cost per million input tokens (USD).",
-        ),
-    ] = None,
-    output_cost: Annotated[
-        float | None,
-        typer.Option(
-            "--output-cost",
-            help="Cost per million output tokens (USD).",
-        ),
-    ] = None,
     temperature: Annotated[
         float | None,
         typer.Option(
@@ -438,14 +406,12 @@ def llm_update(
     """Update configuration fields of a registered LLM."""
     with cli_error_boundary():
         # Require at least one update flag
-        if all(
-            v is None for v in (model, max_tokens, timeout, input_cost, output_cost, temperature)
-        ):
+        if all(v is None for v in (model, max_tokens, timeout, temperature)):
             from revolver.core.exceptions import ValidationError
 
             raise ValidationError(
                 "No update flags provided. Use at least one of: "
-                "--model, --max-tokens, --timeout, --input-cost, --output-cost, --temperature"
+                "--model, --max-tokens, --timeout, --temperature"
             )
 
         conn = get_global_db()
@@ -456,8 +422,6 @@ def llm_update(
                 model=model,
                 max_tokens=max_tokens,
                 timeout_s=timeout,
-                input_cost_per_mtok=input_cost,
-                output_cost_per_mtok=output_cost,
                 temperature=temperature,
             )
         finally:
@@ -475,8 +439,6 @@ def llm_update(
                     "provider": entry.provider,
                     "base_url": entry.base_url,
                     "api_key_env": entry.api_key_env,
-                    "input_cost_per_mtok": entry.input_cost_per_mtok,
-                    "output_cost_per_mtok": entry.output_cost_per_mtok,
                     "max_tokens": entry.max_tokens,
                     "timeout_s": entry.timeout_s,
                     "temperature": entry.temperature,
@@ -494,16 +456,6 @@ def llm_update(
                     "timeout_s": str(entry.timeout_s) if entry.timeout_s is not None else "-",
                     "temperature": (
                         str(entry.temperature) if entry.temperature is not None else "-"
-                    ),
-                    "input_cost_per_mtok": (
-                        str(entry.input_cost_per_mtok)
-                        if entry.input_cost_per_mtok is not None
-                        else "-"
-                    ),
-                    "output_cost_per_mtok": (
-                        str(entry.output_cost_per_mtok)
-                        if entry.output_cost_per_mtok is not None
-                        else "-"
                     ),
                 },
                 json_mode=False,

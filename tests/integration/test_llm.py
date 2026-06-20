@@ -172,12 +172,12 @@ def test_llm_add_ollama_with_pull(mock_global_db: Path) -> None:
     mock_client.show_model.assert_called_once_with("codestral:22b")
 
 
-# ── Test 2: Add remote LLM with pricing ────────────────────────────────────
+# ── Test 2: Add remote LLM ──────────────────────────────────────────────────
 
 
 @pytest.mark.integration
-def test_llm_add_remote_with_pricing(mock_global_db: Path) -> None:
-    """Add a remote LLM with pricing info -> DB entry with costs and default base_url."""
+def test_llm_add_remote(mock_global_db: Path) -> None:
+    """Add a remote LLM -> DB entry with default base_url and api_key_env."""
     result = runner.invoke(
         app,
         [
@@ -193,10 +193,6 @@ def test_llm_add_remote_with_pricing(mock_global_db: Path) -> None:
             "anthropic",
             "--api-key-env",
             "ANTHROPIC_API_KEY",
-            "--input-cost",
-            "3.0",
-            "--output-cost",
-            "15.0",
         ],
     )
 
@@ -211,8 +207,7 @@ def test_llm_add_remote_with_pricing(mock_global_db: Path) -> None:
     # Verify DB entry
     entries = _query_llms(mock_global_db)
     assert len(entries) == 1
-    assert entries[0].input_cost_per_mtok == 3.0
-    assert entries[0].output_cost_per_mtok == 15.0
+    assert entries[0].name == "claude-sonnet"
 
 
 # ── Test 3: Add openai-compat with custom base URL ─────────────────────────
@@ -879,10 +874,6 @@ def _add_remote_llm(name: str = "test-llm") -> None:
             "4096",
             "--timeout",
             "60",
-            "--input-cost",
-            "2.5",
-            "--output-cost",
-            "10.0",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -969,10 +960,8 @@ def test_llm_update_multiple_fields(mock_global_db: Path) -> None:
             "8192",
             "--timeout",
             "180",
-            "--input-cost",
-            "5.0",
-            "--output-cost",
-            "20.0",
+            "--temperature",
+            "0.7",
         ],
     )
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
@@ -980,8 +969,7 @@ def test_llm_update_multiple_fields(mock_global_db: Path) -> None:
     data = json.loads(result.stdout)
     assert data["max_tokens"] == 8192
     assert data["timeout_s"] == 180
-    assert data["input_cost_per_mtok"] == 5.0
-    assert data["output_cost_per_mtok"] == 20.0
+    assert data["temperature"] == 0.7
 
 
 # ── Test 21: Update nonexistent LLM error ────────────────────────────────
@@ -1036,61 +1024,7 @@ def test_llm_update_invalid_timeout_zero(mock_global_db: Path) -> None:
     assert "positive" in output.lower()
 
 
-# ── Test 24: Update with negative input cost error ────────────────────
-
-
-@pytest.mark.integration
-def test_llm_update_negative_input_cost(mock_global_db: Path) -> None:
-    """Updating with negative input cost -> exit code 1."""
-    _add_remote_llm()
-
-    result = runner.invoke(
-        app,
-        ["llm", "update", "test-llm", "--input-cost", "-1.0"],
-    )
-    assert result.exit_code == 1
-
-    output = _get_all_output(result)
-    assert "non-negative" in output.lower()
-
-
-# ── Test 25: Update with negative output cost error ───────────────────
-
-
-@pytest.mark.integration
-def test_llm_update_negative_output_cost(mock_global_db: Path) -> None:
-    """Updating with negative output cost -> exit code 1."""
-    _add_remote_llm()
-
-    result = runner.invoke(
-        app,
-        ["llm", "update", "test-llm", "--output-cost", "-0.01"],
-    )
-    assert result.exit_code == 1
-
-    output = _get_all_output(result)
-    assert "non-negative" in output.lower()
-
-
-# ── Test 26: Update with zero input cost succeeds ─────────────────────
-
-
-@pytest.mark.integration
-def test_llm_update_zero_input_cost_valid(mock_global_db: Path) -> None:
-    """Updating with input cost = 0.0 succeeds (zero is a valid cost)."""
-    _add_remote_llm()
-
-    result = runner.invoke(
-        app,
-        ["--json", "llm", "update", "test-llm", "--input-cost", "0.0"],
-    )
-    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
-
-    data = json.loads(result.stdout)
-    assert data["input_cost_per_mtok"] == 0.0
-
-
-# ── Test 27: Add with --temperature ───────────────────────────────────
+# ── Test 24: Add with --temperature ───────────────────────────────────
 
 
 @pytest.mark.integration

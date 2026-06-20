@@ -233,6 +233,31 @@ class EvolutionBackend(Protocol):
         """
         ...
 
+    def resume_precheck(self, parent_run_dir: Path) -> None:
+        """Fail-fast guard the orchestrator runs before a resume (S16-10).
+
+        Called by ``core.run.resume_run()`` *before* the new run-record
+        insert and lock acquisition so a parent that lacks usable resume
+        state aborts cleanly (DES-005 §14.1). Resume-state formats are
+        backend-specific, so each backend validates its own preconditions
+        and raises a clear :class:`~revolver.core.exceptions.RevolverError`
+        (or subclass) when they are not met.
+
+        The default implementation is a **no-op**. Because ``EvolutionBackend``
+        is a structural :class:`~typing.Protocol` (not subclassed), concrete
+        backends without resume preconditions (e.g. OpenEvolve, whose
+        checkpoint staging is handled by the orchestrator) provide their own
+        explicit no-op rather than inheriting this body.
+
+        Args:
+            parent_run_dir: Directory of the parent run being resumed.
+
+        Raises:
+            RevolverError: When the parent run is not resumable (subclasses
+                override to enforce backend-specific preconditions).
+        """
+        return None
+
     def resume(
         self,
         spec: BackendRunSpec,
@@ -263,6 +288,18 @@ class EvolutionBackend(Protocol):
 
     def count_valid(self, run_dir: Path) -> int | None:
         """Count valid programs produced so far (``None`` if unknown)."""
+        ...
+
+    def count_total(self, run_dir: Path) -> int | None:
+        """Count *all* programs in the backend's store, valid or not.
+
+        Distinct from :meth:`count_valid` (correct programs only) and from
+        the number of programs extracted to the run's ``programs/`` dir.
+        On backends that keep a complete program store (ShinkaEvolve's
+        ``programs.sqlite``) this is the total row count; backends that
+        cannot cheaply produce a full total (OpenEvolve — needs checkpoint
+        parsing) return ``None`` (UX-4 / S16-19).
+        """
         ...
 
     def count_evolved_children(self, run_dir: Path) -> int | None:

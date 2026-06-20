@@ -601,6 +601,45 @@ class TestShinkaBuildConfig:
         dumped = yaml.dump(config, default_flow_style=False)
         assert yaml.safe_load(dumped) == config
 
+    def test_local_source_pins_max_proposal_jobs(self, fake_shinka: None, tmp_path: Path) -> None:
+        """UX-5/S16-21: a --source local LLM auto-pins job_config.max_proposal_jobs=1."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm(source="local")))
+        assert config["job_config"]["max_proposal_jobs"] == 1
+
+    def test_remote_source_does_not_pin_max_proposal_jobs(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """A remote LLM does not get the local concurrency pin."""
+        llm = _make_llm(
+            name="remote-llm",
+            source="remote",
+            provider="openai",
+            base_url=None,
+            api_key_env="OPENAI_API_KEY",
+        )
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=llm))
+        assert "max_proposal_jobs" not in config.get("job_config", {})
+
+    def test_max_proposal_jobs_override_wins(self, fake_shinka: None, tmp_path: Path) -> None:
+        """An explicit --config-override overrides the local auto-pin (UX-5)."""
+        config = ShinkaBackend().build_config(
+            _make_spec(
+                tmp_path,
+                llm=_make_llm(source="local"),
+                config_overrides=["job_config.max_proposal_jobs=3"],
+            )
+        )
+        assert config["job_config"]["max_proposal_jobs"] == 3
+
+    def test_resolved_config_surfaces_max_proposal_jobs(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """The injected max_proposal_jobs appears in the dry-run backend_extras."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path, llm=_make_llm(source="local")))
+        resolved = backend.resolved_config(config)
+        assert resolved.backend_extras["max_proposal_jobs"] == 1
+
 
 # ── resolved_config (S14-08) ─────────────────────────────────────────────────
 
@@ -1042,12 +1081,12 @@ class TestShinkaLaunch:
 
 
 class TestShinkaResume:
-    """resume() continues in the parent's results dir (S14-13)."""
+    """resume() clones the parent dir and continues on the clone (S16-11)."""
 
-    def test_reuses_parent_dir_and_materializes_into_new(
+    def test_clones_parent_dir_and_runs_on_clone(
         self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Engine runs in parent shinka-output/; artifacts land in new dir."""
+        """Engine runs on the NEW run's shinka-output/ (a clone of parent)."""
         parent_run_dir = tmp_path / "parent"
         build_shinka_run_dir(parent_run_dir)
         calls = _install_fake_runner(monkeypatch)
@@ -1057,20 +1096,51 @@ class TestShinkaResume:
 
         result = backend.resume(spec, config, parent_run_dir)
 
-        parent_output = parent_run_dir / "shinka-output"
-        evo_config = calls[0]["evo_config"]
-        assert evo_config.results_dir == str(parent_output)
-        # "Run 4 more": total target = parent last_iteration + iterations.
-        assert evo_config.num_generations == EXPECTED_LAST_GENERATION + 4
-        assert config["output_dir"] == str(parent_output)
-
         assert spec.run_dir is not None
         new_output = spec.run_dir / "shinka-output"
+        evo_config = calls[0]["evo_config"]
+        # The engine runs on the CLONE, never the parent.
+        assert evo_config.results_dir == str(new_output)
+        assert config["output_dir"] == str(new_output)
+        # "Run 4 more": total target = clone last_iteration + iterations.
+        assert evo_config.num_generations == EXPECTED_LAST_GENERATION + 4
+
+        # The clone carries the parent's programs DB.
         assert (new_output / SHINKA_PROGRAMS_DB).exists()
         best_file = new_output / "best" / "best_program.py"
         assert best_file.exists()
         assert result.best_score == pytest.approx(EXPECTED_BEST_SCORE)
         assert result.output_dir == new_output
+
+    def test_parent_dir_untouched(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The engine writes only to the clone; the parent dir is untouched."""
+        parent_run_dir = tmp_path / "parent"
+        build_shinka_run_dir(parent_run_dir)
+        parent_output = parent_run_dir / "shinka-output"
+        parent_db = parent_output / SHINKA_PROGRAMS_DB
+        parent_bytes_before = parent_db.read_bytes()
+
+        # The fake engine writes a marker into whatever results_dir it is
+        # handed; a parent-mutation regression would drop it in the parent.
+        def _write_marker(call: dict[str, Any]) -> None:
+            results_dir = Path(call["evo_config"].results_dir)
+            (results_dir / "engine_marker.txt").write_text("ran here")
+
+        _install_fake_runner(monkeypatch, on_run=_write_marker)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, iterations=4)
+
+        backend.resume(spec, backend.build_config(spec), parent_run_dir)
+
+        assert spec.run_dir is not None
+        clone_output = spec.run_dir / "shinka-output"
+        # The engine ran on the clone, not the parent.
+        assert (clone_output / "engine_marker.txt").exists()
+        assert not (parent_output / "engine_marker.txt").exists()
+        # And the parent's DB is byte-unchanged.
+        assert parent_db.read_bytes() == parent_bytes_before
 
     def test_missing_parent_db_raises(self, fake_shinka: None, tmp_path: Path) -> None:
         """A parent without programs.sqlite cannot be resumed (fallback)."""
@@ -1088,6 +1158,32 @@ class TestShinkaResume:
         spec = _make_spec(tmp_path)
         with pytest.raises(BackendUnavailableError):
             ShinkaBackend().resume(spec, {}, parent_run_dir)
+
+
+class TestShinkaResumePrecheck:
+    """resume_precheck() fails fast on a non-resumable parent (S16-10)."""
+
+    def test_passes_on_resumable_parent(self, tmp_path: Path) -> None:
+        """A parent with a populated programs.sqlite passes the precheck."""
+        parent_run_dir = tmp_path / "parent"
+        build_shinka_run_dir(parent_run_dir)
+        # No raise (does not require shinka to be importable — pure SQLite).
+        ShinkaBackend().resume_precheck(parent_run_dir)
+
+    def test_missing_db_raises(self, tmp_path: Path) -> None:
+        """A parent without programs.sqlite is rejected before the insert."""
+        parent_run_dir = tmp_path / "parent"
+        parent_run_dir.mkdir()
+        with pytest.raises(RevolverError, match="programs database"):
+            ShinkaBackend().resume_precheck(parent_run_dir)
+
+    def test_zero_last_iteration_raises(self, tmp_path: Path) -> None:
+        """A parent whose run never completed a generation is rejected."""
+        parent_run_dir = tmp_path / "parent"
+        gen0_rows = tuple(row for row in FIXTURE_PROGRAM_ROWS if row["generation"] == 0)
+        build_programs_db(parent_run_dir / "shinka-output" / SHINKA_PROGRAMS_DB, rows=gen0_rows)
+        with pytest.raises(RevolverError, match="not resumable"):
+            ShinkaBackend().resume_precheck(parent_run_dir)
 
 
 # ── Engine tier: programs.sqlite readers (S14-11/12) ──────────────────────────

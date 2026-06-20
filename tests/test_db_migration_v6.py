@@ -159,13 +159,13 @@ def test_migration_v5_to_v6_new_llm_with_temperature(tmp_path: Path) -> None:
     # Re-open to trigger migration
     conn = get_global_db_at(db_path)
 
-    # Insert a new LLM with temperature
+    # Insert a new LLM with temperature. The inert pricing columns were dropped
+    # by migration v10 (S16-05), so the post-migration schema no longer has them.
     now = datetime.now(UTC).isoformat()
     conn.execute(
         "INSERT INTO llms (name, provider, model, source, base_url, api_key_env, "
-        "input_cost_per_mtok, output_cost_per_mtok, max_tokens, timeout_s, "
-        "temperature, registered_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "max_tokens, timeout_s, temperature, registered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             "new-llm",
             "openai",
@@ -173,8 +173,6 @@ def test_migration_v5_to_v6_new_llm_with_temperature(tmp_path: Path) -> None:
             "remote",
             "https://api.openai.com/v1",
             "OPENAI_API_KEY",
-            0.15,
-            0.6,
             2048,
             30,
             0.7,

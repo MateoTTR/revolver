@@ -94,7 +94,10 @@ dataset_app = typer.Typer(
 )
 app.add_typer(dataset_app, name="dataset")
 
-run_app = typer.Typer(cls=GlobalOptionGroup, help="Solution generation via OpenEvolve.")
+run_app = typer.Typer(
+    cls=GlobalOptionGroup,
+    help="Solution generation via the configured evolution backend.",
+)
 app.add_typer(run_app, name="run")
 
 solution_app = typer.Typer(

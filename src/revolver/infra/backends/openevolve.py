@@ -1404,6 +1404,16 @@ class OpenEvolveBackend:
             output_dir=output.output_dir,
         )
 
+    def resume_precheck(self, parent_run_dir: Path) -> None:
+        """No-op resume precheck (S16-10).
+
+        OpenEvolve has no backend-specific resume precondition to enforce
+        here: the orchestrator stages the parent checkpoint and raises if it
+        is missing (``core.run.resume_run()``), so this hook inherits the
+        protocol's default no-op behaviour.
+        """
+        return None
+
     def resume(
         self,
         spec: BackendRunSpec,
@@ -1495,6 +1505,15 @@ class OpenEvolveBackend:
         if valid is None and oe_output_dir.exists():
             valid = count_valid_programs(oe_output_dir)
         return valid
+
+    def count_total(self, run_dir: Path) -> int | None:
+        """Return ``None`` — OpenEvolve has no cheap full program-store total.
+
+        A complete total would require parsing every checkpoint, so
+        ``run info`` shows ``programs_in_db`` only on backends with a
+        complete program store (UX-4 / S16-19).
+        """
+        return None
 
     def count_evolved_children(self, run_dir: Path) -> int | None:
         """Return ``None`` — the checkpoint does not distinguish the initial

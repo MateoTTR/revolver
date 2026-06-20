@@ -14,8 +14,9 @@ ShinkaEvolve (SakanaAI, Apache-2.0) is a credible alternative engine sharing Alp
 OpenEvolve (identical `EVOLVE-BLOCK` markers, `combined_score` convention) but differing in
 evaluator contract (subprocess CLI + `metrics.json` vs in-process dict), LLM access (native
 per-provider SDKs vs OpenAI-compatible HTTP), persistence (single `programs.sqlite` vs
-`checkpoint_N/` dirs + MAP-Elites cells), and cost tracking (native USD via bundled `pricing.csv`
-vs Revolver's HTTP token-counting proxy).
+`checkpoint_N/` dirs + MAP-Elites cells), and token/cost tracking (Shinka has native USD accounting
+via a bundled `pricing.csv`; OpenEvolve relies on Revolver's HTTP token-counting proxy). Revolver
+itself reports **tokens only** and surfaces no USD figure (cost removed — #300; see D2).
 
 Three preparatory studies ground this decision:
 
@@ -64,17 +65,18 @@ Key interface points (full signature in [shinka-topdown-267.md §2.2](../../anal
 `TokenUsage` stays **token-primary everywhere** (this supersedes the USD-primary recommendation in
 #267 §5.1/Q2, after code verification of `shinka-evolve 0.0.7`):
 
-- **OpenEvolve**: tokens measured by the HTTP `TokenCountingProxy` (unchanged); USD estimated from
-  Revolver-side pricing.
+- **OpenEvolve**: tokens measured by the HTTP `TokenCountingProxy` (unchanged). (No USD is reported —
+  the Revolver-side estimate was removed in #300.)
 - **ShinkaEvolve**: tokens read from `programs.sqlite` — Shinka persists `input_tokens`,
   `output_tokens`, `thinking_tokens` *and* USD costs per program in its metadata
   (`shinka/core/prompt_evolver.py::_extract_llm_metadata`); no proxy
   (`wants_http_proxy() = False`).
-- **Cost removed in S15 (#300, supersedes the `cost_usd` field below).** Revolver no longer reports
-  any USD figure: the session-051 spike showed neither engine persists per-attempt or
-  reasoning/thinking tokens, so no realistic cost is reachable. Token counts cover stored programs
-  only; the `estimate_cost()` helper and the LLM pricing fields are inert pending removal in S16.
-  The paragraphs below describe the original (now-inert) design and are kept for history.
+- **Cost removed in S15 (#300, removal completed in S16 — supersedes the `cost_usd` field below).**
+  Revolver no longer reports any USD figure: the session-051 spike showed neither engine persists
+  per-attempt or reasoning/thinking tokens, so no realistic cost is reachable. Token counts cover
+  stored programs only; the `estimate_cost()` helper and the LLM `--input-cost`/`--output-cost`
+  pricing flags/columns have been **removed** (schema migration v10 drops the `llms` pricing
+  columns). The struck-through paragraphs below describe the original design and are kept for history.
 - ~~A supplementary **`cost_usd`** field carries native USD on Shinka (computed from its bundled
   `shinka/llm/providers/pricing.csv`, prices per 1M tokens, accessible via
   `pricing.calculate_cost()`) and the Revolver estimate on OE.~~
@@ -147,7 +149,7 @@ backend surfaced everywhere).
 | **Subprocess/CLI isolation of Shinka** (Hydra CLI, separate venv) | No dependency interaction at all | Spike #266 proved it unnecessary; loses in-process progress callbacks and typed errors; more moving parts (env management, IPC) |
 | **No abstraction** — `if backend == "shinka"` branches in `core/run.py` | No refactor sprint | Unmaintainable; spreads engine knowledge through orchestration; blocks a third backend; untestable per-backend contracts |
 | **Separate tool / fork** (`revolver-shinka`) | Zero risk to the OE path | Fragments the UX, duplicates 82%-neutral CLI, kills cross-engine benchmarking — the main payoff |
-| **USD-primary `TokenUsage` on Shinka** (#267 recommendation) | Matches Shinka's native accounting | Refuted by code inspection: Shinka persists per-program token counts; token-primary keeps one comparable unit across backends with USD as supplement |
+| **USD-primary `TokenUsage` on Shinka** (#267 recommendation) | Matches Shinka's native accounting | Refuted by code inspection: Shinka persists per-program token counts; token-primary keeps one comparable unit across backends. (USD reporting was later removed entirely — #300.) |
 | **Typed `OEExtras`/`ShinkaExtras` now** | Early validation of extras | Churn before the second backend exists; dict matches existing `config_overrides` precedent; promote later |
 | **Make Shinka a hard dependency** | Simpler install matrix | +75 transitive deps (hydra, pandas, torch-adjacent stack) imposed on every user for an optional feature |
 
@@ -174,8 +176,8 @@ backend surfaced everywhere).
   not preventable.
 - **Remote model-id constraint** on Shinka (`pricing.csv` recognition) is a real user-facing
   limitation to document.
-- Token totals on Shinka exclude auxiliary LLM spend (USD total covers it) — minor reporting
-  asymmetry.
+- Token totals on Shinka exclude auxiliary LLM spend (embeddings/novelty, meta-LLM, summarizer) —
+  minor reporting asymmetry. (Revolver reports tokens only and no USD total — #300.)
 - One more abstraction layer to maintain; `infra/openevolve.py` moves (churn in imports, history).
 
 ### Risks
@@ -184,7 +186,7 @@ backend surfaced everywhere).
 |---|---|---|
 | Shinka `evaluate.py` wrapper contract bugs (silent mis-scoring) | High | Front-load contract tests in S14 (fixture `programs.sqlite`, mock runner); the eval contract is the top silent-bug source (impact R4) |
 | `shinka-evolve` 0.0.x API instability | Medium | Pin `>=0.0.7,<0.1` in the extra; backend isolates the integration point |
-| Cost comparability drift (Shinka `pricing.csv` vs Revolver pricing) | Medium | Token-primary comparison (D2); document that USD figures come from different tables |
+| ~~Cost comparability drift (Shinka `pricing.csv` vs Revolver pricing)~~ | ~~Medium~~ | **No longer applicable** — cost reporting was removed (#300); comparison is token-primary only (D2), so there are no USD figures to drift |
 | OE checkpoint-format changes breaking `OpenEvolveBackend` | Low | Unchanged from today; the backend wrapper isolates it |
 | Per-backend test matrix growth (L2-OE + L2-Shinka) | Medium | Only the 4 coupled commands duplicate; neutral tests run once (#267 §5.3) |
 

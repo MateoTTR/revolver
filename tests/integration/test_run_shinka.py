@@ -13,7 +13,11 @@ Scenarios (val-integration-tests.md §L2-Shinka):
     DB's best program, NOT the initial program (R4 trap pin).
 (b) ``test_shinka_dry_run`` — ``--dry-run`` shows Shinka ``backend_extras``.
 (c) ``test_shinka_resume_mocked`` — resume inherits ``backend='shinka'``
-    and reuses the parent's ``shinka-output/`` as the engine results dir.
+    and runs the engine on a CLONE of the parent's ``shinka-output/`` in
+    the new run dir (clone-resume, S16-11).
+(c2) ``test_shinka_resume_clone_isolation`` — a clone-resume leaves the
+    parent's ``programs.sqlite`` byte-unchanged while the resumed run's DB
+    carries the cloned programs plus the new generations (S16-12).
 (d) ``test_shinka_token_collection`` — engine-native token accounting from
     the fixture DB lands in the run record (ADR-007 D2).
 (e) ``test_shinka_population_no_cell_indices`` — ``run population`` exits 0
@@ -306,6 +310,16 @@ def _get_run_row(root: Path, run_id: str) -> dict[str, Any]:
     return dict(row)
 
 
+def _program_ids(db_path: Path) -> set[str]:
+    """Return the set of program ids stored in a shinka programs.sqlite."""
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute("SELECT id FROM programs").fetchall()
+    finally:
+        conn.close()
+    return {str(r[0]) for r in rows}
+
+
 # ── (a) Mocked launch (S14-10, FR-RUN-047) ───────────────────────────────────
 
 
@@ -517,7 +531,7 @@ def test_shinka_dry_run(project_with_prereqs: dict[str, Path]) -> None:
 @pytest.mark.integration
 @pytest.mark.shinkaevolve
 def test_shinka_resume_mocked(project_with_prereqs: dict[str, Path]) -> None:
-    """Resume inherits backend='shinka' and reuses the parent shinka-output/."""
+    """Resume inherits backend='shinka' and runs on a CLONE of the parent dir."""
     root = project_with_prereqs["root"]
 
     launch_result, _cls, parent_run_id = _launch_shinka_run(project_with_prereqs)
@@ -539,22 +553,105 @@ def test_shinka_resume_mocked(project_with_prereqs: dict[str, Path]) -> None:
     assert row["resumed_from"] == parent_run_id
     assert row["status"] == "completed"
 
-    # The engine resumed IN the parent's shinka-output/ (DB-driven resume)
-    # with an extended generation target (last_iteration + iterations).
-    parent_output = root / REVOLVER_DIR / "runs" / parent_run_id / SHINKA_OUTPUT_SUBDIR
+    # The engine resumed on the NEW run's shinka-output/ (a clone of the
+    # parent — S16-11), with an extended generation target derived from the
+    # clone's last_iteration (last_iteration + iterations).
+    new_run_dir = root / REVOLVER_DIR / "runs" / new_run_id
+    new_output = new_run_dir / SHINKA_OUTPUT_SUBDIR
     kwargs = resume_runner_cls.call_args.kwargs
-    assert kwargs["evo_config"].results_dir == str(parent_output)
+    assert kwargs["evo_config"].results_dir == str(new_output)
     assert kwargs["evo_config"].num_generations == EXPECTED_LAST_GENERATION + _ITERATIONS
 
-    # Results were materialized into the NEW run dir (DB snapshot + best/).
-    new_run_dir = root / REVOLVER_DIR / "runs" / new_run_id
-    assert (new_run_dir / SHINKA_OUTPUT_SUBDIR / "programs.sqlite").exists()
+    # The clone carries the parent's programs DB and the best program is
+    # materialized from it into the new run dir.
+    assert (new_output / "programs.sqlite").exists()
     assert (new_run_dir / "programs" / "rank-1.py").exists()
 
     manifest = read_run_manifest(root, new_run_id)
     assert manifest is not None
     assert manifest["backend"] == "shinka"
     assert manifest["resumed_from"] == parent_run_id
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_resume_clone_isolation(project_with_prereqs: dict[str, Path]) -> None:
+    """Clone-resume leaves the parent DB byte-unchanged; clone gains new rows.
+
+    Run A (mocked) writes the fixture programs.sqlite into the parent run's
+    shinka-output/. Resume to run B on a CLONE of that dir: the mocked
+    engine appends a new-generation row to the clone's DB (simulating fresh
+    generations). Asserts (S16-12):
+
+    - the PARENT programs.sqlite is byte-identical before and after B
+      (clone-resume isolation — the parent dir is never written to);
+    - the resumed run's DB contains the cloned programs PLUS the new row.
+    """
+    root = project_with_prereqs["root"]
+
+    launch_result, _cls, parent_run_id = _launch_shinka_run(project_with_prereqs)
+    assert launch_result.exit_code == 0, _get_all_output(launch_result)
+
+    parent_db = (
+        root / REVOLVER_DIR / "runs" / parent_run_id / SHINKA_OUTPUT_SUBDIR / "programs.sqlite"
+    )
+    assert parent_db.exists()
+    parent_bytes_before = parent_db.read_bytes()
+    parent_ids_before = _program_ids(parent_db)
+
+    # Mocked resume engine: append one new-generation child to the clone's
+    # DB (the engine continues on the clone the backend handed it).
+    new_program_id = "prog-gen3-resume"
+
+    def _resume_factory(**kwargs: Any) -> MagicMock:
+        instance = MagicMock()
+
+        def _run() -> None:
+            clone_db = Path(kwargs["evo_config"].results_dir) / "programs.sqlite"
+            conn = sqlite3.connect(clone_db)
+            try:
+                conn.execute(
+                    "INSERT INTO programs (id, code, language, generation, "
+                    "timestamp, combined_score, correct, children_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        new_program_id,
+                        "def solve(d):\n    return 1\n",
+                        "python",
+                        3,
+                        0.0,
+                        0.99,
+                        1,
+                        0,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        instance.run.side_effect = _run
+        return instance
+
+    resume_runner_cls = MagicMock(side_effect=_resume_factory)
+    result, _, new_run_id = _invoke_with_mocks(
+        ["run", "resume", "--run", parent_run_id],
+        root,
+        project_with_prereqs["global_db_path"],
+        mock_runner_cls=resume_runner_cls,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+
+    # The parent's programs.sqlite is byte-unchanged (clone-resume isolation).
+    assert parent_db.read_bytes() == parent_bytes_before
+    assert _program_ids(parent_db) == parent_ids_before
+    assert new_program_id not in parent_ids_before
+
+    # The resumed run's DB holds the cloned programs PLUS the new generation.
+    clone_db = root / REVOLVER_DIR / "runs" / new_run_id / SHINKA_OUTPUT_SUBDIR / "programs.sqlite"
+    assert clone_db.exists()
+    clone_ids = _program_ids(clone_db)
+    assert parent_ids_before <= clone_ids  # cloned programs preserved
+    assert new_program_id in clone_ids  # new generation appended
 
 
 # ── (d) Engine-native token collection (S14-11, ADR-007 D2) ──────────────────

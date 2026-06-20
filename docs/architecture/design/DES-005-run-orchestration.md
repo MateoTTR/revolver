@@ -1,7 +1,7 @@
-# DES-005 — `revolver run` — OpenEvolve Orchestration
+# DES-005 — `revolver run` — Run Orchestration
 
-**Version**: 0.6.0 — backend mediation (ADR-007)
-**Date**: 2026-06-11
+**Version**: 0.7.0 — backend integration rewrite (§4, ADR-007)
+**Date**: 2026-06-20
 **Status**: Draft
 **Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
 
@@ -13,10 +13,13 @@ This document details the design of the `revolver run` commands: `run` (launch a
 
 > **Backend mediation (ADR-007)**: since [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md),
 > orchestration is mediated by the `EvolutionBackend` abstraction (`infra/backends/`) rather than
-> calling OpenEvolve directly. OpenEvolve remains the default backend; the OpenEvolve-specific
-> sections of this document (§3 wrapper generation, §4 integration, DD-14 token proxy) describe the
-> **`OpenEvolveBackend` reference implementation**. The ShinkaEvolve counterpart will be designed in
-> the S14 revision. See §14.1 for the mediation summary.
+> calling OpenEvolve directly. OpenEvolve remains the default backend; ShinkaEvolve is an opt-in
+> second backend (`revolver[shinka]`). [§4 Backend Integration](#4-backend-integration) describes
+> the abstraction and how both backends implement each tier. §3 (wrapper generation) is still
+> written from the OpenEvolve in-process `evaluate()` perspective; the per-backend evaluator
+> contract (ShinkaEvolve's subprocess CLI wrapper) is owned by [DES-006 §1.3](DES-006-eval-loop.md).
+> The DD-14 token proxy is an OpenEvolve-only mechanism ([§4.7](#47-openevolve-token-proxy-dd-14)).
+> See §14.1 for the mediation summary.
 
 ### 1.1 Key Responsibilities
 
@@ -70,7 +73,7 @@ Core (core/run.py) → launch_run()
   │     REVOLVER_DATASET_DIR, REVOLVER_INSTANCE_LOG, REVOLVER_EVAL_LOG
   │     (paths point to .revolver/runs/<id>/)
   │ 11. Configure OpenEvolve programmatically       ──► Infra: openevolve.build_config()
-  │     Includes: problem.md injection if present   (§4.4, DD-13)
+  │     Includes: problem.md injection if present   (§4.2, DD-13)
   │ 12. Pre-flight evaluation check (implementation quality safeguard)
   │     Before launching OpenEvolve, evaluate the initial program on the
   │     first dataset instance using the generated wrapper. This catches
@@ -83,7 +86,8 @@ Core (core/run.py) → launch_run()
   │     - If evaluation passes with combined_score == 0.0 → warning on stderr,
   │       proceed (some programs legitimately score zero initially)
   │     - If evaluation passes with score > 0 → log score on stderr, proceed
-  │ 13. Start token-counting proxy (§4.5, DD-14)   ──► Infra: token_proxy.start()
+  │ 13. Start token-counting proxy (§4.7, DD-14)   ──► Infra: token_proxy.start()
+  │     (OpenEvolve backend only — Shinka has no proxy)
   │     Rewrite llm.base_url → proxy local URL
   │ 14. Write run lock file                         ──► Infra: store.write_run_lock(id)
   │     .revolver/runs/locks/<id>.lock
@@ -212,9 +216,12 @@ Core (core/run.py) → get_run_info()
   │ 1. Query run metadata                           ──► Infra: db.get_run(run_id)
   │ 2. Query associated solutions                   ──► Infra: db.get_solutions_for_run(run_id)
   │ 3. Read programs list from run manifest          ──► Infra: store.read_run_manifest(run_id)
-  │    (programs with ranks and scores for display)
+  │    (programs with ranks and scores for display;
+  │     programs_extracted = len(programs))
+  │ 3b. Read backend store total + run best          ──► Backend: total_programs (None on OE),
+  │    (programs_in_db + rank-1 score fallback)            run_best_score for "(from run)" fallback
   │ 4. Query resume chain (CTE recursive)           ──► Infra: db.get_resume_chain(run_id)
-  │ 5. Return RunInfo (with solutions + programs)
+  │ 5. Return RunInfo (solutions + programs + programs_extracted + total_programs + run_best_score)
   ▼
 Infra
   └── db: query runs + solutions tables
@@ -387,325 +394,248 @@ revolver eval:        .revolver/problem/<tag>/evaluator.py → evaluate_instance
 
 ---
 
-## 4. OpenEvolve Integration
+## 4. Backend Integration
 
-### 4.1 Controller Class Usage
+`revolver run` does not call any evolution engine directly. Since [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md),
+`core/run.py` resolves a backend by name (`get_backend(name)`) and drives the whole engine-coupled
+surface — config build, wrapper generation, launch, resume, live progress, population parsing, token
+collection — through the `EvolutionBackend` protocol (`infra/backends/base.py`). Two adapters
+implement that protocol: `OpenEvolveBackend` (`infra/backends/openevolve.py`, default) and
+`ShinkaBackend` (`infra/backends/shinka.py`, opt-in `revolver[shinka]`). The `--backend
+{openevolve,shinka}` flag selects one per run (default `openevolve`); the choice is persisted on the
+run and inherited by `resume` (**FR-RUN-047**).
 
-Per ADR-006 and POC #12 S7, Revolver uses the `OpenEvolve` controller class directly for resume support:
+This section describes the protocol tiers and how each adapter implements them. The unit shared
+across both backends is **tokens** ([ADR-007 D2](../adr/ADR-007-pluggable-evolution-backend.md#d2--tokencost-tracking-token-primary-on-both-backends)):
+no USD cost is reported (S15 / #300). Everything *downstream* of the engine (program collection into
+`programs/rank-N.py`, solution creation, eval, benchmark) stays backend-agnostic by construction
+(#267 §1.4); the abstraction is confined to this section.
 
-```python
-# In revolver/infra/openevolve.py
-import asyncio
-from openevolve.controller import OpenEvolve as OEController
+### 4.1 The `EvolutionBackend` Protocol
 
-class OpenEvolveRunner:
-    """Wrapper around OpenEvolve controller for Revolver integration."""
+`EvolutionBackend` (`infra/backends/base.py`, `@runtime_checkable Protocol`) is the contract every
+adapter satisfies. Each adapter also declares three class attributes the orchestrator reads without a
+method call: `name` (`"openevolve"` / `"shinka"`), `default_output_subdir` (the engine output
+directory inside a run dir — `"oe-output"` / `"shinka-output"`), and `wrapper_filename` (the
+generated wrapper's name — `_revolver_evaluator.py` / `_shinka_evaluator.py`).
 
-    def __init__(
-        self,
-        initial_program: Path,
-        evaluator: Path,
-        config: dict,
-        output_dir: Path,
-    ):
-        # Lazy initialization via _init_controller()
-        self.initial_program = initial_program
-        self.evaluator = evaluator
-        self.config = config
-        self.output_dir = output_dir
-        self._controller: OEController | None = None
+The methods group into tiers. Two engine-neutral data carriers cross the boundary:
+`BackendRunSpec` (the run to launch/resume — snapshot dir, LLM, run dir, resolved iterations, CLI
+overrides, ensemble, …) and `BackendRunResult` (`best_score`, `best_program`, `output_dir`).
 
-    def _init_controller(self) -> None:
-        config_obj = OEConfig.from_dict(self.config)
-        self._controller = OEController(
-            str(self.initial_program),
-            str(self.evaluator),
-            config_obj,
-            str(self.output_dir),
-        )
-
-    def run(
-        self,
-        iterations: int,
-        checkpoint: Path | None = None,
-        on_progress: Callable[[ProgressInfo], None] | None = None,
-    ) -> RunOutput:
-        """
-        Launch OpenEvolve evolution loop.
-
-        Args:
-            iterations: Number of evolution iterations
-            checkpoint: Path to checkpoint directory for resume (optional)
-            on_progress: Callback invoked after each iteration
-
-        Returns:
-            RunOutput with best programs and metrics
-        """
-        best = asyncio.run(
-            self._controller.run(
-                iterations=iterations,
-                checkpoint_path=str(checkpoint) if checkpoint else None,
-            )
-        )
-        return self._collect_output(best)
-```
-
-#### Program Collection
-
-`_collect_programs()` searches OpenEvolve's output directory in priority order:
-
-1. `top_programs/` — ranked programs (if OpenEvolve produces them)
-2. `best_programs/` — alternative naming
-3. `best/` — OpenEvolve writes `best_program.py` here
-4. Root output directory — fallback
-
-Programs are copied to `<run_dir>/programs/rank-1.py`, `rank-2.py`, etc.
-
-#### Best Score Extraction
-
-OpenEvolve's `controller.run()` returns a `Program` object (not a numeric score). Revolver extracts the score via `best.metrics.get("combined_score")`. If the returned value is directly numeric (int/float), it is used as-is.
-
-### 4.2 OpenEvolve Configuration
-
-OpenEvolve is configured programmatically by merging the problem version's `config.yaml` with Revolver's overrides:
-
-```python
-def build_config(
-    problem_config: Path | None,
-    llm: LLMEntry,
-    iterations: int | None = None,
-    config_overrides: list[str] | None = None,
-    output_dir: Path | None = None,
-    problem_description: str | None = None,
-    temperature: float | None = None,
-    parallel: int | None = None,
-    rewrite_mode: bool = False,
-    ensemble: EnsembleEntry | None = None,
-    conn: Any | None = None,
-) -> dict:
-    """
-    Build the OpenEvolve config dict.
-
-    Merge order (last wins):
-        1. Problem version's config.yaml (base)
-        2. LLM endpoint configuration (api_base, primary_model, api_key_env)
-           — or multi-model ``llm.models`` array for ensemble mode
-        2b. LLM per-model config (max_tokens, timeout, temperature) from LLM registry
-        2c. CLI flags: --temperature, --parallel (override LLM registry values)
-        3. Evaluator defaults — Force evaluator.cascade_evaluation: false
-           unless explicitly set in the problem's config.yaml. OpenEvolve
-           defaults to cascade_evaluation: true which requires
-           evaluate_stage1/2/3 functions that Revolver does not support.
-        4. Problem description injection into prompt.system_message (if provided)
-        5. --iterations override
-        6. --config-override key=value pairs
-        7. Output directory (always Revolver-controlled)
-
-    Args:
-        ensemble: If provided, configures multi-model mode via ``llm.models``
-            array instead of a single ``llm.primary_model``.
-        conn: Global DB connection, required when ``ensemble`` is provided
-            to resolve member LLM details.
-
-    Security (F1): The config stores ``api_key_env`` (the env var name,
-    e.g. "ANTHROPIC_API_KEY") instead of the resolved API key value.
-    This keeps secrets out of config_snapshot in SQLite and manifest.yaml.
-    The separate ``resolve_api_keys()`` function resolves the env var
-    to the actual key at runtime, just before passing the config to
-    OpenEvolve.
-    """
-```
-
-### 4.3 LLM Endpoint Injection
-
-OpenEvolve expects LLM configuration in its config. Revolver injects it based on the registered LLM.
-
-#### Single-LLM Mode
-
-| LLM field | OpenEvolve config key | Source |
+| Tier | Protocol method(s) | Purpose |
 |---|---|---|
-| `base_url` | `llm.api_base` | LLM registry (`llms.base_url`) |
-| `model` | `llm.primary_model` | LLM registry (`llms.model`) |
-| `api_key_env` | `llm.api_key_env` | LLM registry (`llms.api_key_env`) — env var **name**, not the resolved value |
+| **Availability / capabilities** | `is_available()`, `capabilities()` | Install probe (`doctor`/`setup`) and the honest capability matrix (§4.6) |
+| **Config build** | `config_template()`, `validate_config()`, `build_config()`, `resolved_config()` | Scaffold (`project init`), warn on unknown keys (`problem version create`), merge the runtime config, project it to the neutral dry-run view |
+| **Wrapper generation** | `generate_wrapper()` | Emit the per-backend evaluator bridging the user's `evaluate_instance()` to the engine's evaluator contract |
+| **Launch / resume** | `launch()`, `resume()` | Run a fresh evolution, or continue from a parent run (backend-defined resume semantics) |
+| **Live progress** | `read_progress()` | Cheap `(iterations_done, best_score)` poll for `run status` (active path) |
+| **Population / counts** | `parse_population()`, `count_valid()`, `count_evolved_children()` | Ranked population for `run population`; valid-program and evolved-children counts |
+| **Token collection** | `wants_http_proxy()`, `collect_token_usage()` | Declare the token strategy and read engine-native accounting when available |
 
-#### Ensemble Mode (multi-model)
+Each tier is detailed below, naming the real method signatures (`infra/backends/base.py`) and how
+`OpenEvolveBackend` and `ShinkaBackend` implement it.
 
-When an ensemble is used (`--llm <ensemble-name>`), `build_config()` emits a `llm.models` array instead of a single `llm.primary_model`. Each member LLM is resolved from the global DB and mapped to OpenEvolve's expected field names:
+### 4.2 Config Build Tier
 
-| Revolver field | OpenEvolve `models[]` key | Note |
+`build_config(spec: BackendRunSpec) -> dict[str, Any]` merges the problem version's `config.yaml`
+with the LLM registry projection and CLI overrides into the engine's native config shape. The merge
+order is **last-wins** and identical in spirit across backends (base config → LLM projection → CLI
+`--temperature`/`--parallel` → problem-description injection → `--iterations` → `--rewrite-mode` →
+`--config-override` dotted `key=value`). `resolved_config(config, overrides)` projects the merged
+config to the engine-neutral `ResolvedConfig` for `--dry-run` display, routing backend-exclusive
+parameters into a `backend_extras` dict ([ADR-007 D4](../adr/ADR-007-pluggable-evolution-backend.md#d4--neutral-config-surface-resolvedconfig--backend_extras)).
+`validate_config()` returns human-readable warnings (never raises) and degrades gracefully to `[]`
+when the engine is not installed; `config_template()` returns the per-backend `config.yaml` scaffold
+served by `project init`.
+
+**`OpenEvolveBackend`** (`build_config` → module-level `build_config()`):
+
+- Single-LLM injection maps the registry entry to OpenEvolve keys: `base_url` → `llm.api_base`,
+  `model` → `llm.primary_model`, `api_key_env` → `llm.api_key_env` (the env var **name**, not the
+  secret — DD-15). Local (`source == "local"`) entries with no key get an `api_key: "ollama"`
+  placeholder (the OpenAI SDK requires a non-empty key).
+- Ensemble mode (`--llm <ensemble>`) emits an `llm.models` array instead of `llm.primary_model`,
+  mapping each member to `name`/`api_base`/`api_key`/`weight`/`temperature`/`max_tokens` (the
+  `${ENV}` syntax for keys). OpenEvolve's ensemble selection is **weighted**.
+- `cascade_evaluation` is forced to `false` unless the problem config sets it (Revolver evaluators
+  do not define `evaluate_stage1/2/3`). Google's `generativelanguage.googleapis.com` endpoint is
+  detected by `base_url` and `random_seed` is nulled at both the top level and under `llm` (DD-17),
+  because that API rejects `seed` with HTTP 400.
+- **Slow local-endpoint timeout (#307, v0.15.0).** When the registered LLM has no explicit
+  `timeout_s` and is `source == "local"`, `build_config()` sets `llm.timeout = 600` s
+  (`DEFAULT_LOCAL_LLM_TIMEOUT_S`). OpenEvolve's OpenAI client defaults to 60 s, which aborts slow
+  local endpoints (e.g. the claude-ollama-bridge at 50–530 s/call) into a retry storm and a proxy
+  `BrokenPipeError`. Remote APIs keep OpenEvolve's default. A `config.yaml` `llm.timeout` or
+  `--config-override llm.timeout=…` still wins (`setdefault` + overrides applied last).
+- `resolved_config()` maps `max_iterations` → iterations, `database.num_islands` → num_islands,
+  `llm.temperature` → temperature, and pushes OE-exclusive keys (`checkpoint_interval`,
+  `feature_dimensions`, `feature_bins`, `parallel_evaluations`, `diff_based_evolution`,
+  `max_code_length`) into `backend_extras` only when set. `validate_config()` strict-parses against
+  the OpenEvolve `Config` dataclass (`dacite`), stripping Revolver-injected keys first.
+
+**`ShinkaBackend`** (`build_config` builds the nested `evo_config`/`db_config`/`job_config` shape):
+
+- The LLM is projected to a Shinka model string ([ADR-007 D5](../adr/ADR-007-pluggable-evolution-backend.md#d5--llm-registry-no-schema-change-per-backend-projection)):
+  local entries become `local/<model>@<base_url>?api_key_env=<env>` (synthesizing
+  `OLLAMA_API_KEY` when none is registered); remote entries use the model id as-is and map the
+  provider-standard env var (`ANTHROPIC_API_KEY`, …) to the registered key var via an `llm_env`
+  export map consumed by `launch()`. `evo_config.llm_models` is a single-element list and
+  `llm_dynamic_selection = "fixed"`.
+- Revolver injects safer defaults than Shinka's own: `llm_kwargs.max_tokens` defaults to 16384
+  (Shinka's 4096 starves thinking-capable models, which return empty content) and
+  `max_patch_attempts` defaults to 10 (Shinka's 1 loses a whole generation on a single malformed
+  patch). Both respect an explicit `config.yaml` value and `--config-override`.
+- Unsupported options are reported honestly (**FR-RUN-048**, map-with-warn): `--parallel` has no
+  neutral Shinka mapping and warns on stderr instead of silently no-opping; ensembles raise a
+  `ValidationError` (weighted→bandit mapping is a later phase). `build_config()` raises
+  `BackendUnavailableError` (exit 3) when shinka is not installed, before any side effect.
+- `resolved_config()` maps `evo_config.num_generations` → iterations, `db_config.num_islands` →
+  num_islands, a single-valued `llm_kwargs.temperatures` → temperature, and pushes Shinka-exclusive
+  keys (`patch_types`, `max_patch_attempts`, `max_tokens`, `reasoning_efforts`, `max_api_costs`,
+  `archive_size`, …) into `backend_extras`.
+
+> **`--source local` concurrency on Shinka (UX-5, planned S16).** `ShinkaBackend.build_config()`
+> additionally pins `job_config.max_proposal_jobs = 1` for a `source == "local"` LLM unless the user
+> overrides it — a serialized subscription/single-GPU endpoint cannot honor Shinka's default
+> fan-out. The OpenEvolve equivalent is `--parallel 1`. See [tuning-oe-config.md](../../guides/tuning-oe-config.md).
+
+### 4.3 Wrapper Generation Tier
+
+`generate_wrapper(spec: BackendRunSpec) -> Path` writes the per-backend evaluator into the run dir
+and returns its path. Both backends adapt the user's single-instance `evaluate_instance()` over the
+dataset in `$REVOLVER_DATASET_DIR` (ADR-006 env-var inputs), but the *output contract* differs and
+is owned by [DES-006 §1.3](DES-006-eval-loop.md):
+
+- **`OpenEvolveBackend`** emits `_revolver_evaluator.py` exposing an in-process
+  `evaluate(program_path) -> dict[str, float]` (§3). It supports legacy `evaluate()`-only evaluators
+  (copied as-is) and the per-instance side-channel log. Detection order: `evaluate()` >
+  `evaluate_instance()` (DD-10).
+- **`ShinkaBackend`** emits `_shinka_evaluator.py`, a **subprocess CLI** evaluator honoring Shinka's
+  job-scheduler argv contract (`--program_path <evolved.py> --results_dir <dir>`) that writes
+  `metrics.json` + `correct.json`. It **requires** `evaluate_instance()` — the legacy
+  `evaluate()`-only contract is OpenEvolve-specific and unsupported here.
+
+On `resume`, the orchestrator copies the parent run's wrapper by its backend-owned
+`wrapper_filename` rather than regenerating it (DD-09), so the exact evaluator code is preserved
+across the resume chain.
+
+### 4.4 Launch / Resume Tier
+
+`launch(spec, config, on_progress=None) -> BackendRunResult` runs a fresh evolution;
+`resume(spec, config, parent_run_dir, on_progress=None) -> BackendRunResult` continues from a parent
+run with backend-defined semantics ([ADR-007 D1](../adr/ADR-007-pluggable-evolution-backend.md#d1--backend-abstraction-infrabackends)).
+Both overwrite `config["output_dir"]` for their own layout, so the orchestrator persists any config
+snapshot *before* calling. `spec.iterations` must already carry the parent-run fallback (FR-RUN-024)
+— `core/run.py` is the single owner of iteration resolution (S14-05); the adapters guard the
+contract rather than silently defaulting. `on_progress` may be ignored (live progress is served by
+`read_progress()` polling).
+
+| | `OpenEvolveBackend` | `ShinkaBackend` |
 |---|---|---|
-| `llm.model` | `name` | OE uses `name`, not `model` |
-| `llm.base_url` | `api_base` | OE uses `api_base`, not `base_url` |
-| `llm.api_key_env` | `api_key_env` | Env var name, resolved at runtime |
-| `member.weight` | `weight` | Sampling weight from ensemble_members |
-| `member.temperature` | `temperature` | Per-member override (optional) |
-| `member.max_tokens` | `max_tokens` | Per-member override (optional) |
+| **Engine entry** | `OpenEvolveRunner` wraps the `OpenEvolve` controller (`asyncio.run(controller.run(...))`); programmatic config, resume support (DD-04, POC #12 S7) | `ShinkaEvolveRunner` constructed in-process from `evo_config`/`db_config`/`job_config` (ADR-007 D6); `llm_env` exported via `revolver_env` before construction |
+| **Launch output** | OpenEvolve writes `oe-output/` (checkpoints, `best/best_program.py`) | Engine writes `shinka-output/` (`programs.sqlite` + per-gen dirs); `launch()` then materializes the top program into `<results_dir>/best/best_program.py` so the orchestrator's `best/`-first collection does not fall through to the engine's root `init_program.py` |
+| **Resume state** | Latest `checkpoint_N/` copied to `<run_dir>/oe-checkpoint` and passed as `checkpoint_path`; OpenEvolve writes fresh checkpoints under `oe-output/checkpoints/` | DB-driven: the engine auto-resumes when `results_dir` holds a `programs.sqlite` with `last_iteration > 0`. The resumed run runs on a **clone** of the parent's `shinka-output/` (`copytree` of `programs.sqlite` + sidecars, every `gen_*/` dir, and any `bandit_state.pkl`/`prompts.sqlite`) placed in the new run dir; the new generation target is `clone.last_iteration + spec.iterations`. A `resume_precheck` hook fails fast when the parent's `programs.sqlite` is missing or `last_iteration == 0` |
+| **Resume artifact isolation** | New run dir is self-contained (own checkpoint copy) | **Clone-resume parity (S16 / TD-3)**: the engine runs on the **clone** in the new run dir, so the parent's `shinka-output/` is never opened for writing and stays byte-unchanged. The resumed run's token/valid/population counts are cumulative over the parent chain (the clone carries the parent's history), while `run population`/`run status` on the parent reflect only its own untouched DB. The clone IS the resumed run's artifact tree, so no post-run snapshot copy is needed |
+| **Failure mapping** | `ExternalError` ("OpenEvolve run failed: …") | `ExternalError` ("ShinkaEvolve run failed: …"); the orchestrator maps engine failure to run status `failed` (FR-RUN-031) |
 
-Example generated config for an ensemble:
+The orchestrator owns the fail-fast resume precheck *before* inserting the run record; the adapters'
+parent-state checks are a defensive fallback, not a parallel implementation.
 
-```yaml
-llm:
-  models:
-    - name: "claude-opus-4-6"
-      api_base: "https://api.anthropic.com/v1"
-      api_key_env: "ANTHROPIC_API_KEY"
-      weight: 0.7
-    - name: "gemini-2.5-pro"
-      api_base: "https://generativelanguage.googleapis.com/v1beta"
-      api_key_env: "GOOGLE_API_KEY"
-      weight: 0.3
-      temperature: 0.9
-```
+### 4.5 Live Progress, Population, and Counts Tier
 
-**Security (F1)**: `build_config()` stores the env var name (`api_key_env: "ANTHROPIC_API_KEY"`) in the config dict, not the resolved API key. This means the `config_snapshot` stored in SQLite (NFR-023) and `manifest.yaml` never contain secrets. A separate `resolve_api_keys()` function is called at runtime to create a deep copy of the config with `llm.api_key_env` replaced by `llm.api_key` (the actual key read from the environment). This resolved copy is passed to OpenEvolve but never persisted. In ensemble mode, each member's `api_key_env` is resolved independently.
+These read-only methods serve `run status` (active path), `run population`, and the
+unproductive-run guard. All are error-tolerant — the engine may be mid-write.
 
-For local LLMs (Ollama), `base_url` is typically `http://localhost:11434/v1` and no API key is needed. However, for local LLMs (`source == "local"`) without an `api_key_env`, Revolver injects `api_key: "ollama"` as a placeholder. The OpenAI SDK used by OpenEvolve requires a non-empty `api_key` even for local endpoints.
+- `read_progress(run_dir) -> (iterations_done, best_score)` — **OE** reads the latest checkpoint
+  (`count_valid_programs` + `read_checkpoint_best_score`); **Shinka** runs cheap queries on
+  `programs.sqlite` (`last_iteration` from `metadata_store`, `MAX(combined_score)`).
+- `parse_population(run_dir) -> list[dict] | None` (ranked by score descending, `None` when no
+  population state yet) — **OE** parses `checkpoint_N/programs/*.json` and resolves MAP-Elites
+  `cell_indices` + `island` from `metadata.json`; **Shinka** reads `programs.sqlite` rows and carries
+  **no** `cell_indices`/`island` (no MAP-Elites grid — callers must not assume them), aliasing
+  `iteration_found` to `generation`.
+- `count_valid(run_dir) -> int | None` — **OE** counts entries in the checkpoint `database.json`;
+  **Shinka** counts `programs` rows with `correct = 1`.
+- `count_evolved_children(run_dir) -> int | None` — **OE** returns `None` (the checkpoint does not
+  distinguish the seed from children, so the unproductive-run check, #302, is skipped); **Shinka**
+  counts programs carrying a `metadata.llm_result` (a `0` after completion means an unproductive
+  run).
 
-### 4.3.1 `llm_type` and `llm_snapshot` Columns
+### 4.6 Capabilities Matrix
 
-Each run records two additional traceability fields:
+`capabilities() -> BackendCapabilities` returns the static, honest declaration of what a backend can
+do (frozen dataclass). It drives map-with-warn behavior (**FR-RUN-048**) and the per-backend
+reproducibility caveat (NFR-024, [ADR-007 D3](../adr/ADR-007-pluggable-evolution-backend.md#d3--reproducibility-scoped-per-backend)).
 
-- **`llm_type`** (`TEXT NOT NULL DEFAULT 'single'`): Either `"single"` for a single-LLM run or `"ensemble"` for a multi-model run.
-- **`llm_snapshot`** (`TEXT`): JSON string capturing the full LLM configuration at run time.
+| Capability | `OpenEvolveBackend` | `ShinkaBackend` | Meaning |
+|---|---|---|---|
+| `global_seed` | `True` | `False` | Search-level reproducibility via a global seed |
+| `map_elites_cells` | `True` | `False` | MAP-Elites feature-grid cells in the population (Shinka: island index only) |
+| `native_cost_tracking` | `False` | `True` | Engine persists token accounting itself (OE relies on the HTTP proxy) |
+| `multi_language` | `False` | `True` | Evolution of non-Python programs |
+| `ensemble_model` | `"weighted"` | `"bandit"` | Multi-LLM selection semantics |
+| `top_n_extraction` | `False` | `True` | Reliable top-N program extraction |
 
-**Single-LLM snapshot format**:
+### 4.7 OpenEvolve Token Proxy (DD-14)
 
-```json
-{
-  "name": "claude-opus",
-  "provider": "anthropic",
-  "model": "claude-opus-4-6",
-  "base_url": "https://api.anthropic.com/v1",
-  "temperature": 0.7
-}
-```
+Token strategy is a backend decision: `wants_http_proxy()` declares it and
+`collect_token_usage(run_dir) -> TokenUsage | None` reads engine-native accounting when the engine
+keeps it ([ADR-007 D2](../adr/ADR-007-pluggable-evolution-backend.md#d2--tokencost-tracking-token-primary-on-both-backends)).
+The two backends sit at opposite ends:
 
-**Ensemble snapshot format**:
+- **`ShinkaBackend`** — `wants_http_proxy() == False`. ShinkaEvolve persists token counts per
+  program, so `collect_token_usage()` sums them directly from `programs.sqlite`: prompt tokens from
+  `metadata.llm_result.input_tokens`, completion tokens from `output_tokens + thinking_tokens`
+  (the sum is the total completion-side count across all 0.0.7 providers). No proxy is started; the
+  real LLM endpoint is stored in the config snapshot. Token counts cover stored programs only and
+  slightly undercount retried generations (`llm_result` holds the last response only).
+- **`OpenEvolveBackend`** — `wants_http_proxy() == True`. OpenEvolve exposes no token usage (POC #13
+  finding: no per-request hooks, no token logging), so `collect_token_usage()` returns `None` and
+  Revolver measures tokens out-of-band with the **`TokenCountingProxy`** (`infra/token_proxy.py`),
+  whose lifecycle is owned by `core/run.py`.
 
-```json
-{
-  "ensemble_name": "multi-model-v1",
-  "members": [
-    {"llm_name": "claude-opus", "model": "claude-opus-4-6", "weight": 0.7, "temperature": null},
-    {"llm_name": "gemini-pro", "model": "gemini-2.5-pro", "weight": 0.3, "temperature": 0.9}
-  ]
-}
-```
+**`TokenCountingProxy` mechanism (OpenEvolve only — DD-14):**
 
-These fields enable full traceability: even if the ensemble definition changes after a run, the snapshot preserves the exact configuration used.
+1. Before launching OpenEvolve, `core/run.py` starts a local proxy on a random free port; its
+   `base_url` rewrite points OpenEvolve at the proxy instead of the real endpoint.
+2. The proxy forwards every request to the real endpoint and accumulates `usage.prompt_tokens` /
+   `usage.completion_tokens` from the OpenAI-compatible response. It forwards upstream HTTP errors
+   verbatim (FB-01) and can optionally back off on `429` (FB-04).
+3. After the run, `core/run.py` calls `proxy.stop()`, which returns the accumulated `TokenUsage`,
+   and persists it on the run.
 
-#### Google Provider Seed Handling (F2)
+**Key properties:**
 
-Google's Generative Language API (`generativelanguage.googleapis.com`) rejects the `seed` parameter with HTTP 400. When a Google LLM is detected via `base_url`, `build_config()` disables random seed at **both** levels:
+- **Transparent**: OpenEvolve sees a normal OpenAI-compatible endpoint; no engine modification.
+- **Protocol-compatible**: works with any provider (Anthropic, OpenAI, Ollama) exposing `usage`.
+- **Best-effort**: a response without `usage` (e.g. streaming without a final usage frame) is not
+  counted; the DB token columns are NULLable for this reason.
+- **Negligible overhead** (< 1 ms/request vs seconds of LLM inference); one local port allocation.
+- **Per-run**: a fresh proxy is started for each run, including on `resume`.
 
-- `config["random_seed"] = None` — top-level config key that OpenEvolve sends to the API
-- `config["llm"]["random_seed"] = None` — nested LLM-specific key
+> **No cost reported (S15 / #300, removal completed S16 / TD-1).** Revolver reports **tokens only**, on both
+> backends. The session-051 spike confirmed that neither engine persists per-attempt or
+> reasoning/thinking tokens, so no realistic USD figure is reachable; the `TokenUsage` model carries
+> `prompt_tokens` / `completion_tokens` / `total_tokens` and no cost field. The `estimate_cost()`
+> helper and the LLM `--input-cost`/`--output-cost` pricing flags/columns have been **removed**
+> (schema migration v10 drops the `llms` pricing columns).
 
-This runs after LLM injection (step 2) but before config overrides (step 5), so `--config-override` can still re-enable seed if desired.
+### 4.8 FR Coverage
 
-### 4.4 Problem Description Injection
+The backend integration described in this section covers the following requirements
+([spec-run.md §3](../../specs/spec-run.md)). The S13-era doc debt on FR-RUN-036..039 and the
+FR-RUN-042 numbering gap is cleared here.
 
-When the problem version snapshot contains a `problem.md` file, Revolver reads its content and injects it into the OpenEvolve system prompt. This gives the LLM structured domain knowledge about the optimization problem.
-
-**Mechanism**:
-
-1. During `launch_run()`, after loading the problem version snapshot (step 2), read `problem.md` from `.revolver/problem/<tag>/problem.md`
-2. If the file exists, pass its content as the `problem_description` parameter to `build_config()`
-3. In `build_config()`, if `problem_description` is not None, set `config["prompt"]["system_message"]` to a template that includes the content:
-
-```python
-SYSTEM_PROMPT_TEMPLATE = """You are an expert programmer tasked with improving code \
-to optimize a specific problem.
-
-## Problem Description
-
-{problem_description}
-
-## Instructions
-
-Analyze the provided code and suggest improvements to optimize the metrics \
-returned by the evaluator. Focus on the code sections marked with EVOLVE-BLOCK."""
-
-def build_config(..., problem_description: str | None = None) -> dict:
-    ...
-    if problem_description:
-        config.setdefault("prompt", {})
-        config["prompt"]["system_message"] = SYSTEM_PROMPT_TEMPLATE.format(
-            problem_description=problem_description
-        )
-    ...
-```
-
-4. If `problem.md` does not exist in the snapshot, `problem_description` is None, and the default OpenEvolve system prompt is left unchanged
-5. The injection happens in `build_config()` at configuration time, **not** at runtime
-
-**Key properties**:
-- The injection is **static**: the entire `problem.md` content is embedded in the config before OpenEvolve starts
-- The content is treated as **opaque text** — no parsing, no validation, no templating beyond the wrapping template
-- The `--config-override` mechanism can still override `prompt.system_message` if the user provides an explicit override (merge order in `build_config()`)
-- Resume runs inherit the same problem version snapshot, so the same `problem.md` is injected
-
-### 4.5 Token Usage Tracking
-
-OpenEvolve does not track token usage internally (POC #13 limitation). Revolver fills this gap by intercepting LLM API responses through a lightweight HTTP proxy.
-
-**Mechanism**:
-
-1. Before launching OpenEvolve, Revolver starts a local token-counting proxy on a random available port
-2. The proxy forwards all requests to the real LLM endpoint (`base_url`) and transparently counts tokens from the OpenAI-compatible response `usage` field (`prompt_tokens`, `completion_tokens`)
-3. In `build_config()`, the `llm.base_url` is rewritten to point to the proxy instead of the real endpoint
-4. After the run completes, Revolver reads the accumulated token counts from the proxy and stores them in the DB
-
-```python
-# In revolver/infra/token_proxy.py
-class TokenCountingProxy:
-    """Transparent HTTP proxy that counts tokens from OpenAI-compatible API responses."""
-
-    def __init__(self, target_url: str):
-        self.target_url = target_url
-        self.prompt_tokens: int = 0
-        self.completion_tokens: int = 0
-
-    def start(self) -> str:
-        """Start proxy server, return local URL (e.g., http://127.0.0.1:54321/v1)."""
-        ...
-
-    def stop(self) -> TokenUsage:
-        """Stop proxy, return accumulated token counts."""
-        return TokenUsage(
-            prompt_tokens=self.prompt_tokens,
-            completion_tokens=self.completion_tokens,
-        )
-```
-
-**Key properties**:
-- **Transparent**: OpenEvolve is unaware of the proxy — it sees a normal OpenAI-compatible endpoint
-- **Protocol-compatible**: works with any provider (Anthropic, OpenAI, Ollama) since all expose the `usage` field in chat completion responses
-- **Best-effort**: if a response lacks `usage` data (e.g., streaming without final usage), the count is incomplete. Token columns are NULLable for this reason.
-- **No overhead**: the proxy adds negligible latency (< 1ms per request) compared to LLM inference time
-
-> **Cost removed (S15 / #300).** Revolver no longer reports a cost figure.
-> The session-051 spike confirmed that neither engine persists per-attempt or
-> reasoning/thinking tokens, so no realistic cost is reachable; token counts
-> cover stored programs only. The `estimate_cost()` helper below and the LLM
-> `--input-cost`/`--output-cost` pricing fields are kept **inert** for one
-> release (removal + DB migration → S16). This section is retained for
-> history; the full §4.5 rewrite is deferred to S16.
-
-**Cost estimation** (deprecated — inert, not called by any code path):
-
-```python
-def estimate_cost(
-    prompt_tokens: int,
-    completion_tokens: int,
-    input_cost_per_mtok: float | None,
-    output_cost_per_mtok: float | None,
-) -> float | None:
-    """Estimate cost in USD from token counts and LLM pricing. Returns None if no pricing configured."""
-    if input_cost_per_mtok is None or output_cost_per_mtok is None:
-        return None
-    return (prompt_tokens * input_cost_per_mtok + completion_tokens * output_cost_per_mtok) / 1_000_000
-```
+| Requirement | Status | Where covered |
+|---|---|---|
+| FR-RUN-036 | **Covered** | `run delete --force` bypasses confirmation — orchestration command, run-record + run-dir teardown. Not engine-coupled (post-engine boundary, #267 §1.4); independent of the selected backend. |
+| FR-RUN-037 | **Covered** | Deleting a run cascade-deletes its solutions and eval data (DB cascade on `runs` → `solutions` → `eval_*`, DES-001 §3.5–3.8). Backend-agnostic. |
+| FR-RUN-038 | **Covered** | Deleting a run removes its run directory (`.revolver/runs/<id>/`, incl. the backend's `default_output_subdir`). Backend-agnostic. |
+| FR-RUN-039 | **Covered** | `run delete --json` without `--force` errors (NFR-003 non-interactive safety). Backend-agnostic. |
+| FR-RUN-042 | **N/A (numbering gap)** | No requirement is defined at FR-RUN-042 — the spec list jumps FR-RUN-041 → FR-RUN-043 (a known gap carried since S13, see sprint-013 §Carry-over). Recorded here so the cross-reference resolves; no behavior is owed, so coverage is not applicable. |
+| FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume` (§4.1–§4.6, §14.1). |
+| FR-RUN-048 | **Covered** | Backend capability map-with-warn (§4.2 Shinka `--parallel`/ensemble warnings, §4.6 `capabilities()`). |
 
 ---
 
@@ -958,6 +888,9 @@ class RunInfo(BaseModel):
     created_at: datetime
     solutions: list["SolutionResult"] = []  # Auto-created + extracted solutions
     programs: list["ProgramEntry"] = []     # All stored programs (for run info display)
+    programs_extracted: int = 0             # Files materialized to programs/ (== len(programs)) — UX-4 / S16
+    total_programs: int | None = None       # Total in backend store (all rows in Shinka's programs.sqlite; None on OE) — surfaced as programs_in_db
+    run_best_score: float | None = None     # Engine's run best; fallback for the rank-1 solution score when its own is missing ("(from run)") — UX-4 / S16
     resume_chain: list[str] = []            # Ordered list of ancestor run IDs
 
 class ProgressInfo(BaseModel):
@@ -1392,9 +1325,9 @@ parsing / token collection through the `EvolutionBackend` interface:
 | Concern | Backend-mediated behavior |
 |---|---|
 | **Backend selection** | `--backend {openevolve,shinka}` (default `openevolve`); stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047) |
-| **Resume semantics** | Backend-defined (FR-RUN-024): OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve reuses the parent `results_dir` (its SQLite DB is the resume state) |
+| **Resume semantics** | Backend-defined (FR-RUN-024), parent never mutated: OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve **clones** the parent `results_dir` (its SQLite DB is the resume state) into the new run dir and continues on the clone (clone-resume parity — S16 / TD-3). A `resume_precheck` hook validates the parent before any record is created |
 | **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
-| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.5, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable (removal of inert pricing → S16) |
+| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.7, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable. The inert pricing flags/columns were fully removed in S16 (schema migration v10) |
 | **Capabilities** | `capabilities()` drives map-with-warn behavior for unsupported options (FR-RUN-048) and the per-backend reproducibility caveat (NFR-024) |
 
 The post-engine boundary is unchanged: `launch_run` writes Revolver-owned artifacts

@@ -163,7 +163,7 @@ A **Dataset** is a collection of problem instances used for training (solution g
 
 **Properties**:
 - **Name**: User-defined identifier
-- **Split**: `train` (used during evolution) or `eval` (used for benchmarking)
+- **Split**: `train` (used during evolution), `eval` (used for benchmarking), or `both` (usable for both)
 - **Compatibility**: Declared compatible with one or more Problem versions
 - **Instance count**: Automatically computed by Revolver (count of top-level entries)
 

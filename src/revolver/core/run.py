@@ -391,16 +391,20 @@ def resolve_default_version(
 def resolve_default_dataset(
     project_root: Path | None = None,
 ) -> str:
-    """Auto-select the dataset when exactly one train dataset exists.
+    """Auto-select the dataset when exactly one train-eligible dataset exists.
+
+    A dataset is train-eligible when its split is ``"train"`` or ``"both"``
+    (UX-3 / S16-18). ``"train"`` datasets take priority: a ``"both"`` dataset
+    is only considered when no ``"train"`` dataset exists.
 
     Args:
         project_root: Explicit project root, or ``None`` to auto-detect.
 
     Returns:
-        The single train dataset name.
+        The single train-eligible dataset name.
 
     Raises:
-        RevolverError: If zero or multiple train datasets exist.
+        RevolverError: If zero or multiple train-eligible datasets exist.
     """
     root = _resolve_project_root(project_root)
     db_path = root / REVOLVER_DIR / "revolver.db"
@@ -410,7 +414,11 @@ def resolve_default_dataset(
     finally:
         proj_conn.close()
 
+    # Prefer datasets explicitly marked "train"; fall back to "both"
+    # (dual-use) datasets only when no "train" dataset is registered.
     train_datasets = [d for d in all_datasets if d.split == "train"]
+    if not train_datasets:
+        train_datasets = [d for d in all_datasets if d.split == "both"]
 
     if len(train_datasets) == 0:
         raise RevolverError(
@@ -418,7 +426,7 @@ def resolve_default_dataset(
         )
     if len(train_datasets) == 1:
         return train_datasets[0].name
-    # Multiple train datasets: list them in the error message
+    # Multiple train-eligible datasets: list them in the error message
     names = ", ".join(d.name for d in train_datasets)
     raise RevolverError(f"Multiple train datasets exist ({names}). Specify one with --dataset.")
 
@@ -542,8 +550,10 @@ def launch_run(
         if ds is None:
             raise RevolverError(f"Dataset '{config.dataset_name}' not found.")
 
-        # 5. FR-RUN-002: warn if dataset split != train
-        if ds.split and ds.split != "train":
+        # 5. FR-RUN-002: warn if dataset split is not train-eligible.
+        #    "both" (dual-use) datasets are train-eligible — no warning
+        #    (UX-3 / S16-18).
+        if ds.split and ds.split not in ("train", "both"):
             sys.stderr.write(
                 f"Warning: dataset '{ds.name}' has split='{ds.split}' "
                 f"(expected 'train'). Proceeding anyway.\n"
@@ -1253,14 +1263,20 @@ def resume_run(
         if parent_wrapper.exists():
             copy_run_file(parent_wrapper, new_run_dir / backend.wrapper_filename)
 
-        # 6. Backend-aware resume staging precheck (S14-13, ADR-007 D6).
+        # 6. Backend-owned fail-fast resume precheck (S16-10, ADR-007 D6).
         # The orchestrator owns this fail-fast precheck: it must run BEFORE
         # the run-record insert and lock acquisition so a resume-state-less
-        # parent aborts cleanly (DES-005 §14.1). Resume state formats are
-        # backend-specific, hence the dispatch.
+        # parent aborts cleanly (DES-005 §14.1). Resume-state formats are
+        # backend-specific, so each backend validates its own preconditions
+        # (no-op on OpenEvolve, programs.sqlite + last_iteration on Shinka).
+        backend.resume_precheck(parent_run_dir)
+
+        # 6b. OpenEvolve-specific staging: copy the parent's latest
+        # checkpoint into the new run dir as the resume *input*. The backend's
+        # resume() self-staging branch is a fallback only; the missing-
+        # checkpoint guard above is covered by resume_precheck on backends
+        # that need it, but OE still stages the checkpoint file here.
         if backend.name == "openevolve":
-            # Copy checkpoint from parent run dir. The backend's resume()
-            # self-staging branch is a fallback only.
             parent_checkpoint = find_latest_checkpoint(parent_run_dir)
             if parent_checkpoint is None:
                 raise RevolverError(
@@ -1271,15 +1287,6 @@ def resume_run(
             # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
             new_checkpoint: Path = new_run_dir / "oe-checkpoint"
             copy_run_file(parent_checkpoint, new_checkpoint)
-        else:
-            # ShinkaEvolve auto-resumes from the parent's programs database
-            # (reused in place by ShinkaBackend.resume() — no staging copy).
-            parent_programs_db = parent_run_dir / backend.default_output_subdir / "programs.sqlite"
-            if not parent_programs_db.exists():
-                raise RevolverError(
-                    f"No programs database found in parent run '{run_id}'. "
-                    "The run may have been too short to produce any programs."
-                )
 
         # Resolve paths
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version
@@ -1492,11 +1499,11 @@ def resume_run(
 
             # Determine final status based on valid iteration ratio, then
             # flag unproductive runs (0 evolved children — backlog #302).
-            # NOTE: on Shinka, count_evolved_children reads the cumulative
-            # parent-chain DB (ShinkaBackend.resume() reuses the parent
-            # results_dir), so a resume that evolves nothing but inherits a
-            # productive parent is not flagged — consistent with the cumulative
-            # token/valid-iteration accounting on the same DB.
+            # NOTE: on Shinka, count_evolved_children reads the resumed run's
+            # DB, which is a clone of the parent's results_dir (S16-11) and so
+            # carries the cumulative parent-chain history. A resume that evolves
+            # nothing but inherits a productive parent is therefore not flagged —
+            # consistent with the cumulative token/valid-iteration accounting.
             final_status = _determine_run_status(valid_iters, actual_iterations)
             final_status = _apply_unproductive_override(
                 backend, new_run_dir, actual_iterations, final_status, quiet=quiet
@@ -1966,19 +1973,47 @@ def get_run_info(
                 completion_tokens=int(run_data.get("completion_tokens") or 0),  # type: ignore[call-overload]
             )
 
-        # 6. Detect an unproductive run (0 evolved children — #302). Only
-        #    meaningful for a completed_with_errors status on a backend that
-        #    distinguishes children from seeds (others return None → False).
+        # 6. Resolve the run's backend once for the backend-derived reads below
+        #    (program totals, unproductive-run check, score fallback).
+        run_dir = get_run_dir(root, run_id)
+        try:
+            run_backend = get_backend(str(run_data.get("backend") or DEFAULT_BACKEND))
+        except Exception:
+            run_backend = None
+            logger.debug("backend resolution failed in get_run_info", exc_info=True)
+
+        # 6a. Total programs in the backend's store (all attempts, not just
+        #     the files extracted to programs/) — UX-4 / S16-19. None on
+        #     backends without a cheap full total (OpenEvolve).
+        total_programs: int | None = None
+        if run_backend is not None:
+            try:
+                total_programs = run_backend.count_total(run_dir)
+            except Exception:
+                logger.debug("count_total failed in get_run_info", exc_info=True)
+
+        # 6b. Detect an unproductive run (0 evolved children — #302). Only
+        #     meaningful for a completed_with_errors status on a backend that
+        #     distinguishes children from seeds (others return None → False).
         status_str = str(run_data["status"])
         produced_no_children = False
-        if status_str == "completed_with_errors":
+        if status_str == "completed_with_errors" and run_backend is not None:
             try:
-                run_backend = get_backend(str(run_data.get("backend") or DEFAULT_BACKEND))
-                produced_no_children = (
-                    run_backend.count_evolved_children(get_run_dir(root, run_id)) == 0
-                )
+                produced_no_children = run_backend.count_evolved_children(run_dir) == 0
             except Exception:
                 logger.debug("unproductive-run check failed in get_run_info", exc_info=True)
+
+        # 6c. Run-level best score fallback for the rank-1 solution (UX-4 /
+        #     S16-20). When the rank-1 solution's own best_score is missing
+        #     (post-run eval skipped or failed), surface the engine's best
+        #     score read from the run directory so `run info` shows a number.
+        rank1_missing_score = any(s.rank == 1 and s.best_score is None for s in solution_results)
+        run_best_score: float | None = None
+        if rank1_missing_score and run_backend is not None:
+            try:
+                _iters, run_best_score = run_backend.read_progress(run_dir)
+            except Exception:
+                logger.debug("run best_score fallback read failed in get_run_info", exc_info=True)
 
         return RunInfo(
             run_id=str(run_data["id"]),
@@ -2005,6 +2040,9 @@ def get_run_info(
             created_at=datetime.fromisoformat(str(run_data["created_at"])),
             solutions=solution_results,
             programs=programs,
+            programs_extracted=len(programs),
+            total_programs=total_programs,
+            run_best_score=run_best_score,
             resume_chain=chain,
             llm_type=str(run_data.get("llm_type", "single")),
             llm_snapshot=(str(run_data["llm_snapshot"]) if run_data.get("llm_snapshot") else None),

@@ -24,8 +24,9 @@ Engine tier (PR-C, S14-10..13):
 - :meth:`ShinkaBackend.launch` — exports the ``llm_env`` map, constructs
   ``ShinkaEvolveRunner`` from the built config, runs the evolution, and
   materializes the best ranked program(s) into ``<results_dir>/best/``;
-- :meth:`ShinkaBackend.resume` — DB-driven in-place continuation in the
-  parent run's ``shinka-output/`` (clone-based parity is S15);
+- :meth:`ShinkaBackend.resume` — clone-resume: copies the parent run's
+  ``shinka-output/`` into the new run dir and continues evolution on the
+  clone, leaving the parent untouched (S16-11, spike S16-09 GO);
 - :meth:`ShinkaBackend.read_progress` / :meth:`ShinkaBackend.parse_population`
   / :meth:`ShinkaBackend.count_valid` — read ``programs.sqlite``;
 - :meth:`ShinkaBackend.collect_token_usage` — engine-native token/cost
@@ -42,6 +43,7 @@ import dataclasses
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 from typing import Any
@@ -698,6 +700,20 @@ class ShinkaBackend:
         if wrapper_path is not None:
             job["eval_program_path"] = str(wrapper_path)
 
+        # 4c. Local-endpoint concurrency pin (UX-5 / S16-21): a "local"
+        #     source LLM is typically a serialized subscription or single-GPU
+        #     endpoint, so fanning out parallel proposal jobs starves it.
+        #     Pin job_config.max_proposal_jobs=1 unless the user set it
+        #     explicitly via --config-override (the override loop below still
+        #     wins for any value they pass).
+        overrides_set_proposal_jobs = any(
+            override.split("=", 1)[0].strip().split(".")[-1] == "max_proposal_jobs"
+            for override in (spec.config_overrides or [])
+            if "=" in override
+        )
+        if spec.llm.source == "local" and not overrides_set_proposal_jobs:
+            job["max_proposal_jobs"] = 1
+
         # 5. Config overrides last (dotted keys, e.g. db_config.num_islands=4)
         for override in spec.config_overrides or []:
             if "=" not in override:
@@ -728,6 +744,9 @@ class ShinkaBackend:
         db = config.get("db_config")
         if not isinstance(db, dict):
             db = {}
+        job = config.get("job_config")
+        if not isinstance(job, dict):
+            job = {}
 
         llm_models: list[dict[str, Any]] | None = None
         raw_models = evo.get("llm_models")
@@ -769,6 +788,7 @@ class ShinkaBackend:
             ("archive_size", db.get("archive_size")),
             ("parent_selection_strategy", db.get("parent_selection_strategy")),
             ("migration_interval", db.get("migration_interval")),
+            ("max_proposal_jobs", job.get("max_proposal_jobs")),
             ("results_dir", evo.get("results_dir")),
         ):
             if value is not None:
@@ -869,6 +889,39 @@ class ShinkaBackend:
             output_dir=output_dir,
         )
 
+    def resume_precheck(self, parent_run_dir: Path) -> None:
+        """Fail-fast guard before a Shinka clone-resume (S16-10).
+
+        ShinkaEvolve resume is DB-driven: the runner only continues an
+        existing search when its ``results_dir`` contains a
+        ``programs.sqlite`` whose ``last_iteration > 0`` (verified against
+        upstream ``async_runner.py`` 0.0.7 — ``resuming_run = db_path.exists()
+        and self.db.last_iteration > 0``). This precheck enforces those two
+        preconditions on the **parent** run so the orchestrator aborts the
+        resume *before* the new run-record insert (DES-005 §14.1) rather
+        than letting :meth:`resume` silently restart from generation 0.
+
+        Args:
+            parent_run_dir: Directory of the parent run being resumed.
+
+        Raises:
+            RevolverError: When the parent has no ``programs.sqlite`` or its
+                ``last_iteration`` is ``0``/unreadable (not resumable).
+        """
+        parent_db = parent_run_dir / self.default_output_subdir / SHINKA_PROGRAMS_DB
+        if not parent_db.exists():
+            raise RevolverError(
+                f"No programs database found in parent run '{parent_run_dir.name}'. "
+                "The run may have been too short to produce any programs."
+            )
+        last_iteration = self._read_last_iteration_from_db(parent_db)
+        if last_iteration is None or last_iteration <= 0:
+            raise RevolverError(
+                f"Parent run '{parent_run_dir.name}' is not resumable: its programs "
+                "database has no completed generation (last_iteration is 0). "
+                "The run may have been interrupted before its first generation."
+            )
+
     def resume(
         self,
         spec: BackendRunSpec,
@@ -876,39 +929,44 @@ class ShinkaBackend:
         parent_run_dir: Path,
         on_progress: Callable[[ProgressInfo], None] | None = None,
     ) -> BackendRunResult:
-        """Resume by continuing evolution in the parent's results dir (S14-13).
+        """Resume by cloning the parent's results dir and continuing on it (S16-11).
 
         ShinkaEvolve resume is DB-driven: when ``results_dir`` contains a
         ``programs.sqlite`` with ``last_iteration > 0``, the runner
-        auto-resumes from it. The S14 implementation therefore points the
-        engine at the **parent run's** ``shinka-output/`` and extends the
-        generation target by ``spec.iterations`` (the already-resolved
-        count per FR-RUN-024 — "run N more generations", mirroring the
-        OpenEvolve checkpoint-resume semantics). After the engine
-        completes, the programs database and the best ranked program are
-        materialized into the **new** run dir so backend-neutral
+        auto-resumes from it (``async_runner.py`` 0.0.7 — ``db_path`` is
+        derived from ``results_dir`` at runtime, ``resuming_run =
+        db_path.exists() and self.db.last_iteration > 0``, init-program
+        seeding runs only in the non-resume branch, and the DB is opened
+        with ``CREATE TABLE IF NOT EXISTS`` — never truncated). The resolved
+        absolute path is **never written into the DB**, so a ``copytree``
+        clone resumes correctly from a new location (S16-09 spike, GO).
+
+        Implementation (clone-resume parity):
+
+        1. ``shutil.copytree`` the parent's ``shinka-output/`` —
+           ``programs.sqlite`` (+ any ``-wal``/``-shm`` sidecars), every
+           ``gen_*/`` directory, and ``bandit_state.pkl`` / ``prompts.sqlite``
+           when present — into the **new** run's ``shinka-output/``.
+        2. Extend the generation target on the clone: Shinka's
+           ``num_generations`` is a *total* over the shared database, so
+           continuing for ``spec.iterations`` more generations means
+           ``last_iteration + N`` (the already-resolved count per
+           FR-RUN-024). This is already applied by ``build_config`` and only
+           recomputed here against the clone's ``last_iteration``.
+        3. Point the engine at the **clone** and run it; the parent run's
+           ``shinka-output/`` is never opened for writing and stays
+           byte-unchanged.
+
+        The clone IS the resumed run's artifact tree, so backend-neutral
         post-processing (program collection, ``count_valid``,
-        ``collect_token_usage``, ``parse_population``) reads the new run
-        dir as usual.
-
-        Known S14 limitations (full clone-based parity — copying
-        ``programs.sqlite`` + ``gen_*`` dirs into the new run dir *before*
-        the run — is deferred to Sprint 015):
-
-        - the parent's ``shinka-output/`` is mutated in place: the resumed
-          run is a logical continuation, not a separate artifact tree;
-        - token usage, valid-program counts, and population reported for
-          the resumed run include the parent chain's programs (cumulative
-          accounting over the shared database — benchmarks and cost
-          tracking over-attribute the child run);
-        - conversely, ``run population``/``run status`` on the **parent**
-          run read its mutated database and therefore show the resumed
-          child's generations too.
+        ``collect_token_usage``, ``parse_population``) reads the new run dir
+        directly — no post-run snapshot copy is needed.
 
         Raises:
             RevolverError: When the parent has no programs database
                 (fallback only — the orchestrator owns the fail-fast
-                precheck before the run-record insert, DES-005 §14.1).
+                :meth:`resume_precheck` before the run-record insert,
+                DES-005 §14.1).
             BackendUnavailableError: When shinka is not installed.
             ExternalError: When the engine fails (exit code 4).
         """
@@ -921,22 +979,28 @@ class ShinkaBackend:
                 "The run may have been too short to produce any programs."
             )
 
-        # Extend the generation target: ShinkaEvolve's num_generations is a
-        # *total* target over the shared database, so continuing for
-        # spec.iterations more generations means last_iteration + N.
-        last_iteration = self._read_last_iteration_from_db(parent_db)
+        # 1. Clone the parent's shinka-output/ into the new run dir. The
+        #    clone becomes the resumed run's working tree; the parent is left
+        #    untouched (clone-resume isolation — S16-11). build_config()
+        #    already created an empty <run_dir>/shinka-output for the config
+        #    snapshot; copytree refuses an existing target, so remove it first.
+        new_output_dir = run_dir / self.default_output_subdir
+        if new_output_dir.exists():
+            shutil.rmtree(new_output_dir)
+        shutil.copytree(parent_output_dir, new_output_dir)
+        cloned_db = new_output_dir / SHINKA_PROGRAMS_DB
+
+        # 2. Extend the generation target against the CLONE's last_iteration.
+        last_iteration = self._read_last_iteration_from_db(cloned_db)
         if spec.iterations is not None and last_iteration is not None:
             _ensure_section(config, "evo_config")["num_generations"] = (
                 last_iteration + spec.iterations
             )
 
-        config["output_dir"] = str(parent_output_dir)
-        self._run_engine(spec, config, parent_output_dir)
+        # 3. Run the engine on the clone; the parent dir is never written to.
+        config["output_dir"] = str(new_output_dir)
+        self._run_engine(spec, config, new_output_dir)
 
-        # Materialize results into the new run dir (see docstring).
-        new_output_dir = run_dir / self.default_output_subdir
-        new_output_dir.mkdir(exist_ok=True)
-        self._snapshot_programs_db(parent_db, new_output_dir / SHINKA_PROGRAMS_DB)
         best_score, best_program = self._materialize_best_programs(new_output_dir)
         return BackendRunResult(
             best_score=best_score,
@@ -1046,6 +1110,27 @@ class ShinkaBackend:
             conn = sqlite3.connect(db_path)
             try:
                 row = conn.execute("SELECT COUNT(*) FROM programs WHERE correct = 1").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+        return int(row[0]) if row is not None else None
+
+    def count_total(self, run_dir: Path) -> int | None:
+        """Count *all* rows in ``programs.sqlite`` (valid or not — UX-4 / S16-19).
+
+        Unlike :meth:`count_valid` (``correct = 1`` only), this returns the
+        full program store size: initial seed(s) plus every attempted child,
+        which is what ``run info`` surfaces as ``programs_in_db``. Returns
+        ``None`` when the database does not exist or cannot be read.
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM programs").fetchone()
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -1383,23 +1468,6 @@ class ShinkaBackend:
                 conn.close()
         except sqlite3.Error:
             return None
-
-    @staticmethod
-    def _snapshot_programs_db(source: Path, destination: Path) -> None:
-        """Copy a programs database via the SQLite backup API.
-
-        Safer than a file copy: pending WAL content is included in the
-        snapshot regardless of the journal mode the engine left behind.
-        """
-        src = sqlite3.connect(source)
-        try:
-            dst = sqlite3.connect(destination)
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
-        finally:
-            src.close()
 
 
 __all__ = ["SHINKA_PROGRAMS_DB", "SHINKA_WRAPPER_FILENAME", "ShinkaBackend"]

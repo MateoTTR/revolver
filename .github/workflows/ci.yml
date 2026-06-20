@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [main, develop]
+    # Run the version-check job on release tags. The lint/test jobs are
+    # scoped away from tag pushes via per-job `if:` guards below so they do
+    # not spin up conda envs for a tag-only event.
+    tags: ['v*']
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -22,7 +26,10 @@ jobs:
   lint:
     name: Lint (ruff + mypy)
     runs-on: [self-hosted, linux, x64]
-    if: github.event.pull_request.draft == false || github.event_name == 'push'
+    # Skip on tag pushes (handled by version-check); run on PRs (non-draft) and branch pushes.
+    if: >-
+      !startsWith(github.ref, 'refs/tags/')
+      && (github.event.pull_request.draft == false || github.event_name == 'push')
     steps:
       - uses: actions/checkout@v5
 
@@ -65,10 +72,60 @@ jobs:
         if: always()
         run: mamba env remove -y -p "$CONDA_ENV" || rm -rf "$CONDA_ENV"
 
+  version-check:
+    name: Version/tag consistency (release tags)
+    runs-on: [self-hosted, linux, x64]
+    # Run ONLY on pushed v* tags. Never blocks normal branch pushes or PRs.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check tag matches declared version
+        run: |
+          set -euo pipefail
+
+          # Tag name from refs/tags/vX.Y.Z, stripping the leading 'v'.
+          tag="${GITHUB_REF#refs/tags/v}"
+
+          # version = "X.Y.Z" from pyproject.toml [project] table.
+          # Accept single- or double-quoted values; '|| true' keeps the empty
+          # guard below reachable when grep finds no match under pipefail.
+          pyproject_version="$(grep -E '^version[[:space:]]*=' pyproject.toml \
+            | head -n1 \
+            | sed -E "s/^version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/" || true)"
+
+          # __version__ = "X.Y.Z" from the package __init__.
+          init_version="$(grep -E '^__version__[[:space:]]*=' src/revolver/__init__.py \
+            | head -n1 \
+            | sed -E "s/^__version__[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/" || true)"
+
+          echo "tag (from GITHUB_REF):          $tag"
+          echo "pyproject.toml version:         $pyproject_version"
+          echo "src/revolver/__init__.py:       $init_version"
+
+          if [ -z "$pyproject_version" ]; then
+            echo "::error::Could not extract 'version' from pyproject.toml" >&2
+            exit 1
+          fi
+          if [ -z "$init_version" ]; then
+            echo "::error::Could not extract '__version__' from src/revolver/__init__.py" >&2
+            exit 1
+          fi
+
+          if [ "$tag" != "$pyproject_version" ] || [ "$tag" != "$init_version" ]; then
+            echo "::error::Version mismatch on release tag: tag=v${tag}, pyproject.toml=${pyproject_version}, __init__.py=${init_version}. All three must match before tagging a release." >&2
+            exit 1
+          fi
+
+          echo "Version consistency OK: tag v${tag} matches pyproject.toml and __version__."
+
   test:
     name: Test (pytest + coverage)
     runs-on: [self-hosted, linux, x64]
-    if: github.event.pull_request.draft == false || github.event_name == 'push'
+    # Skip on tag pushes (handled by version-check); run on PRs (non-draft) and branch pushes.
+    if: >-
+      !startsWith(github.ref, 'refs/tags/')
+      && (github.event.pull_request.draft == false || github.event_name == 'push')
     strategy:
       fail-fast: false
       matrix:

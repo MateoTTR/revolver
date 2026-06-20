@@ -29,8 +29,6 @@ def _make_entry(
     source: str = "local",
     base_url: str | None = "http://localhost:11434",
     api_key_env: str | None = None,
-    input_cost: float | None = None,
-    output_cost: float | None = None,
 ) -> LLMEntry:
     """Build an LLMEntry with sensible defaults for testing."""
     return LLMEntry(
@@ -40,8 +38,6 @@ def _make_entry(
         source=source,
         base_url=base_url,
         api_key_env=api_key_env,
-        input_cost_per_mtok=input_cost,
-        output_cost_per_mtok=output_cost,
         registered_at=datetime(2026, 3, 14, 10, 0, 0, tzinfo=UTC),
     )
 
@@ -82,8 +78,6 @@ def test_insert_and_get_llm(tmp_path: Path) -> None:
         assert retrieved.source == "local"
         assert retrieved.base_url == "http://localhost:11434"
         assert retrieved.api_key_env is None
-        assert retrieved.input_cost_per_mtok is None
-        assert retrieved.output_cost_per_mtok is None
     finally:
         conn.close()
 
@@ -100,8 +94,8 @@ def test_get_llm_not_found(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_insert_remote_llm_with_costs(tmp_path: Path) -> None:
-    """Insert a remote LLM with cost info and api_key_env."""
+def test_insert_remote_llm(tmp_path: Path) -> None:
+    """Insert a remote LLM with api_key_env."""
     db_path = tmp_path / "global.db"
     conn = get_global_db_at(db_path)
     try:
@@ -112,8 +106,6 @@ def test_insert_remote_llm_with_costs(tmp_path: Path) -> None:
             source="remote",
             base_url="https://api.anthropic.com",
             api_key_env="ANTHROPIC_API_KEY",
-            input_cost=15.0,
-            output_cost=75.0,
         )
         insert_llm(conn, entry)
 
@@ -121,8 +113,6 @@ def test_insert_remote_llm_with_costs(tmp_path: Path) -> None:
         assert retrieved is not None
         assert retrieved.source == "remote"
         assert retrieved.api_key_env == "ANTHROPIC_API_KEY"
-        assert retrieved.input_cost_per_mtok == 15.0
-        assert retrieved.output_cost_per_mtok == 75.0
     finally:
         conn.close()
 

@@ -435,8 +435,6 @@ def update_llm(
     name: str,
     max_tokens: int | None = None,
     timeout_s: int | None = None,
-    input_cost_per_mtok: float | None = None,
-    output_cost_per_mtok: float | None = None,
     temperature: float | None = None,
 ) -> LLMEntry:
     """Update configuration fields of a registered LLM."""
@@ -534,8 +532,6 @@ def update(
     name: str = typer.Argument(..., help="LLM to update"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="Max tokens per response"),
     timeout: int = typer.Option(None, "--timeout", help="Request timeout in seconds"),
-    input_cost: float = typer.Option(None, "--input-cost", help="Cost per Mtok input (USD)"),
-    output_cost: float = typer.Option(None, "--output-cost", help="Cost per Mtok output (USD)"),
     temperature: float = typer.Option(None, "--temperature", help="Sampling temperature 0.0-2.0"),
 ): ...
 ```

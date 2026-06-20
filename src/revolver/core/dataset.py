@@ -123,7 +123,8 @@ def register_dataset(
         project_root: Explicit project root, or ``None`` to auto-detect.
         name: Unique user-chosen identifier for the dataset.
         path: Path to the dataset directory.
-        split: ``"train"`` or ``"eval"``, or ``None`` if unspecified.
+        split: ``"train"``, ``"eval"``, ``"both"`` (usable for training and
+            evaluation), or ``None`` if unspecified.
         snapshot: If ``True``, copy files into ``.revolver/datasets/<name>/snapshot/``.
         compatible_with: List of problem version tags this dataset is compatible with.
         description: Optional short description.
@@ -148,8 +149,8 @@ def register_dataset(
         raise ValidationError(f"Dataset path is not a directory: {resolved_path}")
 
     # Validate split value if provided
-    if split is not None and split not in ("train", "eval"):
-        raise ValidationError(f"Invalid split '{split}'. Must be 'train' or 'eval'.")
+    if split is not None and split not in ("train", "eval", "both"):
+        raise ValidationError(f"Invalid split '{split}'. Must be 'train', 'eval', or 'both'.")
 
     # Open project DB
     db_path = root / REVOLVER_DIR / "revolver.db"
