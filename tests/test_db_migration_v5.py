@@ -450,6 +450,6 @@ def test_schema_version_is_at_least_9(tmp_path: Path) -> None:
     conn = get_project_db(db_path)
     try:
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 9
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
     finally:
         conn.close()

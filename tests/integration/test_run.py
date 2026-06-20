@@ -145,16 +145,14 @@ def _register_llm(
     model: str = "gpt-4",
     source: str = "remote",
     base_url: str | None = "http://localhost:11434/v1",
-    input_cost: float | None = None,
-    output_cost: float | None = None,
 ) -> None:
     """Register an LLM in the global database."""
     conn = get_global_db_at(global_db_path)
     try:
         conn.execute(
             "INSERT INTO llms (name, provider, model, source, base_url, "
-            "api_key_env, input_cost_per_mtok, output_cost_per_mtok, registered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "api_key_env, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 "openai",
@@ -162,8 +160,6 @@ def _register_llm(
                 source,
                 base_url,
                 None,
-                input_cost,
-                output_cost,
                 datetime.now(UTC).isoformat(),
             ),
         )
@@ -599,21 +595,19 @@ def test_run_with_token_usage(project_with_prereqs: dict[str, Path]) -> None:
 
 
 @pytest.mark.integration
-def test_run_pricing_no_cost_displayed(
+def test_run_no_cost_displayed(
     tmp_project: Path,
     dataset_dir: Path,
     global_db_path: Path,
 ) -> None:
-    """Cost is not reported (S15 / #300): tokens shown, no cost even when
-    the LLM carries (now inert) pricing fields."""
+    """Cost is not reported (S15 / #300, pricing removed in S16 / #203):
+    tokens are shown, cost never is."""
     _create_problem_version(tmp_project, "v1.0")
     _register_dataset(tmp_project, dataset_dir, compatible_with=["v1.0"])
     _register_llm(
         global_db_path,
-        name="priced-llm",
+        name="test-llm",
         base_url="http://localhost:11434/v1",
-        input_cost=3.0,
-        output_cost=15.0,
     )
 
     mock_runner = _make_mock_runner()
@@ -625,7 +619,7 @@ def test_run_pricing_no_cost_displayed(
             "--version",
             "v1.0",
             "--llm",
-            "priced-llm",
+            "test-llm",
             "--dataset",
             "train-small",
         ],
@@ -641,7 +635,7 @@ def test_run_pricing_no_cost_displayed(
     # Tokens are still shown ...
     assert "1000" in output
     assert "2000" in output
-    # ... but cost is never reported, even though priced-llm has pricing (#300).
+    # ... but cost is never reported (#300).
     assert "cost" not in output.lower()
     assert "$" not in output
     assert "estimated_cost" not in output

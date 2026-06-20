@@ -18,7 +18,6 @@ import pytest
 from revolver.infra.token_proxy import (
     TokenCountingProxy,
     TokenUsage,
-    estimate_cost,
 )
 
 pytestmark = [pytest.mark.unit]
@@ -214,67 +213,6 @@ class TestTokenCountingProxy:
             proxy.stop()
         finally:
             fake_server.shutdown()
-
-
-# ── estimate_cost tests ───────────────────────────────────────────────────────
-
-
-class TestEstimateCost:
-    """Tests for estimate_cost()."""
-
-    def test_with_pricing(self) -> None:
-        """Cost is computed correctly from token counts and pricing."""
-        cost = estimate_cost(
-            prompt_tokens=1_000_000,
-            completion_tokens=500_000,
-            input_cost_per_mtok=3.0,
-            output_cost_per_mtok=15.0,
-        )
-        assert cost is not None
-        # 1M * 3.0 / 1M + 0.5M * 15.0 / 1M = 3.0 + 7.5 = 10.5
-        assert cost == pytest.approx(10.5)
-
-    def test_zero_tokens(self) -> None:
-        """Zero tokens yields zero cost."""
-        cost = estimate_cost(
-            prompt_tokens=0,
-            completion_tokens=0,
-            input_cost_per_mtok=3.0,
-            output_cost_per_mtok=15.0,
-        )
-        assert cost == pytest.approx(0.0)
-
-    def test_no_pricing(self) -> None:
-        """Returns None when pricing is not configured."""
-        cost = estimate_cost(
-            prompt_tokens=1000,
-            completion_tokens=500,
-            input_cost_per_mtok=None,
-            output_cost_per_mtok=None,
-        )
-        assert cost is None
-
-    def test_partial_pricing(self) -> None:
-        """Returns None when only one pricing is configured."""
-        cost = estimate_cost(
-            prompt_tokens=1000,
-            completion_tokens=500,
-            input_cost_per_mtok=3.0,
-            output_cost_per_mtok=None,
-        )
-        assert cost is None
-
-    def test_small_token_counts(self) -> None:
-        """Small token counts produce correct fractional costs."""
-        cost = estimate_cost(
-            prompt_tokens=100,
-            completion_tokens=50,
-            input_cost_per_mtok=3.0,
-            output_cost_per_mtok=15.0,
-        )
-        assert cost is not None
-        # 100 * 3.0 / 1M + 50 * 15.0 / 1M = 0.0003 + 0.00075 = 0.00105
-        assert cost == pytest.approx(0.00105)
 
 
 # ── Fake error LLM backend ──────────────────────────────────────────────────

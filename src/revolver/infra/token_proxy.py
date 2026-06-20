@@ -58,41 +58,6 @@ class TokenUsage:
         return self.prompt_tokens + self.completion_tokens
 
 
-# ── Cost estimation utility ───────────────────────────────────────────────────
-
-
-def estimate_cost(
-    prompt_tokens: int,
-    completion_tokens: int,
-    input_cost_per_mtok: float | None = None,
-    output_cost_per_mtok: float | None = None,
-) -> float | None:
-    """Estimate cost in USD from token counts and per-million-token pricing.
-
-    .. deprecated:: 0.15.0
-        Cost is no longer reported by Revolver (S15 / backlog #300): no
-        realistic figure is reachable since the engines do not persist
-        per-attempt or reasoning/thinking tokens. This helper and the LLM
-        pricing fields are kept inert for one release; their removal (with
-        the DB migration) is scheduled for Sprint 016. Not called by any
-        production code path.
-
-    Args:
-        prompt_tokens: Number of prompt/input tokens.
-        completion_tokens: Number of completion/output tokens.
-        input_cost_per_mtok: Cost per million input tokens (USD).
-        output_cost_per_mtok: Cost per million output tokens (USD).
-
-    Returns:
-        Estimated cost in USD, or ``None`` if pricing is not configured.
-    """
-    if input_cost_per_mtok is None or output_cost_per_mtok is None:
-        return None
-    return (
-        prompt_tokens * input_cost_per_mtok + completion_tokens * output_cost_per_mtok
-    ) / 1_000_000
-
-
 # ── Token counting proxy ─────────────────────────────────────────────────────
 
 

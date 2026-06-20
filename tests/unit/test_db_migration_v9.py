@@ -198,17 +198,21 @@ def _create_v8_project_db(db_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_current_schema_version_is_9() -> None:
-    """CURRENT_SCHEMA_VERSION should be 9 after migration v9 (runs.backend)."""
-    assert CURRENT_SCHEMA_VERSION == 9
+def test_current_schema_version_is_at_least_9() -> None:
+    """CURRENT_SCHEMA_VERSION is at least 9 (runs.backend, migration v9).
+
+    Relaxed pin (>=) so later migrations don't churn this file; the exact
+    current value is asserted in test_db_migration_v10.py.
+    """
+    assert CURRENT_SCHEMA_VERSION >= 9
 
 
 @pytest.mark.unit
-def test_fresh_project_db_schema_version_9(project_conn: sqlite3.Connection) -> None:
-    """A fresh project DB lands at schema version 9."""
+def test_fresh_project_db_schema_version_current(project_conn: sqlite3.Connection) -> None:
+    """A fresh project DB lands at the current schema version."""
     cursor = project_conn.execute("SELECT MAX(version) FROM schema_version")
     row = cursor.fetchone()
-    assert row is not None and row[0] == 9
+    assert row is not None and row[0] == CURRENT_SCHEMA_VERSION
 
 
 @pytest.mark.unit
@@ -247,7 +251,7 @@ def test_migration_v8_to_v9_adds_backend_column(tmp_path: Path) -> None:
         assert "backend" in columns, "backend column not added by migration v9"
 
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 9
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
     finally:
         conn.close()
 
@@ -306,7 +310,7 @@ CREATE TABLE IF NOT EXISTS llms (
     conn = get_global_db_at(db_path)
     try:
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 9
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
     finally:
         conn.close()
 
