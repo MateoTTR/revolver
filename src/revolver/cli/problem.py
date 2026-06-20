@@ -149,13 +149,20 @@ def problem_test(
 @version_app.command("create")
 def problem_version_create(
     ctx: typer.Context,
-    tag: Annotated[
-        str,
-        typer.Option(
-            "--tag",
+    tag_positional: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="TAG",
             help="Version tag (e.g. v1.0).",
         ),
-    ],
+    ] = None,
+    tag_option: Annotated[
+        str | None,
+        typer.Option(
+            "--tag",
+            help="Version tag (e.g. v1.0). Deprecated: prefer the positional TAG.",
+        ),
+    ] = None,
     message: Annotated[
         str,
         typer.Option(
@@ -179,6 +186,17 @@ def problem_version_create(
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
+
+        # Resolve the tag from either the positional argument or the
+        # backward-compat ``--tag`` option (positional wins when both
+        # are supplied — UX-2 / S16-17).
+        tag = tag_positional or tag_option
+        if tag is None:
+            raise ValidationError(
+                "A version tag is required. Provide it as a positional "
+                "argument (e.g. 'revolver problem version create v1.0') or "
+                "via the --tag option."
+            )
 
         pv, config_warnings = core_problem.create_version(
             tag=tag, message=message, backend=backend

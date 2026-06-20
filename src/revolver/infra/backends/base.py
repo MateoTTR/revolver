@@ -265,6 +265,18 @@ class EvolutionBackend(Protocol):
         """Count valid programs produced so far (``None`` if unknown)."""
         ...
 
+    def count_total(self, run_dir: Path) -> int | None:
+        """Count *all* programs in the backend's store, valid or not.
+
+        Distinct from :meth:`count_valid` (correct programs only) and from
+        the number of programs extracted to the run's ``programs/`` dir.
+        On backends that keep a complete program store (ShinkaEvolve's
+        ``programs.sqlite``) this is the total row count; backends that
+        cannot cheaply produce a full total (OpenEvolve — needs checkpoint
+        parsing) return ``None`` (UX-4 / S16-19).
+        """
+        ...
+
     def count_evolved_children(self, run_dir: Path) -> int | None:
         """Count successfully evolved child programs, excluding seed(s).
 

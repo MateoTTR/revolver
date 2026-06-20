@@ -93,9 +93,9 @@ def _create_v9_global_db(db_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_current_schema_version_is_10() -> None:
-    """CURRENT_SCHEMA_VERSION should be 10 after migration v10 (drop pricing columns)."""
-    assert CURRENT_SCHEMA_VERSION == 10
+def test_current_schema_version_at_least_10() -> None:
+    """CURRENT_SCHEMA_VERSION should be at least 10 (migration v10 drops pricing columns)."""
+    assert CURRENT_SCHEMA_VERSION >= 10
 
 
 @pytest.mark.unit
@@ -108,7 +108,7 @@ def test_fresh_global_db_has_no_cost_columns(tmp_path: Path) -> None:
         assert not (_COST_COLUMNS & columns), f"pricing columns still present: {columns}"
 
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 10
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
     finally:
         conn.close()
 
@@ -128,7 +128,7 @@ def test_migration_v9_to_v10_drops_cost_columns(tmp_path: Path) -> None:
         assert not (_COST_COLUMNS & columns), f"cost columns not dropped: {columns}"
 
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 10
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
 
         # The pre-existing llm row must survive the table recreate (sans cost columns).
         row = conn.execute(
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     conn = get_project_db(db_path)
     try:
         cursor = conn.execute("SELECT MAX(version) FROM schema_version")
-        assert cursor.fetchone()[0] == 10
+        assert cursor.fetchone()[0] == CURRENT_SCHEMA_VERSION
 
         # The llms table is global-only; it must not appear on the project DB.
         cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='llms'")

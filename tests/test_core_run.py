@@ -35,6 +35,7 @@ from revolver.core.run import (
     get_run_status,
     launch_run,
     list_runs,
+    resolve_default_dataset,
     resume_run,
 )
 from revolver.infra.backends.openevolve import RunOutput
@@ -433,6 +434,113 @@ def test_launch_run_warns_non_train_split(
 
     captured = capsys.readouterr()
     assert "split='eval'" in captured.err
+
+
+@pytest.mark.unit
+def test_launch_run_no_warn_split_both(
+    project_with_prereqs: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """launch_run must NOT warn for a split='both' (dual-use) dataset (UX-3 / S16-18)."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    conn = get_project_db(db_path)
+    try:
+        conn.execute("UPDATE datasets SET split = 'both' WHERE name = 'train-small'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        dry_run=True,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+
+    good_integrity = IntegrityReport(
+        is_valid=True,
+        checked_at=datetime.now(UTC),
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch(
+            "revolver.core.run.verify_dataset_integrity",
+            return_value=good_integrity,
+        ),
+    ):
+        mock_global_db.return_value = MagicMock()
+        launch_run(config, project_root=root)
+
+    captured = capsys.readouterr()
+    assert "split=" not in captured.err
+
+
+@pytest.mark.unit
+def test_resolve_default_dataset_picks_both_when_no_train(
+    project_with_prereqs: dict,
+) -> None:
+    """The smart-default picks a split='both' dataset when no train exists (UX-3)."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    conn = get_project_db(db_path)
+    try:
+        # No train dataset: flip the only dataset to 'both'.
+        conn.execute("UPDATE datasets SET split = 'both' WHERE name = 'train-small'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert resolve_default_dataset(project_root=root) == "train-small"
+
+
+@pytest.mark.unit
+def test_resolve_default_dataset_prefers_train_over_both(
+    project_with_prereqs: dict,
+) -> None:
+    """A 'train' dataset takes priority over a 'both' dataset (UX-3)."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    conn = get_project_db(db_path)
+    try:
+        # Add a second dataset with split='both'; train-small stays 'train'.
+        conn.execute(
+            "INSERT INTO datasets (name, path, split, storage, description, "
+            "global_hash, instance_count, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "dual",
+                str(root / "datasets" / "dual"),
+                "both",
+                "reference",
+                "",
+                "dataset-hash-2",
+                1,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # train-small (split='train') wins; 'both' is only a fallback.
+    assert resolve_default_dataset(project_root=root) == "train-small"
 
 
 @pytest.mark.unit
@@ -1933,6 +2041,128 @@ def test_get_run_info_returns_complete_data(project_with_prereqs: dict) -> None:
 
     # Resume chain
     assert run_id in info.resume_chain
+
+
+@pytest.mark.unit
+def test_get_run_info_program_counts_and_score_fallback(
+    project_with_prereqs: dict,
+) -> None:
+    """get_run_info surfaces programs_extracted, total_programs, and the
+    rank-1 run best_score fallback when the solution score is missing
+    (UX-4 / S16-19/20)."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    run_id = "run-20260311-090000"
+    create_run_dir(root, run_id)
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+            backend="shinka",
+        )
+        # Rank-1 solution with NO score (post-run eval skipped).
+        insert_solution(
+            conn,
+            solution_id="sol-001",
+            run_id=run_id,
+            rank=1,
+            best_score=None,
+            alias=None,
+        )
+    finally:
+        conn.close()
+
+    write_run_manifest(
+        root,
+        run_id,
+        {
+            "run_id": run_id,
+            "programs": [
+                {"rank": 1, "score": None, "file": "programs/rank-1.py"},
+                {"rank": 2, "score": None, "file": "programs/rank-2.py"},
+            ],
+        },
+    )
+
+    # Fake backend: 11 programs in the store, engine best_score 0.87.
+    fake_backend = MagicMock()
+    fake_backend.count_total.return_value = 11
+    fake_backend.count_evolved_children.return_value = 9
+    fake_backend.read_progress.return_value = (5, 0.87)
+
+    with patch("revolver.core.run.get_backend", return_value=fake_backend):
+        info = get_run_info(run_id, project_root=root)
+
+    assert info.programs_extracted == 2
+    assert info.total_programs == 11
+    assert info.run_best_score == 0.87
+    # The rank-1 solution's own score remains None (fallback is display-only).
+    assert info.solutions[0].best_score is None
+
+
+@pytest.mark.unit
+def test_get_run_info_no_score_fallback_when_present(
+    project_with_prereqs: dict,
+) -> None:
+    """No run best_score fallback is read when the rank-1 solution has a score."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    run_id = "run-20260311-091500"
+    create_run_dir(root, run_id)
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+            backend="shinka",
+        )
+        insert_solution(
+            conn,
+            solution_id="sol-001",
+            run_id=run_id,
+            rank=1,
+            best_score=0.93,
+            alias=None,
+        )
+    finally:
+        conn.close()
+
+    write_run_manifest(root, run_id, {"run_id": run_id, "programs": []})
+
+    fake_backend = MagicMock()
+    fake_backend.count_total.return_value = 4
+    fake_backend.read_progress.return_value = (5, 0.50)
+
+    with patch("revolver.core.run.get_backend", return_value=fake_backend):
+        info = get_run_info(run_id, project_root=root)
+
+    # The rank-1 solution already has a score → no fallback read.
+    assert info.run_best_score is None
+    fake_backend.read_progress.assert_not_called()
+    assert info.solutions[0].best_score == 0.93
 
 
 @pytest.mark.unit

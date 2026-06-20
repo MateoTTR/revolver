@@ -1496,6 +1496,15 @@ class OpenEvolveBackend:
             valid = count_valid_programs(oe_output_dir)
         return valid
 
+    def count_total(self, run_dir: Path) -> int | None:
+        """Return ``None`` — OpenEvolve has no cheap full program-store total.
+
+        A complete total would require parsing every checkpoint, so
+        ``run info`` shows ``programs_in_db`` only on backends with a
+        complete program store (UX-4 / S16-19).
+        """
+        return None
+
     def count_evolved_children(self, run_dir: Path) -> int | None:
         """Return ``None`` — the checkpoint does not distinguish the initial
         program from evolved children, so the unproductive-run check

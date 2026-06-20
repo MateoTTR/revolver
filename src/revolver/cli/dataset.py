@@ -29,7 +29,10 @@ def dataset_add(
     ],
     split: Annotated[
         str | None,
-        typer.Option("--split", help="Dataset split: 'train' or 'eval'."),
+        typer.Option(
+            "--split",
+            help="Dataset split: 'train', 'eval', or 'both' (usable for both).",
+        ),
     ] = None,
     snapshot: Annotated[
         bool,

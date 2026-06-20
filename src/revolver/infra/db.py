@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS problem_versions (
 CREATE TABLE IF NOT EXISTS datasets (
     name            TEXT PRIMARY KEY,
     path            TEXT NOT NULL,
-    split           TEXT CHECK (split IN ('train', 'eval')),
+    split           TEXT CHECK (split IN ('train', 'eval', 'both')),
     storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
     description     TEXT DEFAULT '',
     global_hash     TEXT NOT NULL,
@@ -463,6 +463,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 10:
         _migrate_v9_to_v10(conn)
 
+    # Migration v11: Widen the datasets.split CHECK to accept 'both' (project).
+    if current < 11:
+        _migrate_v10_to_v11(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -646,6 +650,61 @@ ALTER TABLE llms_new RENAME TO llms;
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
         (10, now),
+    )
+    conn.commit()
+
+
+def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
+    """Migration v10->v11: Widen the datasets.split CHECK to accept 'both' (project DB).
+
+    Adds ``'both'`` (usable for training and evaluation) as a third valid
+    value for the ``datasets.split`` CHECK constraint (UX-3, sprint-016
+    S16-18).  SQLite does not support ``ALTER CHECK``, so the ``datasets``
+    table is recreated with the widened constraint and existing rows are
+    copied over.  Foreign-key checks are disabled during the recreate so
+    the tables that reference ``datasets(name)`` (``dataset_instances``,
+    ``dataset_compat``, ``runs``, ``benchmarks``, ``eval_metadata``) are
+    not affected — the primary-key ``name`` values are preserved.
+
+    The ``datasets`` table lives only in the project DB.  The global DB has
+    no such table, so the migration is a no-op there and only the schema
+    version is bumped.
+    """
+    # Guard: only project databases have the datasets table.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='datasets'")
+    if cursor.fetchone() is None:
+        # Global DB — nothing to migrate, just record version.
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (11, now),
+        )
+        conn.commit()
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+
+    conn.executescript("""\
+CREATE TABLE datasets_new (
+    name            TEXT PRIMARY KEY,
+    path            TEXT NOT NULL,
+    split           TEXT CHECK (split IN ('train', 'eval', 'both')),
+    storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
+    description     TEXT DEFAULT '',
+    global_hash     TEXT NOT NULL,
+    instance_count  INTEGER NOT NULL,
+    registered_at   TEXT NOT NULL
+);
+INSERT INTO datasets_new SELECT * FROM datasets;
+DROP TABLE datasets;
+ALTER TABLE datasets_new RENAME TO datasets;
+""")
+
+    conn.execute("PRAGMA foreign_keys=ON")
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (11, now),
     )
     conn.commit()
 

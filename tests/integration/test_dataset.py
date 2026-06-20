@@ -185,6 +185,28 @@ def test_add_with_split(tmp_project: Path, dataset_dir: Path) -> None:
 
 
 @pytest.mark.integration
+def test_add_with_split_both(tmp_project: Path, dataset_dir: Path) -> None:
+    """--split both (dual-use) is accepted and stored in the DB (UX-3 / S16-18)."""
+    result = _invoke_with_cwd(
+        ["dataset", "add", "ds-both", "--path", str(dataset_dir), "--split", "both"],
+        tmp_project,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        cursor = conn.execute("SELECT split FROM datasets WHERE name = ?", ("ds-both",))
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "both"
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
 def test_add_with_compatible_version(tmp_project: Path, dataset_dir: Path) -> None:
     """--compatible-with v1.0 creates compat entry (requires problem version v1.0)."""
     # Create problem version v1.0 first

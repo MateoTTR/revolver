@@ -558,6 +558,11 @@ def run_info(
                 data["valid_iterations"] = f"{info.valid_iterations}/{info.iterations} ({pct}%)"
             if info.generation_time_s is not None:
                 data["generation_time_s"] = f"{info.generation_time_s:.1f}"
+            # Program counters (UX-4 / S16-19): files extracted to programs/
+            # plus the backend store total (only when the backend reports it).
+            data["programs_extracted"] = info.programs_extracted
+            if info.total_programs is not None:
+                data["programs_in_db"] = info.total_programs
             if info.resumed_from:
                 data["resumed_from"] = info.resumed_from
             if info.resume_chain:
@@ -584,17 +589,26 @@ def run_info(
             if info.produced_no_children:
                 sys.stderr.write(f"WARNING: {core_run.UNPRODUCTIVE_RUN_MESSAGE}.\n")
 
-            # Display solutions
+            # Display solutions. When a rank-1 solution has no post-run eval
+            # score, fall back to the engine's run best_score with a
+            # "(from run)" indicator (UX-4 / S16-20).
             if info.solutions:
-                sol_rows = [
-                    {
-                        "solution_id": s.solution_id,
-                        "rank": s.rank,
-                        "best_score": (f"{s.best_score:.4f}" if s.best_score is not None else "-"),
-                        "alias": s.alias or "",
-                    }
-                    for s in info.solutions
-                ]
+                sol_rows = []
+                for s in info.solutions:
+                    if s.best_score is not None:
+                        score_str = f"{s.best_score:.4f}"
+                    elif s.rank == 1 and info.run_best_score is not None:
+                        score_str = f"{info.run_best_score:.4f} (from run)"
+                    else:
+                        score_str = "-"
+                    sol_rows.append(
+                        {
+                            "solution_id": s.solution_id,
+                            "rank": s.rank,
+                            "best_score": score_str,
+                            "alias": s.alias or "",
+                        }
+                    )
                 render(sol_rows, json_mode=False)
 
             # Display programs
@@ -719,7 +733,7 @@ def run_population(
     ctx: typer.Context,
     run_id: Annotated[str, typer.Argument(help="Run ID to inspect.")],
 ) -> None:
-    """Display the MAP-Elites population of a run."""
+    """Display the program population of a run."""
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
 
