@@ -1,7 +1,7 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.6 — runs.backend column + planned migration v9 (ADR-007)
-**Date**: 2026-03-25
+**Version**: 0.7 — migrations through v11 landed: runs.backend (v9, ADR-007), drop llms pricing columns (v10, #300), widen datasets.split CHECK to include 'both' (v11)
+**Date**: 2026-06-20
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
@@ -119,7 +119,7 @@ Dataset registrations. Manifests stored in `.revolver/datasets/<name>/manifest.y
 CREATE TABLE datasets (
     name            TEXT PRIMARY KEY,       -- "train-small", "eval-benchmark"
     path            TEXT NOT NULL,          -- absolute path to dataset directory
-    split           TEXT NOT NULL CHECK (split IN ('train', 'eval')),
+    split           TEXT CHECK (split IN ('train', 'eval', 'both')), -- 'both' added in migration v11 (UX-3)
     storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
     description     TEXT DEFAULT '',
     global_hash     TEXT NOT NULL,          -- SHA-256 of sorted instance hashes
@@ -157,7 +157,7 @@ CREATE TABLE dataset_compat (
 
 ### 3.5 `runs`
 
-Run metadata created by `revolver run`. A run is the physical unit of an evolution session on the selected backend (ADR-007): it owns the resume state, config, wrapper evaluator, and stored programs. A single solution (rank-1) is auto-created on completion; additional solutions can be extracted on demand via `revolver solution extract`. Full provenance for traceability (NFR-020). The `backend` column (migration v9, planned for S13) records which evolution backend produced the run; solutions derive their backend via the `run_id` join.
+Run metadata created by `revolver run`. A run is the physical unit of an evolution session on the selected backend (ADR-007): it owns the resume state, config, wrapper evaluator, and stored programs. A single solution (rank-1) is auto-created on completion; additional solutions can be extracted on demand via `revolver solution extract`. Full provenance for traceability (NFR-020). The `backend` column (migration v9) records which evolution backend produced the run; solutions derive their backend via the `run_id` join.
 
 ```sql
 CREATE TABLE runs (
@@ -179,7 +179,7 @@ CREATE TABLE runs (
                              'failed', 'completed_with_errors')),
     llm_type          TEXT NOT NULL DEFAULT 'single', -- 'single' or 'ensemble'
     llm_snapshot      TEXT,                   -- JSON snapshot of LLM/ensemble config for traceability
-    backend           TEXT NOT NULL DEFAULT 'openevolve', -- evolution backend (ADR-007, migration v9 — S13)
+    backend           TEXT NOT NULL DEFAULT 'openevolve', -- evolution backend (ADR-007, migration v9)
     created_at        TEXT NOT NULL           -- ISO 8601
 );
 
@@ -296,8 +296,6 @@ CREATE TABLE llms (
     source          TEXT NOT NULL CHECK (source IN ('local', 'remote')),
     base_url        TEXT,                   -- e.g., "http://localhost:11434/v1"
     api_key_env     TEXT,                   -- env var name (e.g., "ANTHROPIC_API_KEY")
-    input_cost_per_mtok  REAL,             -- USD per million input tokens (NULL = no pricing)
-    output_cost_per_mtok REAL,             -- USD per million output tokens (NULL = no pricing)
     temperature     REAL,                   -- default sampling temperature (NULL = use provider default)
     registered_at   TEXT NOT NULL           -- ISO 8601
 );
@@ -460,7 +458,7 @@ UPDATE schema_version SET version = 8, applied_at = datetime('now');
 
 Each `ALTER TABLE` is executed individually with error suppression (SQLite does not support `ADD COLUMN IF NOT EXISTS`).
 
-### 5.8 Migration: v8 → v9 (Sprint 013 — planned)
+### 5.8 Migration: v8 → v9 (Sprint 013)
 
 Schema version 9 adds the `backend` column to the `runs` table (project DB) for evolution-backend
 traceability (ADR-007, FR-RUN-047):
@@ -470,7 +468,71 @@ ALTER TABLE runs ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve';
 UPDATE schema_version SET version = 9, applied_at = datetime('now');
 ```
 
-All pre-v9 runs are OpenEvolve runs, so the default backfills them correctly.
+All pre-v9 runs are OpenEvolve runs, so the default backfills them correctly. The `runs` table lives
+only in the project DB; on the global DB the migration is a no-op that just records the version bump.
+
+### 5.9 Migration: v9 → v10 (Sprint 016)
+
+Schema version 10 drops the two inert per-million-token pricing columns
+(`input_cost_per_mtok`, `output_cost_per_mtok`) from the `llms` table (global DB). Cost reporting
+was removed in v0.15.0 (S15 / #300) — the columns were always `NULL` afterwards, so no data needs
+preserving (FR-RUN-030, FR-LLM-018). SQLite does not support `DROP COLUMN` on all supported
+versions, so the table is recreated without the pricing columns and existing rows are copied over:
+
+```sql
+CREATE TABLE llms_new (
+    name            TEXT PRIMARY KEY,
+    provider        TEXT,
+    model           TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK (source IN ('local', 'remote')),
+    base_url        TEXT,
+    api_key_env     TEXT,
+    max_tokens      INTEGER,
+    timeout_s       INTEGER,
+    temperature     REAL,
+    registered_at   TEXT NOT NULL
+);
+INSERT INTO llms_new SELECT
+    name, provider, model, source, base_url, api_key_env,
+    max_tokens, timeout_s, temperature, registered_at
+FROM llms;
+DROP TABLE llms;
+ALTER TABLE llms_new RENAME TO llms;
+UPDATE schema_version SET version = 10, applied_at = datetime('now');
+```
+
+The `llms` table lives only in the global DB; on the project DB the migration is a no-op that just
+records the version bump.
+
+### 5.10 Migration: v10 → v11 (Sprint 016)
+
+Schema version 11 widens the `datasets.split` CHECK constraint to accept `'both'` (a dataset usable
+for both training and evaluation — UX-3). SQLite does not support `ALTER CHECK`, so the `datasets`
+table is recreated with the widened constraint and existing rows are copied over. FK enforcement is
+temporarily disabled (`PRAGMA foreign_keys=OFF`) during the recreate so the tables that reference
+`datasets(name)` are not affected — the primary-key `name` values are preserved:
+
+```sql
+PRAGMA foreign_keys=OFF;
+CREATE TABLE datasets_new (
+    name            TEXT PRIMARY KEY,
+    path            TEXT NOT NULL,
+    split           TEXT CHECK (split IN ('train', 'eval', 'both')),
+    storage         TEXT NOT NULL DEFAULT 'reference' CHECK (storage IN ('reference', 'snapshot')),
+    description     TEXT DEFAULT '',
+    global_hash     TEXT NOT NULL,
+    instance_count  INTEGER NOT NULL,
+    registered_at   TEXT NOT NULL
+);
+INSERT INTO datasets_new SELECT * FROM datasets;
+DROP TABLE datasets;
+ALTER TABLE datasets_new RENAME TO datasets;
+PRAGMA foreign_keys=ON;
+UPDATE schema_version SET version = 11, applied_at = datetime('now');
+```
+
+The `datasets` table lives only in the project DB; on the global DB the migration is a no-op that
+just records the version bump.
 
 ---
 

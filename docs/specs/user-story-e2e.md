@@ -43,7 +43,7 @@ Done: LLM 'codestral-local' registered
 ```bash
 # Register the remote LLM (Claude via Anthropic API)
 $ revolver llm add claude-opus --source remote --provider anthropic --model claude-opus-4-6 \
-    --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
+    --api-key-env ANTHROPIC_API_KEY
 
  status    registered
  name      claude-opus
@@ -210,7 +210,7 @@ Alice wants to try an AlphaEvolve-style multi-model ensemble combining a cheap m
 ```bash
 # Register a second remote LLM
 $ revolver llm add flash-lite --provider google --model gemini-2.5-flash-lite \
-    --api-key-env GEMINI_API_KEY --input-cost 0.075 --output-cost 0.30
+    --api-key-env GEMINI_API_KEY
 
 Done: LLM 'flash-lite' registered
 ```

@@ -28,7 +28,7 @@ Register a dataset directory.
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `--path <dir>` | string | Yes | Path to the dataset directory |
-| `--split <type>` | string | No | `train` or `eval` |
+| `--split <type>` | string | No | `train`, `eval`, or `both` (usable for both training and evaluation) |
 | `--compatible-with <tag>` | string | No | Problem version tag(s) this dataset works with (repeatable) |
 | `--snapshot` | flag | No | Copy all instance files into `.revolver/datasets/<name>/snapshot/` |
 | `--description <text>` | string | No | Short description |
@@ -191,7 +191,7 @@ Integrity check:
 | FR-DAT-003 | MUST | Store the absolute path to the dataset directory | §7.2 |
 | FR-DAT-004 | MUST | Count instances automatically (top-level entries in directory) | §4.3 |
 | FR-DAT-005 | MUST | Support `--snapshot` to copy files into `.revolver/datasets/<name>/snapshot/` | §4.3 |
-| FR-DAT-006 | MUST | Each dataset declares a split: `train` or `eval` | §4.3 |
+| FR-DAT-006 | MUST | Each dataset declares a split: `train`, `eval`, or `both` (usable for both training and evaluation) | §4.3 |
 | FR-DAT-007 | MUST | Each dataset declares compatibility with one or more problem versions | §7.4 |
 | FR-DAT-008 | MUST | `update` allows adding/removing compatible problem versions | §5.4 |
 | FR-DAT-009 | MUST | `info --verify` recomputes hashes and reports mismatches | §7.2 |
@@ -212,7 +212,7 @@ Integrity check:
 | Dataset name already registered | Error: "Dataset '<name>' already exists" | 1 |
 | Dataset directory does not exist | Error: "Directory not found: <path>" | 1 |
 | Dataset directory is empty | Error: "No instances found in <path>" | 1 |
-| `--split` is not `train` or `eval` | Error: "Split must be 'train' or 'eval'" | 1 |
+| `--split` is not `train`, `eval`, or `both` | Error: "Invalid split '<value>'. Must be 'train', 'eval', or 'both'." | 1 |
 | `--compatible-with` tag does not exist | Error: "Problem version '<tag>' not found" | 1 |
 | `info --verify` finds hash mismatches | Warning on stderr + details; exit code 2 | 2 |
 | Dataset path no longer accessible | Error: "Dataset path no longer accessible: <path>" | 1 |
