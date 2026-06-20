@@ -630,8 +630,8 @@ FR-RUN-042 numbering gap is cleared here.
 | FR-RUN-037 | **Covered** | Deleting a run cascade-deletes its solutions and eval data (DB cascade on `runs` → `solutions` → `eval_*`, DES-001 §3.5–3.8). Backend-agnostic. |
 | FR-RUN-038 | **Covered** | Deleting a run removes its run directory (`.revolver/runs/<id>/`, incl. the backend's `default_output_subdir`). Backend-agnostic. |
 | FR-RUN-039 | **Covered** | `run delete --json` without `--force` errors (NFR-003 non-interactive safety). Backend-agnostic. |
-| FR-RUN-042 | **Covered (numbering gap)** | No requirement is defined at FR-RUN-042 — the spec list jumps FR-RUN-041 → FR-RUN-043 (a known gap carried since S13, see sprint-013 §Carry-over). Recorded here so the cross-reference resolves; no behavior is owed. |
-| FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume` (§4, §14.1). |
+| FR-RUN-042 | **N/A (numbering gap)** | No requirement is defined at FR-RUN-042 — the spec list jumps FR-RUN-041 → FR-RUN-043 (a known gap carried since S13, see sprint-013 §Carry-over). Recorded here so the cross-reference resolves; no behavior is owed, so coverage is not applicable. |
+| FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume` (§4.1–§4.6, §14.1). |
 | FR-RUN-048 | **Covered** | Backend capability map-with-warn (§4.2 Shinka `--parallel`/ensemble warnings, §4.6 `capabilities()`). |
 
 ---
