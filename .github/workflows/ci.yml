@@ -88,14 +88,16 @@ jobs:
           tag="${GITHUB_REF#refs/tags/v}"
 
           # version = "X.Y.Z" from pyproject.toml [project] table.
+          # Accept single- or double-quoted values; '|| true' keeps the empty
+          # guard below reachable when grep finds no match under pipefail.
           pyproject_version="$(grep -E '^version[[:space:]]*=' pyproject.toml \
             | head -n1 \
-            | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
+            | sed -E "s/^version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/" || true)"
 
           # __version__ = "X.Y.Z" from the package __init__.
           init_version="$(grep -E '^__version__[[:space:]]*=' src/revolver/__init__.py \
             | head -n1 \
-            | sed -E 's/^__version__[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
+            | sed -E "s/^__version__[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/" || true)"
 
           echo "tag (from GITHUB_REF):          $tag"
           echo "pyproject.toml version:         $pyproject_version"
