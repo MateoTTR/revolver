@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -482,6 +483,65 @@ def test_problem_version_create_unknown_backend_fails_fast(tmp_project: Path) ->
 
     # Fail fast: no snapshot dir, no DB record
     assert not (tmp_project / ".revolver" / "problem" / "v-bad").exists()
+
+
+# ── version create: positional tag (UX-2 / S16-17) ──────────────────────────
+
+
+@pytest.mark.integration
+def test_problem_version_create_positional_tag(tmp_project: Path) -> None:
+    """`problem version create v1.0` works with a positional TAG (no --tag)."""
+    _copy_problem_fixtures(tmp_project)
+
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(app, ["problem", "version", "create", "v1.0"])
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {output}"
+    assert (tmp_project / ".revolver" / "problem" / "v1.0" / "config.yaml").is_file()
+
+
+@pytest.mark.integration
+def test_problem_version_create_option_tag_backward_compat(tmp_project: Path) -> None:
+    """`problem version create --tag v1.0` still works (backward-compat option)."""
+    _copy_problem_fixtures(tmp_project)
+
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(app, ["problem", "version", "create", "--tag", "v1.0"])
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {output}"
+    assert (tmp_project / ".revolver" / "problem" / "v1.0" / "config.yaml").is_file()
+
+
+@pytest.mark.integration
+def test_problem_version_create_no_tag_errors(tmp_project: Path) -> None:
+    """`problem version create` with no tag raises a clear validation error (exit 1)."""
+    _copy_problem_fixtures(tmp_project)
+
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(app, ["problem", "version", "create"])
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}: {output}"
+    assert "version tag is required" in output.lower()
+
+
+@pytest.mark.integration
+def test_problem_version_create_positional_wins_over_option(tmp_project: Path) -> None:
+    """When both positional and --tag are supplied, the positional wins (UX-2)."""
+    _copy_problem_fixtures(tmp_project)
+
+    with patch("pathlib.Path.cwd", return_value=tmp_project):
+        result = runner.invoke(
+            app,
+            ["problem", "version", "create", "v-positional", "--tag", "v-option"],
+        )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {output}"
+    assert (tmp_project / ".revolver" / "problem" / "v-positional" / "config.yaml").is_file()
+    assert not (tmp_project / ".revolver" / "problem" / "v-option").exists()
 
 
 @pytest.mark.integration

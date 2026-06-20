@@ -347,8 +347,9 @@ def evaluate_solution(
         except Exception as exc:
             sys.stderr.write(f"Warning: could not verify dataset integrity: {exc}\n")
 
-        # 5. Warn if split != 'eval' (FR-EVL-009)
-        if ds.split is not None and ds.split != "eval":
+        # 5. Warn if split is not eval-eligible (FR-EVL-009). "both"
+        #    (dual-use) datasets are eval-eligible — no warning (UX-3 / S16-18).
+        if ds.split is not None and ds.split not in ("eval", "both"):
             sys.stderr.write(
                 f"Warning: dataset '{dataset_name}' has split='{ds.split}' (expected 'eval').\n"
             )

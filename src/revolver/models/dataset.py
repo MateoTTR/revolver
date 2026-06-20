@@ -39,7 +39,8 @@ class DatasetRegistration(BaseModel):
         name: Unique user-chosen identifier (e.g. ``"train-small"``).
         path: Absolute path to the dataset directory.
         storage: ``"reference"`` (default) or ``"snapshot"``.
-        split: ``"train"`` or ``"eval"``, or ``None`` if unspecified.
+        split: ``"train"``, ``"eval"``, ``"both"`` (usable for training and
+            evaluation), or ``None`` if unspecified.
         instance_count: Number of top-level entries in the dataset directory.
         global_hash: SHA-256 of sorted instance hashes (dataset-level hash).
         created_at: Timestamp of registration.
@@ -51,7 +52,7 @@ class DatasetRegistration(BaseModel):
     name: str
     path: str
     storage: Literal["reference", "snapshot"]
-    split: Literal["train", "eval"] | None
+    split: Literal["train", "eval", "both"] | None
     instance_count: int
     global_hash: str
     created_at: datetime
@@ -63,14 +64,14 @@ class DatasetSummary(BaseModel):
 
     Attributes:
         name: Dataset identifier.
-        split: ``"train"``, ``"eval"``, or ``None``.
+        split: ``"train"``, ``"eval"``, ``"both"``, or ``None``.
         instance_count: Number of instances.
         storage: ``"reference"`` or ``"snapshot"``.
         created_at: Timestamp of registration.
     """
 
     name: str
-    split: Literal["train", "eval"] | None
+    split: Literal["train", "eval", "both"] | None
     instance_count: int
     storage: Literal["reference", "snapshot"]
     created_at: datetime

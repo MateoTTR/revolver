@@ -601,6 +601,45 @@ class TestShinkaBuildConfig:
         dumped = yaml.dump(config, default_flow_style=False)
         assert yaml.safe_load(dumped) == config
 
+    def test_local_source_pins_max_proposal_jobs(self, fake_shinka: None, tmp_path: Path) -> None:
+        """UX-5/S16-21: a --source local LLM auto-pins job_config.max_proposal_jobs=1."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm(source="local")))
+        assert config["job_config"]["max_proposal_jobs"] == 1
+
+    def test_remote_source_does_not_pin_max_proposal_jobs(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """A remote LLM does not get the local concurrency pin."""
+        llm = _make_llm(
+            name="remote-llm",
+            source="remote",
+            provider="openai",
+            base_url=None,
+            api_key_env="OPENAI_API_KEY",
+        )
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=llm))
+        assert "max_proposal_jobs" not in config.get("job_config", {})
+
+    def test_max_proposal_jobs_override_wins(self, fake_shinka: None, tmp_path: Path) -> None:
+        """An explicit --config-override overrides the local auto-pin (UX-5)."""
+        config = ShinkaBackend().build_config(
+            _make_spec(
+                tmp_path,
+                llm=_make_llm(source="local"),
+                config_overrides=["job_config.max_proposal_jobs=3"],
+            )
+        )
+        assert config["job_config"]["max_proposal_jobs"] == 3
+
+    def test_resolved_config_surfaces_max_proposal_jobs(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """The injected max_proposal_jobs appears in the dry-run backend_extras."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path, llm=_make_llm(source="local")))
+        resolved = backend.resolved_config(config)
+        assert resolved.backend_extras["max_proposal_jobs"] == 1
+
 
 # ── resolved_config (S14-08) ─────────────────────────────────────────────────
 

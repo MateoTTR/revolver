@@ -318,6 +318,14 @@ class RunInfo(BaseModel):
         created_at: Timestamp of run creation.
         solutions: All solutions (auto-created + extracted) for this run.
         programs: All stored programs from OpenEvolve output.
+        programs_extracted: Number of programs materialized to the run's
+            ``programs/`` directory (equals ``len(programs)``).
+        total_programs: Total programs in the backend's store (all rows in
+            ShinkaEvolve's ``programs.sqlite``; ``None`` on OpenEvolve, where
+            a full total needs checkpoint parsing — UX-4 / S16-19).
+        run_best_score: Best score recorded by the engine at run completion,
+            used as a fallback for the rank-1 solution score when its own
+            post-run eval score is missing (UX-4 / S16-20).
         resume_chain: Ordered list of ancestor run IDs.
         llm_type: ``"single"`` or ``"ensemble"``.
         llm_snapshot: JSON string with LLM/ensemble configuration snapshot.
@@ -340,6 +348,9 @@ class RunInfo(BaseModel):
     created_at: datetime
     solutions: list[SolutionResult] = []
     programs: list[ProgramEntry] = []
+    programs_extracted: int = 0
+    total_programs: int | None = None
+    run_best_score: float | None = None
     resume_chain: list[str] = []
     llm_type: str = "single"
     llm_snapshot: str | None = None

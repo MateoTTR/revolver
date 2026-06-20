@@ -698,6 +698,20 @@ class ShinkaBackend:
         if wrapper_path is not None:
             job["eval_program_path"] = str(wrapper_path)
 
+        # 4c. Local-endpoint concurrency pin (UX-5 / S16-21): a "local"
+        #     source LLM is typically a serialized subscription or single-GPU
+        #     endpoint, so fanning out parallel proposal jobs starves it.
+        #     Pin job_config.max_proposal_jobs=1 unless the user set it
+        #     explicitly via --config-override (the override loop below still
+        #     wins for any value they pass).
+        overrides_set_proposal_jobs = any(
+            override.split("=", 1)[0].strip().split(".")[-1] == "max_proposal_jobs"
+            for override in (spec.config_overrides or [])
+            if "=" in override
+        )
+        if spec.llm.source == "local" and not overrides_set_proposal_jobs:
+            job["max_proposal_jobs"] = 1
+
         # 5. Config overrides last (dotted keys, e.g. db_config.num_islands=4)
         for override in spec.config_overrides or []:
             if "=" not in override:
@@ -728,6 +742,9 @@ class ShinkaBackend:
         db = config.get("db_config")
         if not isinstance(db, dict):
             db = {}
+        job = config.get("job_config")
+        if not isinstance(job, dict):
+            job = {}
 
         llm_models: list[dict[str, Any]] | None = None
         raw_models = evo.get("llm_models")
@@ -769,6 +786,7 @@ class ShinkaBackend:
             ("archive_size", db.get("archive_size")),
             ("parent_selection_strategy", db.get("parent_selection_strategy")),
             ("migration_interval", db.get("migration_interval")),
+            ("max_proposal_jobs", job.get("max_proposal_jobs")),
             ("results_dir", evo.get("results_dir")),
         ):
             if value is not None:
@@ -1046,6 +1064,27 @@ class ShinkaBackend:
             conn = sqlite3.connect(db_path)
             try:
                 row = conn.execute("SELECT COUNT(*) FROM programs WHERE correct = 1").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
+        return int(row[0]) if row is not None else None
+
+    def count_total(self, run_dir: Path) -> int | None:
+        """Count *all* rows in ``programs.sqlite`` (valid or not — UX-4 / S16-19).
+
+        Unlike :meth:`count_valid` (``correct = 1`` only), this returns the
+        full program store size: initial seed(s) plus every attempted child,
+        which is what ``run info`` surfaces as ``programs_in_db``. Returns
+        ``None`` when the database does not exist or cannot be read.
+        """
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM programs").fetchone()
             finally:
                 conn.close()
         except sqlite3.Error:
