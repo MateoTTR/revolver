@@ -724,7 +724,8 @@ Common per-model settings:
 ### Cost implications
 
 Ensemble runs can dramatically reduce cost by routing most iterations
-through cheap models. Approximate Gemini pricing as of early 2026:
+through cheap models. Approximate Gemini pricing as of early 2026 (provider
+list prices — for your own budgeting):
 
 | Model | Input cost (per 1M tokens) | Output cost (per 1M tokens) | Relative cost |
 |-------|---------------------------|----------------------------|---------------|
@@ -737,9 +738,12 @@ With an 80/20 Flash-Lite/Pro ensemble over 500 iterations:
 - Estimated 5-7x cheaper than running all 500 on Pro alone
 - Quality benefit: Pro's occasional contributions lift the population
 
-Use `revolver llm update <name> --input-cost <X> --output-cost <Y>` to
-register per-model costs, then `revolver run info` will report estimated
-run cost.
+> **Revolver does not report cost (#300).** Cost estimation was removed:
+> Revolver reports **tokens only** (`run info` shows the prompt/completion
+> token breakdown, not a USD figure), because neither engine persists
+> per-attempt or reasoning/thinking tokens, so no realistic cost is reachable.
+> Use the per-model token counts above plus your provider console to reason
+> about spend.
 
 ### Ensemble vs sequential resume
 

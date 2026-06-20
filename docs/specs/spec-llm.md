@@ -38,8 +38,6 @@ Register a new LLM in the global registry.
 | `--api-key-env <var>` | string | For remote | Environment variable name holding the API key (e.g., `ANTHROPIC_API_KEY`) |
 | `--base-url <url>` | string | No | Override API base URL. Auto-set to `http://localhost:11434/v1` for Ollama |
 | `--pull` | flag | No | For Ollama: immediately pull the model after registration (default: prompt user) |
-| `--input-cost <price>` | float | No | **Inert since S15 (#300)**: cost is no longer reported (no realistic figure is reachable). Accepted and stored for compatibility; removal + DB migration → S16. |
-| `--output-cost <price>` | float | No | **Inert since S15 (#300)**: cost is no longer reported. Accepted and stored for compatibility; removal + DB migration → S16. |
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Injected into OpenEvolve config at run time. |
 | `--timeout <seconds>` | int | No | Request timeout in seconds. Injected into OpenEvolve config at run time. |
 | `--temperature <float>` | float | No | Sampling temperature (0.0–2.0). Injected into OpenEvolve config at run time. |
@@ -51,9 +49,7 @@ Model pulled successfully (12 GB, digest: sha256:0898a8b2...)
 ```
 
 ```bash
-# The --input-cost/--output-cost flags are still accepted but inert since
-# S15 (#300): cost is no longer reported (removal + DB migration → S16).
-$ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY --input-cost 15.0 --output-cost 75.0
+$ revolver llm add claude-opus --provider anthropic --model claude-opus-4-6 --api-key-env ANTHROPIC_API_KEY
 ```
 ```
 LLM "claude-opus" registered (provider: anthropic, model: claude-opus-4-6)
@@ -220,8 +216,6 @@ Update configuration fields of a registered LLM. At least one option must be pro
 |---|---|---|---|
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response |
 | `--timeout <seconds>` | int | No | Request timeout in seconds |
-| `--input-cost <price>` | float | No | Inert since S15 (#300): stored, not used for any reported figure |
-| `--output-cost <price>` | float | No | Inert since S15 (#300): stored, not used for any reported figure |
 | `--temperature <float>` | float | No | Sampling temperature (0.0–2.0) |
 
 **Output** (human):
@@ -372,7 +366,7 @@ Ensemble "multi-model-v1" removed (2 members deleted)
 | FR-LLM-015 | MUST | Remote LLMs have status `ready` if the API key env var is set, `unconfigured` otherwise | §4.8 |
 | FR-LLM-016 | SHOULD | Support `--provider openai-compat` for arbitrary OpenAI-compatible endpoints | §3.2 |
 | FR-LLM-017 | MUST | API keys are never stored in Revolver files — only the env var name is stored | NFR-050 |
-| FR-LLM-018 | SHOULD | Support optional `--input-cost` and `--output-cost` pricing (USD per Mtok) for cost estimation in `revolver run` | POC #13 |
+| FR-LLM-018 | ~~SHOULD~~ | **Removed (S16 / #300).** The `--input-cost`/`--output-cost` pricing flags and the `input_cost_per_mtok`/`output_cost_per_mtok` columns were dropped (cost is no longer reported — mirrors FR-RUN-030). Schema migration v10 removes the columns from the `llms` table. | POC #13 |
 | FR-LLM-019 | SHOULD | LLM temperature stored in registry and injected into the backend config when present | — |
 | FR-LLM-020 | MUST | Create a named ensemble in the global registry with a unique name | — |
 | FR-LLM-021 | MUST | Add a member LLM to an ensemble with a sampling weight (and optional per-member temperature/max_tokens overrides) | — |
@@ -421,8 +415,6 @@ Using SQLite (rather than individual YAML files) ensures atomic writes and preve
 | `model` | `"codestral:22b"` | `"claude-opus-4-6"` |
 | `base_url` | `"http://localhost:11434/v1"` | Provider default or custom |
 | `api_key_env` | — | `"ANTHROPIC_API_KEY"` |
-| `input_cost_per_mtok` | — (local = free) | `15.0` (USD per million input tokens, optional) |
-| `output_cost_per_mtok` | — (local = free) | `75.0` (USD per million output tokens, optional) |
 | `max_tokens` | Optional | Optional |
 | `timeout_s` | Optional | Optional |
 | `temperature` | Optional (0.0–2.0) | Optional (0.0–2.0) |

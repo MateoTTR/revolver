@@ -117,7 +117,7 @@ Derived from [user-story-e2e.md](../specs/user-story-e2e.md). Tests the canonica
 A scenario validating Revolver behavior without Ollama or GPU. Defined during Phase 5, it will cover:
 
 - Remote LLM only (fake server registered as `--provider openai-compat`)
-- Token tracking with now-inert pricing flags (`--input-cost 10.0 --output-cost 30.0` accepted without error, no effect on output)
+- Token tracking only — the pricing flags were removed (#300), so `llm add`/`llm update` reject `--input-cost`/`--output-cost`
 - Token breakdown (prompt/completion/total) displayed in run output with the honesty caveat — **no cost figure** (S15 / #300)
 - Graceful degradation: `revolver doctor` reports Ollama/GPU as WARN, not FAIL
 - `revolver llm status` shows remote LLM as `ready`

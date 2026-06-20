@@ -216,9 +216,12 @@ Core (core/run.py) → get_run_info()
   │ 1. Query run metadata                           ──► Infra: db.get_run(run_id)
   │ 2. Query associated solutions                   ──► Infra: db.get_solutions_for_run(run_id)
   │ 3. Read programs list from run manifest          ──► Infra: store.read_run_manifest(run_id)
-  │    (programs with ranks and scores for display)
+  │    (programs with ranks and scores for display;
+  │     programs_extracted = len(programs))
+  │ 3b. Read backend store total + run best          ──► Backend: total_programs (None on OE),
+  │    (programs_in_db + rank-1 score fallback)            run_best_score for "(from run)" fallback
   │ 4. Query resume chain (CTE recursive)           ──► Infra: db.get_resume_chain(run_id)
-  │ 5. Return RunInfo (with solutions + programs)
+  │ 5. Return RunInfo (solutions + programs + programs_extracted + total_programs + run_best_score)
   ▼
 Infra
   └── db: query runs + solutions tables
@@ -532,8 +535,8 @@ contract rather than silently defaulting. `on_progress` may be ignored (live pro
 |---|---|---|
 | **Engine entry** | `OpenEvolveRunner` wraps the `OpenEvolve` controller (`asyncio.run(controller.run(...))`); programmatic config, resume support (DD-04, POC #12 S7) | `ShinkaEvolveRunner` constructed in-process from `evo_config`/`db_config`/`job_config` (ADR-007 D6); `llm_env` exported via `revolver_env` before construction |
 | **Launch output** | OpenEvolve writes `oe-output/` (checkpoints, `best/best_program.py`) | Engine writes `shinka-output/` (`programs.sqlite` + per-gen dirs); `launch()` then materializes the top program into `<results_dir>/best/best_program.py` so the orchestrator's `best/`-first collection does not fall through to the engine's root `init_program.py` |
-| **Resume state** | Latest `checkpoint_N/` copied to `<run_dir>/oe-checkpoint` and passed as `checkpoint_path`; OpenEvolve writes fresh checkpoints under `oe-output/checkpoints/` | DB-driven: the engine auto-resumes when `results_dir` holds a `programs.sqlite` with `last_iteration > 0`; the new generation target is `last_iteration + spec.iterations` |
-| **Resume artifact isolation** | New run dir is self-contained (own checkpoint copy) | **S14 limitation**: the parent `shinka-output/` is continued **in place**; token/valid/population counts for the resumed run are cumulative over the shared DB, and `run population`/`run status` on the parent reflect the child's generations too. Full clone-based parity (copy `programs.sqlite` before the run) is tracked in §14.1 |
+| **Resume state** | Latest `checkpoint_N/` copied to `<run_dir>/oe-checkpoint` and passed as `checkpoint_path`; OpenEvolve writes fresh checkpoints under `oe-output/checkpoints/` | DB-driven: the engine auto-resumes when `results_dir` holds a `programs.sqlite` with `last_iteration > 0`. The resumed run runs on a **clone** of the parent's `shinka-output/` (`copytree` of `programs.sqlite` + sidecars, every `gen_*/` dir, and any `bandit_state.pkl`/`prompts.sqlite`) placed in the new run dir; the new generation target is `clone.last_iteration + spec.iterations`. A `resume_precheck` hook fails fast when the parent's `programs.sqlite` is missing or `last_iteration == 0` |
+| **Resume artifact isolation** | New run dir is self-contained (own checkpoint copy) | **Clone-resume parity (S16 / TD-3)**: the engine runs on the **clone** in the new run dir, so the parent's `shinka-output/` is never opened for writing and stays byte-unchanged. The resumed run's token/valid/population counts are cumulative over the parent chain (the clone carries the parent's history), while `run population`/`run status` on the parent reflect only its own untouched DB. The clone IS the resumed run's artifact tree, so no post-run snapshot copy is needed |
 | **Failure mapping** | `ExternalError` ("OpenEvolve run failed: …") | `ExternalError` ("ShinkaEvolve run failed: …"); the orchestrator maps engine failure to run status `failed` (FR-RUN-031) |
 
 The orchestrator owns the fail-fast resume precheck *before* inserting the run record; the adapters'
@@ -611,12 +614,12 @@ The two backends sit at opposite ends:
 - **Negligible overhead** (< 1 ms/request vs seconds of LLM inference); one local port allocation.
 - **Per-run**: a fresh proxy is started for each run, including on `resume`.
 
-> **No cost reported (v0.15.0 reality — S15 / #300).** Revolver reports **tokens only**, on both
+> **No cost reported (S15 / #300, removal completed S16 / TD-1).** Revolver reports **tokens only**, on both
 > backends. The session-051 spike confirmed that neither engine persists per-attempt or
 > reasoning/thinking tokens, so no realistic USD figure is reachable; the `TokenUsage` model carries
-> `prompt_tokens` / `completion_tokens` / `total_tokens` and no cost field. The inert
-> `estimate_cost()` helper and the LLM `--input-cost`/`--output-cost` pricing fields are scheduled
-> for removal (with a DB migration) in S16 (TD-1).
+> `prompt_tokens` / `completion_tokens` / `total_tokens` and no cost field. The `estimate_cost()`
+> helper and the LLM `--input-cost`/`--output-cost` pricing flags/columns have been **removed**
+> (schema migration v10 drops the `llms` pricing columns).
 
 ### 4.8 FR Coverage
 
@@ -885,6 +888,9 @@ class RunInfo(BaseModel):
     created_at: datetime
     solutions: list["SolutionResult"] = []  # Auto-created + extracted solutions
     programs: list["ProgramEntry"] = []     # All stored programs (for run info display)
+    programs_extracted: int = 0             # Files materialized to programs/ (== len(programs)) — UX-4 / S16
+    total_programs: int | None = None       # Total in backend store (all rows in Shinka's programs.sqlite; None on OE) — surfaced as programs_in_db
+    run_best_score: float | None = None     # Engine's run best; fallback for the rank-1 solution score when its own is missing ("(from run)") — UX-4 / S16
     resume_chain: list[str] = []            # Ordered list of ancestor run IDs
 
 class ProgressInfo(BaseModel):
@@ -1319,9 +1325,9 @@ parsing / token collection through the `EvolutionBackend` interface:
 | Concern | Backend-mediated behavior |
 |---|---|
 | **Backend selection** | `--backend {openevolve,shinka}` (default `openevolve`); stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047) |
-| **Resume semantics** | Backend-defined (FR-RUN-024): OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve reuses the parent `results_dir` (its SQLite DB is the resume state) |
+| **Resume semantics** | Backend-defined (FR-RUN-024), parent never mutated: OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve **clones** the parent `results_dir` (its SQLite DB is the resume state) into the new run dir and continues on the clone (clone-resume parity — S16 / TD-3). A `resume_precheck` hook validates the parent before any record is created |
 | **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
-| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.7, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable (removal of inert pricing → S16) |
+| **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.7, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable. The inert pricing flags/columns were fully removed in S16 (schema migration v10) |
 | **Capabilities** | `capabilities()` drives map-with-warn behavior for unsupported options (FR-RUN-048) and the per-backend reproducibility caveat (NFR-024) |
 
 The post-engine boundary is unchanged: `launch_run` writes Revolver-owned artifacts

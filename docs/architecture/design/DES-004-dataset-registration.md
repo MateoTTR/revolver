@@ -291,7 +291,7 @@ class DatasetRegistration(BaseModel):
 
     name: str
     path: str                  # absolute path
-    split: str                 # "train" | "eval"
+    split: str                 # "train" | "eval" | "both"
     storage: str = "reference" # "reference" | "snapshot"
     description: str = ""
     global_hash: str
@@ -408,7 +408,7 @@ app = typer.Typer(name="dataset", help="Manage datasets for training and evaluat
 def add(
     name: str = typer.Option(..., "--name", help="Dataset identifier"),
     path: Path = typer.Option(..., "--path", help="Dataset directory"),
-    split: str = typer.Option(..., "--split", help="'train' or 'eval'"),
+    split: str = typer.Option(..., "--split", help="Dataset split: 'train', 'eval', or 'both' (usable for both)"),
     compatible_with: str = typer.Option(..., "--compatible-with", help="Problem version tag"),
     snapshot: bool = typer.Option(False, "--snapshot", help="Copy files into .revolver/"),
     description: str = typer.Option("", "--description", help="Short description"),

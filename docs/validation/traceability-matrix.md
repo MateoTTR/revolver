@@ -1,7 +1,7 @@
 # Revolver — Traceability Matrix
 
-**Version**: 0.5 — S14 backend rows implemented (FR-RUN-047/048; L2-Shinka + E2E Scenario 3 delivered)
-**Date**: 2026-06-13
+**Version**: 0.6 — S16 sync: FR-RUN-030 + FR-LLM-018 marked Removed (#300), test rename, FR-RUN-036..039 dedicated rows, migration v10/v11 test rows
+**Date**: 2026-06-20
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Validation Overview](validation.md)
 
@@ -49,7 +49,7 @@ Design: [DES-002](../architecture/design/DES-002-llm-subcommands.md), [DES-001 �
 
 | FR ID | Pri | DES Ref | Level | Test ID | Status |
 |---|---|---|---|---|---|
-| FR-LLM-001 | MUST | DES-002 §add | L2 | `integration/test_llm::test_llm_add_remote_with_pricing` | Implemented |
+| FR-LLM-001 | MUST | DES-002 §add | L2 | `integration/test_llm::test_llm_add_remote` | Implemented |
 | FR-LLM-002 | MUST | DES-002 §add | L2 | `integration/test_llm::test_llm_add_ollama_with_pull` | Implemented |
 | FR-LLM-003 | MUST | DES-001, DES-002 | L1 | `test_db_llm::test_insert_and_get_llm` | Implemented |
 | FR-LLM-004 | MUST | DES-002 §add | L2 | `integration/test_llm::test_llm_add_ollama_with_pull` | Implemented |
@@ -66,7 +66,7 @@ Design: [DES-002](../architecture/design/DES-002-llm-subcommands.md), [DES-001 �
 | FR-LLM-015 | MUST | DES-002 §status | L1 | `unit/core/test_llm::test_remote_status_ready_if_env_set` | Planned |
 | FR-LLM-016 | SHOULD | DES-002 §add | L2 | `integration/test_llm::test_llm_add_openai_compat` | Implemented |
 | FR-LLM-017 | MUST | DES-002, NFR-050 | L1 | `test_db_llm::test_api_key_env_stored_not_value` | Implemented |
-| FR-LLM-018 | SHOULD | DES-002, DES-005 §4.5 | L2 | `integration/test_llm::test_llm_add_remote_with_pricing` | Implemented |
+| FR-LLM-018 | ~~SHOULD~~ | DES-002, DES-005 §4.5 | — | — | **Removed** (S16 / #300) — `--input-cost`/`--output-cost` flags and the `llms` pricing columns dropped (migration v10); cost no longer reported. Mirrors FR-RUN-030. |
 | FR-LLM-019 | SHOULD | DES-002, DES-005 | L2 | `integration/test_llm::test_llm_add_temperature` | Implemented |
 | FR-LLM-020 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_create` | Implemented |
 | FR-LLM-021 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_add_member` | Implemented |
@@ -162,7 +162,7 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-028 | SHOULD | DES-005 §4.5, DD-14 | L1 | `unit/infra/test_token_proxy::test_captures_tokens` | Implemented |
 | FR-RUN-029 | SHOULD | DES-005 §4.5 | L2 | `integration/test_run::test_run_with_token_usage` | Implemented |
 | FR-RUN-029 | SHOULD | DES-005 §4.5 | L2 | `integration/test_run::test_run_info_token_caveat` | Implemented (S15 caveat #300) |
-| FR-RUN-030 | ~~SHOULD~~ | DES-005 §4.5 | — | — | Removed (S15 / #300) — `estimate_cost()` inert, removal + DB migration → S16 |
+| FR-RUN-030 | ~~SHOULD~~ | DES-005 §4.5 | — | — | **Removed** (S15 / #300, completed S16) — `estimate_cost()` and the `--input-cost`/`--output-cost` pricing flags/columns dropped (migration v10); cost no longer reported |
 | #307 (no FR) | bug-fix | DES-005 §4.5, tuning guide | L1 | `test_llm_config::test_build_config_local_default_timeout` (+3 variants) | Implemented (S15) — `--source local` default LLM timeout |
 | Scope F (no FR) | infra | DES-005 §env | L1 | `unit/infra/test_openevolve::test_pythonunbuffered_restored_when_absent` (+ prior-value) | Implemented (S15) — PYTHONUNBUFFERED restore |
 | FR-RUN-001 | MUST | DES-005 §2.1 | L1 | `test_core_run::test_preflight_check_pass` | Implemented |
@@ -191,6 +191,14 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_json_mode_with_force` | Implemented |
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_missing_directory` | Implemented |
 | FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_user_cancels` | Implemented |
+| FR-RUN-036 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_force_skips_prompt` | Implemented |
+| FR-RUN-036 | MUST | DES-005 §4.8 | L2 | `integration/test_run::test_run_delete_all` | Implemented |
+| FR-RUN-037 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_delete_run_cascades_solutions` | Implemented |
+| FR-RUN-037 | MUST | DES-005 §4.8 | L1 | `test_db_migration_v5::test_cascade_delete_run` | Implemented |
+| FR-RUN-038 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_by_id` | Implemented |
+| FR-RUN-038 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_missing_directory` | Implemented |
+| FR-RUN-039 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_json_mode_requires_force` | Implemented |
+| FR-RUN-039 | MUST | DES-005 §4.8 | L2 | `integration/test_run::test_run_delete_all_no_force` | Implemented |
 | FR-RUN-040 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_temperature_flag` | Implemented |
 | FR-RUN-041 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_parallel_flag` | Implemented |
 | FR-RUN-044 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_type_stored` | Implemented |
@@ -332,6 +340,8 @@ Design: [Architecture §4.2](../architecture/architecture.md)
 | NFR-010 | MUST | Storage | L2 | `test_project_integration::test_init_creates_structure` (checks .revolver/ dir) | Implemented |
 | NFR-011 | MUST | Storage | L2 | `integration/test_llm::test_global_data_in_home` | Planned |
 | NFR-013 | MUST | Storage | L2 | `test_project_integration::test_init_creates_structure` (checks revolver.db) | Implemented |
+| NFR-013 | MUST | DES-001 §5.9 | L1 | `unit/test_db_migration_v10::test_migration_v9_to_v10_drops_cost_columns`, `::test_migration_v9_to_v10_project_db` | Implemented (S16 — drop `llms` pricing columns, #300) |
+| NFR-013 | MUST | DES-001 §5.10 | L1 | `unit/test_db_migration_v11::test_migration_v10_to_v11_widens_split_check`, `::test_migration_v10_to_v11_global_db` | Implemented (S16 — widen `datasets.split` to `both`, UX-3) |
 | NFR-014 | MUST | Storage | L1 | `test_hashing::test_sha256_used` | Implemented |
 | NFR-015 | MUST | Storage | L2 | `integration/test_problem::test_snapshot_immutable` | Planned |
 | NFR-016 | SHOULD | Storage | L1 | `test_db::test_wal_mode_enabled` | Implemented |
@@ -386,7 +396,7 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
 | spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
-| spec-llm | 25 | 16 | 9 | 0 | 4 | 15 | via Sc.1 | 6 |
+| spec-llm | 25 | 16 | 9 | 0 | 4 | 14 | via Sc.1 | 6 |
 | spec-problem | 15 | 10 | 4 | 1 | 1 | 10 | via Sc.1 | 3 |
 | spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
 | spec-run | 53 | 41 | 10 | 0 | 30 | 17 | via Sc.1 | 6 |
@@ -394,13 +404,14 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-solution | 20 | 18 | 2 | 0 | 2 | 16 | via Sc.1 | 2 |
 | spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
-| NFR (direct) | 28 | 19 | 9 | 0 | 6 | 12 | — | 5 (3 perf manual + 2 planned) |
+| NFR (direct) | 28 | 19 | 9 | 0 | 10 | 12 | — | 5 (3 perf manual + 2 planned) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **238** | **172** | **55** | **2** | **73** | **134** | **3 scenarios (1 planned)** | **28** |
+| **Total** | **238** | **172** | **55** | **2** | **77** | **133** | **3 scenarios (1 planned)** | **28** |
 
 Notes:
-- FR-RUN-030 (cost estimation) was **removed in S15 (#300)**: cost is no longer reported; `estimate_cost()` and the LLM pricing fields are inert pending removal in S16. The spec-run and Total rows are decremented accordingly. S15 also added non-FR test rows for the token caveat (FR-RUN-029), the `--source local` default timeout (#307), and the PYTHONUNBUFFERED restore (Scope F).
-- Run delete (FR-RUN-035) adds 11 new test entries covering DB layer, core logic, CLI, and edge cases.
+- FR-RUN-030 (cost estimation) and FR-LLM-018 (`--input-cost`/`--output-cost` pricing) are both **Removed** (S15 / #300, completed in S16): cost is no longer reported. The `estimate_cost()` helper and the LLM pricing flags/columns were dropped — schema migration v10 removes the two `llms` pricing columns. Both rows carry no test (status **Removed**); their former coverage is dropped from the counts. The renamed test `test_llm_add_remote_with_pricing` → `test_llm_add_remote` is re-pointed to FR-LLM-001.
+- Schema migrations v10 (drop `llms` pricing columns, #300) and v11 (widen `datasets.split` to `both`, UX-3) add 4 new L1 migration-test rows under NFR-013 (`unit/test_db_migration_v10`, `unit/test_db_migration_v11`).
+- Run delete: FR-RUN-035 keeps its 11 entries; FR-RUN-036..039 (previously absorbed under FR-RUN-035) now have **dedicated rows** mapped to `DES-005 §4.8` and the real `test_run_delete::*` / `integration/test_run::test_run_delete_all*` tests.
 - Benchmark delete (FR-BEN-018) adds 3 new test entries covering confirmation, nonexistent, and force delete.
 - Many FR-level tests cover multiple requirements. The total counts distinct test assignments (some FRs have both L1 and L2 tests).
 - 13 NFRs are covered indirectly by FR-level tests (see §11 indirect coverage table). They are not double-counted in L1/L2 totals.

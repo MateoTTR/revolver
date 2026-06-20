@@ -128,8 +128,8 @@ Resume an interrupted run from its checkpoint. Creates a NEW run from the parent
 
 **Behavior**:
 1. Locate the parent run's backend resume state (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir with `programs.sqlite`)
-2. Verify the resume state is valid and resumable (fail fast, exit 1, before any record is created)
-3. Create a new run (`resumed_from: <parent-run-id>`). On **OpenEvolve** the parent's resume state is READ but not modified (the checkpoint is copied into the new run dir). On **ShinkaEvolve** the engine continues **in place** in the parent's results dir (DB-driven resume); the programs database and best program are then snapshotted into the new run dir. Consequences (documented S14 limitation, clone parity planned for S15): the resumed run's token/valid counts are cumulative over the parent chain, and the parent's `run population`/`run status` reflect the continued database.
+2. Verify the resume state is valid and resumable via the backend's `resume_precheck` hook (fail fast, exit 1, before any record is created). ShinkaEvolve's precheck requires the parent's `programs.sqlite` to exist and to record `last_iteration > 0`; otherwise the run is rejected as non-resumable.
+3. Create a new run (`resumed_from: <parent-run-id>`). On **both backends the parent's resume state is READ but never mutated**: OpenEvolve copies the checkpoint into the new run dir, and **ShinkaEvolve clones the parent's `shinka-output/`** (`copytree` of `programs.sqlite` + sidecars, every `gen_*/` dir, and any `bandit_state.pkl`/`prompts.sqlite`) into the new run dir and continues the DB-driven search **on the clone**. The parent's `shinka-output/` stays byte-unchanged (clone-resume isolation), and because the clone is itself the new run's artifact tree, no post-run snapshot copy is needed. The resumed run's token/valid counts are cumulative over the parent chain, while the parent's `run population`/`run status` continue to reflect only the parent's own (untouched) database.
 4. The resumed run uses the **parent run's backend** (cross-backend resume is not supported)
 5. If `--llm` is provided, use the specified LLM or ensemble instead of the parent run's LLM
 6. Reuse the parent run's wrapper evaluator (no regeneration)
@@ -185,6 +185,8 @@ Run: run-20260310-143000
   Tokens: 1,245,000 prompt + 328,000 completion = 1,573,000 total
   Note: token counts cover stored programs only; retry/failed-attempt and
   reasoning/thinking tokens are not counted — watch the provider console.
+  Programs extracted: 3 (files in programs/)
+  Programs in DB: 18 (total in backend store)
   Resumed from: —
   Directory: .revolver/runs/run-20260310-143000/
 
@@ -199,6 +201,16 @@ Programs (from backend output):
 
 Resume chain: (none)
 ```
+
+> **Program counters (UX-4 / S16).** `run info` reports two counts: **Programs
+> extracted** (`programs_extracted`) is the number of `rank-N.py` files
+> materialized into the run's `programs/` directory; **Programs in DB**
+> (`programs_in_db`) is the total program count in the backend's own store
+> (every row in ShinkaEvolve's `programs.sqlite`). The DB total is only shown
+> on backends that report it — it is omitted on OpenEvolve, where a full total
+> would require parsing the checkpoint. When a rank-1 solution has no post-run
+> eval score of its own, its score falls back to the engine's run best with a
+> `(from run)` indicator.
 
 **Output** (human, ensemble):
 ```
@@ -288,11 +300,11 @@ Deleted run "run-20260310-143000"
 | FR-RUN-021 | MUST | `run list` shows all runs with filtering by version, LLM, status | — |
 | FR-RUN-022 | MUST | `run info` displays full run details including the auto-created solution, all stored programs with scores, and resume chain | — |
 | FR-RUN-023 | MUST | `--dry-run` validates all inputs and displays the resolved config (neutral fields + backend extras) without launching | ADR-007 D4 |
-| FR-RUN-024 | MUST | Resume reuses the parent run's wrapper evaluator (no regeneration) and backend resume state; the resume mechanism is backend-defined (OpenEvolve: copy checkpoint; ShinkaEvolve: reuse results DB) | ADR-007 |
+| FR-RUN-024 | MUST | Resume reuses the parent run's wrapper evaluator (no regeneration) and backend resume state; the resume mechanism is backend-defined and never mutates the parent (OpenEvolve: copy checkpoint into the new run dir; ShinkaEvolve: clone the parent's `shinka-output/` and continue the DB-driven search on the clone — clone-resume parity, S16 / TD-3). A `resume_precheck` backend hook fails fast on a non-resumable parent before any record is created. | ADR-007 |
 | FR-RUN-025 | SHOULD | Per-run lock files in `.revolver/runs/locks/` enable concurrent run tracking | §3.3 |
 | FR-RUN-028 | SHOULD | Track total `prompt_tokens` and `completion_tokens` consumed during the run. The accounting source is backend-defined: HTTP response interception (OpenEvolve) or the engine's native per-program accounting (ShinkaEvolve) — token-primary on all backends (ADR-007 D2). Counts cover **stored programs only**: retry/failed-attempt and reasoning/thinking tokens are not counted (the engines do not persist them — S15 / #300) | §4.6, POC #13 |
 | FR-RUN-029 | SHOULD | Display token usage (prompt/completion/total breakdown) in run completion output and `run info`, with a caveat that retry and reasoning/thinking tokens are not counted | §4.6 |
-| FR-RUN-030 | ~~SHOULD~~ | **Removed (S15 / #300).** Cost estimation was dropped from reported output: no realistic figure is reachable since the engines never persist per-attempt or reasoning/thinking tokens (verified by the session-051 spike). The `estimate_cost()` helper and the LLM `--input-cost`/`--output-cost` pricing fields are left inert for one release (removal + DB migration → S16) | §4.6, POC #13 |
+| FR-RUN-030 | ~~SHOULD~~ | **Removed (S15 / #300, completed in S16).** Cost estimation was dropped from reported output: no realistic figure is reachable since the engines never persist per-attempt or reasoning/thinking tokens (verified by the session-051 spike). The `estimate_cost()` helper and the LLM `--input-cost`/`--output-cost` pricing flags/columns have been removed (schema migration v10 drops the columns). Revolver reports **tokens only**. | §4.6, POC #13 |
 | FR-RUN-031 | MUST | If the evolution backend throws an exception during execution, run status is set to `failed` in DB, `run-error.log` is written to the run directory, and the lock file is removed | — |
 | FR-RUN-032 | MUST | Post-processing errors are logged to `run-error.log` in the run directory | — |
 | FR-RUN-033 | MUST | `solution extract` accepts runs with status `completed_with_errors` if the program file exists | — |
@@ -322,7 +334,7 @@ Deleted run "run-20260310-143000"
 | Local LLM not loaded | Error: "LLM '<name>' is not loaded. Run `revolver llm start <name>` first." | 3 |
 | Remote LLM API key not set | Error: "API key not configured. Set <ENV_VAR> environment variable." | 3 |
 | Dataset not found | Error: "Dataset '<name>' not found" | 1 |
-| Dataset split is not `train` | Warning: "Dataset '<name>' has split 'eval'. Consider using a training dataset." | 0 (continue) |
+| Dataset split is neither `train` nor `both` | Warning: "dataset '<name>' has split='eval' (expected 'train'). Proceeding anyway." A `both` dataset is a valid training split and triggers **no** warning. | 0 (continue) |
 | Dataset hash mismatch | Warning: "Dataset '<name>' has been modified since registration. Results may not be reproducible." | 0 (continue) |
 | Dataset incompatible with problem version | Warning: "Dataset '<name>' is not declared compatible with version '<tag>'." | 0 (continue) |
 | Backend crashes during run | Error: "<Backend> failed: <error>". Run status set to `failed`, `run-error.log` written, lock removed. Preserve partial results if any. | 4 |

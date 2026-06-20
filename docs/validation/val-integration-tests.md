@@ -65,7 +65,7 @@ recorded end-to-end by default.
 | Command | Scenario | Validates | FRs |
 |---|---|---|---|
 | `llm add` (Ollama) | Register local LLM with `--pull` | DB entry (global), source=ollama, digest stored | FR-LLM-002, 004, 005 |
-| `llm add` (API) | Register remote LLM with pricing | DB entry, provider, cost fields, api-key-env name stored | FR-LLM-001, 017, 018 |
+| `llm add` (API) | Register remote LLM | DB entry, provider, api-key-env name stored (pricing fields removed — #300) | FR-LLM-001, 017 |
 | `llm add` (openai-compat) | Register custom endpoint | DB entry, base_url stored | FR-LLM-016 |
 | `llm add` | Duplicate name | Exit code 1 | — |
 | `llm list` | After 2 adds | Both listed, correct columns | — |
@@ -128,6 +128,8 @@ recorded end-to-end by default.
 | `dataset add` | Valid directory, 3 JSON files | DB entry, per-instance hashes, global hash, absolute path, count=3 | FR-DAT-001..004 |
 | `dataset add --snapshot` | Copy files into `.revolver/` | Snapshot dir created with copies | FR-DAT-005 |
 | `dataset add --split train` | Specify split | Split stored in DB | FR-DAT-006 |
+| `dataset add --split both` | Dual-use split | `both` accepted and stored (migration v11); usable for train and eval, no run split-warning | FR-DAT-006 |
+| `dataset add --split bogus` | Invalid split | Exit code 1, "Must be 'train', 'eval', or 'both'" | FR-DAT-006 |
 | `dataset add --compatible-with v1.0` | Declare compat | Compat entry in DB | FR-DAT-007 |
 | `dataset add` | Non-existent path | Exit code 1 | — |
 | `dataset add` | Duplicate name | Exit code 1 | FR-DAT-011 |
@@ -152,8 +154,7 @@ recorded end-to-end by default.
 | `run` | Dataset integrity failure (tampered file) | Exit code 2, warning message | FR-RUN-004 |
 | `run` | Dataset split=eval | Warning on stderr, run proceeds | FR-RUN-002 |
 | `run` | Dataset incompatible with version | Warning on stderr, run proceeds | FR-RUN-003 |
-| `run` | Completion with tokens | Token usage displayed, stored in DB | FR-RUN-028, 029 |
-| `run` | LLM has (now-inert) pricing set | Tokens displayed, **no cost** shown (S15 / #300) | FR-RUN-028, 029 |
+| `run` | Completion with tokens | Token usage displayed (tokens only — **no cost**, #300), stored in DB | FR-RUN-028, 029 |
 | `run` | Post-run eval on train set | Rank-1 program evaluated, results in DB | FR-RUN-019, 020 |
 | `run` (pre-flight) | Evaluator returns score > 0 on first instance | Pre-flight passes, run proceeds | FR-RUN-001 |
 | `run` (pre-flight) | Evaluator raises exception | Run aborts with RevolverError | FR-RUN-001 |
