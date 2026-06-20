@@ -283,20 +283,40 @@ Estimated length: 8 sequential tasks in the TD-1 chain, then a parallel UX wave.
 
 ## Sprint Review
 
-_To be filled at sprint close._
+**Complete — released as v0.16.0.** All scopes shipped across 6 PRs (+ a doc cascade), merged into `develop`, then `develop → main` + tag `v0.16.0`.
+
+| PR | Scope | Issue |
+|---|---|---|
+| #206 | TD-2 — CI version/tag guard (S16-08) | #204 |
+| #207 | TD-4 — DES-005 §4 rewrite (S16-14..15) | #205 |
+| #208 | TD-1 — Pricing removal + DB migration v10 (S16-01..07) | #203 |
+| #210 | UX-1..6 — wording, positional tag, `split=both` (migration v11), `run info` counters, local `max_proposal_jobs` pin, doc note (S16-16..22) | #209 |
+| #212 | TD-3 — Shinka resume clone parity + `resume_precheck` (S16-10..12) | #211 |
+| #214 | Pre-release doc audit — purge S16 staleness across 14 living docs | #213 |
 
 ### Tests passing
-- X / Y integration tests passing
+- No-shinka env: **1289 passed, 11 skipped**; `ruff` + `mypy` clean. CI green on the self-hosted runner (Lint + Test 3.12/3.14). Shinka L2 suite auto-skips locally/CI (no `[shinka]` extra installed); validated on the dedicated shinka env separately.
+- New tests: `test_db_migration_v10`/`v11`, `--split both` integration, `run info` two-counter + rank-1 fallback, `test_shinka_resume_clone_isolation` + `resume_precheck`.
 
 ### Demo-able features
-- [ ] `revolver llm add --help` shows no pricing flags
-- [ ] `revolver problem version create v1.0` works without `--tag`
-- [ ] `revolver run info` shows correct `programs_in_db` count
-- [ ] Shinka dry-run with `--source local` shows `max_proposal_jobs: 1`
-- [ ] CI tag-push job blocks on version mismatch
+- [x] `revolver llm add --help` shows no pricing flags (cost machinery fully removed; DB migration v10)
+- [x] `revolver problem version create v1.0` works without `--tag` (positional tag)
+- [x] `revolver dataset add --split both` accepted (migration v11); no `run` split warning
+- [x] `revolver run info` shows `programs_extracted` + `programs_in_db` + rank-1 score fallback "(from run)"
+- [x] Shinka dry-run with `--source local` shows `max_proposal_jobs: 1`
+- [x] CI tag-push `version-check` job blocks on a version mismatch
+- [x] Shinka resume clones the parent `shinka-output/` (parent left untouched; `resume_precheck` fail-fast)
 
 ### Spike result
-- [ ] Resume clone parity: GO (S16-10..12 implemented) / NO-GO (S16-13 documented)
+- [x] Resume clone parity: **GO** — confirmed against upstream `SakanaAI/ShinkaEvolve` v0.0.7 (`async_runner.py` DB-driven resume, `num_generations` is a total, path-independent DB → `copytree` clone-resume is sound). S16-10..12 implemented; S16-13 fallback dropped.
 
-### Carry-over
-_To be filled at sprint close._
+### Reviews
+- Code/spec/validation/doc **reviewer agents repeatedly hit the harness idle-timeout** on long background runs (killed mid-tool-use, no SDK `result` record — NOT a token-budget issue). Worked around by self-reviewing each PR in the main session against the load-bearing risk areas + independent verification greps. The deep doc audit was delegated to a general-purpose dev agent (warm stream) instead of the flaky reviewers.
+
+### Infra
+- Self-hosted CI runner image fixed: bake in **miniforge (mamba)** + bump the GitHub runner to **2.335.1** (node24 for `actions/checkout@v5`). The committed Dockerfile previously could not run the mamba-based CI.
+
+### Carry-over → Sprint 017
+- **Top-N extraction (#299)** — deferred (highest-value product feature; Shinka-first feasible, OE needs a `database.json` assessment).
+- Tighten review-agent reliability (raise `maxTurns` / prefer sonnet / run foreground vs background) to avoid the idle-timeout.
+- `--config-override` validation; ensemble→bandit; multi-language passthrough (#132–135).

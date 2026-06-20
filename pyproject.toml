@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "revolver"
-version = "0.15.0"
-description = "MLOps CLI platform for LLM-guided evolutionary optimization via OpenEvolve"
+version = "0.16.0"
+description = "MLOps CLI platform for LLM-guided evolutionary optimization via a pluggable evolution backend (OpenEvolve, ShinkaEvolve)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
