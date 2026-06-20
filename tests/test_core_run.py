@@ -146,8 +146,8 @@ def project_with_prereqs(tmp_project: Path) -> dict:
     try:
         global_conn.execute(
             "INSERT INTO llms (name, provider, model, source, base_url, "
-            "api_key_env, input_cost_per_mtok, output_cost_per_mtok, registered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "api_key_env, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 "test-llm",
                 "openai",
@@ -155,8 +155,6 @@ def project_with_prereqs(tmp_project: Path) -> dict:
                 "remote",
                 "http://localhost:11434/v1",
                 None,
-                3.0,
-                15.0,
                 datetime.now(UTC).isoformat(),
             ),
         )
@@ -165,16 +163,14 @@ def project_with_prereqs(tmp_project: Path) -> dict:
         # Also insert a local LLM for concurrency tests
         global_conn.execute(
             "INSERT INTO llms (name, provider, model, source, base_url, "
-            "api_key_env, input_cost_per_mtok, output_cost_per_mtok, registered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "api_key_env, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 "local-llm",
                 "ollama",
                 "codestral:22b",
                 "local",
                 "http://localhost:11434/v1",
-                None,
-                None,
                 None,
                 datetime.now(UTC).isoformat(),
             ),
@@ -523,8 +519,6 @@ def test_launch_run_happy_path(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -873,8 +867,6 @@ def test_preflight_check_pass(project_with_prereqs: dict, capsys: pytest.Capture
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -949,8 +941,6 @@ def test_preflight_check_evaluator_crash(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -1022,8 +1012,6 @@ def test_preflight_check_timeout(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -1097,8 +1085,6 @@ def test_preflight_check_score_zero(
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -1245,8 +1231,6 @@ def test_resume_run_creates_new_run(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -1361,8 +1345,6 @@ def test_resume_run_preflight_crash(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -1658,8 +1640,6 @@ def test_resume_config_override_single(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -1748,8 +1728,6 @@ def test_resume_config_override_multiple(project_with_prereqs: dict) -> None:
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 
@@ -2329,8 +2307,6 @@ def test_launch_run_post_processing_failure_sets_completed_with_errors(
         model="gpt-4",
         source="remote",
         base_url="http://localhost:11434/v1",
-        input_cost_per_mtok=3.0,
-        output_cost_per_mtok=15.0,
         registered_at=datetime.now(UTC),
     )
 

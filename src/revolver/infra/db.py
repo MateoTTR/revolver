@@ -28,7 +28,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -166,8 +166,6 @@ CREATE TABLE IF NOT EXISTS llms (
     source          TEXT NOT NULL CHECK (source IN ('local', 'remote')),
     base_url        TEXT,
     api_key_env     TEXT,
-    input_cost_per_mtok  REAL,
-    output_cost_per_mtok REAL,
     max_tokens      INTEGER,
     timeout_s       INTEGER,
     temperature     REAL,
@@ -461,6 +459,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 9:
         _migrate_v8_to_v9(conn)
 
+    # Migration v10: Drop inert pricing columns from the llms table (global).
+    if current < 10:
+        _migrate_v9_to_v10(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -583,6 +585,67 @@ def _migrate_v8_to_v9(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
         (9, now),
+    )
+    conn.commit()
+
+
+def _migrate_v9_to_v10(conn: sqlite3.Connection) -> None:
+    """Migration v9->v10: Drop the inert pricing columns from the llms table (global DB).
+
+    Removes the two inert per-million-token pricing columns from the ``llms``
+    table.  These columns were always ``NULL`` (cost reporting was removed in
+    v0.15.0, S15 / backlog #300), so no data needs preserving.  SQLite does
+    not support ``DROP COLUMN`` on all supported versions, so the table is
+    recreated without the pricing columns and existing rows are copied over
+    (TD-1, sprint-016 S16-05).
+
+    The ``llms`` table lives only in the global DB.  Project databases have no
+    such table, so the migration is a no-op there and only the schema version
+    is bumped.
+    """
+    # Guard: only the global DB has the llms table.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='llms'")
+    if cursor.fetchone() is None:
+        # Project DB — nothing to migrate, just record version.
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (10, now),
+        )
+        conn.commit()
+        return
+
+    conn.executescript("""\
+CREATE TABLE llms_new (
+    name            TEXT PRIMARY KEY,
+    provider        TEXT,
+    model           TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK (source IN ('local', 'remote')),
+    base_url        TEXT,
+    api_key_env     TEXT,
+    max_tokens      INTEGER,
+    timeout_s       INTEGER,
+    temperature     REAL,
+    registered_at   TEXT NOT NULL
+);
+
+INSERT INTO llms_new (
+    name, provider, model, source, base_url, api_key_env,
+    max_tokens, timeout_s, temperature, registered_at
+)
+SELECT
+    name, provider, model, source, base_url, api_key_env,
+    max_tokens, timeout_s, temperature, registered_at
+FROM llms;
+
+DROP TABLE llms;
+ALTER TABLE llms_new RENAME TO llms;
+""")
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (10, now),
     )
     conn.commit()
 
@@ -802,8 +865,7 @@ def delete_problem_version(conn: sqlite3.Connection, tag: str) -> bool:
 
 _LLM_COLUMNS = (
     "name, provider, model, source, base_url, api_key_env, "
-    "input_cost_per_mtok, output_cost_per_mtok, max_tokens, timeout_s, "
-    "temperature, registered_at"
+    "max_tokens, timeout_s, temperature, registered_at"
 )
 
 
@@ -816,12 +878,10 @@ def _row_to_llm_entry(row: tuple[object, ...]) -> LLMEntry:
         source=row[3],  # type: ignore[arg-type]
         base_url=row[4],  # type: ignore[arg-type]
         api_key_env=row[5],  # type: ignore[arg-type]
-        input_cost_per_mtok=row[6],  # type: ignore[arg-type]
-        output_cost_per_mtok=row[7],  # type: ignore[arg-type]
-        max_tokens=row[8],  # type: ignore[arg-type]
-        timeout_s=row[9],  # type: ignore[arg-type]
-        temperature=row[10],  # type: ignore[arg-type]
-        registered_at=row[11],  # type: ignore[arg-type]
+        max_tokens=row[6],  # type: ignore[arg-type]
+        timeout_s=row[7],  # type: ignore[arg-type]
+        temperature=row[8],  # type: ignore[arg-type]
+        registered_at=row[9],  # type: ignore[arg-type]
     )
 
 
@@ -840,9 +900,8 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
             """\
             INSERT INTO llms (
                 name, provider, model, source, base_url, api_key_env,
-                input_cost_per_mtok, output_cost_per_mtok,
                 max_tokens, timeout_s, temperature, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.name,
@@ -851,8 +910,6 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
                 entry.source,
                 entry.base_url,
                 entry.api_key_env,
-                entry.input_cost_per_mtok,
-                entry.output_cost_per_mtok,
                 entry.max_tokens,
                 entry.timeout_s,
                 entry.temperature,
@@ -915,8 +972,6 @@ def update_llm(
     model: str | None = None,
     max_tokens: int | None = None,
     timeout_s: int | None = None,
-    input_cost_per_mtok: float | None = None,
-    output_cost_per_mtok: float | None = None,
     temperature: float | None = None,
 ) -> int:
     """Update mutable fields of an LLM entry.
@@ -930,8 +985,6 @@ def update_llm(
         model: New model identifier (e.g. ``gemini-2.5-flash-lite``).
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
-        input_cost_per_mtok: New value for cost per million input tokens.
-        output_cost_per_mtok: New value for cost per million output tokens.
         temperature: New value for sampling temperature (0.0-2.0).
 
     Returns:
@@ -944,10 +997,6 @@ def update_llm(
         fields["max_tokens"] = max_tokens
     if timeout_s is not None:
         fields["timeout_s"] = timeout_s
-    if input_cost_per_mtok is not None:
-        fields["input_cost_per_mtok"] = input_cost_per_mtok
-    if output_cost_per_mtok is not None:
-        fields["output_cost_per_mtok"] = output_cost_per_mtok
     if temperature is not None:
         fields["temperature"] = temperature
 

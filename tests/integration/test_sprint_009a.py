@@ -329,16 +329,14 @@ def _register_llm(
     try:
         conn.execute(
             "INSERT INTO llms (name, provider, model, source, base_url, "
-            "api_key_env, input_cost_per_mtok, output_cost_per_mtok, registered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "api_key_env, registered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 "openai",
                 model,
                 source,
                 base_url,
-                None,
-                None,
                 None,
                 datetime.now(UTC).isoformat(),
             ),

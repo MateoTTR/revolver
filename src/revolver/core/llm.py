@@ -126,8 +126,6 @@ def register_llm(
     api_key_env: str | None = None,
     base_url: str | None = None,
     pull: bool = False,
-    input_cost_per_mtok: float | None = None,
-    output_cost_per_mtok: float | None = None,
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     temperature: float | None = None,
@@ -150,8 +148,6 @@ def register_llm(
         api_key_env: Name of the environment variable holding the API key.
         base_url: Override for the OpenAI-compatible endpoint URL.
         pull: Whether to pull the model from Ollama registry (local only).
-        input_cost_per_mtok: Cost per million input tokens (USD).
-        output_cost_per_mtok: Cost per million output tokens (USD).
         max_tokens: Maximum tokens per LLM response (injected into OE config).
         timeout_s: Request timeout in seconds (injected into OE config).
         temperature: Sampling temperature (0.0-2.0) injected into OE config.
@@ -236,8 +232,6 @@ def register_llm(
         source=source,
         base_url=resolved_base_url,
         api_key_env=api_key_env,
-        input_cost_per_mtok=input_cost_per_mtok,
-        output_cost_per_mtok=output_cost_per_mtok,
         max_tokens=max_tokens,
         timeout_s=timeout_s,
         temperature=temperature,
@@ -258,8 +252,6 @@ def update_llm(
     model: str | None = None,
     max_tokens: int | None = None,
     timeout_s: int | None = None,
-    input_cost_per_mtok: float | None = None,
-    output_cost_per_mtok: float | None = None,
     temperature: float | None = None,
 ) -> LLMEntry:
     """Update mutable fields of a registered LLM.
@@ -272,8 +264,6 @@ def update_llm(
         model: New model identifier (e.g. ``gemini-2.5-flash-lite``).
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
-        input_cost_per_mtok: New value for cost per million input tokens (USD).
-        output_cost_per_mtok: New value for cost per million output tokens (USD).
         temperature: New value for sampling temperature (0.0-2.0).
 
     Returns:
@@ -292,10 +282,6 @@ def update_llm(
         raise ValidationError("--max-tokens must be a positive integer")
     if timeout_s is not None and timeout_s < 1:
         raise ValidationError("--timeout must be a positive integer")
-    if input_cost_per_mtok is not None and input_cost_per_mtok < 0:
-        raise ValidationError("--input-cost must be non-negative")
-    if output_cost_per_mtok is not None and output_cost_per_mtok < 0:
-        raise ValidationError("--output-cost must be non-negative")
     if temperature is not None and (temperature < 0.0 or temperature > 2.0):
         raise ValidationError("--temperature must be between 0.0 and 2.0")
 
@@ -305,8 +291,6 @@ def update_llm(
         model=model,
         max_tokens=max_tokens,
         timeout_s=timeout_s,
-        input_cost_per_mtok=input_cost_per_mtok,
-        output_cost_per_mtok=output_cost_per_mtok,
         temperature=temperature,
     )
 

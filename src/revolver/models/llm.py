@@ -24,8 +24,6 @@ class LLMEntry(BaseModel):
         source: ``"local"`` for Ollama-managed or ``"remote"`` for API-based.
         base_url: OpenAI-compatible endpoint URL.
         api_key_env: Name of the environment variable holding the API key.
-        input_cost_per_mtok: Cost per million input tokens (USD).
-        output_cost_per_mtok: Cost per million output tokens (USD).
         max_tokens: Maximum tokens per LLM response (injected into OE config).
         timeout_s: Request timeout in seconds (injected into OE config).
         temperature: Sampling temperature (0.0-2.0) injected into OE config.
@@ -40,8 +38,6 @@ class LLMEntry(BaseModel):
     source: Literal["local", "remote"]
     base_url: str | None = None
     api_key_env: str | None = None
-    input_cost_per_mtok: float | None = None
-    output_cost_per_mtok: float | None = None
     max_tokens: int | None = None
     timeout_s: int | None = None
     temperature: float | None = None
