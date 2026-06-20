@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-ARG RUNNER_VERSION=2.325.0
+ARG RUNNER_VERSION=2.335.1
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Core dependencies
@@ -31,6 +31,15 @@ WORKDIR /home/runner/actions-runner
 RUN curl -fsSL https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
     | tar xz \
     && chown -R runner:runner /home/runner
+
+# Miniforge (provides mamba) for the ephemeral-conda CI workflow (ci.yml).
+# Installed at /home/runner/miniforge3 so $HOME/miniforge3/condabin/mamba
+# resolves for the non-root 'runner' user — matches ci.yml's search path.
+RUN curl -fsSL "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" -o /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /home/runner/miniforge3 \
+    && rm -f /tmp/miniforge.sh \
+    && chown -R runner:runner /home/runner/miniforge3 \
+    && /home/runner/miniforge3/condabin/mamba --version
 
 # Entrypoint script
 COPY entrypoint.sh /entrypoint.sh
