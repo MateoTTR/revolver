@@ -1263,14 +1263,20 @@ def resume_run(
         if parent_wrapper.exists():
             copy_run_file(parent_wrapper, new_run_dir / backend.wrapper_filename)
 
-        # 6. Backend-aware resume staging precheck (S14-13, ADR-007 D6).
+        # 6. Backend-owned fail-fast resume precheck (S16-10, ADR-007 D6).
         # The orchestrator owns this fail-fast precheck: it must run BEFORE
         # the run-record insert and lock acquisition so a resume-state-less
-        # parent aborts cleanly (DES-005 §14.1). Resume state formats are
-        # backend-specific, hence the dispatch.
+        # parent aborts cleanly (DES-005 §14.1). Resume-state formats are
+        # backend-specific, so each backend validates its own preconditions
+        # (no-op on OpenEvolve, programs.sqlite + last_iteration on Shinka).
+        backend.resume_precheck(parent_run_dir)
+
+        # 6b. OpenEvolve-specific staging: copy the parent's latest
+        # checkpoint into the new run dir as the resume *input*. The backend's
+        # resume() self-staging branch is a fallback only; the missing-
+        # checkpoint guard above is covered by resume_precheck on backends
+        # that need it, but OE still stages the checkpoint file here.
         if backend.name == "openevolve":
-            # Copy checkpoint from parent run dir. The backend's resume()
-            # self-staging branch is a fallback only.
             parent_checkpoint = find_latest_checkpoint(parent_run_dir)
             if parent_checkpoint is None:
                 raise RevolverError(
@@ -1281,15 +1287,6 @@ def resume_run(
             # OE writes fresh checkpoints to oe-output/checkpoints/checkpoint_N/ instead.
             new_checkpoint: Path = new_run_dir / "oe-checkpoint"
             copy_run_file(parent_checkpoint, new_checkpoint)
-        else:
-            # ShinkaEvolve auto-resumes from the parent's programs database
-            # (reused in place by ShinkaBackend.resume() — no staging copy).
-            parent_programs_db = parent_run_dir / backend.default_output_subdir / "programs.sqlite"
-            if not parent_programs_db.exists():
-                raise RevolverError(
-                    f"No programs database found in parent run '{run_id}'. "
-                    "The run may have been too short to produce any programs."
-                )
 
         # Resolve paths
         snapshot_dir = root / REVOLVER_DIR / PROBLEM_DIR / parent_version

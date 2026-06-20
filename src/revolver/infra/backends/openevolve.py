@@ -1404,6 +1404,16 @@ class OpenEvolveBackend:
             output_dir=output.output_dir,
         )
 
+    def resume_precheck(self, parent_run_dir: Path) -> None:
+        """No-op resume precheck (S16-10).
+
+        OpenEvolve has no backend-specific resume precondition to enforce
+        here: the orchestrator stages the parent checkpoint and raises if it
+        is missing (``core.run.resume_run()``), so this hook inherits the
+        protocol's default no-op behaviour.
+        """
+        return None
+
     def resume(
         self,
         spec: BackendRunSpec,

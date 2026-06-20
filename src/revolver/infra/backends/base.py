@@ -233,6 +233,29 @@ class EvolutionBackend(Protocol):
         """
         ...
 
+    def resume_precheck(self, parent_run_dir: Path) -> None:
+        """Fail-fast guard the orchestrator runs before a resume (S16-10).
+
+        Called by ``core.run.resume_run()`` *before* the new run-record
+        insert and lock acquisition so a parent that lacks usable resume
+        state aborts cleanly (DES-005 §14.1). Resume-state formats are
+        backend-specific, so each backend validates its own preconditions
+        and raises a clear :class:`~revolver.core.exceptions.RevolverError`
+        (or subclass) when they are not met.
+
+        The default implementation is a **no-op**: backends without resume
+        preconditions (e.g. OpenEvolve, whose checkpoint staging is handled
+        by the orchestrator) inherit it unchanged.
+
+        Args:
+            parent_run_dir: Directory of the parent run being resumed.
+
+        Raises:
+            RevolverError: When the parent run is not resumable (subclasses
+                override to enforce backend-specific preconditions).
+        """
+        return None
+
     def resume(
         self,
         spec: BackendRunSpec,
