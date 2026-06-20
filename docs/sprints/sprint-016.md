@@ -164,14 +164,19 @@ Wave 3 — after spike resolves:
 
 ## Spike Result
 
-_To be filled after S16-09 executes._
+**Executed** (S16-09, session 053). Shinka is **not installed on this machine**, so the spike was answered against the **upstream engine source** (`SakanaAI/ShinkaEvolve`, tag **`v0.0.7`**, commit `c4568ad`) rather than empirically.
 
 **Question**: Does `ShinkaEvolveRunner` (shinka 0.0.7) continue from a pre-populated `results_dir` (a fresh copy of a prior run's `shinka-output/`) when `num_generations` is set higher than the cloned `last_iteration`?
 
-**Answer**: [ ] Feasible — implementation tasks S16-10..12 proceed.
-**Answer**: [ ] Not feasible — fallback task S16-13 applies; S16-10..12 are cancelled.
+**Answer**: ✅ **GO — Feasible. Implementation tasks S16-10..12 proceed; the S16-13 fallback is dropped.**
 
-**Preconditions (if feasible)**: _fill after spike_
+The engine continues from a pre-populated, **path-independent** `results_dir`. Evidence (upstream source):
+
+- **CONTINUE, not restart** — `shinka/core/async_runner.py:1133-1178`: `db_path` is derived from `results_dir` at runtime (`db_path = Path(f"{self.results_dir}/programs.sqlite")`), then `resuming_run = db_path.exists() and self.db.last_iteration > 0`; the initial-program seeding runs only in the `else` (non-resume) branch. `shinka/database/dbase.py:478-627` opens the DB (`CREATE TABLE IF NOT EXISTS`, never `DROP`/truncate) and reads `last_iteration` back from `metadata_store`.
+- **`num_generations` is a TOTAL target** — `async_runner.py:4924-4940` restores `completed_generations`/`next_generation_to_submit = last_iteration + 1`; every stop/cap condition (`:2166`, `:2485`) compares the absolute counter to `num_generations`. This **validates Revolver's existing** `num_generations = last_iteration + spec.iterations`.
+- **Path-independent / clone-safe** — the resolved absolute path is never written into the DB; `programs` rows hold code/scores/metadata only, `gen_*/` dirs are built relative to `results_dir`. A `shutil.copytree` of a cleanly-stopped run resumes correctly at a new path.
+
+**Preconditions** (for S16-11 clone logic): clone the *entire* `results_dir` (programs.sqlite + any `-wal`/`-shm` + all `gen_*/`, plus `bandit_state.pkl` / `prompts.sqlite` if present); repoint `evo_config.results_dir` at the clone; keep `num_generations = last_iteration + additional`; clone only a **cleanly-stopped** run (consistent SQLite file); same engine schema (0.0.7 ↔ 0.0.7). Add a 2-gen → copytree → resume-2-more → assert-4-total smoke test (S16-12) to lock the guarantee.
 
 ---
 
