@@ -114,7 +114,7 @@ revolver problem test --dataset data/instances/
 ### Version your problem
 
 ```bash
-revolver problem version create --tag v1.0 -m "Initial formulation"
+revolver problem version create v1.0 -m "Initial formulation"
 revolver problem version list
 ```
 

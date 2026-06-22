@@ -330,6 +330,38 @@ class TestProxyErrorForwarding:
         finally:
             fake_server.shutdown()
 
+    def test_proxy_forwards_502_status(self) -> None:
+        """Proxy forwards an upstream 502 status and body verbatim (A5 / #317).
+
+        A subscription bridge (e.g. claude-ollama-bridge) under sustained load
+        can return ``502 Bad Gateway``. Because urllib raises ``HTTPError`` for
+        5xx, this exercises the FB-01 forwarding branch — the client must see
+        the real 502 + body, not a generic proxy error that masks the cause.
+        """
+        error_body = b'{"error":"bad gateway","message":"bridge upstream failed"}'
+        fake_server, fake_port = _start_fake_error_llm(error_code=502, error_body=error_body)
+        try:
+            proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
+            proxy_url = proxy.start()
+
+            req = Request(
+                f"{proxy_url}/v1/chat/completions",
+                data=json.dumps({"model": "test"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with pytest.raises(HTTPError) as exc_info:
+                urlopen(req, timeout=5)
+
+            assert exc_info.value.code == 502
+            body = exc_info.value.read()
+            assert b"bad gateway" in body
+            assert b"bridge upstream failed" in body
+
+            proxy.stop()
+        finally:
+            fake_server.shutdown()
+
     def test_proxy_returns_502_on_connection_error(self) -> None:
         """Proxy returns 502 for non-HTTP errors (connection refused)."""
         # Point at a port that is not listening
