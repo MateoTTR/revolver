@@ -491,3 +491,16 @@ def test_normalize_ollama_url_strips_trailing_slash() -> None:
     root2, api2 = normalize_ollama_url("http://sirius:11434/")
     assert root2 == "http://sirius:11434"
     assert api2 == "http://sirius:11434/v1"
+
+
+@pytest.mark.unit
+def test_normalize_ollama_url_schemeless_defaults_http() -> None:
+    """A scheme-less host (as OLLAMA_HOST is often set) defaults to http://."""
+    root, api = normalize_ollama_url("sirius:11434")
+    assert root == "http://sirius:11434"
+    assert api == "http://sirius:11434/v1"
+
+    # Scheme-less /v1 form is handled too.
+    root2, api2 = normalize_ollama_url("sirius:11434/v1")
+    assert root2 == "http://sirius:11434"
+    assert api2 == "http://sirius:11434/v1"

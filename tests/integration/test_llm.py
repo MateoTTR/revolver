@@ -1372,6 +1372,70 @@ def test_llm_add_local_base_url_probe(mock_global_db: Path) -> None:
 
 
 @pytest.mark.integration
+def test_llm_add_local_root_base_url_stored_as_v1(mock_global_db: Path) -> None:
+    """`--base-url http://host:11434` (root form) is stored as the /v1 form."""
+    mock_client = _make_ollama_client_mock()
+
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "llm",
+                "add",
+                "gemma-root",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+                "--base-url",
+                "http://sirius:11434",
+            ],
+        )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    # Probe uses the root; the stored entry is normalized to the /v1 form so
+    # OE's api_base and Shinka's embed resolve.
+    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+    data = json.loads(result.stdout)
+    assert data["base_url"] == "http://sirius:11434/v1"
+    entries = _query_llms(mock_global_db)
+    assert entries[0].base_url == "http://sirius:11434/v1"
+
+
+@pytest.mark.integration
+def test_llm_add_local_schemeless_ollama_host(
+    mock_global_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scheme-less `OLLAMA_HOST` (sirius:11434) probes + stores with http://."""
+    monkeypatch.setenv("OLLAMA_HOST", "sirius:11434")
+    mock_client = _make_ollama_client_mock()
+
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "llm",
+                "add",
+                "gemma-schemeless",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+            ],
+        )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+    data = json.loads(result.stdout)
+    assert data["base_url"] == "http://sirius:11434/v1"
+    entries = _query_llms(mock_global_db)
+    assert entries[0].base_url == "http://sirius:11434/v1"
+
+
+@pytest.mark.integration
 def test_llm_add_local_ollama_host_env(
     mock_global_db: Path,
     monkeypatch: pytest.MonkeyPatch,

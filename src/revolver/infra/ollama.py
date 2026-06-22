@@ -40,14 +40,21 @@ def normalize_ollama_url(url: str | None) -> tuple[str, str]:
     entry agree on the same host.
 
     Args:
-        url: A base URL in either root or ``/v1`` form, or ``None`` to use the
-            local default (``http://localhost:11434``).
+        url: A base URL in either root or ``/v1`` form (a scheme-less value
+            such as ``sirius:11434`` — as ``OLLAMA_HOST`` is often set — is
+            treated as ``http://``), or ``None`` to use the local default
+            (``http://localhost:11434``).
 
     Returns:
         ``(root_url, api_url)`` — *root_url* has any trailing ``/v1`` stripped;
         *api_url* always ends with ``/v1``. Both have trailing slashes removed.
     """
-    base = (url or DEFAULT_OLLAMA_ROOT_URL).rstrip("/")
+    base = (url or DEFAULT_OLLAMA_ROOT_URL).strip()
+    # Ollama-native env vars (e.g. ``OLLAMA_HOST=sirius:11434``) are commonly
+    # set scheme-less; default to ``http://`` so httpx can connect (#313).
+    if "://" not in base:
+        base = f"http://{base}"
+    base = base.rstrip("/")
     root_url = base[: -len("/v1")].rstrip("/") if base.endswith("/v1") else base
     api_url = f"{root_url}/v1"
     return root_url, api_url

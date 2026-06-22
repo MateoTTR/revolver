@@ -192,12 +192,11 @@ def register_llm(
             # Get digest via show_model
             oc.show_model(model)
 
-            # Set base_url to Ollama's OpenAI-compat endpoint. When --base-url
-            # is absent, honour OLLAMA_HOST as a convenience default (#313) so
-            # the stored entry agrees with the probe; otherwise fall back to
-            # localhost. The /v1 (OpenAI-compat) form is always stored.
-            if resolved_base_url is None:
-                _, resolved_base_url = normalize_ollama_url(os.environ.get("OLLAMA_HOST"))
+            # Always store the OpenAI-compat (/v1) form so OE's api_base and
+            # Shinka's local/<model>@<url> embed both resolve, regardless of
+            # the shape the user gave: normalize --base-url (root or /v1,
+            # scheme-less or not), else OLLAMA_HOST, else localhost (#313).
+            _, resolved_base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST"))
         finally:
             if own:
                 oc.close()
