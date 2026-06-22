@@ -249,27 +249,35 @@ def test_project_init_no_templates_json(tmp_path: pytest.TempPathFactory) -> Non
 
 # ── S13-13: config.yaml template served by the evolution backend ─────────────
 
-# Byte-for-byte copy of the pre-S13 core/project.py template: `project init`
-# output must stay identical after the ownership move into
+# Golden copy of the OpenEvolve `config.yaml` scaffold served by
 # OpenEvolveBackend.config_template() (ADR-007, sprint-013 S13-13).
+# Rewritten in S16a (A6/#318) to OpenEvolve-schema-correct keys so a
+# freshly-scaffolded project validates clean (zero validator warnings):
+# `num_iterations` -> `max_iterations`, top-level `population_size` moved
+# under a commented-out `database:` section (OE default 1000 preserved).
 _EXPECTED_CONFIG_TEMPLATE = """\
 # OpenEvolve configuration — edit to match your problem.
 #
 # See OpenEvolve documentation for all available options.
 # Revolver passes this file to OpenEvolve via --config.
+# Keys here use OpenEvolve's own schema; a freshly-scaffolded project
+# validates clean (zero warnings) at `problem version create`.
 
 # Number of evolutionary iterations (generations).
-num_iterations: 10
-
-# Population size — number of candidate programs per generation.
-population_size: 10
+max_iterations: 10
 
 # LLM sampling settings.
 llm:
   temperature: 0.8
   max_tokens: 4096
 
-# Evaluation settings.
+# MAP-Elites database settings.
+# Population size — number of candidate programs kept in the archive.
+# OpenEvolve defaults to 1000; uncomment to shrink it for quick experiments.
+# database:
+#   population_size: 10
+
+# Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:
   timeout_per_instance: 30  # seconds
 """
@@ -347,6 +355,70 @@ def test_project_init_backend_default_is_openevolve(
 
     content = (tmp_path / "config.yaml").read_text(encoding="utf-8")
     assert content == get_backend("openevolve").config_template()
+
+
+# ── S16a-15 (A6/#318): the OE scaffold validates clean (zero warnings) ───────
+
+
+def _has_dacite_and_openevolve() -> bool:
+    """Check that dacite and openevolve are installed (validator no-ops without them)."""
+    try:
+        import dacite  # noqa: F401
+        from openevolve.config import Config  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not _has_dacite_and_openevolve(),
+    reason="dacite/openevolve not installed — validator is a no-op, test would be vacuous",
+)
+def test_oe_scaffold_zero_warnings(tmp_path) -> None:
+    """A freshly-scaffolded OpenEvolve project validates clean (A6/#318).
+
+    Drives a real ``project init --backend openevolve`` followed by
+    ``problem version create --backend openevolve`` on the untouched
+    scaffold and asserts the backend config validator emits **zero**
+    warnings — the official template must not warn about itself.
+
+    Requires openevolve + dacite to be importable; otherwise
+    ``validate_oe_config`` returns ``[]`` regardless of the template and
+    the assertion would be vacuous, so the test auto-skips.
+
+    Validates: FR-PRJ-005, ADR-007 (S16a-11/S16a-15).
+    """
+    from revolver.core.problem import create_version
+
+    project_dir = tmp_path / "scaffold-demo"
+    result = runner.invoke(
+        app,
+        [
+            "project",
+            "init",
+            "scaffold-demo",
+            "--path",
+            str(project_dir),
+            "--backend",
+            "openevolve",
+        ],
+    )
+    assert result.exit_code == 0, f"init failed: {_get_all_output(result)}"
+
+    # Sanity: the scaffold is the untouched OpenEvolve template.
+    from revolver.infra.backends.base import get_backend
+
+    content = (project_dir / "config.yaml").read_text(encoding="utf-8")
+    assert content == get_backend("openevolve").config_template()
+
+    _pv, config_warnings = create_version(
+        tag="v1.0", project_root=project_dir, backend="openevolve"
+    )
+    assert config_warnings == [], (
+        f"Fresh OpenEvolve scaffold must validate clean, got: {config_warnings}"
+    )
 
 
 @pytest.mark.integration
