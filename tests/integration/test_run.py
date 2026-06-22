@@ -893,6 +893,114 @@ def test_run_info_token_caveat(project_with_prereqs: dict[str, Path]) -> None:
     assert "estimated_cost" not in output
 
 
+# ── Test 12c: run info — bridge token under-count caveat (A4 / #316) ────────
+
+
+@pytest.mark.integration
+def test_run_info_local_token_caveat(project_with_prereqs: dict[str, Path]) -> None:
+    """`run info` on a `--source local` run appends the bridge token
+    under-count caveat after the standard #300 token-honesty note."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # A local-source LLM (e.g. a claude-ollama-bridge endpoint).
+    _register_llm(
+        global_db_path,
+        name="bridge-local",
+        model="claude-via-bridge",
+        source="local",
+        base_url="http://localhost:11434/v1",
+    )
+
+    mock_runner = _make_mock_runner()
+    mock_proxy = _make_mock_proxy(prompt_tokens=2, completion_tokens=4)
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "bridge-local",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+        mock_runner=mock_runner,
+        mock_proxy=mock_proxy,
+    )
+    assert result.exit_code == 0
+    run_id = _parse_json_output(result)["run_id"]
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.cli.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+    ):
+        result = runner.invoke(app, ["run", "info", run_id], catch_exceptions=False)
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # The bridge under-count caveat is present ...
+    assert "under-report token usage" in output
+    assert "Anthropic console" in output
+    # ... alongside (after) the existing #300 token-honesty caveat ...
+    assert "not counted" in output
+    # ... and still no cost figure.
+    assert "$" not in output
+
+
+@pytest.mark.integration
+def test_run_info_remote_no_token_caveat(project_with_prereqs: dict[str, Path]) -> None:
+    """`run info` on a `--source remote` run shows the standard #300 caveat
+    but NOT the bridge token under-count caveat (the default `test-llm`
+    fixture is registered as remote)."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    mock_runner = _make_mock_runner()
+    mock_proxy = _make_mock_proxy(prompt_tokens=500, completion_tokens=1000)
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+        mock_runner=mock_runner,
+        mock_proxy=mock_proxy,
+    )
+    assert result.exit_code == 0
+    run_id = _parse_json_output(result)["run_id"]
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.cli.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+    ):
+        result = runner.invoke(app, ["run", "info", run_id], catch_exceptions=False)
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # The standard #300 token-honesty caveat is still present ...
+    assert "not counted" in output
+    # ... but the bridge under-count caveat is NOT shown on a remote run.
+    assert "under-report token usage" not in output
+
+
 # ── Test 13: run resume — existing checkpoint (FR-RUN-013, 024) ─────────────
 
 
