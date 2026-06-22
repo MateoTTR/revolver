@@ -984,6 +984,115 @@ def test_run_resume(project_with_prereqs: dict[str, Path]) -> None:
     assert new_run_dir.exists()
 
 
+# ── Test 13b: run resume — positional RUN_ID (S16a-12, #319a) ───────────────
+
+
+def _stage_parent_checkpoint(
+    project_with_prereqs: dict[str, Path],
+) -> tuple[Path, Path, str]:
+    """Launch an initial run and stage a checkpoint so resume can proceed.
+
+    Returns (root, global_db_path, parent_run_id).
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0
+    parent_data = _parse_json_output(result)
+    parent_run_id = parent_data["run_id"]
+
+    # Create the expected checkpoint directory structure
+    checkpoint_dir = (
+        root / REVOLVER_DIR / "runs" / parent_run_id / "oe-output" / "checkpoints" / "checkpoint_5"
+    )
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    return root, global_db_path, parent_run_id
+
+
+def _invoke_resume(args: list[str], root: Path, global_db_path: Path) -> object:
+    """Invoke ``run resume`` with the standard resume mocks."""
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    resume_run_id, resume_sol_id = _next_ids()
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+    ):
+        return runner.invoke(app, args, catch_exceptions=False)
+
+
+@pytest.mark.integration
+def test_run_resume_positional_run_id(project_with_prereqs: dict[str, Path]) -> None:
+    """``run resume <id>`` accepts the run ID as a positional argument."""
+    root, global_db_path, parent_run_id = _stage_parent_checkpoint(project_with_prereqs)
+
+    result = _invoke_resume(
+        ["--json", "run", "resume", parent_run_id],
+        root,
+        global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    resume_data = _parse_json_output(result)
+    assert resume_data["run_id"] != parent_run_id
+    assert resume_data.get("resumed_from") == parent_run_id
+
+
+@pytest.mark.integration
+def test_run_resume_option_compat(project_with_prereqs: dict[str, Path]) -> None:
+    """``run resume --run <id>`` still works as a backward-compat alias."""
+    root, global_db_path, parent_run_id = _stage_parent_checkpoint(project_with_prereqs)
+
+    result = _invoke_resume(
+        ["--json", "run", "resume", "--run", parent_run_id],
+        root,
+        global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    resume_data = _parse_json_output(result)
+    assert resume_data["run_id"] != parent_run_id
+    assert resume_data.get("resumed_from") == parent_run_id
+
+
+@pytest.mark.integration
+def test_run_resume_no_id_exits_1(project_with_prereqs: dict[str, Path]) -> None:
+    """``run resume`` with no ID prints a clear error and exits 1."""
+    root = project_with_prereqs["root"]
+
+    result = _invoke_with_cwd(["run", "resume"], cwd=root)
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "run ID is required" in output
+
+
 # ── Test 14: run info shows valid_iterations ─────────────────────────────
 
 
