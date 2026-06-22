@@ -1093,6 +1093,27 @@ def test_run_resume_no_id_exits_1(project_with_prereqs: dict[str, Path]) -> None
     assert "run ID is required" in output
 
 
+@pytest.mark.integration
+def test_run_resume_positional_wins_over_option(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """When both a positional RUN_ID and ``--run`` are given, the positional wins."""
+    root, global_db_path, parent_run_id = _stage_parent_checkpoint(project_with_prereqs)
+
+    # ``--run`` points at a non-existent id; if it were honoured the resume
+    # would fail to resolve the parent, so a clean resume proves positional wins.
+    result = _invoke_resume(
+        ["--json", "run", "resume", parent_run_id, "--run", "does-not-exist"],
+        root,
+        global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    resume_data = _parse_json_output(result)
+    assert resume_data.get("resumed_from") == parent_run_id
+
+
 # ── Test 14: run info shows valid_iterations ─────────────────────────────
 
 
