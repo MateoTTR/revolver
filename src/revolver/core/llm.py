@@ -22,7 +22,7 @@ from revolver.core.exceptions import (
 )
 from revolver.infra import db
 from revolver.infra.gpu import GpuInfo, get_gpu_info
-from revolver.infra.ollama import OllamaClient
+from revolver.infra.ollama import OllamaClient, normalize_ollama_url
 from revolver.models.llm import (
     EnsembleEntry,
     EnsembleMember,
@@ -134,7 +134,8 @@ def register_llm(
     """Register a new LLM in the global database.
 
     For local (Ollama) LLMs: performs health check, optionally pulls the
-    model, retrieves the digest, and sets the base URL to localhost.
+    model, retrieves the digest, and sets the base URL. When ``base_url`` is
+    omitted the URL defaults from ``OLLAMA_HOST`` (if set), else localhost.
 
     For remote LLMs: validates the provider and API key env var, sets
     the default base URL per provider.
@@ -191,9 +192,12 @@ def register_llm(
             # Get digest via show_model
             oc.show_model(model)
 
-            # Set base_url to Ollama's OpenAI-compat endpoint
+            # Set base_url to Ollama's OpenAI-compat endpoint. When --base-url
+            # is absent, honour OLLAMA_HOST as a convenience default (#313) so
+            # the stored entry agrees with the probe; otherwise fall back to
+            # localhost. The /v1 (OpenAI-compat) form is always stored.
             if resolved_base_url is None:
-                resolved_base_url = "http://localhost:11434/v1"
+                _, resolved_base_url = normalize_ollama_url(os.environ.get("OLLAMA_HOST"))
         finally:
             if own:
                 oc.close()

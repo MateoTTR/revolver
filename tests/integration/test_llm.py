@@ -1333,3 +1333,164 @@ def test_llm_update_model_empty_string_rejected(mock_global_db: Path) -> None:
     assert result.exit_code != 0, f"output: {_get_all_output(result)}"
     output = _get_all_output(result)
     assert "empty string" in output.lower() or "must not be" in output.lower()
+
+
+# ── A1 / S16a-14: network/local Ollama probe honours --base-url/OLLAMA_HOST ───
+
+
+@pytest.mark.integration
+def test_llm_add_local_base_url_probe(mock_global_db: Path) -> None:
+    """`--base-url http://host:11434/v1` probes the network root, not localhost."""
+    mock_client = _make_ollama_client_mock()
+
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "llm",
+                "add",
+                "gemma-net",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+                "--base-url",
+                "http://sirius:11434/v1",
+            ],
+        )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    # Probe client built with the network ROOT (no /v1), not localhost.
+    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+
+    # Stored entry keeps the OpenAI-compat /v1 form.
+    data = json.loads(result.stdout)
+    assert data["base_url"] == "http://sirius:11434/v1"
+    entries = _query_llms(mock_global_db)
+    assert entries[0].base_url == "http://sirius:11434/v1"
+
+
+@pytest.mark.integration
+def test_llm_add_local_ollama_host_env(
+    mock_global_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`OLLAMA_HOST` is honoured as the probe + stored default when --base-url absent."""
+    monkeypatch.setenv("OLLAMA_HOST", "http://sirius:11434")
+    mock_client = _make_ollama_client_mock()
+
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "llm",
+                "add",
+                "gemma-env",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+            ],
+        )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    # Probe targets the OLLAMA_HOST root.
+    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+
+    # Stored base_url defaults from OLLAMA_HOST (OpenAI-compat /v1 form).
+    data = json.loads(result.stdout)
+    assert data["base_url"] == "http://sirius:11434/v1"
+    entries = _query_llms(mock_global_db)
+    assert entries[0].base_url == "http://sirius:11434/v1"
+
+
+@pytest.mark.integration
+def test_llm_add_local_no_host_defaults_localhost(
+    mock_global_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No --base-url and no OLLAMA_HOST → probe + storage default to localhost."""
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    mock_client = _make_ollama_client_mock()
+
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "llm",
+                "add",
+                "gemma-localhost",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+            ],
+        )
+
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    mock_cls.assert_called_once_with(base_url="http://localhost:11434")
+    data = json.loads(result.stdout)
+    assert data["base_url"] == "http://localhost:11434/v1"
+
+
+@pytest.mark.integration
+def test_llm_add_local_network_url_oe_api_base(
+    mock_global_db: Path,
+) -> None:
+    """The stored network URL reaches OpenEvolve build_config's llm.api_base."""
+    from revolver.infra.backends.openevolve import build_config
+
+    mock_client = _make_ollama_client_mock()
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client):
+        result = runner.invoke(
+            app,
+            [
+                "llm",
+                "add",
+                "gemma-oe",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+                "--base-url",
+                "http://sirius:11434/v1",
+            ],
+        )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    entry = next(e for e in _query_llms(mock_global_db) if e.name == "gemma-oe")
+    config = build_config(problem_config=None, llm=entry)
+    assert config["llm"]["api_base"] == "http://sirius:11434/v1"
+
+
+@pytest.mark.integration
+def test_llm_add_local_network_url_shinka_embed(
+    mock_global_db: Path,
+) -> None:
+    """The stored network URL reaches the Shinka local/<model>@<url> embed."""
+    from revolver.infra.backends.shinka import _project_llm_model
+
+    mock_client = _make_ollama_client_mock()
+    with patch("revolver.cli.llm.OllamaClient", return_value=mock_client):
+        result = runner.invoke(
+            app,
+            [
+                "llm",
+                "add",
+                "gemma-shinka",
+                "--model",
+                "gemma4:latest",
+                "--source",
+                "local",
+                "--base-url",
+                "http://sirius:11434/v1",
+            ],
+        )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    entry = next(e for e in _query_llms(mock_global_db) if e.name == "gemma-shinka")
+    model_string, _ = _project_llm_model(entry)
+    assert model_string.startswith("local/gemma4:latest@http://sirius:11434/v1")

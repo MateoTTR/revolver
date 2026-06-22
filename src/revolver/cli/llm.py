@@ -8,6 +8,7 @@ Traceable to: DES-002 section 6, FR-LLM-001..008.
 
 from __future__ import annotations
 
+import os
 from typing import Annotated
 
 import typer
@@ -17,7 +18,7 @@ from revolver.cli._global_options import GlobalOptionGroup
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import llm as llm_core
 from revolver.infra.db import get_global_db
-from revolver.infra.ollama import OllamaClient
+from revolver.infra.ollama import OllamaClient, normalize_ollama_url
 from revolver.infra.output import print_confirmation, render
 
 # ── Ensemble sub-app ──────────────────────────────────────────────────────
@@ -100,10 +101,16 @@ def llm_add(
     with cli_error_boundary():
         conn = get_global_db()
         try:
-            # Only create OllamaClient for local sources
+            # Only create OllamaClient for local sources.
+            # The probe must target the host the user asked for (#313):
+            # derive the native-API root from --base-url, falling back to
+            # OLLAMA_HOST, then to localhost. The OpenAI-compat /v1 form is
+            # stripped because the /api/* probe calls live at the root.
             client: OllamaClient | None = None
             if source == "local":
-                client = OllamaClient()
+                probe_url = base_url or os.environ.get("OLLAMA_HOST")
+                probe_root, _ = normalize_ollama_url(probe_url)
+                client = OllamaClient(base_url=probe_root)
 
             try:
                 entry = llm_core.register_llm(
