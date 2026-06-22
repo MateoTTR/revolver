@@ -374,6 +374,31 @@ Peak parallelism: **4 agents** simultaneously at Wave 1 start (streams A, B, C, 
 
 ---
 
+## Sprint Review
+
+**Wave 1 complete — 6 of 7 items merged into `develop` (2026-06-22/23).** A2 (#224) remains a draft pending runtime confirmation on the demos env.
+
+| PR | Items | Backlog | Status |
+|---|---|---|---|
+| #220 | A1 — network/local Ollama probe (+ scheme-less `OLLAMA_HOST` + `/v1` storage, folded in from review) | #313 | merged |
+| #222 | A6 + A3 — warning-free OE scaffold + local parallel auto-pin | #318, #315 | merged |
+| #219 | A7 — positional `RUN_ID` on `run resume` | #319a | merged |
+| #221 | A4/A5/A7-doc — token under-count caveat, 502 verify, README positional tag | #316, #317, #319b | merged |
+| #224 | A2 — orchestrator-owned Shinka shutdown | #314 | **draft** — demos runtime confirmation pending |
+
+### Reviews
+- Each merged PR got an independent adversarial review (workflow, 5 agents — all approved, no blockers) **and** a posted GitHub `code-reviewer` review. A1's two non-blocking findings (scheme-less `OLLAMA_HOST`, asymmetric `/v1` storage) were folded in before merge.
+- Process fix adopted (**option A**, codified in `CLAUDE.md` PR workflow): the orchestrator/main session creates PRs so the `gh pr create` code-review hook fires — a PR created inside a background subagent ships unreviewed.
+
+### Tests / CI
+- Suite at **1316 passed / 4 skipped** (no-shinka env); ruff + mypy clean; CI green on all merged PRs.
+- Infra: scaled the self-hosted runner pool to **3** (`x1c-mathieu`, `-2`, `-3`) to parallelize the lint + 3.12 + 3.14 matrix. Two transient CI hangs handled by re-trigger — one orphaned job from a runner restart, one intermittent `fork()`-in-multithreaded-process pytest deadlock (candidate hardening: `pytest-timeout` / `spawn` start method).
+
+### A2 carry-over (gate to v0.16.1)
+- Spike (upstream ShinkaEvolve v0.0.7): the post-run busy-loop is leaked per-call async LLM clients (`openai.AsyncOpenAI`/httpx never `aclose()`d) spinning during `asyncio.run()` teardown; the runner's own `_cleanup_async()` already joins the pools. Fix #224 = orchestrator-owned teardown (`_shutdown_runner` wait=False + `_reap_run_children` SIGTERM/SIGKILL), mocked-test green. **Runtime confirmation on the demos shinka env is the gate to merge #224 and cut v0.16.1.** Upstream issue warranted (cf. #159).
+
+---
+
 ## Provisional / pending
 
 - **Frequency-planning** has not yet run through Revolver. **Decision (P3): ship A1–A7 now as v0.16.1; do not wait.** When frequency-planning runs, the feedback report will be extended with an **A8+** block → triaged into a **separate `sprint-016b`** (v0.16.2), not appended here.
