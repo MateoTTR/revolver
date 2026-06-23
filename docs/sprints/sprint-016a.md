@@ -248,14 +248,13 @@ Wave 2 — after spike:
 
 ## Spike Result
 
-_To be filled during the sprint._
+### A2 spike (S16a-04) — DONE
 
-### A2 spike (S16a-04)
-
-- **Status**: not yet executed.
-- **Environment**: `revolver-demos` conda env (shinka 0.0.7 + Revolver develop).
-- **Procedure**: run `revolver run --backend shinka --iterations 5` on a minimal demo; after `Done:` observe `ps aux` + `pstree` to identify the lingering process(es); attach `strace -p <pid>` or examine `/proc/<pid>/wchan`; confirm whether the hang is in `asyncio.run()` teardown, `JobScheduler` thread pool, or a forked evaluator child.
-- **Expected output**: exact class/function name of the lingering entity; go/no-go decision for S16a-05 (orchestrator teardown vs subprocess-reap vs upstream issue).
+- **Static spike (upstream ShinkaEvolve v0.0.7)**: the post-run busy-loop is **leaked per-call async LLM clients** (`openai.AsyncOpenAI`/httpx never `aclose()`d) spinning during `asyncio.run()` teardown. The runner's own `_cleanup_async()` already joins the `JobScheduler`/DB pools, so it is **not** an un-joined pool. **GO** for a defensive orchestrator-owned teardown.
+- **Fix (PR #224)**: `_run_engine()` wraps `runner.run()` in `try/finally` → `_shutdown_runner()` (idempotent scheduler/DB-executor shutdown, `wait=False`) + `_reap_run_children()` (SIGTERM→SIGKILL any evaluator child outliving the run, Linux `/proc`-based). Shinka-only, runs after the result is persisted, never touches the OE path. 7 mocked-runner tests green.
+- **Demos verdict (2026-06-23, `revolver-demos`)**: **#224 is safe / no regression — validated empirically** (a normal Shinka run completes and persists results cleanly with the fix). **The A2 busy-loop itself could NOT be re-demonstrated** — the original `gemma4:8b` model was deleted — so the anti-hang value is **confirmed by code review only**, not by an empirical before/after. As the fix is purely defensive teardown with no regression, it ships.
+- **Upstream**: an issue against `SakanaAI/ShinkaEvolve` (leaked async LLM clients, cf. #159) remains warranted.
+- **Annex finding (NOT A2 — see backlog #320)**: a **distinct Shinka mid-run deadlock with `qwen15`** surfaced during the eval — a different failure mode (mid-run, not post-run teardown), **not covered by #224**. Tracked separately.
 
 ---
 
