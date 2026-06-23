@@ -97,3 +97,26 @@ def test_global_db_has_llms_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         assert cursor.fetchone() is not None, "llms table not found in global DB"
     finally:
         conn.close()
+
+
+@pytest.mark.unit
+def test_global_db_respects_revolver_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_global_db honours $REVOLVER_HOME over the user's home.
+
+    This isolates the global store across parallel CI runners that share
+    $HOME — otherwise they race on the ``schema_version`` migration.
+    """
+    home_dir = tmp_path / "home"
+    state_dir = tmp_path / "state"
+    # Home points elsewhere; REVOLVER_HOME must win.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))  # type: ignore[arg-type]
+    monkeypatch.setenv("REVOLVER_HOME", str(state_dir))
+
+    from revolver.infra.db import get_global_db
+
+    conn = get_global_db()
+    try:
+        assert (state_dir / ".revolver" / "revolver.db").exists()
+        assert not (home_dir / ".revolver").exists()
+    finally:
+        conn.close()

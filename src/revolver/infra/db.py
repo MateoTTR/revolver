@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import sqlite3
 from typing import Literal, cast
@@ -730,10 +731,16 @@ def get_project_db(path: Path) -> sqlite3.Connection:
 def get_global_db() -> sqlite3.Connection:
     """Open (or create) the global user-level database at ``~/.revolver/revolver.db``.
 
+    The base directory is ``$REVOLVER_HOME`` when that env var is set (used e.g.
+    in CI to isolate the global store across parallel runners that share
+    ``$HOME``), otherwise the user's home directory.
+
     Returns:
         A configured ``sqlite3.Connection`` with WAL mode and foreign keys enabled.
     """
-    global_dir = Path.home() / ".revolver"
+    revolver_home = os.environ.get("REVOLVER_HOME")
+    base = Path(revolver_home) if revolver_home else Path.home()
+    global_dir = base / ".revolver"
     global_dir.mkdir(parents=True, exist_ok=True)
     db_path = global_dir / "revolver.db"
     conn = sqlite3.connect(str(db_path))

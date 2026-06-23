@@ -133,8 +133,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Define ephemeral conda env path
-        run: echo "CONDA_ENV=${RUNNER_TEMP}/revolver-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test-${{ matrix.python-version }}" >> "$GITHUB_ENV"
+      - name: Define ephemeral conda env + isolated global-DB paths
+        run: |
+          echo "CONDA_ENV=${RUNNER_TEMP}/revolver-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test-${{ matrix.python-version }}" >> "$GITHUB_ENV"
+          # Isolate the global DB (~/.revolver) per job so parallel self-hosted
+          # runners sharing $HOME don't race on schema_version; get_global_db()
+          # honours $REVOLVER_HOME.
+          echo "REVOLVER_HOME=${RUNNER_TEMP}/revolver-home-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test-${{ matrix.python-version }}" >> "$GITHUB_ENV"
 
       - name: Make conda/mamba available
         run: |
@@ -159,7 +164,7 @@ jobs:
         run: mamba run -p "$CONDA_ENV" python -m pip install -e ".[dev]"
 
       - name: Clean stale global DB
-        run: rm -rf ~/.revolver
+        run: rm -rf "${REVOLVER_HOME:-$HOME}/.revolver"
 
       - name: Run tests with coverage
         run: mamba run -p "$CONDA_ENV" pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
