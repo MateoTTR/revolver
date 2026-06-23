@@ -114,6 +114,16 @@ _DATABASE_KEYS = frozenset(
 
 REVOLVER_KEYS = frozenset({"initial_program", "num_generations", "timeout_per_instance"})
 
+# ── Revolver-specific top-level sections ─────────────────────────────────────
+# Sections that Revolver owns and the engine never sees. They must be stripped
+# before strict parsing so they do not trigger "unknown key" warnings. Mirrors
+# the Shinka backend's ``_REVOLVER_SECTIONS`` (symmetric cross-backend
+# treatment, not an OpenEvolve-schema allowlist widening):
+# - ``evaluation``: wrapper settings (``timeout_per_instance``); consumed by
+#   ``core.run`` (prefers ``evaluation:`` over ``evaluator:``) to size the
+#   generated wrapper evaluator, never passed to the OpenEvolve Config schema.
+REVOLVER_SECTIONS = frozenset({"evaluation"})
+
 # Default LLM request timeout (seconds) injected for ``--source local``
 # endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
 # OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
@@ -136,6 +146,8 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     - ``api_key_env`` inside ``llm`` (Revolver resolves it to ``api_key`` at runtime)
     - ``initial_program``, ``num_generations``, ``timeout_per_instance`` — Revolver-
       specific keys listed in :data:`REVOLVER_KEYS`
+    - ``evaluation`` — Revolver-owned top-level section listed in
+      :data:`REVOLVER_SECTIONS` (holds the wrapper ``timeout_per_instance``)
 
     Args:
         config: Path to a YAML config file **or** an already-loaded dict.
@@ -181,6 +193,12 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     had_num_generations = "num_generations" in data
     for rk in REVOLVER_KEYS:
         data.pop(rk, None)
+
+    # Strip Revolver-owned top-level sections (e.g. ``evaluation``) — they are
+    # not part of the OpenEvolve Config schema and would otherwise produce
+    # false-positive "unknown key" warnings (A6/#318).
+    for section in REVOLVER_SECTIONS:
+        data.pop(section, None)
 
     # Build deprecation notice (independent of dacite parse outcome)
     warnings: list[str] = []
@@ -449,7 +467,10 @@ def build_config(
             registry temperature (step 2b) but is itself overridden by
             ``--config-override llm.temperature=X`` (step 5).
         parallel: CLI ``--parallel`` override for ``evaluator.parallel_evaluations``
-            (optional).
+            (optional). When unset (``None``) on a ``--source local`` endpoint,
+            ``parallel_evaluations`` is auto-pinned to ``1`` unless overridden via
+            ``--config-override`` (A3/#315). An explicit value ``>1`` on a local
+            endpoint is honoured with a warning (map-with-warn).
         rewrite_mode: Full-rewrite mode shortcut (optional). When ``True``, sets
             ``diff_based_evolution=false`` and ``max_code_length=50000``.
             Overridable by ``--config-override`` (step 5).
@@ -550,10 +571,41 @@ def build_config(
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
             config["llm"]["temperature"] = temperature
+
+    # --parallel handling, incl. the local-endpoint auto-pin (A3/#315,
+    # extends #309). A "local" source LLM is typically a serialized
+    # subscription or single-GPU endpoint, so fanning out parallel
+    # evaluations starves it -> staggered calls, 600 s timeouts, a retry
+    # storm and a multi-hour hang (see DEFAULT_LOCAL_LLM_TIMEOUT_S / #307).
+    # Policy:
+    #   - parallel unset + source local + not set via --config-override
+    #     -> pin parallel_evaluations = 1 (conservative default for ALL
+    #        local endpoints, incl. genuine multi-GPU; cheap to override).
+    #   - parallel explicitly >1 on a local endpoint -> warn but honour the
+    #     user's value (map-with-warn, mirrors the Shinka pin in S16-21).
+    #   - remote endpoints are unaffected.
+    # --config-override evaluator.parallel_evaluations=N (step 5) always wins.
+    overrides_set_parallel = any(
+        override.split("=", 1)[0].strip()
+        in ("parallel_evaluations", "evaluator.parallel_evaluations")
+        for override in (config_overrides or [])
+        if "=" in override
+    )
     if parallel is not None:
+        if llm.source == "local" and parallel > 1:
+            sys.stderr.write(
+                f"Warning: --parallel {parallel} on a --source local endpoint. Local "
+                "endpoints (subscription-backed or single-GPU) usually serialize "
+                "requests, so concurrency yields no speedup and can trigger timeouts "
+                "and a retry storm. Honouring your value; pass --parallel 1 to pin.\n"
+            )
         config.setdefault("evaluator", {})
         if isinstance(config.get("evaluator"), dict):
             config["evaluator"]["parallel_evaluations"] = parallel
+    elif llm.source == "local" and not overrides_set_parallel:
+        config.setdefault("evaluator", {})
+        if isinstance(config.get("evaluator"), dict):
+            config["evaluator"]["parallel_evaluations"] = 1
 
     # 3. Problem description injection (DES-005 §4.4)
     if problem_description:
@@ -1231,19 +1283,24 @@ _CONFIG_TEMPLATE = """\
 #
 # See OpenEvolve documentation for all available options.
 # Revolver passes this file to OpenEvolve via --config.
+# Keys here use OpenEvolve's own schema; a freshly-scaffolded project
+# validates clean (zero warnings) at `problem version create`.
 
 # Number of evolutionary iterations (generations).
-num_iterations: 10
-
-# Population size — number of candidate programs per generation.
-population_size: 10
+max_iterations: 10
 
 # LLM sampling settings.
 llm:
   temperature: 0.8
   max_tokens: 4096
 
-# Evaluation settings.
+# MAP-Elites database settings.
+# Population size — number of candidate programs kept in the archive.
+# OpenEvolve defaults to 1000; uncomment to shrink it for quick experiments.
+# database:
+#   population_size: 10
+
+# Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:
   timeout_per_instance: 30  # seconds
 """

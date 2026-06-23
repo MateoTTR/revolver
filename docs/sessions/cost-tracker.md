@@ -59,14 +59,15 @@ Cumulative tracking of session duration across all Revolver sessions.
 | 50 | 2026-06-13 | session-050 | ~3h | Phase 5 | Real Shinka smoke test (new revolver-demos repo + dedicated env, TSP demo): working recipe gemini-3-flash-preview + max_tokens 16384 + max_patch_attempts 10 → +21% vs baseline. Surfaced backlog 300–306 incl. 🔴 cost under-report ~20× (thinking tokens billed but uncaptured). Claude Max via Agent SDK explored + ToS-verified on primary sources, scoped as side project (claude-ollama-bridge scaffold, reuses bard-ai). Sprint 015 planned (sprint-015.md, 9 PRs / 2 waves). |
 | 51 | 2026-06-17/18 | session-051 | ~4h | Phase 5 | Backlog pass + Sprint 015 re-scoped 9→6 (cost removed per user steer; token counting kept). Spike #300 (real artifacts): attempt/failure files carry only cost, thinking_tokens always 0 → token recovery infeasible, cost dropped from output. Executed S15 Scope B (#301 Shinka thinking-model LLM defaults, PR #199) + Scope C (#302 unproductive-run detection, PR #201), both merged; 1267 no-shinka / 1307 real-shinka. Fixed code-review PR hook (systemMessage→additionalContext + field-agnostic extraction). Clarified CI runs on the user's laptop (self-hosted runner, systemd user service). |
 | 52 | 2026-06-20 | session-052 | ~3h | Phase 5 | **Sprint 015 closed + v0.15.0 released.** Remaining scopes on one grouped branch (PR #202, 4 commits): F (shim removal + PYTHONUNBUFFERED restore + dead iterations-fallback removal), A/#300 (cost removed from output, honest prompt/completion/total token breakdown + caveat), #307 (OE 600 s default timeout for `--source local`), Doc (specs/conops/DES/ADR/README/validation). spec-reviewer 0 FAIL/4 WARN→fixed; validation-reviewer 4 FAIL/5 WARN→fixed. 1271 no-shinka / 1311 real-shinka, CI green. Release v0.15.0 (bump, merge→main, tag, install verified). code-reviewer/doc-reviewer agents repeatedly stream-timed-out → reviews done in main session. |
+| 53 | 2026-06-20 | session-053 | ~6h | Phase 5 | **Sprint 016 planned, shipped, released v0.16.0.** Debt + polish (no flagship): pricing removal + DB migration v10 (#208), CI version/tag guard (#206), DES-005 §4 rewrite (#207), UX bundle + `split=both`/migration v11 + `run info` counters (#210), Shinka resume clone parity + `resume_precheck` (#212, spike GO vs upstream shinka 0.0.7), pre-release doc audit across 14 living docs (#214). Fixed the self-hosted CI runner image (bake miniforge + runner 2.335.1). 1289 no-shinka tests, CI green. Released v0.16.0 (new `version-check` guard validated the tag; install verified). Incidents: session-limit recovery (TD-1), reviewer-agent idle-timeout flakiness (investigated — not token budget), worktree-hygiene reverts, concurrency-cancelled CI on #212. |
 
 ## Cumulative Totals
 
 | Metric | Value |
 |---|---|
-| **Total sessions** | 53 |
-| **Total duration** | ~109h15 |
-| **Avg duration/session** | ~2h00 |
+| **Total sessions** | 54 |
+| **Total duration** | ~115h15 |
+| **Avg duration/session** | ~2h08 |
 
 ## Notes
 

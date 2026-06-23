@@ -212,6 +212,93 @@ class TestBuildConfigRoundtrip:
 
 @pytest.mark.integration
 @pytest.mark.openevolve
+class TestLocalParallelAutoPin:
+    """A3/#315: --source local auto-pins evaluator.parallel_evaluations.
+
+    A "local" source LLM is typically a serialized subscription or single-GPU
+    endpoint; fanning out parallel evaluations starves it -> staggered calls,
+    timeouts, a retry storm and a multi-hour hang. build_config() pins
+    parallel_evaluations=1 for local endpoints unless the user opts out, and
+    honours an explicit --parallel >1 with a warning (map-with-warn).
+    """
+
+    def test_oe_local_parallel_pin_dry_run(self, tmp_path: Path) -> None:
+        """--source local, --parallel unset -> auto-pin parallel_evaluations=1.
+
+        Also verifies the pinned value surfaces in the dry-run output
+        (ResolvedConfig.backend_extras), which is what `run --dry-run`
+        renders.
+        """
+        from revolver.infra.backends.openevolve import OpenEvolveBackend
+
+        llm = _make_llm_entry(source="local")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        assert config_dict["evaluator"]["parallel_evaluations"] == 1
+
+        # Round-trip through Config.from_dict() -- the pinned value is valid OE
+        config_obj = OEConfig.from_dict(config_dict)
+        assert config_obj.evaluator.parallel_evaluations == 1
+
+        # Surfaced in the dry-run output (backend_extras)
+        resolved = OpenEvolveBackend().resolved_config(config_dict)
+        assert resolved.backend_extras["parallel_evaluations"] == 1
+
+    def test_oe_local_parallel_explicit_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Explicit --parallel 3 on a local endpoint warns but honours the value."""
+        llm = _make_llm_entry(source="local")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            parallel=3,
+            output_dir=tmp_path / "output",
+        )
+
+        # Honoured, not pinned to 1
+        assert config_dict["evaluator"]["parallel_evaluations"] == 3
+
+        # A warning was emitted to stderr
+        captured = capsys.readouterr()
+        assert "Warning:" in captured.err
+        assert "--parallel 3" in captured.err
+        assert "local" in captured.err
+
+    def test_oe_local_parallel_config_override_wins(self, tmp_path: Path) -> None:
+        """--config-override evaluator.parallel_evaluations=2 wins over the auto-pin."""
+        llm = _make_llm_entry(source="local")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["evaluator.parallel_evaluations=2"],
+            output_dir=tmp_path / "output",
+        )
+
+        # The override value wins; the auto-pin (1) does not clobber it
+        assert config_dict["evaluator"]["parallel_evaluations"] == 2
+
+    def test_oe_remote_parallel_no_pin(self, tmp_path: Path) -> None:
+        """--source remote, --parallel unset -> no auto-pin applied."""
+        llm = _make_llm_entry(source="remote")
+        config_dict = build_config(
+            problem_config=None,
+            llm=llm,
+            output_dir=tmp_path / "output",
+        )
+
+        # Remote endpoints are unaffected: build_config does not inject
+        # parallel_evaluations, so OpenEvolve's own default (1) applies via
+        # the schema, not a Revolver pin.
+        assert "parallel_evaluations" not in config_dict.get("evaluator", {})
+
+
+@pytest.mark.integration
+@pytest.mark.openevolve
 class TestControllerInstantiation:
     """Verify real OpenEvolve controller instantiation."""
 

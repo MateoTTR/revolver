@@ -172,9 +172,9 @@ For critical bugs discovered after a release:
 Each PR follows a standardized 5-step process:
 
 1. **GitHub Issue** — `gh issue create` with: scope (sprint tasks), files to create/modify, acceptance criteria, test scenarios, DES/spec references. The issue is the single source of truth for the feature.
-2. **Dev Agent (worktree)** — Launch a worktree-isolated agent. The agent reads the issue via `gh issue view <number>`, plus project docs (DES, specs, existing code). It implements, tests, and commits.
-3. **Draft PR** — Push branch, `gh pr create --draft` linking the issue (`Closes #N`). Draft prevents CI from running prematurely.
-4. **Code Review Agent** — Triggered after PR creation. Reviews the diff, posts structured findings as a PR comment (CRITICAL/WARNING/SUGGESTION/GOOD).
+2. **Dev Agent (worktree)** — Launch a worktree-isolated agent. The agent reads the issue via `gh issue view <number>`, plus project docs (DES, specs, existing code). It implements, tests, commits, and **pushes the branch** — then stops and reports. It does **NOT** run `gh pr create`: a PR created inside a background subagent does not trigger the code-review hook in a session that acts on it, so such PRs ship unreviewed.
+3. **Draft PR (from the main / orchestrator session)** — The orchestrator (main session), **not** the worktree agent, runs `gh pr create --draft` linking the issue (`Closes #N`). Creating the PR from the main session is what lets the `gh pr create` PostToolUse hook fire in the main loop and auto-launch the code-reviewer (step 4). Draft prevents CI from running prematurely.
+4. **Code Review Agent** — Auto-triggered by the hook once the main session creates the PR. Run it **foreground** (these reviewer agents tend to hit the harness idle-timeout when backgrounded). Reviews the diff, posts structured findings as a PR review (CRITICAL/WARNING/SUGGESTION/GOOD).
 5. **Fix & Ready** — Address review findings, push fixes, then `gh pr ready` to mark as ready (triggers CI).
 6. **Merge** — User merges on GitHub after CI passes.
 

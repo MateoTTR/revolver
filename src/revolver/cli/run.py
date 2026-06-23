@@ -19,6 +19,7 @@ from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import run as core_run
 from revolver.core.exceptions import ValidationError
 from revolver.infra.backends.base import AVAILABLE_BACKENDS
+from revolver.infra.db import get_global_db, get_llm
 from revolver.infra.output import print_confirmation, render
 from revolver.models.run import RunConfig
 
@@ -318,10 +319,20 @@ def run_status(
 @run_app.command("resume")
 def run_resume(
     ctx: typer.Context,
+    run_positional: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="RUN_ID",
+            help="Run ID to resume.",
+        ),
+    ] = None,
     run: Annotated[
-        str,
-        typer.Option("--run", help="Run ID to resume from."),
-    ],
+        str | None,
+        typer.Option(
+            "--run",
+            help="Run ID to resume from. Deprecated: prefer the positional RUN_ID.",
+        ),
+    ] = None,
     iterations: Annotated[
         int | None,
         typer.Option("--iterations", help="Number of iterations for the resumed run."),
@@ -370,15 +381,25 @@ def run_resume(
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
+        # Resolve the run ID from either the positional argument or the
+        # backward-compat ``--run`` option (positional wins when both are
+        # supplied — UX-2 / S16a-12, mirroring problem version create).
+        run_id = run_positional or run
+        if run_id is None:
+            raise ValidationError(
+                "A run ID is required. Provide it as a positional argument "
+                "(e.g. 'revolver run resume <run-id>') or via the --run option."
+            )
+
         # Validate temperature range (same as run_start)
         if temperature is not None and not (0.0 <= temperature <= 2.0):
             sys.stderr.write("Error: --temperature must be between 0.0 and 2.0\n")
             raise typer.Exit(1)
 
-        sys.stderr.write(f"Resuming run from: {run}\n")
+        sys.stderr.write(f"Resuming run from: {run_id}\n")
 
         result = core_run.resume_run(
-            run_id=run,
+            run_id=run_id,
             iterations=iterations,
             temperature=temperature,
             parallel=parallel,
@@ -410,7 +431,7 @@ def run_resume(
         else:
             data: dict[str, object] = {
                 "run_id": result.run_id,
-                "resumed_from": result.resumed_from or run,
+                "resumed_from": result.resumed_from or run_id,
                 "solution_id": result.solution.solution_id,
                 "problem_version": result.problem_version,
                 "llm": result.llm,
@@ -502,6 +523,33 @@ def run_list(
 # ── run info (DES-005 §2.5) ─────────────────────────────────────────────────
 
 
+def _run_llm_is_local(llm_name: str) -> bool:
+    """Best-effort check of whether a run's LLM is a ``--source local`` endpoint.
+
+    Used to gate the bridge token under-count caveat in ``run info`` (A4 /
+    #316). Resolves the LLM by name from the global registry and returns
+    ``True`` only when its ``source`` is ``"local"``. Any lookup failure
+    (LLM deleted, ensemble name, missing DB) yields ``False`` so the caveat
+    is simply omitted rather than crashing the command — this is a read-only,
+    display-only signal.
+
+    Args:
+        llm_name: The run's LLM registry name (``RunInfo.llm``).
+
+    Returns:
+        ``True`` if the registered LLM has ``source == "local"``.
+    """
+    try:
+        conn = get_global_db()
+        try:
+            entry = get_llm(conn, llm_name)
+        finally:
+            conn.close()
+    except Exception:
+        return False
+    return entry is not None and entry.source == "local"
+
+
 @run_app.command("info")
 def run_info(
     ctx: typer.Context,
@@ -584,6 +632,20 @@ def run_info(
                     "not counted — watch the provider console for "
                     "thinking-model spend.\n"
                 )
+
+                # Bridge token under-count caveat (A4 / #316, composes #308):
+                # when the run's LLM is a `--source local` endpoint (e.g. the
+                # claude-ollama-bridge fronting a Claude Max subscription), the
+                # OpenAI `usage` it returns omits the hidden Agent-SDK context
+                # and thinking tokens, so the totals above massively under-count
+                # real consumption. Read-only lookup; no change to the stored
+                # TokenUsage fields or the counting path.
+                if _run_llm_is_local(info.llm):
+                    sys.stderr.write(
+                        "Note: bridge/Agent-SDK endpoints under-report token "
+                        "usage (hidden context and thinking tokens not "
+                        "counted); track real spend on the Anthropic console.\n"
+                    )
 
             # Unproductive-run warning (#302): completed but 0 evolved children
             if info.produced_no_children:

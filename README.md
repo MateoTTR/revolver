@@ -114,7 +114,7 @@ revolver problem test --dataset data/instances/
 ### Version your problem
 
 ```bash
-revolver problem version create --tag v1.0 -m "Initial formulation"
+revolver problem version create v1.0 -m "Initial formulation"
 revolver problem version list
 ```
 
@@ -215,6 +215,7 @@ mypy
 | Sprint 014 | ShinkaEvolve MVP: real `--backend shinka` end-to-end, `[shinka]` extra | v0.14.0 | Done |
 | Sprint 015 | Thinking-model usability, token honesty (cost removed), slow-local-endpoint timeout, shim cleanup | v0.15.0 | Done |
 | Sprint 016 | Tech-debt + UX polish: pricing removal (migration v10), dataset `split=both` (v11), `run info` program counters, Shinka resume clone parity, CI version/tag guard | v0.16.0 | Done |
+| Sprint 016a | Corrective (demo feedback v0.16.0): network-Ollama probe honours `--base-url`/`OLLAMA_HOST`, clean Shinka post-run shutdown, OE local `--parallel` auto-pin, warning-free OE config scaffold, positional `run resume`, bridge token under-count caveat, CI global-DB isolation | v0.16.1 | Done |
 
 ## Documentation
 

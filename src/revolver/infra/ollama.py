@@ -24,6 +24,41 @@ from revolver.core.exceptions import (
     OllamaNotRunningError,
 )
 
+DEFAULT_OLLAMA_ROOT_URL = "http://localhost:11434"
+"""Default root URL of a local Ollama server (native ``/api/*`` endpoints)."""
+
+
+def normalize_ollama_url(url: str | None) -> tuple[str, str]:
+    """Derive the root and OpenAI-compatible URLs for an Ollama endpoint.
+
+    Ollama exposes two surfaces on the same host: the native REST API at the
+    **root** (``http://host:11434``, used by ``/api/*`` probe calls) and the
+    OpenAI-compatible API under **``/v1``** (``http://host:11434/v1``, used by
+    OpenEvolve's ``api_base`` and Shinka's ``local/<model>@<url>`` embed).
+
+    Given any of these forms, this returns both so the probe and the stored
+    entry agree on the same host.
+
+    Args:
+        url: A base URL in either root or ``/v1`` form (a scheme-less value
+            such as ``sirius:11434`` — as ``OLLAMA_HOST`` is often set — is
+            treated as ``http://``), or ``None`` to use the local default
+            (``http://localhost:11434``).
+
+    Returns:
+        ``(root_url, api_url)`` — *root_url* has any trailing ``/v1`` stripped;
+        *api_url* always ends with ``/v1``. Both have trailing slashes removed.
+    """
+    base = (url or DEFAULT_OLLAMA_ROOT_URL).strip()
+    # Ollama-native env vars (e.g. ``OLLAMA_HOST=sirius:11434``) are commonly
+    # set scheme-less; default to ``http://`` so httpx can connect (#313).
+    if "://" not in base:
+        base = f"http://{base}"
+    base = base.rstrip("/")
+    root_url = base[: -len("/v1")].rstrip("/") if base.endswith("/v1") else base
+    api_url = f"{root_url}/v1"
+    return root_url, api_url
+
 
 @dataclass
 class LocalModel:

@@ -39,13 +39,16 @@ DES-006 §1.3, FR-RUN-047/048, sprint-014 S14-07..13.
 from __future__ import annotations
 
 from collections.abc import Callable
+import contextlib
 import dataclasses
 import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import sqlite3
 import sys
+import time
 from typing import Any
 
 import yaml
@@ -93,6 +96,12 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # orchestrator's program collection behaves identically across backends;
 # top-N extraction (capabilities().top_n_extraction) is an S15 extension.
 _BEST_PROGRAMS_COUNT = 1
+
+# Grace period (seconds) between SIGTERM and SIGKILL when the post-run
+# backstop reaps an evaluator child that survived ``runner.run()`` (A2 /
+# #314). The child's result is already on disk in ``programs.sqlite`` by the
+# time the runner returns, so reaping it cannot truncate persistence.
+_CHILD_REAP_GRACE_SECONDS = 3.0
 
 # Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
 # ShinkaEvolve's own defaults are tuned for cheap non-thinking models and
@@ -1360,6 +1369,14 @@ class ShinkaBackend:
         # exit (S15-15) — the env mutation must not leak past the run.
         exports = self._env_exports(config)
         exports["PYTHONUNBUFFERED"] = "1"
+
+        # Snapshot the orchestrator's child PIDs BEFORE the run so the
+        # post-run backstop only reaps children the run itself spawned
+        # (A2 / #314). Children predating the run (none expected, but be
+        # safe) are excluded.
+        pre_run_children = self._current_child_pids()
+
+        runner: Any = None
         try:
             with revolver_env(exports):
                 runner = runner_cls(
@@ -1379,6 +1396,114 @@ class ShinkaBackend:
             raise
         except Exception as exc:
             raise ExternalError(f"ShinkaEvolve run failed: {exc}") from exc
+        finally:
+            # Orchestrator-owned teardown (A2 / #314). ``run()`` drives an
+            # in-process ``asyncio.run()`` whose ``_cleanup_async()`` already
+            # joins the scheduler/DB thread pools, yet the process can still
+            # busy-loop at ~100% CPU afterwards (leaked async LLM transports /
+            # default executor / a surviving evaluator child). This teardown
+            # is purely defensive: it is idempotent with the runner's own
+            # cleanup, never raises, and only runs on the Shinka path (the OE
+            # adapter is untouched). The result is already persisted in
+            # ``programs.sqlite`` by the time ``run()`` returns, so neither
+            # the resource shutdown nor the child reap can truncate it.
+            self._shutdown_runner(runner)
+            self._reap_run_children(pre_run_children)
+
+    @staticmethod
+    def _shutdown_runner(runner: Any) -> None:
+        """Defensively tear down a ``ShinkaEvolveRunner``'s reachable pools.
+
+        ``ShinkaEvolveRunner.run_async()`` already calls ``_cleanup_async()``
+        (which joins the ``JobScheduler`` ``ThreadPoolExecutor`` and both
+        ``AsyncProgramDatabase`` executors with ``wait=True``), so on a clean
+        run this is a no-op. It exists as a backstop for the case where the
+        runner returns with one of those pools still alive — every step is
+        guarded so a partially-constructed or differently-shaped runner (or a
+        future upstream rename) can never turn teardown into a crash.
+
+        ``wait=False`` is used deliberately: the orchestrator must not block
+        on a pool worker that is itself wedged (cf. the OE
+        ``ProcessPoolExecutor.shutdown(wait=True)`` hang in backlog #159).
+        The surviving worker, if any, is a daemon-less thread the
+        ``_reap_run_children`` backstop and the interpreter exit handle.
+        """
+        if runner is None:
+            return
+
+        scheduler = getattr(runner, "scheduler", None)
+        scheduler_shutdown = getattr(scheduler, "shutdown", None)
+        if callable(scheduler_shutdown):
+            with contextlib.suppress(Exception):
+                scheduler_shutdown(wait=False)
+
+        async_db = getattr(runner, "async_db", None)
+        for attr in ("executor", "write_executor"):
+            executor = getattr(async_db, attr, None)
+            executor_shutdown = getattr(executor, "shutdown", None)
+            if callable(executor_shutdown):
+                with contextlib.suppress(Exception):
+                    executor_shutdown(wait=False)
+
+    @staticmethod
+    def _current_child_pids() -> set[int]:
+        """Return the PIDs of the current process's direct children (Linux).
+
+        Reads ``/proc/self/task/*/children`` — the kernel-maintained list of
+        child PIDs — which needs no third-party dependency. Returns an empty
+        set on any platform without that interface (macOS, Windows) or on any
+        read error, so the caller's reap backstop simply becomes a no-op
+        rather than failing the run.
+        """
+        children: set[int] = set()
+        task_dir = Path("/proc/self/task")
+        if not task_dir.is_dir():
+            return children
+        try:
+            for tid_dir in task_dir.iterdir():
+                children_file = tid_dir / "children"
+                with contextlib.suppress(OSError):
+                    for token in children_file.read_text().split():
+                        with contextlib.suppress(ValueError):
+                            children.add(int(token))
+        except OSError:
+            return children
+        return children
+
+    def _reap_run_children(self, pre_run_children: set[int]) -> None:
+        """Terminate evaluator children that outlived ``runner.run()`` (A2).
+
+        ShinkaEvolve spawns each local evaluation as a ``subprocess.Popen``
+        child and normally reaps it via its ``monitor()`` poll loop. As a
+        backstop against a child that survives the run (and could keep the CLI
+        alive / pinned at ~100% CPU), any child PID that appeared *after* the
+        pre-run snapshot is sent ``SIGTERM``, then ``SIGKILL`` after a short
+        grace period. The run's result is already in ``programs.sqlite`` when
+        ``run()`` returns, so this cannot truncate persistence. No-op on
+        platforms without ``/proc`` child enumeration.
+        """
+        survivors = self._current_child_pids() - pre_run_children
+        if not survivors:
+            return
+
+        for pid in survivors:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGTERM)
+
+        deadline = time.monotonic() + _CHILD_REAP_GRACE_SECONDS
+        remaining = set(survivors)
+        while remaining and time.monotonic() < deadline:
+            for pid in list(remaining):
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, OSError):
+                    remaining.discard(pid)
+            if remaining:
+                time.sleep(0.1)
+
+        for pid in remaining:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGKILL)
 
     def _materialize_best_programs(self, results_dir: Path) -> tuple[float | None, Path | None]:
         """Write the top ranked program(s) into ``<results_dir>/best/``.

@@ -3,8 +3,16 @@ name: doc-reviewer
 description: Reviews user-facing docs (README, guides, user-story-e2e) for consistency with specs and actual CLI implementation. Use after release, or when README/guides/user-story-e2e are modified. Run AFTER spec-reviewer and validation-reviewer.
 tools: Read, Glob, Grep
 model: sonnet
-maxTurns: 20
+maxTurns: 40
 ---
+
+## Run discipline (reliability — read this first)
+
+Long, silent runs get killed mid-task by the harness idle-timeout — this has repeatedly cut reviewer agents off before they produced a final report. To stay alive and useful:
+
+- **Emit a one-line progress note after every 1–2 files** you read or check (e.g. "Checked README — 1 stale version"). Never go silent for a long stretch; frequent short output keeps the stream warm and the run alive.
+- **Produce structured findings incrementally as you go**, then a short final summary — do not defer all output to one large block at the end.
+- **Bound the work**: review the highest-risk / most-recently-changed documents first. If the scope is large, a focused, *complete* review of the top items plus an explicit "Not yet covered: X, Y" line is far better than an exhaustive sweep that gets cut off with no result.
 
 You are a documentation reviewer for the Revolver project, a MLOps CLI platform written in Python 3.12+.
 

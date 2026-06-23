@@ -303,15 +303,24 @@ call at a time. Fanning out parallel generation requests to such an endpoint
 queues them rather than running them concurrently — and can trip rate limits.
 Pin concurrency to 1:
 
-- **OpenEvolve path** — pass `--parallel 1` so the engine issues one
-  evaluation (and therefore one LLM call) at a time:
+- **OpenEvolve path** — Revolver **auto-pins** `evaluator.parallel_evaluations`
+  to `1` whenever the run's LLM has `--source local` and you did not pass
+  `--parallel` explicitly, so the engine issues one evaluation (and therefore
+  one LLM call) at a time. If you set `--parallel >1` on a local endpoint
+  Revolver honours it but emits a warning; a `--config-override
+  evaluator.parallel_evaluations=N` always wins over the auto-pin:
 
   ```bash
-  revolver run --llm codestral-local --source local --parallel 1
+  # Auto-pinned to 1 (no --parallel needed):
+  revolver run --llm codestral-local --source local
+
+  # Force concurrency on a local endpoint that can take it (warns, honoured):
+  revolver run --llm codestral-local --source local --parallel 3
   ```
 
-  See also *Slow local endpoints & request timeout* above — Revolver already
-  raises the per-call timeout to 600 s for `--source local` LLMs.
+  A `--dry-run` shows the resolved `parallel_evaluations` value. See also
+  *Slow local endpoints & request timeout* above — Revolver already raises the
+  per-call timeout to 600 s for `--source local` LLMs.
 
 - **ShinkaEvolve path** — Revolver **auto-pins** `job_config.max_proposal_jobs`
   to `1` whenever the run's LLM has `--source local`, so Shinka does not launch
@@ -332,6 +341,16 @@ Pin concurrency to 1:
 > on the **Anthropic console**, not by Revolver. Revolver does not capture the
 > `total_cost_usd` field returned by the bridge — watch the provider console
 > for subscription usage.
+
+> **Token totals under-count on bridge/Agent-SDK endpoints.** Beyond cost, the
+> prompt/completion **token** counts that `run info` reports are also
+> understated for `--source local` bridge endpoints. The bridge returns an
+> OpenAI `usage` block that omits the hidden Claude-Code context the Agent SDK
+> injects per call and the model's thinking tokens, so a call billed as
+> hundreds of real tokens may report only a handful. This is the same family of
+> gap as the reasoning/thinking caveat in *Token accounting* above. `run info`
+> prints an explicit caveat for `--source local` runs — track real consumption
+> on the **Anthropic console**, not Revolver's token totals.
 
 ---
 
