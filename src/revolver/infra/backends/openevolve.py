@@ -406,6 +406,7 @@ def _build_ensemble_llm_config(
     ensemble: EnsembleEntry,
     primary_llm: LLMEntry,
     conn: Any | None,
+    weight_overrides: dict[str, float] | None = None,
 ) -> None:
     """Build the ``llm.models`` array for ensemble mode (S11-07).
 
@@ -427,10 +428,15 @@ def _build_ensemble_llm_config(
         ensemble: The ensemble entry with member definitions.
         primary_llm: The first member's LLM entry, used for shared defaults.
         conn: Global DB connection for resolving member LLM details.
+        weight_overrides: Per-run ``--llm-weight model=weight`` overrides keyed
+            by member LLM registry name (ADR-007 A1/M3). When a member's name
+            is present the override *wins* over the registry ``member.weight``;
+            otherwise the registry weight is used unchanged.
     """
     from revolver.infra.db import get_llm
 
     config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
+    overrides = weight_overrides or {}
 
     models: list[dict[str, Any]] = []
     for member in ensemble.members:
@@ -443,9 +449,12 @@ def _build_ensemble_llm_config(
                 f"Ensemble member LLM '{member.llm_name}' not found in registry."
             )
 
+        # --llm-weight override wins over the registry weight (CLI wins).
+        effective_weight = overrides.get(member.llm_name, member.weight)
+
         entry: dict[str, Any] = {
             "name": member_llm.model,
-            "weight": member.weight,
+            "weight": effective_weight,
         }
 
         if member_llm.base_url:
@@ -484,6 +493,8 @@ def build_config(
     rewrite_mode: bool = False,
     ensemble: EnsembleEntry | None = None,
     conn: Any | None = None,
+    selection: str | None = None,
+    llm_weight_overrides: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build the OpenEvolve config dict.
 
@@ -526,10 +537,33 @@ def build_config(
         ensemble: Ensemble entry for multi-model mode (optional).
         conn: Global database connection, required when *ensemble* is provided
             to resolve member LLM details.
+        selection: Resolved ``--selection`` strategy (optional). OpenEvolve's
+            only ensemble selection is the static weighted sampler, so any
+            value other than ``None``/``"fixed"`` is rejected here as a
+            defensive belt-and-braces guard behind the primary orchestrator
+            check (ADR-007 A2/A4, DES-005 §4.2).
+        llm_weight_overrides: Per-run ``--llm-weight model=weight`` overrides
+            keyed by member LLM registry name, applied on top of the registry
+            weights when building the ``llm.models`` array (ADR-007 A1/M3).
 
     Returns:
         Merged configuration dictionary.
+
+    Raises:
+        ValidationError: If *selection* is an adaptive strategy OpenEvolve
+            cannot honor (only static weighted sampling is supported).
     """
+    # 0. Defensive selection guard (ADR-007 A2/A4): OpenEvolve only offers the
+    # static weighted sampler, whose sole neutral selection value is "fixed".
+    # The orchestrator-level capability check (core.run._validate_selection) is
+    # primary and rejects an unsupported value earlier; this belt-and-braces
+    # guard keeps build_config honest if called directly.
+    if selection is not None and selection != "fixed":
+        raise ValidationError(
+            f"Selection strategy '{selection}' is not supported by backend "
+            f"'openevolve'. Supported: fixed."
+        )
+
     # 1. Base config from problem version
     config: dict[str, Any] = {}
     if problem_config and problem_config.exists():
@@ -555,7 +589,7 @@ def build_config(
     # 2. LLM endpoint injection (DES-005 §4.3)
     if ensemble is not None:
         # Ensemble mode: emit llm.models array (S11-07)
-        _build_ensemble_llm_config(config, ensemble, llm, conn)
+        _build_ensemble_llm_config(config, ensemble, llm, conn, llm_weight_overrides)
     else:
         # Single-LLM mode (unchanged)
         llm_config: dict[str, Any] = {}
@@ -1475,7 +1509,7 @@ class OpenEvolveBackend:
             multi_language=False,
             ensemble_model="weighted",
             top_n_extraction=False,
-            selection_strategies=("weighted",),
+            selection_strategies=("fixed",),
             per_member_reasoning_effort=True,
         )
 
@@ -1506,6 +1540,8 @@ class OpenEvolveBackend:
             rewrite_mode=spec.rewrite_mode,
             ensemble=spec.ensemble,
             conn=spec.conn,
+            selection=spec.selection,
+            llm_weight_overrides=spec.llm_weight_overrides,
         )
 
     def resolved_config(
