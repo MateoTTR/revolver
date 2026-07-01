@@ -1112,16 +1112,18 @@ def recover_best_from_checkpoint(run_dir: Path) -> RecoveredProgram:
             "no usable code."
         )
 
-    # Score: sum of numeric metric values (consistent with parse_population
-    # and read_checkpoint_best_score).
+    # Score: the program's ``combined_score`` metric — the single scalar
+    # solutions/populations are ranked by everywhere else. NOT the sum of all
+    # numeric metrics: a program carrying ``combined_score`` alongside other
+    # numeric metrics (accuracy, latency, ...) would otherwise be over-counted.
+    # When the checkpoint predates aggregation and has no ``combined_score``,
+    # fall back to ``None`` (unknown) rather than fabricating a summed value.
     metrics = program_data.get("metrics", {})
     score: float | None = None
     if isinstance(metrics, dict):
-        numeric_vals = [
-            v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
-        ]
-        if numeric_vals:
-            score = float(sum(numeric_vals))
+        raw_score = metrics.get("combined_score")
+        if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
+            score = float(raw_score)
 
     language = program_data.get("language")
     return RecoveredProgram(

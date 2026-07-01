@@ -639,8 +639,19 @@ def test_extract_accepts_completed_with_errors(tmp_project: Path) -> None:
     assert "sol-" in output
 
 
-def _seed_interrupted_run(tmp_project: Path, run_id: str) -> Path:
-    """Seed an interrupted OpenEvolve run (with rank-1 program) and return its dir."""
+def _seed_interrupted_run(
+    tmp_project: Path,
+    run_id: str,
+    *,
+    status: str = "interrupted",
+    write_rank1: bool = True,
+) -> Path:
+    """Seed a run (default interrupted) and return its dir.
+
+    ``write_rank1=False`` skips the placeholder ``programs/rank-1.py`` so a
+    test can assert it is *absent* after an aborted --from-checkpoint command
+    (finding #2: no stray file on abort).
+    """
     _create_problem_version_in_db(tmp_project, "v1.0")
     _create_dataset_in_db(tmp_project, "train-small")
 
@@ -658,7 +669,7 @@ def _seed_interrupted_run(tmp_project: Path, run_id: str) -> Path:
             dataset_hash="dhash-train-small",
             llm_model="gpt-4",
             created_at=datetime.now(UTC),
-            status="interrupted",
+            status=status,
             backend="openevolve",
         )
     finally:
@@ -667,16 +678,30 @@ def _seed_interrupted_run(tmp_project: Path, run_id: str) -> Path:
     run_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / run_id
     programs_dir = run_dir / "programs"
     programs_dir.mkdir(parents=True, exist_ok=True)
-    (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
+    if write_rank1:
+        (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
     return run_dir
 
 
-def _write_oe_checkpoint(run_dir: Path, best_code: str, best_score: float) -> None:
-    """Write a minimal OpenEvolve checkpoint with a tracked best program."""
+def _write_oe_checkpoint(
+    run_dir: Path,
+    best_code: str,
+    best_score: float,
+    extra_metrics: dict[str, float] | None = None,
+) -> None:
+    """Write a minimal OpenEvolve checkpoint with a tracked best program.
+
+    *extra_metrics* are stored alongside ``combined_score`` so a test can
+    assert the recovered score is the ``combined_score`` alone, not the sum of
+    all numeric metrics (finding #1).
+    """
     checkpoint = run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
     programs = checkpoint / "programs"
     programs.mkdir(parents=True, exist_ok=True)
     best_id = "prog-best-123"
+    metrics: dict[str, float] = {"combined_score": best_score}
+    if extra_metrics:
+        metrics.update(extra_metrics)
     (checkpoint / "metadata.json").write_text(
         json.dumps({"best_program_id": best_id}), encoding="utf-8"
     )
@@ -686,7 +711,7 @@ def _write_oe_checkpoint(run_dir: Path, best_code: str, best_score: float) -> No
                 "id": best_id,
                 "code": best_code,
                 "language": "python",
-                "metrics": {"combined_score": best_score},
+                "metrics": metrics,
             }
         ),
         encoding="utf-8",
@@ -722,10 +747,19 @@ def test_extract_from_checkpoint_recovers_interrupted_run(tmp_project: Path) -> 
     recovered from the latest OpenEvolve checkpoint, materialized to the
     run's ``programs/rank-1.py``, and promoted to a solution carrying the
     recovered ``combined_score``.
+
+    The checkpoint program carries multiple numeric metrics; the persisted
+    score must be the ``combined_score`` alone (0.87), NOT the sum of all
+    metrics (0.87 + 0.5 + 12.0 = 13.37) — finding #1.
     """
     run_dir = _seed_interrupted_run(tmp_project, "run-recover")
     recovered_code = "def solve():\n    return 42  # recovered from checkpoint\n"
-    _write_oe_checkpoint(run_dir, recovered_code, best_score=0.87)
+    _write_oe_checkpoint(
+        run_dir,
+        recovered_code,
+        best_score=0.87,
+        extra_metrics={"accuracy": 0.5, "latency_ms": 12.0},
+    )
 
     result = _invoke_with_cwd(
         ["solution", "extract", "--run", "run-recover", "--from-checkpoint"],
@@ -739,7 +773,7 @@ def test_extract_from_checkpoint_recovers_interrupted_run(tmp_project: Path) -> 
     rank1 = run_dir / "programs" / "rank-1.py"
     assert rank1.read_text(encoding="utf-8") == recovered_code
 
-    # The recovered score is persisted on the solution.
+    # The recovered score is the combined_score, not the sum of all metrics.
     db_path = tmp_project / REVOLVER_DIR / "revolver.db"
     conn = get_project_db(db_path)
     try:
@@ -750,6 +784,80 @@ def test_extract_from_checkpoint_recovers_interrupted_run(tmp_project: Path) -> 
         conn.close()
     assert row is not None
     assert row[0] == pytest.approx(0.87)
+
+
+@pytest.mark.integration
+def test_extract_from_checkpoint_leaves_no_stray_file_on_abort(tmp_project: Path) -> None:
+    """A validation failure under --from-checkpoint leaves no rank-1.py (finding #2).
+
+    Recovery is read-only; the recovered code is materialized only after the
+    alias/duplicate/force validation passes. Here a duplicate (run_id, rank)
+    without --force aborts the command, so ``programs/rank-1.py`` must NOT be
+    created.
+    """
+    run_dir = _seed_interrupted_run(tmp_project, "run-abort", write_rank1=False)
+    recovered_code = "def solve():\n    return 7  # would be recovered\n"
+    _write_oe_checkpoint(run_dir, recovered_code, best_score=0.5)
+
+    # Pre-existing solution for (run-abort, rank 1): the extract must abort as a
+    # duplicate before any file is written.
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_solution(
+            conn,
+            solution_id="sol-preexisting",
+            run_id="run-abort",
+            rank=1,
+            best_score=0.1,
+            alias=None,
+        )
+    finally:
+        conn.close()
+
+    rank1 = run_dir / "programs" / "rank-1.py"
+    assert not rank1.exists()  # precondition: no rank-1.py yet
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-abort", "--from-checkpoint"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "already exists" in output.lower()
+
+    # No stray rank-1.py was left behind by the aborted command.
+    assert not rank1.exists()
+
+
+@pytest.mark.integration
+def test_extract_from_checkpoint_on_completed_run_notes_ignored(tmp_project: Path) -> None:
+    """--from-checkpoint on a COMPLETED run notes the flag is ignored (finding #3).
+
+    The flag is a no-op on a completed run (it already has extractable
+    programs), but the command must say so on stderr rather than silently
+    ignoring the flag, and still succeed via the normal rank-1 path.
+    """
+    run_dir = _seed_interrupted_run(
+        tmp_project, "run-done", status="completed", write_rank1=True
+    )
+    # A checkpoint exists but must NOT be used (completed run -> normal path).
+    _write_oe_checkpoint(
+        run_dir, "def solve():\n    return 999  # checkpoint, unused\n", best_score=0.99
+    )
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-done", "--from-checkpoint"],
+        tmp_project,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "--from-checkpoint ignored" in output
+    assert "sol-" in output
+
+    # The normal rank-1.py (the placeholder) was used, not the checkpoint code.
+    rank1 = run_dir / "programs" / "rank-1.py"
+    assert "checkpoint, unused" not in rank1.read_text(encoding="utf-8")
 
 
 @pytest.mark.integration

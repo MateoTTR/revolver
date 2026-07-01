@@ -17,8 +17,13 @@ import pytest
 from typer.testing import CliRunner
 
 from revolver.cli import app
+from revolver.core.exceptions import CheckpointRecoveryError
 from revolver.core.run import get_population
-from revolver.infra.backends.openevolve import parse_population, read_checkpoint_best_score
+from revolver.infra.backends.openevolve import (
+    parse_population,
+    read_checkpoint_best_score,
+    recover_best_from_checkpoint,
+)
 from revolver.infra.db import get_project_db, insert_run
 from revolver.infra.store import REVOLVER_DIR, init_project_store
 
@@ -648,3 +653,74 @@ class TestReadCheckpointBestScore:
         (programs_dir / "prog-bad.json").write_text("invalid json")
 
         assert read_checkpoint_best_score(tmp_path) is None
+
+
+# ── L1: recover_best_from_checkpoint() unit tests (B7) ───────────────────────
+
+
+def _write_recovery_checkpoint(
+    run_dir: Path,
+    *,
+    best_id: str = "prog-001",
+    code: str = "def solve():\n    return 0\n",
+    metrics: dict[str, float] | None = None,
+) -> Path:
+    """Write a checkpoint_5 under run_dir/oe-output/checkpoints and return it."""
+    checkpoint = run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    programs_dir = checkpoint / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    (checkpoint / "metadata.json").write_text(json.dumps({"best_program_id": best_id}))
+    (programs_dir / f"{best_id}.json").write_text(
+        json.dumps(
+            {
+                "id": best_id,
+                "code": code,
+                "language": "python",
+                "metrics": metrics if metrics is not None else {"combined_score": 1.0},
+            }
+        )
+    )
+    return checkpoint
+
+
+class TestRecoverBestFromCheckpoint:
+    """Unit tests for ``infra.openevolve.recover_best_from_checkpoint()`` (B7)."""
+
+    def test_score_is_combined_score_not_sum(self, tmp_path: Path) -> None:
+        """The recovered score is combined_score alone, NOT the sum of metrics.
+
+        A program with combined_score plus other numeric metrics must not be
+        over-counted (finding #1): 0.87 recovered, not 0.87 + 0.5 + 12.0.
+        """
+        _write_recovery_checkpoint(
+            tmp_path,
+            metrics={"combined_score": 0.87, "accuracy": 0.5, "latency_ms": 12.0},
+        )
+
+        recovered = recover_best_from_checkpoint(tmp_path)
+
+        assert recovered.score == pytest.approx(0.87)
+        assert recovered.program_id == "prog-001"
+        assert recovered.language == "python"
+
+    def test_score_none_when_no_combined_score(self, tmp_path: Path) -> None:
+        """Falls back to None (not a summed value) when combined_score is absent."""
+        _write_recovery_checkpoint(
+            tmp_path, metrics={"accuracy": 0.8, "throughput": 1.2}
+        )
+
+        recovered = recover_best_from_checkpoint(tmp_path)
+
+        assert recovered.score is None
+        assert recovered.code.startswith("def solve():")
+
+    def test_no_checkpoint_raises(self, tmp_path: Path) -> None:
+        """Raises CheckpointRecoveryError when no checkpoint exists yet."""
+        with pytest.raises(CheckpointRecoveryError, match="No checkpoint"):
+            recover_best_from_checkpoint(tmp_path)
+
+    def test_no_code_raises(self, tmp_path: Path) -> None:
+        """Raises CheckpointRecoveryError when the best program has no code."""
+        _write_recovery_checkpoint(tmp_path, code="")
+        with pytest.raises(CheckpointRecoveryError, match="no usable code"):
+            recover_best_from_checkpoint(tmp_path)
