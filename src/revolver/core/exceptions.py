@@ -111,6 +111,28 @@ class ExportError(RevolverError):
     exit_code: int = 1
 
 
+class CheckpointRecoveryError(RevolverError):
+    """Raised when best-of-interrupted-run recovery cannot produce a program.
+
+    Distinct from :class:`RecoveryNotSupportedError`: the backend *does*
+    support checkpoint recovery, but no usable checkpoint exists yet (the run
+    was too short) or the checkpoint on disk is unreadable (B7 / FR-RUN-051).
+    """
+
+    exit_code: int = 1
+
+
+class RecoveryNotSupportedError(RevolverError):
+    """Raised when a backend cannot recover a best program from a checkpoint.
+
+    Distinct from :class:`CheckpointRecoveryError`: the backend has no
+    checkpoint-based recovery mechanism at all (e.g. ShinkaEvolve, whose
+    interrupted-run state is its ``programs.sqlite`` — B7 / FR-RUN-051).
+    """
+
+    exit_code: int = 1
+
+
 # ── Ollama / LLM exceptions ─────────────────────────────────────────────────
 
 

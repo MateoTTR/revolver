@@ -284,11 +284,22 @@ def solution_extract(
         bool,
         typer.Option("--force", help="Replace existing solution for this run."),
     ] = False,
+    from_checkpoint: Annotated[
+        bool,
+        typer.Option(
+            "--from-checkpoint",
+            help=(
+                "Recover the best program from the backend's latest checkpoint "
+                "for an interrupted/failed run (OpenEvolve only)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Promote the best program from a run to a solution entry.
 
     Extracts rank-1 (best) program. Use --force to replace an existing
-    extraction for the same run.
+    extraction for the same run. Use --from-checkpoint to recover the best
+    program of an interrupted/failed run from its latest checkpoint (B7).
     """
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
@@ -299,6 +310,7 @@ def solution_extract(
             rank=1,
             alias=alias,
             force=force,
+            from_checkpoint=from_checkpoint,
         )
 
         sys.stderr.write(

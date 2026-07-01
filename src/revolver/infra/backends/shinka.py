@@ -45,10 +45,8 @@ import json
 import os
 from pathlib import Path
 import shutil
-import signal
 import sqlite3
 import sys
-import time
 from typing import Any
 
 import yaml
@@ -56,6 +54,7 @@ import yaml
 from revolver.core.exceptions import (
     EvaluatorLoadError,
     ExternalError,
+    RecoveryNotSupportedError,
     RevolverError,
     ValidationError,
 )
@@ -64,7 +63,9 @@ from revolver.infra.backends.base import (
     BackendRunResult,
     BackendRunSpec,
     BackendUnavailableError,
+    ChildProcessReaperMixin,
     ProgressInfo,
+    RecoveredProgram,
 )
 from revolver.infra.backends.openevolve import (
     # Backend-neutral config plumbing shared with the OpenEvolve adapter.
@@ -96,12 +97,6 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # orchestrator's program collection behaves identically across backends;
 # top-N extraction (capabilities().top_n_extraction) is an S15 extension.
 _BEST_PROGRAMS_COUNT = 1
-
-# Grace period (seconds) between SIGTERM and SIGKILL when the post-run
-# backstop reaps an evaluator child that survived ``runner.run()`` (A2 /
-# #314). The child's result is already on disk in ``programs.sqlite`` by the
-# time the runner returns, so reaping it cannot truncate persistence.
-_CHILD_REAP_GRACE_SECONDS = 3.0
 
 # Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
 # ShinkaEvolve's own defaults are tuned for cheap non-thinking models and
@@ -459,7 +454,7 @@ def _as_number(value: Any) -> float:
     return 0.0
 
 
-class ShinkaBackend:
+class ShinkaBackend(ChildProcessReaperMixin):
     """``EvolutionBackend`` adapter for ShinkaEvolve (ADR-007, Sprint 014)."""
 
     name: str = "shinka"
@@ -932,6 +927,22 @@ class ShinkaBackend:
                 "database has no completed generation (last_iteration is 0). "
                 "The run may have been interrupted before its first generation."
             )
+
+    def recover_best_from_checkpoint(self, run_dir: Path) -> RecoveredProgram:
+        """Not supported on ShinkaEvolve (B7 / FR-RUN-051).
+
+        ShinkaEvolve does not write filesystem checkpoints that survive an
+        interrupted run: its state is ``programs.sqlite``. There is no
+        checkpoint to recover a best program *from*, so this raises
+        :class:`~revolver.core.exceptions.RecoveryNotSupportedError`
+        (distinct from OpenEvolve's checkpoint recovery) to be surfaced
+        cleanly by ``solution extract --from-checkpoint``.
+        """
+        raise RecoveryNotSupportedError(
+            "ShinkaEvolve has no filesystem checkpoint to recover from "
+            "(interrupted-run state lives in programs.sqlite). "
+            "Best-of-checkpoint recovery is an OpenEvolve capability."
+        )
 
     def resume(
         self,
@@ -1447,65 +1458,9 @@ class ShinkaBackend:
                 with contextlib.suppress(Exception):
                     executor_shutdown(wait=False)
 
-    @staticmethod
-    def _current_child_pids() -> set[int]:
-        """Return the PIDs of the current process's direct children (Linux).
-
-        Reads ``/proc/self/task/*/children`` — the kernel-maintained list of
-        child PIDs — which needs no third-party dependency. Returns an empty
-        set on any platform without that interface (macOS, Windows) or on any
-        read error, so the caller's reap backstop simply becomes a no-op
-        rather than failing the run.
-        """
-        children: set[int] = set()
-        task_dir = Path("/proc/self/task")
-        if not task_dir.is_dir():
-            return children
-        try:
-            for tid_dir in task_dir.iterdir():
-                children_file = tid_dir / "children"
-                with contextlib.suppress(OSError):
-                    for token in children_file.read_text().split():
-                        with contextlib.suppress(ValueError):
-                            children.add(int(token))
-        except OSError:
-            return children
-        return children
-
-    def _reap_run_children(self, pre_run_children: set[int]) -> None:
-        """Terminate evaluator children that outlived ``runner.run()`` (A2).
-
-        ShinkaEvolve spawns each local evaluation as a ``subprocess.Popen``
-        child and normally reaps it via its ``monitor()`` poll loop. As a
-        backstop against a child that survives the run (and could keep the CLI
-        alive / pinned at ~100% CPU), any child PID that appeared *after* the
-        pre-run snapshot is sent ``SIGTERM``, then ``SIGKILL`` after a short
-        grace period. The run's result is already in ``programs.sqlite`` when
-        ``run()`` returns, so this cannot truncate persistence. No-op on
-        platforms without ``/proc`` child enumeration.
-        """
-        survivors = self._current_child_pids() - pre_run_children
-        if not survivors:
-            return
-
-        for pid in survivors:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGTERM)
-
-        deadline = time.monotonic() + _CHILD_REAP_GRACE_SECONDS
-        remaining = set(survivors)
-        while remaining and time.monotonic() < deadline:
-            for pid in list(remaining):
-                try:
-                    os.kill(pid, 0)
-                except (ProcessLookupError, OSError):
-                    remaining.discard(pid)
-            if remaining:
-                time.sleep(0.1)
-
-        for pid in remaining:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGKILL)
+    # ``_current_child_pids`` / ``_reap_run_children`` are inherited from
+    # ``ChildProcessReaperMixin`` (base.py) — hoisted in S17-04 so both
+    # backends share one definition.
 
     def _materialize_best_programs(self, results_dir: Path) -> tuple[float | None, Path | None]:
         """Write the top ranked program(s) into ``<results_dir>/best/``.

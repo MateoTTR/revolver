@@ -6,8 +6,10 @@ and error cases.
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 import shutil
+from types import ModuleType
 
 import pytest
 
@@ -281,3 +283,92 @@ class TestGenerateWrapperErrors:
 
         with pytest.raises(EvaluatorLoadError, match="Failed to import"):
             generate_wrapper(snapshot_dir, output_dir)
+
+
+def _load_generated_wrapper(wrapper_path: Path) -> ModuleType:
+    """Import a generated wrapper file as a fresh module for exec-based tests."""
+    spec = importlib.util.spec_from_file_location(
+        f"_revolver_wrapper_under_test_{id(wrapper_path)}", wrapper_path
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestGeneratedWrapperAggregation:
+    """Exec the generated wrapper's aggregation loop (B1 / FR-EVL-021).
+
+    No existing test previously exec'd the generated ``evaluate()`` in its
+    aggregated (dataset) mode. These tests run it against a small on-disk
+    dataset containing an instance whose ``evaluate_instance`` returns a mix
+    of numeric and non-numeric metrics, asserting the numeric guard drops the
+    non-numeric keys instead of crashing ``statistics.mean``.
+    """
+
+    def _build_wrapper(self, tmp_path: Path) -> ModuleType:
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        shutil.copy(FIXTURES / "evaluator_mixed_metrics.py", snapshot_dir / "evaluator.py")
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+        # timeout_per_instance=None -> _call_evaluate_instance calls directly
+        # (no multiprocessing), so evaluate() runs in-process for the exec test.
+        wrapper_path = generate_wrapper(snapshot_dir, output_dir)
+        return _load_generated_wrapper(wrapper_path)
+
+    def test_mixed_numeric_and_non_numeric_metrics_no_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-numeric metric field is dropped, not crashed on (B1)."""
+        wrapper = self._build_wrapper(tmp_path)
+
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        # "bad" instance -> {"combined_score": 0.5, "error": "boom", "passed": True}
+        (dataset_dir / "bad-01.txt").write_text("x", encoding="utf-8")
+        # numeric instance -> {"combined_score": 1.0, "accuracy": 0.8}
+        (dataset_dir / "good-01.txt").write_text("y", encoding="utf-8")
+
+        monkeypatch.delenv("REVOLVER_INSTANCE_PATH", raising=False)
+        monkeypatch.delenv("REVOLVER_INSTANCE_LOG", raising=False)
+        monkeypatch.setenv("REVOLVER_DATASET_DIR", str(dataset_dir))
+
+        program = tmp_path / "program.py"
+        program.write_text("def solve():\n    return 0\n", encoding="utf-8")
+
+        result = wrapper.evaluate(str(program))
+
+        # combined_score = mean(0.5, 1.0) = 0.75 — a real number, no exception.
+        assert isinstance(result["combined_score"], (int, float))
+        assert result["combined_score"] == pytest.approx(0.75)
+        # accuracy present only for the numeric instance -> mean of one value.
+        assert result["accuracy"] == pytest.approx(0.8)
+        # Non-numeric fields are dropped from the aggregate entirely.
+        assert "error" not in result
+        # bool is an int subclass but must be excluded by the numeric guard.
+        assert "passed" not in result
+        assert all(isinstance(v, (int, float)) for v in result.values())
+
+    def test_all_numeric_metrics_aggregate_normally(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fully-numeric dataset aggregates unchanged (no regression)."""
+        wrapper = self._build_wrapper(tmp_path)
+
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        (dataset_dir / "good-01.txt").write_text("y", encoding="utf-8")
+        (dataset_dir / "good-02.txt").write_text("z", encoding="utf-8")
+
+        monkeypatch.delenv("REVOLVER_INSTANCE_PATH", raising=False)
+        monkeypatch.delenv("REVOLVER_INSTANCE_LOG", raising=False)
+        monkeypatch.setenv("REVOLVER_DATASET_DIR", str(dataset_dir))
+
+        program = tmp_path / "program.py"
+        program.write_text("def solve():\n    return 0\n", encoding="utf-8")
+
+        result = wrapper.evaluate(str(program))
+
+        assert result["combined_score"] == pytest.approx(1.0)
+        assert result["accuracy"] == pytest.approx(0.8)

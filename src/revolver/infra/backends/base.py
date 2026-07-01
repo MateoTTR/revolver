@@ -12,8 +12,12 @@ top-down analysis #267 §2.2, DES-005 §14.1.
 from __future__ import annotations
 
 from collections.abc import Callable
+import contextlib
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import signal
+import time
 from typing import Any, Protocol, runtime_checkable
 
 from revolver.core.exceptions import ResourceError, ValidationError
@@ -22,6 +26,83 @@ from revolver.models.run import ResolvedConfig, TokenUsage
 
 # Names accepted by :func:`get_backend`, in display order.
 AVAILABLE_BACKENDS: tuple[str, ...] = ("openevolve", "shinka")
+
+# Grace period between SIGTERM and SIGKILL when reaping run children (A2 /
+# #314). Shared by both backends' post-run teardown.
+_CHILD_REAP_GRACE_SECONDS = 3.0
+
+
+class ChildProcessReaperMixin:
+    """Post-run child-process teardown shared by both backends (A2 / #314).
+
+    An in-process engine ``run()`` (ShinkaEvolve's ``asyncio.run`` or
+    OpenEvolve's ``ProcessPoolExecutor`` workers) can leave an evaluation
+    child alive after the result is already persisted, keeping the CLI pinned
+    at ~100% CPU. Both backends snapshot their child PIDs *before* the run and,
+    in a ``finally`` block, reap any PID that appeared afterwards.
+
+    Hoisted here (S17-04) so there is exactly one definition; ``ShinkaBackend``
+    and ``OpenEvolveBackend`` inherit it. The reap is Linux-only (needs
+    ``/proc``) and a no-op elsewhere, and never raises — it is a defensive
+    backstop, not part of the run's correctness path.
+    """
+
+    @staticmethod
+    def _current_child_pids() -> set[int]:
+        """Return the PIDs of the current process's direct children (Linux).
+
+        Reads ``/proc/self/task/*/children`` — the kernel-maintained list of
+        child PIDs — which needs no third-party dependency. Returns an empty
+        set on any platform without that interface (macOS, Windows) or on any
+        read error, so the caller's reap backstop simply becomes a no-op
+        rather than failing the run.
+        """
+        children: set[int] = set()
+        task_dir = Path("/proc/self/task")
+        if not task_dir.is_dir():
+            return children
+        try:
+            for tid_dir in task_dir.iterdir():
+                children_file = tid_dir / "children"
+                with contextlib.suppress(OSError):
+                    for token in children_file.read_text().split():
+                        with contextlib.suppress(ValueError):
+                            children.add(int(token))
+        except OSError:
+            return children
+        return children
+
+    def _reap_run_children(self, pre_run_children: set[int]) -> None:
+        """Terminate evaluator children that outlived the engine run (A2).
+
+        Any child PID that appeared *after* the pre-run snapshot is sent
+        ``SIGTERM``, then ``SIGKILL`` after a short grace period. The run's
+        result is already persisted when the engine ``run()`` returns, so this
+        cannot truncate persistence. No-op on platforms without ``/proc`` child
+        enumeration.
+        """
+        survivors = self._current_child_pids() - pre_run_children
+        if not survivors:
+            return
+
+        for pid in survivors:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGTERM)
+
+        deadline = time.monotonic() + _CHILD_REAP_GRACE_SECONDS
+        remaining = set(survivors)
+        while remaining and time.monotonic() < deadline:
+            for pid in list(remaining):
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, OSError):
+                    remaining.discard(pid)
+            if remaining:
+                time.sleep(0.1)
+
+        for pid in remaining:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGKILL)
 
 
 class BackendUnavailableError(ResourceError):
@@ -160,6 +241,27 @@ class BackendRunSpec:
     conn: Any | None = None
     timeout_per_instance: float | None = None
     wrapper_path: Path | None = None
+
+
+@dataclass
+class RecoveredProgram:
+    """A best program recovered from an interrupted/failed run (B7).
+
+    Returned by :meth:`EvolutionBackend.recover_best_from_checkpoint`. Carries
+    just enough to materialize a solution program file from a run that never
+    reached the normal ``programs/`` extraction path (FR-RUN-051).
+
+    Attributes:
+        program_id: The backend's internal id of the recovered best program.
+        code: The program source code.
+        score: The recovered ``combined_score`` (``None`` if unavailable).
+        language: Program language (``"python"`` by default).
+    """
+
+    program_id: str
+    code: str
+    score: float | None = None
+    language: str = "python"
 
 
 @dataclass
@@ -303,6 +405,40 @@ class EvolutionBackend(Protocol):
         parent-run fallback (see :class:`BackendRunSpec`).
         """
         ...
+
+    def recover_best_from_checkpoint(self, run_dir: Path) -> RecoveredProgram:
+        """Recover the best program of an interrupted/failed run (B7).
+
+        For backends that periodically checkpoint their population to disk
+        (OpenEvolve), this reads the latest checkpoint and returns its tracked
+        best program — letting ``solution extract --from-checkpoint`` promote
+        a program from a run that never reached the normal ``programs/``
+        extraction path (FR-RUN-051, DES-005 §7.2).
+
+        The default implementation raises
+        :class:`~revolver.core.exceptions.RecoveryNotSupportedError`. Because
+        ``EvolutionBackend`` is a structural :class:`~typing.Protocol`, each
+        concrete backend provides its own body: OpenEvolve implements
+        checkpoint recovery; ShinkaEvolve (whose interrupted-run state is its
+        ``programs.sqlite``, not a filesystem checkpoint) raises the
+        not-supported error explicitly.
+
+        Args:
+            run_dir: Directory of the interrupted/failed run.
+
+        Returns:
+            The recovered best :class:`RecoveredProgram`.
+
+        Raises:
+            RecoveryNotSupportedError: The backend has no checkpoint recovery.
+            CheckpointRecoveryError: Recovery is supported but no usable
+                checkpoint exists yet (run too short) or it is unreadable.
+        """
+        from revolver.core.exceptions import RecoveryNotSupportedError
+
+        raise RecoveryNotSupportedError(
+            "This backend does not support best-of-checkpoint recovery."
+        )
 
     def read_progress(self, run_dir: Path) -> tuple[int | None, float | None]:
         """Cheap live-progress read: ``(iterations_done, best_score)``."""

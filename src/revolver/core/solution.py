@@ -18,8 +18,13 @@ from datetime import UTC, datetime
 import difflib
 from pathlib import Path
 import sqlite3
+import sys
+from typing import TYPE_CHECKING
 
 from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
+
+if TYPE_CHECKING:
+    from revolver.infra.backends.base import RecoveredProgram
 from revolver.infra.db import (
     delete_solution as db_delete_solution,
     get_project_db,
@@ -291,12 +296,39 @@ def set_alias(
         conn.close()
 
 
+def _recover_checkpoint_program(
+    run: dict[str, object],
+    run_dir: Path,
+) -> RecoveredProgram:
+    """Recover the best program of an interrupted/failed run from its checkpoint.
+
+    Resolves the run's backend and asks it to recover its best program from the
+    latest checkpoint (B7 / FR-RUN-051). This is a **read-only** step: it does
+    not write to disk, so it is safe to call before the alias/duplicate/force
+    validation (the recovered code is materialized only once validation passes,
+    to avoid leaving a stray ``rank-1.py`` behind on an aborted command).
+
+    Returns:
+        The recovered :class:`RecoveredProgram` (code + score).
+
+    Raises:
+        CheckpointRecoveryError: No usable checkpoint exists yet.
+        RecoveryNotSupportedError: The backend has no checkpoint recovery.
+    """
+    from revolver.infra.backends.base import get_backend
+
+    backend_name = str(run.get("backend") or "openevolve")
+    backend = get_backend(backend_name)
+    return backend.recover_best_from_checkpoint(run_dir)
+
+
 def extract_solution(
     run_id: str,
     rank: int,
     *,
     alias: str | None = None,
     force: bool = False,
+    from_checkpoint: bool = False,
     project_root: Path | None = None,
 ) -> Solution:
     """Promote a stored program to a new solution DB entry.
@@ -314,12 +346,21 @@ def extract_solution(
     that a crash or insert failure cannot leave the database without a
     solution for that ``(run_id, rank)`` slot.
 
+    When ``from_checkpoint=True`` **and** the run is ``interrupted``/``failed``,
+    the best program is recovered from the backend's latest checkpoint (B7 /
+    FR-RUN-051) instead of read from ``programs/rank-<rank>.py``: the recovered
+    code is materialized to that path and its score is stored as
+    ``best_score``. The default (``from_checkpoint=False``) is unchanged —
+    interrupted/failed runs are still rejected.
+
     Args:
         run_id: ID of the run that produced the program.
         rank: Program rank within the run.
         alias: Optional alias for the new solution.
         force: If ``True``, replace an existing solution for the same
             ``(run_id, rank)`` pair instead of raising an error.
+        from_checkpoint: If ``True``, recover the best program from the
+            backend's latest checkpoint when the run is interrupted/failed.
         project_root: Explicit project root, or ``None`` to auto-detect.
 
     Returns:
@@ -329,6 +370,10 @@ def extract_solution(
         RevolverError: If the run is not found or the program file does not exist.
         ValidationError: If rank is <= 0, the run is not completed, or the
             program file does not exist.
+        CheckpointRecoveryError: ``from_checkpoint`` requested but no usable
+            checkpoint exists yet.
+        RecoveryNotSupportedError: ``from_checkpoint`` requested on a backend
+            without checkpoint recovery (e.g. ShinkaEvolve).
         DuplicateNameError: If ``force=False`` and ``(run_id, rank)`` already
             extracted, or if the alias is already in use.
     """
@@ -343,15 +388,42 @@ def extract_solution(
         run = get_run(conn, run_id)
         if run is None:
             raise RevolverError(f"Run not found: {run_id}")
-        if run.get("status") not in ("completed", "completed_with_errors"):
-            raise ValidationError(
-                f"Run '{run_id}' is not completed (status: '{run.get('status')}')"
+
+        run_dir = root / REVOLVER_DIR / RUNS_DIR / run_id
+        program_path = run_dir / "programs" / f"rank-{rank}.py"
+
+        status = run.get("status")
+        # B7 / FR-RUN-051: --from-checkpoint recovers the best program of an
+        # interrupted/failed run. The default path is unchanged: only completed
+        # (or completed_with_errors) runs are extractable.
+        use_checkpoint = from_checkpoint and status in ("interrupted", "failed")
+        if from_checkpoint and status in ("completed", "completed_with_errors"):
+            # The flag is a no-op on a run that already has extractable
+            # programs — say so rather than silently ignoring it.
+            sys.stderr.write(
+                f"Note: run '{run_id}' is {status}; --from-checkpoint ignored, "
+                "using the normal rank-1 program.\n"
             )
 
-        # 2. Verify program file exists
-        program_path = root / REVOLVER_DIR / RUNS_DIR / run_id / "programs" / f"rank-{rank}.py"
-        if not program_path.exists():
-            raise ValidationError(f"Program file not found: {program_path}")
+        recovered: RecoveredProgram | None = None
+        if not use_checkpoint:
+            if status not in ("completed", "completed_with_errors"):
+                if from_checkpoint:
+                    raise ValidationError(
+                        f"Run '{run_id}' has status '{status}'. --from-checkpoint "
+                        "only applies to 'interrupted' or 'failed' runs."
+                    )
+                raise ValidationError(f"Run '{run_id}' is not completed (status: '{status}')")
+
+            # 2. Verify program file exists
+            if not program_path.exists():
+                raise ValidationError(f"Program file not found: {program_path}")
+        else:
+            # Read-only recovery (fails fast on an unrecoverable run). The
+            # recovered code is materialized to disk only *after* the
+            # alias/duplicate/force validation below, so an aborted command
+            # never leaves a stray rank-1.py behind.
+            recovered = _recover_checkpoint_program(run, run_dir)
 
         # 3. Pre-mutation validation: check alias uniqueness and duplicates
         # Alias check MUST happen before any delete to avoid data loss on
@@ -372,11 +444,21 @@ def extract_solution(
                         f"Solution already exists for run={run_id}, rank={rank}"
                     )
 
+        # 3b. Materialize the recovered checkpoint program now that all
+        # validation has passed — never before (finding #2: no stray file on
+        # an aborted command).
+        recovered_score: float | None = None
+        if recovered is not None:
+            program_path.parent.mkdir(parents=True, exist_ok=True)
+            program_path.write_text(recovered.code, encoding="utf-8")
+            recovered_score = recovered.score
+
         # 4. Generate unique ID
         solution_id = _generate_solution_id(conn)
 
-        # 5. best_score: not available from file, set None
-        best_score: float | None = None
+        # 5. best_score: unavailable from a program file, but recovered from
+        # the checkpoint metadata when --from-checkpoint was used (B7).
+        best_score: float | None = recovered_score
 
         # 6. Atomic delete + insert within a single transaction.
         # We use raw SQL instead of the helper functions to avoid
