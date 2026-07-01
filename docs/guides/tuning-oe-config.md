@@ -805,6 +805,90 @@ fine-grained budget control per phase. Sequential resume is particularly
 useful when you want to explore with full-rewrite mode first, then
 switch to diff-based mode for refinement.
 
+### Cross-engine ensemble: the same ensemble on three selection strategies
+
+The **same** registered ensemble runs on both backends, but *how* the
+member weights and per-member reasoning effort are honored differs by
+engine and selection strategy. This section walks through one concrete
+ensemble across the three combinations. All commands below are
+`--dry-run`-verified (they resolve and exit 0 without launching a run).
+
+Setup — a two-member weighted ensemble with a per-member reasoning
+effort on the expensive model:
+
+```bash
+# Register two Gemini models (both read GEMINI_API_KEY)
+revolver llm add flash-lite --provider google \
+  --model gemini-2.5-flash-lite --api-key-env GEMINI_API_KEY
+revolver llm add pro --provider google \
+  --model gemini-2.5-pro --api-key-env GEMINI_API_KEY
+
+# Weighted ensemble: 80% cheap, 20% expensive; pro also thinks less
+revolver llm ensemble create alphevo
+revolver llm ensemble add alphevo --llm flash-lite --weight 0.8
+revolver llm ensemble add alphevo --llm pro --weight 0.2 \
+  --temperature 0.5 --reasoning-effort low
+```
+
+Three-way comparison (add `--dry-run` to inspect the resolved config
+without launching):
+
+```bash
+# 1. OpenEvolve — static weighted sampler (the only OE ensemble mode)
+revolver run --version v1.0 --llm alphevo --dataset train-small \
+  --backend openevolve --selection fixed --iterations 100
+#   → llm_models: gemini-2.5-flash-lite×0.8, gemini-2.5-pro×0.2
+#     (weights become llm.models[].weight; per-member reasoning_effort honored)
+
+# 2. ShinkaEvolve fixed — same weights, via FixedSampler.prior_probs
+revolver run --version v1.0 --llm alphevo --dataset train-small \
+  --backend shinka --selection fixed --iterations 100
+#   → llm_dynamic_selection: fixed
+#     llm_dynamic_selection_kwargs.prior_probs: [0.8, 0.2]  (weights honored)
+#     llm_kwargs.reasoning_efforts: [low]  (see the asymmetry below)
+
+# 3. ShinkaEvolve ucb — adaptive bandit; the SAME weights are ignored
+revolver run --version v1.0 --llm alphevo --dataset train-small \
+  --backend shinka --selection ucb --iterations 100
+#   → llm_dynamic_selection: ucb  (learns arm weights from a uniform start)
+#     Warning: ensemble weights (registry weights / --llm-weight) are ignored
+#              under '--selection ucb' on the shinka backend …
+```
+
+`--selection` is capability-checked per backend (ADR-007 A2/A4):
+OpenEvolve accepts `fixed` only (any adaptive value is rejected before the
+run); ShinkaEvolve accepts `fixed | ucb | ucb1 | thompson`. Omitting
+`--selection` defaults to `fixed` on both engines.
+
+#### Two asymmetries to keep in mind
+
+1. **Member weights are honored only under OE-weighted and Shinka-fixed.**
+   Under any Shinka adaptive mode (`ucb`/`ucb1`/`thompson`), the bandit
+   starts uniform and learns arm weights from observed rewards, so your
+   configured weights (registry weights **or** `--llm-weight` overrides)
+   are deliberately **ignored with a warning** — they are not silently
+   applied. Use `fixed` when you want to pin the sampling mixture.
+
+2. **Per-member `reasoning_effort` is OpenEvolve-only.** On OpenEvolve
+   each `llm.models[]` entry carries its own `reasoning_effort`, so a
+   Flash member and a Pro member can think at different levels.
+   ShinkaEvolve exposes a **single global** `llm_kwargs.reasoning_efforts`
+   pool with no per-member setting (ADR-007 A3.2), so Revolver collapses
+   the members' efforts into one value: identical efforts merge silently;
+   *disagreeing* efforts pick the **highest** level (never under-think)
+   **with a warning**. On local/bridge members the setting is inert and is
+   flagged as such. If per-member effort matters to your run, use the
+   OpenEvolve backend.
+
+> `--config-override` is the reserved escape hatch for backend-exclusive
+> *structural* keys (OE `feature_dimensions`, Shinka `archive_size`, …); it
+> is **not** the path for these common levers, and it cannot address array
+> members such as per-member weight or reasoning effort — those are
+> reachable only through `--llm-weight` / the ensemble member flags. A
+> `--config-override key=value` whose key matches no field in the resolved
+> backend's config schema is a no-op and is **warned** rather than silently
+> accepted (spec §4.5).
+
 ---
 
 ## Checklist
