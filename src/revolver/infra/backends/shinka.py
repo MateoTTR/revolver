@@ -76,7 +76,12 @@ from revolver.infra.backends.openevolve import (
     _set_nested,
     revolver_env,
 )
-from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
+from revolver.models.llm import (
+    REASONING_EFFORT_LEVELS,
+    EnsembleEntry,
+    EnsembleMember,
+    LLMEntry,
+)
 from revolver.models.run import ResolvedConfig, TokenUsage
 
 _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
@@ -172,6 +177,14 @@ _SHINKA_SAMPLER_KWARG_KEYS["ucb1"] = _SHINKA_SAMPLER_KWARG_KEYS["ucb"]
 # / bridge case), NOT ShinkaEvolve's own 0.5. Inert when per-model cost is
 # undifferentiated (all-local/bridge) but must default correctly (M4, ADR-007 A5).
 _SHINKA_DEFAULT_COST_AWARE_COEF = 0.0
+
+# Total order over reasoning-effort levels (lowest → highest). ShinkaEvolve has
+# a single global reasoning_efforts pool (FACT A: no per-member effort), so when
+# ensemble members disagree Revolver picks the *highest* effort under this order
+# — never under-thinking — and warns (S17-27, ADR-007 A3.2). Aliased to the
+# canonical tuple in ``revolver.models.llm`` (single source of truth shared with
+# the core validator), so the two can no longer drift.
+_REASONING_EFFORT_ORDER: tuple[str, ...] = REASONING_EFFORT_LEVELS
 
 # Default env var name synthesized for local OpenAI-compatible endpoints
 # when the registry entry has no api_key_env (ADR-007 D5). launch()
@@ -819,6 +832,11 @@ class ShinkaBackend(ChildProcessReaperMixin):
             spec.llm.max_tokens if spec.llm.max_tokens is not None else _SHINKA_DEFAULT_MAX_TOKENS
         )
         llm_kwargs.setdefault("max_tokens", default_max_tokens)
+        # Collapse per-member reasoning_effort into Shinka's single global pool
+        # (FACT A: no per-member effort). Disagreements pick the highest level
+        # (never under-think) with a warning; local/bridge members warn as inert
+        # (S17-27, ADR-007 A3.2).
+        self._project_reasoning_efforts(spec, llm_kwargs)
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
 
@@ -974,6 +992,86 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
         if selection_kwargs:
             evo["llm_dynamic_selection_kwargs"] = selection_kwargs
+
+    @staticmethod
+    def _project_reasoning_efforts(
+        spec: BackendRunSpec,
+        llm_kwargs: dict[str, Any],
+    ) -> None:
+        """Collapse per-member reasoning_effort into Shinka's single global pool.
+
+        FACT A (v017 research §0, ADR-007 A3.2): ShinkaEvolve exposes a single
+        ``llm_kwargs.reasoning_efforts`` pool — it cannot honour a *different*
+        effort per ensemble member. This projection:
+
+        - collects each member's **effective** effort (per-member override else
+          the member LLM's registry ``reasoning_effort``);
+        - if no member sets one → leaves ``reasoning_efforts`` unset (zero
+          behaviour change);
+        - if the set members agree (or only one is set) → writes
+          ``llm_kwargs["reasoning_efforts"] = [<value>]`` **silently**;
+        - if they **disagree** → picks the **highest** effort under
+          :data:`_REASONING_EFFORT_ORDER` (never under-think) and **warns**;
+        - warns **once** that effort is *inert* for ``local``/bridge-sourced
+          members (Shinka classes them ``is_reasoning_model=False``).
+
+        Mutates *llm_kwargs* in place (the caller writes it back into
+        ``evo['llm_kwargs']``). An explicit ``config.yaml`` /
+        ``--config-override`` ``reasoning_efforts`` is preserved: only unset when
+        the setdefault-style guard below sees no existing value.
+        """
+        # Resolve members in the same order as _project_llm_selection.
+        if spec.ensemble is not None:
+            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
+        else:
+            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
+
+        efforts: list[str] = []
+        any_local_with_effort = False
+        for member, member_llm in members:
+            effective = (
+                member.reasoning_effort
+                if member.reasoning_effort is not None
+                else member_llm.reasoning_effort
+            )
+            if effective is None:
+                continue
+            efforts.append(effective)
+            if member_llm.source == "local":
+                any_local_with_effort = True
+
+        if not efforts:
+            # Nothing to project — keep the config byte-identical to pre-S17-27.
+            return
+
+        # A config.yaml / --config-override value takes precedence: config
+        # overrides are applied *after* build_config's llm_kwargs assembly, but
+        # a value already present in llm_kwargs came from the problem config.yaml
+        # and must win over the registry-derived pool (mirrors max_tokens).
+        if "reasoning_efforts" in llm_kwargs:
+            return
+
+        distinct = set(efforts)
+        if len(distinct) > 1:
+            chosen = max(distinct, key=_REASONING_EFFORT_ORDER.index)
+            sys.stderr.write(
+                "Warning: ensemble members request different reasoning_effort "
+                f"levels ({', '.join(sorted(distinct, key=_REASONING_EFFORT_ORDER.index))}), "
+                "but the shinka backend has a single global reasoning_efforts pool "
+                "(it cannot honour per-member effort). Choosing the highest level "
+                f"'{chosen}' so no member under-thinks.\n"
+            )
+        else:
+            chosen = efforts[0]
+
+        if any_local_with_effort:
+            sys.stderr.write(
+                "Warning: reasoning_effort is inert for local/bridge-sourced members "
+                "on the shinka backend (they are treated as non-reasoning models); "
+                "it applies only to reasoning-capable remote models.\n"
+            )
+
+        llm_kwargs["reasoning_efforts"] = [chosen]
 
     def resolved_config(
         self,

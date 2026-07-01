@@ -306,6 +306,40 @@ def test_add_ensemble_member_with_overrides(global_conn: sqlite3.Connection) -> 
     assert len(members) == 1
     assert members[0]["temperature_override"] == 0.5
     assert members[0]["max_tokens_override"] == 4096
+    assert members[0]["reasoning_effort"] is None
+
+
+@pytest.mark.unit
+def test_add_ensemble_member_reasoning_effort_round_trip(
+    global_conn: sqlite3.Connection,
+) -> None:
+    """A per-member reasoning_effort override survives insert → get (S17-25)."""
+    ts = datetime(2026, 3, 28, 10, 0, 0, tzinfo=UTC)
+    insert_ensemble(global_conn, "alphevo", ts)
+    add_ensemble_member(
+        global_conn,
+        "alphevo",
+        "pro",
+        0.2,
+        reasoning_effort_override="high",
+    )
+
+    members = get_ensemble_members(global_conn, "alphevo")
+    assert len(members) == 1
+    assert members[0]["reasoning_effort"] == "high"
+
+
+@pytest.mark.unit
+def test_add_ensemble_member_reasoning_effort_defaults_none(
+    global_conn: sqlite3.Connection,
+) -> None:
+    """A member added without a reasoning_effort override reads back as None."""
+    ts = datetime(2026, 3, 28, 10, 0, 0, tzinfo=UTC)
+    insert_ensemble(global_conn, "alphevo", ts)
+    add_ensemble_member(global_conn, "alphevo", "flash-lite", 0.8)
+
+    members = get_ensemble_members(global_conn, "alphevo")
+    assert members[0]["reasoning_effort"] is None
 
 
 @pytest.mark.unit

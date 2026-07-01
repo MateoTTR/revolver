@@ -13,6 +13,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+# Canonical reasoning-effort levels, ordered lowest→highest
+# (min < low < medium < high < max). Single source of truth shared by the
+# core validator (``revolver.core.llm``) and the ShinkaEvolve backend's
+# disagreement policy (pick the *highest* effort by index). Keeping it here —
+# a leaf module both the ``core`` and ``infra`` layers already import — avoids
+# the two copies drifting and ranking efforts inconsistently.
+# FR-LLM-026, ADR-007 Amendment A3.2.
+REASONING_EFFORT_LEVELS: tuple[str, ...] = ("min", "low", "medium", "high", "max")
+
 
 class LLMEntry(BaseModel):
     """A registered LLM in the global database.

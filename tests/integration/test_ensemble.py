@@ -19,7 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from revolver.cli import app
-from revolver.infra.db import get_global_db_at, insert_llm
+from revolver.infra.db import get_ensemble_members, get_global_db_at, get_llm, insert_llm
 from revolver.models.llm import LLMEntry
 
 runner = CliRunner()
@@ -65,7 +65,12 @@ def mock_global_db(
         yield global_db_path
 
 
-def _register_llm(db_path: Path, name: str = "flash-lite") -> None:
+def _register_llm(
+    db_path: Path,
+    name: str = "flash-lite",
+    *,
+    reasoning_effort: str | None = None,
+) -> None:
     """Register a dummy LLM directly in the DB."""
     conn = get_global_db_at(db_path)
     try:
@@ -76,6 +81,7 @@ def _register_llm(db_path: Path, name: str = "flash-lite") -> None:
             source="remote",
             base_url="https://example.com/v1",
             api_key_env="GOOGLE_API_KEY",
+            reasoning_effort=reasoning_effort,
             registered_at=datetime.now(UTC),
         )
         insert_llm(conn, entry)
@@ -165,6 +171,69 @@ class TestEnsembleAdd:
         data = json.loads(result.stdout)
         assert data["temperature"] == 0.5
         assert data["max_tokens"] == 1024
+
+    def test_add_member_reasoning_effort_override(self, mock_global_db: Path) -> None:
+        """--reasoning-effort stores a per-member override distinct from the LLM's
+        registry reasoning_effort (S17-25)."""
+        # Registry-level effort is "low"; the per-member override is "high".
+        _register_llm(mock_global_db, "flash-lite", reasoning_effort="low")
+        runner.invoke(app, ["--json", "llm", "ensemble", "create", "alphevo"])
+
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "llm",
+                "ensemble",
+                "add",
+                "alphevo",
+                "--llm",
+                "flash-lite",
+                "--weight",
+                "1.0",
+                "--reasoning-effort",
+                "high",
+            ],
+        )
+        assert result.exit_code == 0, _get_all_output(result)
+        assert json.loads(result.stdout)["reasoning_effort"] == "high"
+
+        # The per-member override round-trips distinct from the registry value.
+        conn = get_global_db_at(mock_global_db)
+        try:
+            members = get_ensemble_members(conn, "alphevo")
+            llm = get_llm(conn, "flash-lite")
+        finally:
+            conn.close()
+        assert members[0]["reasoning_effort"] == "high"
+        assert llm is not None and llm.reasoning_effort == "low"
+
+    def test_add_member_invalid_reasoning_effort(self, mock_global_db: Path) -> None:
+        """An invalid --reasoning-effort exits with ValidationError (exit 1)."""
+        _register_llm(mock_global_db, "flash-lite")
+        runner.invoke(app, ["--json", "llm", "ensemble", "create", "alphevo"])
+        result = runner.invoke(
+            app,
+            [
+                "llm",
+                "ensemble",
+                "add",
+                "alphevo",
+                "--llm",
+                "flash-lite",
+                "--weight",
+                "1.0",
+                "--reasoning-effort",
+                "turbo",
+            ],
+        )
+        assert result.exit_code == 1
+        # No member was persisted.
+        conn = get_global_db_at(mock_global_db)
+        try:
+            assert get_ensemble_members(conn, "alphevo") == []
+        finally:
+            conn.close()
 
     def test_add_member_llm_not_found(self, mock_global_db: Path) -> None:
         runner.invoke(app, ["--json", "llm", "ensemble", "create", "alphevo"])

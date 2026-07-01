@@ -1558,3 +1558,141 @@ def test_llm_add_local_network_url_shinka_embed(
     entry = next(e for e in _query_llms(mock_global_db) if e.name == "gemma-shinka")
     model_string, _ = _project_llm_model(entry)
     assert model_string.startswith("local/gemma4:latest@http://sirius:11434/v1")
+
+
+# ── S17-24: per-LLM --reasoning-effort on add / update ────────────────────────
+
+
+@pytest.mark.integration
+def test_llm_add_with_reasoning_effort(mock_global_db: Path) -> None:
+    """`llm add --reasoning-effort high` stores the value in the DB."""
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "llm",
+            "add",
+            "gpt4o",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--reasoning-effort",
+            "high",
+        ],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["reasoning_effort"] == "high"
+
+    entries = _query_llms(mock_global_db)
+    assert entries[0].reasoning_effort == "high"
+
+
+@pytest.mark.integration
+def test_llm_add_invalid_reasoning_effort(mock_global_db: Path) -> None:
+    """An invalid --reasoning-effort value exits with ValidationError (exit 1)."""
+    result = runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "gpt4o",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--reasoning-effort",
+            "ultra",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "reasoning-effort" in _get_all_output(result).lower()
+    # Nothing was persisted.
+    assert _query_llms(mock_global_db) == []
+
+
+@pytest.mark.integration
+def test_llm_update_reasoning_effort(mock_global_db: Path) -> None:
+    """`llm update --reasoning-effort low` updates the stored value."""
+    _add_remote_llm()
+
+    result = runner.invoke(
+        app,
+        ["--json", "llm", "update", "test-llm", "--reasoning-effort", "low"],
+    )
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+
+    data = json.loads(result.stdout)
+    assert data["reasoning_effort"] == "low"
+
+    entries = _query_llms(mock_global_db)
+    assert entries[0].reasoning_effort == "low"
+
+
+@pytest.mark.integration
+def test_llm_update_invalid_reasoning_effort(mock_global_db: Path) -> None:
+    """`llm update --reasoning-effort bogus` exits with ValidationError (exit 1)."""
+    _add_remote_llm()
+    result = runner.invoke(
+        app,
+        ["llm", "update", "test-llm", "--reasoning-effort", "bogus"],
+    )
+    assert result.exit_code == 1
+    # Registry value unchanged (was never set).
+    entries = _query_llms(mock_global_db)
+    assert entries[0].reasoning_effort is None
+
+
+@pytest.mark.integration
+def test_llm_list_shows_reasoning_effort(mock_global_db: Path) -> None:
+    """`llm list --json` surfaces reasoning_effort (set and unset)."""
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "llm-effort",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--reasoning-effort",
+            "medium",
+        ],
+    )
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "llm-plain",
+            "--model",
+            "gpt-4o-mini",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+        ],
+    )
+
+    result = runner.invoke(app, ["--json", "llm", "list"])
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    by_name = {e["name"]: e for e in json.loads(result.stdout)}
+    assert by_name["llm-effort"]["reasoning_effort"] == "medium"
+    assert by_name["llm-plain"]["reasoning_effort"] is None

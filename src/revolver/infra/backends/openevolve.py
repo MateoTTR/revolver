@@ -419,9 +419,11 @@ def _build_ensemble_llm_config(
     - ``EnsembleMember.weight`` → ``models[].weight``
     - ``EnsembleMember.temperature`` → ``models[].temperature`` (optional)
     - ``EnsembleMember.max_tokens`` → ``models[].max_tokens`` (optional)
+    - ``EnsembleMember.reasoning_effort`` → ``models[].reasoning_effort``
+      (optional; S17-26, FACT A: OpenEvolve honours effort per model)
 
-    Falls back to the member's LLM registry defaults for temperature and
-    max_tokens when no per-member override is set.
+    Falls back to the member's LLM registry defaults for temperature,
+    max_tokens, and reasoning_effort when no per-member override is set.
 
     Args:
         config: The OE config dict to mutate (adds ``llm.models``).
@@ -475,6 +477,17 @@ def _build_ensemble_llm_config(
         )
         if effective_max_tokens is not None:
             entry["max_tokens"] = effective_max_tokens
+
+        # Per-member reasoning_effort override wins over the member LLM's
+        # registry-level value (S17-26, ADR-007 A3.2). OpenEvolve honours
+        # reasoning_effort per model in its llm.models array (FACT A).
+        effective_reasoning_effort = (
+            member.reasoning_effort
+            if member.reasoning_effort is not None
+            else member_llm.reasoning_effort
+        )
+        if effective_reasoning_effort is not None:
+            entry["reasoning_effort"] = effective_reasoning_effort
 
         models.append(entry)
 
@@ -630,6 +643,14 @@ def build_config(
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
             config["llm"]["temperature"] = llm.temperature
+    # 2b (S17-26): single-LLM reasoning_effort from the registry entry. In
+    # ensemble mode the per-member value is already mapped onto llm.models[]
+    # above, so only inject the top-level key on the single-LLM path.
+    # --config-override llm.reasoning_effort=… (step 5) still wins.
+    if ensemble is None and llm.reasoning_effort is not None:
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["reasoning_effort"] = llm.reasoning_effort
 
     # Google provider detection (FB-02): Google's Generative Language API
     # rejects the ``seed`` parameter with HTTP 400.  Disable random_seed.
