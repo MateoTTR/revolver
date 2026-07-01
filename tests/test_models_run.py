@@ -86,6 +86,27 @@ class TestRunConfig:
         assert config.alias is None
         assert config.config_overrides == []
         assert config.dry_run is False
+        # New Sprint 017 ensemble levers default to None (zero behavior change).
+        assert config.selection is None
+        assert config.selection_kwargs is None
+        assert config.llm_weight_overrides is None
+
+    @pytest.mark.unit
+    def test_selection_levers_round_trip(self) -> None:
+        """RunConfig carries the raw --selection / --selection-kwarg / --llm-weight levers."""
+        config = RunConfig(
+            problem_version="v1.0",
+            llm_name="my-ensemble",
+            dataset_name="train",
+            selection="ucb",
+            selection_kwargs=["cost_aware_coef=0.3"],
+            llm_weight_overrides=["gpt4o=0.7", "claude=0.3"],
+        )
+        assert config.selection == "ucb"
+        assert config.selection_kwargs == ["cost_aware_coef=0.3"]
+        assert config.llm_weight_overrides == ["gpt4o=0.7", "claude=0.3"]
+        # Raw strings survive a serialization round-trip unparsed.
+        assert RunConfig.model_validate(config.model_dump()).selection == "ucb"
 
     @pytest.mark.unit
     def test_with_all_fields(self) -> None:

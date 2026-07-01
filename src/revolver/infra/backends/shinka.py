@@ -478,6 +478,8 @@ class ShinkaBackend:
             multi_language=True,
             ensemble_model="bandit",
             top_n_extraction=True,
+            selection_strategies=("fixed", "ucb", "ucb1", "thompson"),
+            per_member_reasoning_effort=False,
         )
 
     def is_available(self) -> tuple[bool, str | None]:
