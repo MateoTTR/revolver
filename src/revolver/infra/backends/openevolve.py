@@ -1108,8 +1108,7 @@ def recover_best_from_checkpoint(run_dir: Path) -> RecoveredProgram:
     code = program_data.get("code")
     if not isinstance(code, str) or not code:
         raise CheckpointRecoveryError(
-            f"Best program '{best_id}' in checkpoint '{checkpoint.name}' has "
-            "no usable code."
+            f"Best program '{best_id}' in checkpoint '{checkpoint.name}' has no usable code."
         )
 
     # Score: the program's ``combined_score`` metric — the single scalar

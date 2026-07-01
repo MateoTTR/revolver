@@ -838,9 +838,7 @@ def test_extract_from_checkpoint_on_completed_run_notes_ignored(tmp_project: Pat
     programs), but the command must say so on stderr rather than silently
     ignoring the flag, and still succeed via the normal rank-1 path.
     """
-    run_dir = _seed_interrupted_run(
-        tmp_project, "run-done", status="completed", write_rank1=True
-    )
+    run_dir = _seed_interrupted_run(tmp_project, "run-done", status="completed", write_rank1=True)
     # A checkpoint exists but must NOT be used (completed run -> normal path).
     _write_oe_checkpoint(
         run_dir, "def solve():\n    return 999  # checkpoint, unused\n", best_score=0.99

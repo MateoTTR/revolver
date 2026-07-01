@@ -705,9 +705,7 @@ class TestRecoverBestFromCheckpoint:
 
     def test_score_none_when_no_combined_score(self, tmp_path: Path) -> None:
         """Falls back to None (not a summed value) when combined_score is absent."""
-        _write_recovery_checkpoint(
-            tmp_path, metrics={"accuracy": 0.8, "throughput": 1.2}
-        )
+        _write_recovery_checkpoint(tmp_path, metrics={"accuracy": 0.8, "throughput": 1.2})
 
         recovered = recover_best_from_checkpoint(tmp_path)
 

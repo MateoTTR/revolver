@@ -309,9 +309,7 @@ class TestGeneratedWrapperAggregation:
     def _build_wrapper(self, tmp_path: Path) -> ModuleType:
         snapshot_dir = tmp_path / "snapshot"
         snapshot_dir.mkdir()
-        shutil.copy(
-            FIXTURES / "evaluator_mixed_metrics.py", snapshot_dir / "evaluator.py"
-        )
+        shutil.copy(FIXTURES / "evaluator_mixed_metrics.py", snapshot_dir / "evaluator.py")
         output_dir = tmp_path / "run"
         output_dir.mkdir()
         # timeout_per_instance=None -> _call_evaluate_instance calls directly
