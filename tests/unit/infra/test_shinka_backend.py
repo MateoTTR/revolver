@@ -690,7 +690,9 @@ class TestShinkaBuildConfig:
         assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == ["medium"]
         err = capsys.readouterr().err
         assert "different reasoning_effort" in err
-        assert "medium" in err
+        # Assert on the distinct "chosen" phrase, not the bare level (which also
+        # appears in the listed distinct levels), to lock the highest-wins policy.
+        assert "Choosing the highest level 'medium'" in err
 
     def test_shinka_reasoning_effort_inert_local_warns(
         self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]

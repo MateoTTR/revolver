@@ -76,7 +76,12 @@ from revolver.infra.backends.openevolve import (
     _set_nested,
     revolver_env,
 )
-from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
+from revolver.models.llm import (
+    REASONING_EFFORT_LEVELS,
+    EnsembleEntry,
+    EnsembleMember,
+    LLMEntry,
+)
 from revolver.models.run import ResolvedConfig, TokenUsage
 
 _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
@@ -176,9 +181,10 @@ _SHINKA_DEFAULT_COST_AWARE_COEF = 0.0
 # Total order over reasoning-effort levels (lowest → highest). ShinkaEvolve has
 # a single global reasoning_efforts pool (FACT A: no per-member effort), so when
 # ensemble members disagree Revolver picks the *highest* effort under this order
-# — never under-thinking — and warns (S17-27, ADR-007 A3.2). Kept in sync with
-# ``revolver.core.llm._REASONING_EFFORT_LEVELS``.
-_REASONING_EFFORT_ORDER: tuple[str, ...] = ("min", "low", "medium", "high", "max")
+# — never under-thinking — and warns (S17-27, ADR-007 A3.2). Aliased to the
+# canonical tuple in ``revolver.models.llm`` (single source of truth shared with
+# the core validator), so the two can no longer drift.
+_REASONING_EFFORT_ORDER: tuple[str, ...] = REASONING_EFFORT_LEVELS
 
 # Default env var name synthesized for local OpenAI-compatible endpoints
 # when the registry entry has no api_key_env (ADR-007 D5). launch()

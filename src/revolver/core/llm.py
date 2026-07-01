@@ -24,6 +24,7 @@ from revolver.infra import db
 from revolver.infra.gpu import GpuInfo, get_gpu_info
 from revolver.infra.ollama import OllamaClient, normalize_ollama_url
 from revolver.models.llm import (
+    REASONING_EFFORT_LEVELS,
     EnsembleEntry,
     EnsembleMember,
     LLMEntry,
@@ -43,10 +44,10 @@ _PROVIDER_BASE_URLS: dict[str, str] = {
 
 _KNOWN_PROVIDERS = {"anthropic", "openai", "google", "openai-compat"}
 
-# Valid reasoning-effort levels (FR-LLM-026, ADR-007 Amendment A3.2). Ordered
-# lowest→highest so callers that need the ranking (e.g. the ShinkaEvolve
-# disagreement policy — pick the *highest* effort) can index into it.
-_REASONING_EFFORT_LEVELS: tuple[str, ...] = ("min", "low", "medium", "high", "max")
+# Valid reasoning-effort levels (FR-LLM-026, ADR-007 Amendment A3.2). Aliased
+# to the canonical tuple in ``revolver.models.llm`` so the core validator and
+# the ShinkaEvolve disagreement policy share one source of truth.
+_REASONING_EFFORT_LEVELS: tuple[str, ...] = REASONING_EFFORT_LEVELS
 
 
 def _validate_reasoning_effort(reasoning_effort: str | None) -> None:
