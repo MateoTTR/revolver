@@ -76,7 +76,7 @@ from revolver.infra.backends.openevolve import (
     _set_nested,
     revolver_env,
 )
-from revolver.models.llm import LLMEntry
+from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
 from revolver.models.run import ResolvedConfig, TokenUsage
 
 _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
@@ -108,6 +108,70 @@ _BEST_PROGRAMS_COUNT = 1
 #     patch loses the whole generation; ShinkaEvolve's examples use 10.
 _SHINKA_DEFAULT_MAX_TOKENS = 16384
 _SHINKA_DEFAULT_MAX_PATCH_ATTEMPTS = 10
+
+# ── Multi-LLM ensemble → bandit mapping (S17-19/20/21, ADR-007 A2/A5) ─────────
+#
+# ShinkaEvolve picks the *model* with a bandit; ``llm_dynamic_selection`` names
+# the sampler and ``llm_dynamic_selection_kwargs`` is spread VERBATIM into that
+# sampler's constructor (verified async_runner.py 0.0.7 L361-383 —
+# ``<Sampler>(arm_names=llm_models, **llm_dynamic_selection_kwargs)``). A key the
+# selected sampler's ``__init__`` does not accept therefore raises ``TypeError``
+# at launch (AsymmetricUCB/ThompsonSampler have no ``**kwargs``), so Revolver
+# must route kwargs per sampler and never send a union.
+#
+# Default selection strategy when ``--selection`` is unset: ``fixed`` keeps the
+# S14 single-LLM path a one-member FixedSampler case (zero behaviour change).
+_SHINKA_DEFAULT_SELECTION = "fixed"
+
+# ``ucb`` and ``ucb1`` are aliases for the same ``AsymmetricUCB`` class
+# (verified: no separate ucb1 class — v017 research §0 FACT B / §1).
+_SHINKA_ADAPTIVE_SELECTIONS = frozenset({"ucb", "ucb1", "thompson"})
+
+# Per-sampler accepted ``selection_kwargs`` keys (verified against
+# shinka/llm/prioritization.py 0.0.7 constructor signatures). ``prior_probs`` is
+# injected by build_config itself under ``fixed`` (weight vector) — it is NOT in
+# the user-facing allow-list. Any kwarg not listed for the selected sampler is
+# dropped with a warning rather than spread (would ``TypeError`` under
+# ucb/ucb1/thompson, be silently ignored under fixed).
+_SHINKA_SAMPLER_KWARG_KEYS: dict[str, frozenset[str]] = {
+    "fixed": frozenset(),
+    "ucb": frozenset(
+        {
+            "exploration_coef",
+            "epsilon",
+            "auto_decay",
+            "shift_by_baseline",
+            "shift_by_parent",
+            "adaptive_scale",
+            "asymmetric_scaling",
+            "exponential_base",
+            "cost_aware_coef",
+            "cost_exploration_coef",
+            "cost_power",
+            "cost_ref_percentile",
+        }
+    ),
+    "thompson": frozenset(
+        {
+            "epsilon",
+            "prior_alpha",
+            "prior_beta",
+            "auto_decay",
+            "shift_by_baseline",
+            "shift_by_parent",
+            "adaptive_scale",
+            "asymmetric_scaling",
+            "exponential_base",
+        }
+    ),
+}
+# ``ucb1`` is a bandit alias of ``ucb`` — same accepted-kwarg set.
+_SHINKA_SAMPLER_KWARG_KEYS["ucb1"] = _SHINKA_SAMPLER_KWARG_KEYS["ucb"]
+
+# Revolver's own default for the cost-aware coefficient on ucb/ucb1: 0 (flat-rate
+# / bridge case), NOT ShinkaEvolve's own 0.5. Inert when per-model cost is
+# undifferentiated (all-local/bridge) but must default correctly (M4, ADR-007 A5).
+_SHINKA_DEFAULT_COST_AWARE_COEF = 0.0
 
 # Default env var name synthesized for local OpenAI-compatible endpoints
 # when the registry entry has no api_key_env (ADR-007 D5). launch()
@@ -438,6 +502,111 @@ def _project_llm_model(llm: LLMEntry) -> tuple[str, dict[str, str | None]]:
     return llm.model, {}
 
 
+def _resolve_ensemble_members(
+    ensemble: EnsembleEntry,
+    conn: Any | None,
+) -> list[tuple[EnsembleMember, LLMEntry]]:
+    """Resolve every ensemble member to its registered ``LLMEntry`` (ADR-007 A2).
+
+    Mirrors the OpenEvolve adapter's member resolution: each
+    :class:`~revolver.models.llm.EnsembleMember` is looked up by name in the
+    global registry via ``conn`` so the projection sees the endpoint details
+    (model id, base_url, api_key_env, source).
+
+    Returns:
+        A list of ``(member, member_llm)`` pairs in ``ensemble.members`` order —
+        which becomes the ``llm_models`` / ``prior_probs`` alignment order.
+
+    Raises:
+        ValidationError: When a member LLM is not found in the registry (or no
+            DB connection was provided to resolve it).
+    """
+    from revolver.infra.db import get_llm
+
+    resolved: list[tuple[EnsembleMember, LLMEntry]] = []
+    for member in ensemble.members:
+        member_llm: LLMEntry | None = None
+        if conn is not None:
+            member_llm = get_llm(conn, member.llm_name)
+        if member_llm is None:
+            raise ValidationError(
+                f"Ensemble member LLM '{member.llm_name}' not found in registry."
+            )
+        resolved.append((member, member_llm))
+    return resolved
+
+
+def _prior_probs_vector(
+    members: list[tuple[EnsembleMember, LLMEntry]],
+    weight_overrides: dict[str, float] | None,
+) -> list[float]:
+    """Build the ``FixedSampler.prior_probs`` vector aligned to ``llm_models``.
+
+    Registry/member weights are taken first, then any per-run
+    ``--llm-weight model=w`` override (keyed by LLM registry name) is applied on
+    top (CLI wins). The vector is renormalized to sum 1 (Shinka renormalizes too,
+    but doing it here keeps the dry-run/display honest). A degenerate all-zero /
+    negative sum falls back to a uniform vector so the sampler never rejects it.
+
+    Args:
+        members: ``(member, member_llm)`` pairs in ``llm_models`` order.
+        weight_overrides: ``--llm-weight`` overrides keyed by LLM registry name.
+
+    Returns:
+        The renormalized weight vector, one entry per member, in order.
+    """
+    overrides = weight_overrides or {}
+    raw = [float(overrides.get(member.llm_name, member.weight)) for member, _llm in members]
+    total = sum(raw)
+    if total <= 0.0:
+        # Degenerate weights → uniform (never send a sum<=0 vector: FixedSampler
+        # raises on it). This also matches the bandit's uniform default.
+        n = len(raw)
+        return [1.0 / n for _ in raw] if n else []
+    return [value / total for value in raw]
+
+
+def _route_selection_kwargs(
+    selection: str,
+    selection_kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Filter ``selection_kwargs`` to what the selected sampler's ctor accepts.
+
+    ``llm_dynamic_selection_kwargs`` is spread verbatim into the chosen sampler's
+    constructor (async_runner.py 0.0.7 L361-383), and AsymmetricUCB /
+    ThompsonSampler have no ``**kwargs`` — a stray key raises ``TypeError`` at
+    launch. Keys the selected sampler does not accept are therefore **dropped
+    with a stderr warning** rather than forwarded (never spread as a union —
+    ADR-007 A5). For ``ucb``/``ucb1`` the Revolver-specific ``cost_aware_coef``
+    default (0, not Shinka's 0.5 — M4) is applied when the user did not set it.
+
+    Args:
+        selection: The resolved sampler name (``fixed``/``ucb``/``ucb1``/
+            ``thompson``).
+        selection_kwargs: Parsed per-sampler kwargs from ``--selection-kwarg``
+            (``None`` when none supplied).
+
+    Returns:
+        The accepted-only kwargs dict for the sampler (may be empty). Never
+        contains ``prior_probs`` — that is set separately for ``fixed``.
+    """
+    accepted = _SHINKA_SAMPLER_KWARG_KEYS.get(selection, frozenset())
+    routed: dict[str, Any] = {}
+    for key, value in (selection_kwargs or {}).items():
+        if key in accepted:
+            routed[key] = value
+        else:
+            sys.stderr.write(
+                f"Warning: --selection-kwarg '{key}' is not accepted by the "
+                f"'{selection}' selection strategy on the shinka backend and was "
+                f"dropped (it would otherwise be ignored or raise a TypeError).\n"
+            )
+    # M4: default cost_aware_coef to 0 (flat-rate/bridge) on ucb/ucb1 only.
+    if selection in ("ucb", "ucb1"):
+        routed.setdefault("cost_aware_coef", _SHINKA_DEFAULT_COST_AWARE_COEF)
+    return routed
+
+
 def _ensure_section(config: dict[str, Any], name: str) -> dict[str, Any]:
     """Return ``config[name]`` as a dict, (re)creating it when needed."""
     section = config.get(name)
@@ -581,8 +750,15 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
         Merge order (last wins):
             1. Problem version's ``config.yaml`` (base sections)
-            2. LLM projection (ADR-007 D5): ``llm_models`` single entry,
-               ``llm_dynamic_selection="fixed"``, ``llm_kwargs`` from the
+            2. LLM projection (ADR-007 D5 + A2/A5): ``llm_models`` (the single
+               primary LLM, or every ensemble member in order),
+               ``llm_dynamic_selection`` from ``spec.selection`` (default
+               ``"fixed"``); under ``fixed`` an ensemble's member weights
+               (registry + ``--llm-weight`` overrides) become
+               ``llm_dynamic_selection_kwargs.prior_probs`` (renormalized to sum
+               1) — inert-and-warned under ``ucb``/``ucb1``/``thompson``;
+               per-sampler ``--selection-kwarg`` routing (dropped-with-warning
+               when the sampler rejects the key); ``llm_kwargs`` from the primary
                registry entry
             2b. CLI ``--temperature`` (overrides registry temperature)
             3. Problem description → ``task_sys_msg``
@@ -601,19 +777,12 @@ class ShinkaBackend(ChildProcessReaperMixin):
             BackendUnavailableError: When shinka is not installed — keeps
                 ``revolver run --backend shinka`` failing fast before any
                 side effect (exit 3).
-            ValidationError: For ensembles (bandit mapping is S15) or
-                malformed config overrides.
+            ValidationError: For an ensemble member LLM missing from the
+                registry, or malformed config overrides.
         """
         available, _hint = self.is_available()
         if not available:
             raise self._unavailable()
-
-        if spec.ensemble is not None:
-            raise ValidationError(
-                "Ensembles are not supported on the shinka backend yet "
-                "(weighted-to-bandit mapping is planned for Sprint 015). "
-                "Use a single registered LLM."
-            )
 
         # 1. Base config from the problem version snapshot
         config: dict[str, Any] = {}
@@ -627,12 +796,11 @@ class ShinkaBackend(ChildProcessReaperMixin):
         _ensure_section(config, "db_config")
         job = _ensure_section(config, "job_config")
 
-        # 2. LLM projection (ADR-007 D5) — single LLM, fixed selection
-        model_string, llm_env = _project_llm_model(spec.llm)
-        evo["llm_models"] = [model_string]
-        evo["llm_dynamic_selection"] = "fixed"
-        if llm_env:
-            config["llm_env"] = llm_env
+        # 2. LLM projection (ADR-007 D5 + A2/A5) — single LLM or ensemble bandit.
+        #    The single-LLM path (no ensemble) stays a one-member ``fixed`` case
+        #    and produces the identical config as before this change (no
+        #    ``prior_probs`` / ``llm_dynamic_selection_kwargs`` are emitted for it).
+        self._project_llm_selection(spec, config, evo)
 
         # 2/2b. llm_kwargs from the registry entry + CLI --temperature
         llm_kwargs = evo.get("llm_kwargs")
@@ -730,6 +898,82 @@ class ShinkaBackend(ChildProcessReaperMixin):
             _set_nested(config, key.strip(), _parse_value(value.strip()))
 
         return config
+
+    @staticmethod
+    def _project_llm_selection(
+        spec: BackendRunSpec,
+        config: dict[str, Any],
+        evo: dict[str, Any],
+    ) -> None:
+        """Project the LLM(s) + selection strategy into ``evo_config`` (A2/A5).
+
+        Sets ``llm_models`` (all ensemble members, or the single primary LLM),
+        ``llm_dynamic_selection`` (from ``spec.selection``, default ``fixed``),
+        and merges the members' env-var export maps into ``config['llm_env']``.
+
+        Weight / kwarg mapping (verified v017 research §0 FACT B / §1):
+
+        - **fixed** (or unset): member weights (registry, then ``--llm-weight``
+          overrides on top) become ``FixedSampler.prior_probs`` — a vector
+          aligned to ``llm_models`` order, renormalized to sum 1. Emitted only
+          when there is a real weighting to express (an ensemble, or a weight
+          override): a plain single-LLM run stays byte-identical to the pre-A2
+          projection (no ``prior_probs`` / ``llm_dynamic_selection_kwargs``).
+        - **ucb/ucb1/thompson**: the bandit learns from a uniform start;
+          ``prior_probs`` is FixedSampler-only and would ``TypeError`` on these
+          samplers, so weights are **ignored with a warning** when non-uniform
+          weights are present (registry or ``--llm-weight``).
+
+        Per-sampler ``--selection-kwarg`` routing (never a union): kwargs the
+        selected sampler's constructor does not accept are dropped with a warning
+        (see :func:`_route_selection_kwargs`).
+        """
+        selection = spec.selection or _SHINKA_DEFAULT_SELECTION
+
+        # Members in llm_models / prior_probs order: the ensemble members, or a
+        # synthetic single-member view of the primary LLM (single-LLM path).
+        if spec.ensemble is not None:
+            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
+        else:
+            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
+
+        llm_models: list[str] = []
+        llm_env: dict[str, str | None] = {}
+        for _member, member_llm in members:
+            model_string, member_env = _project_llm_model(member_llm)
+            llm_models.append(model_string)
+            llm_env.update(member_env)
+
+        evo["llm_models"] = llm_models
+        evo["llm_dynamic_selection"] = selection
+        if llm_env:
+            config["llm_env"] = llm_env
+
+        overrides = spec.llm_weight_overrides or None
+        # Whether any non-uniform weighting is present (ensemble member weights
+        # or a --llm-weight override). A plain single-LLM run has neither.
+        has_ensemble = spec.ensemble is not None
+        has_weight_signal = has_ensemble or bool(overrides)
+
+        selection_kwargs = _route_selection_kwargs(selection, spec.selection_kwargs)
+
+        if selection == "fixed":
+            if has_weight_signal:
+                # Only emit prior_probs when there is a weighting to express, so
+                # the single-LLM default path stays byte-identical (no extra key).
+                selection_kwargs["prior_probs"] = _prior_probs_vector(members, overrides)
+        elif selection in _SHINKA_ADAPTIVE_SELECTIONS and has_weight_signal:
+            # FACT B: prior_probs is FixedSampler-only — sending it to
+            # ucb/ucb1/thompson raises TypeError. The bandit starts uniform, so
+            # weights are inert here; warn and do NOT send them.
+            sys.stderr.write(
+                f"Warning: ensemble weights (registry weights / --llm-weight) are "
+                f"ignored under '--selection {selection}' on the shinka backend — "
+                f"the bandit learns arm weights adaptively from a uniform start.\n"
+            )
+
+        if selection_kwargs:
+            evo["llm_dynamic_selection_kwargs"] = selection_kwargs
 
     def resolved_config(
         self,
