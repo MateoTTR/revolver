@@ -134,6 +134,11 @@ REVOLVER_SECTIONS = frozenset({"evaluation"})
 # storm and a proxy BrokenPipeError. Remote APIs keep OpenEvolve's default.
 DEFAULT_LOCAL_LLM_TIMEOUT_S = 600
 
+# Marker prefixing every "unknown key" finding emitted by validate_oe_config().
+# Shared with _warn_noop_config_overrides()'s B9 filter (below) so that a reword
+# of these messages cannot silently break no-op detection there.
+_UNKNOWN_OE_KEY_MARKER = "Unknown OE config key"
+
 
 def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
     """Validate a config dict or YAML file against the OpenEvolve Config schema.
@@ -228,11 +233,12 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
         for key in sorted(exc.keys):
             if key in _DATABASE_KEYS:
                 warnings.append(
-                    f"Unknown OE config key '{key}' at top level. Did you mean 'database.{key}'?"
+                    f"{_UNKNOWN_OE_KEY_MARKER} '{key}' at top level. "
+                    f"Did you mean 'database.{key}'?"
                 )
             else:
                 warnings.append(
-                    f"Unknown OE config key '{key}' (not in OpenEvolve Config schema)."
+                    f"{_UNKNOWN_OE_KEY_MARKER} '{key}' (not in OpenEvolve Config schema)."
                 )
         return warnings
     except Exception:
@@ -265,6 +271,13 @@ def _warn_noop_config_overrides(
     Degrades to silence when OpenEvolve/dacite are unavailable (validation
     returns ``[]``), mirroring ``problem version create``.
 
+    Note: dacite recurses into JSON-object override *values*, so a whole-section
+    override like ``evaluator={"bogus_sub": 1}`` is also caught here — a bonus,
+    though the warning names the override key (``evaluator``) rather than the
+    offending leaf (``bogus_sub``). The Shinka B9 probe deliberately substitutes
+    an empty dict for the value and so does *not* recurse into JSON-object
+    contents; this OE-vs-Shinka asymmetry is harmless (both err toward warning).
+
     Args:
         config_overrides: The raw ``key=value`` override strings.
         parsed_values: Map of dotted override key → already-parsed value, so
@@ -280,7 +293,7 @@ def _warn_noop_config_overrides(
         # Only "unknown key" findings are no-ops. Deprecation notices (e.g.
         # ``num_generations``, which build_config remaps to ``max_iterations``)
         # are recognized keys and must NOT warn as no-ops.
-        if any("Unknown OE config key" in msg for msg in validate_oe_config(probe)):
+        if any(_UNKNOWN_OE_KEY_MARKER in msg for msg in validate_oe_config(probe)):
             sys.stderr.write(
                 f"Warning: --config-override '{key}' matches no field in the "
                 f"OpenEvolve config schema; it will have no effect.\n"

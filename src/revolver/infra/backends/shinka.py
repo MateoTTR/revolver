@@ -774,7 +774,12 @@ class ShinkaBackend(ChildProcessReaperMixin):
             # path lands inside a dict-valued dataclass field (validated as a
             # whole), so its leaf is not a schema field and must not warn.
             _set_nested(probe, ".".join(parts[:2]), {} if len(parts) > 2 else None)
-            if any("Unknown" in msg for msg in self.validate_config(probe)):
+            # Both no-op findings from validate_config start with "Unknown "
+            # ("Unknown config section ..." / "Unknown <section> key ..."); the
+            # only other message ("... must be a mapping.") does not. Match the
+            # prefix rather than a bare substring so an unrelated future message
+            # that merely contains the word cannot trigger a false warning.
+            if any(msg.startswith("Unknown ") for msg in self.validate_config(probe)):
                 sys.stderr.write(
                     f"Warning: --config-override '{key}' matches no field in the "
                     f"shinka config schema; it will have no effect.\n"
