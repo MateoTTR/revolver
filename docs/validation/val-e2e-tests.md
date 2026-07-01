@@ -1,7 +1,7 @@
 # Revolver — End-to-End Tests (Level 3)
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-13
+**Version**: 0.2 — S17 sync (v0.17 multi-LLM ensemble, ADR-007 Amendment): §3.4 Scenario 4 — Shinka bandit ensemble (2+ members, `--selection ucb`) against the fake server
+**Date**: 2026-07-01
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [User Story E2E](../specs/user-story-e2e.md)
 
@@ -146,6 +146,42 @@ auto-skip when not installed (no dedicated marker). Runtime ≈ 6 s.
 are **deselected by default** (`addopts = "-m 'not e2e'"` in pyproject) — run explicitly with
 `pytest -m e2e`.
 
+### 3.4 Scenario 4 — Shinka Bandit Ensemble (**planned — S17**, ADR-007 Amendment)
+
+`tests/e2e/test_shinka_ensemble_bandit.py` — a multi-LLM variant of Scenario 3, running the **real**
+`ShinkaEvolveRunner` against the fake LLM server with a **2+ member ensemble** driven by the adaptive
+bandit (`--selection ucb`). It validates the flagship v0.17 feature: the full weighted→bandit ensemble
+mapping end-to-end (ADR-007 A2), not just single-LLM `fixed` selection.
+
+**Steps** (mirrors Scenario 3's structure):
+
+| # | Command | Assertion |
+|---|---|---|
+| 1 | `revolver project init --backend shinka ...` | Scaffold validates cleanly |
+| 2 | `revolver llm add member-a -s local --model <name> --base-url http://localhost:<port>/v1` | First member registered against the fake server |
+| 3 | `revolver llm add member-b -s local --model <name2> --base-url http://localhost:<port>/v1` | Second member registered |
+| 4 | `revolver llm ensemble create bandit-ens` + `ensemble add bandit-ens member-a --weight 0.7` + `ensemble add bandit-ens member-b --weight 0.3` | Ensemble with 2 weighted members |
+| 5 | `revolver problem version create --tag v1.0 ...` | Snapshot created |
+| 6 | `revolver dataset add ... --split train` | Dataset registered |
+| 7 | `revolver run --backend shinka --llm bandit-ens --selection ucb --iterations 2 --rewrite-mode --alias bandit-run` | Run completes; both members projected to `evo_config.llm_models` (length 2); `llm_dynamic_selection == "ucb"`; a warning surfaced that the registry weights are ignored under the adaptive bandit (FACT B); no `prior_probs` sent to the sampler (no `TypeError`) |
+| 8 | inspect `programs/rank-1.py` | Exists and is **not** the initial program; manifest + run record carry `backend: shinka`; native token accounting > 0 (ADR-007 D2) |
+| 9 | `revolver solution list` / `eval` / `eval results` | Engine-neutral downstream works on the produced artifacts |
+
+**Assertions specific to this scenario** (beyond Scenario 3): the ensemble produces a 2-member
+`llm_models` config, the adaptive bandit runs (`--selection ucb`), and the weights-ignored warning is
+emitted (the honest capability asymmetry — ADR-007 A3). A sibling assertion (or a companion dry-run
+check) confirms that the *same* ensemble under `--selection fixed` maps the weights into
+`FixedSampler.prior_probs` (the apples-to-apples comparison from ADR-007 A2 / the sprint demo).
+
+Requires the `revolver[shinka]` extra; gated by `@pytest.mark.e2e` plus
+`pytest.importorskip("shinka.database")` for auto-skip when not installed.
+
+**FRs covered**: FR-RUN-046 (ensemble), FR-RUN-049 (`--selection`), FR-RUN-050 (`--llm-weight` on
+Shinka-fixed vs warned on bandit), FR-LLM-026 (per-member `reasoning_effort` — global-pool mapping if
+exercised); complements FR-RUN-047/048 from Scenario 3.
+
+**CI suitability**: runs on any runner (no GPU required); non-blocking like Scenario 3.
+
 ---
 
 ## 4. Conventions
@@ -153,9 +189,10 @@ are **deselected by default** (`addopts = "-m 'not e2e'"` in pyproject) — run 
 - **File layout**:
   ```
   tests/e2e/
-  ├── test_alice_jobshop.py     # Scenario 1 (planned)
-  ├── test_remote_only.py       # Scenario 2 (planned)
-  └── test_shinka_backend.py    # Scenario 3 (implemented & passing — S14, ADR-007)
+  ├── test_alice_jobshop.py         # Scenario 1 (planned)
+  ├── test_remote_only.py           # Scenario 2 (planned)
+  ├── test_shinka_backend.py        # Scenario 3 (implemented & passing — S14, ADR-007)
+  └── test_shinka_ensemble_bandit.py  # Scenario 4 (planned — S17, ADR-007 Amendment)
   ```
 - **Markers**:
   - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`

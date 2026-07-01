@@ -1,9 +1,9 @@
 # DES-002 — `revolver llm` Subcommands — Ollama API Mapping
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-11
+**Version**: 0.2 — per-LLM `reasoning_effort` registry field (§2.1/§2.8/§5/§6, ADR-007 Amendment A1/A3.2)
+**Date**: 2026-07-01
 **Status**: Draft
-**Traceable to**: [spec-llm.md](../../specs/spec-llm.md), [ADR-001](../adr/ADR-001-ollama-local-llm-backend.md), [Architecture](../architecture.md) §4, [DES-001 Data Model](DES-001-sqlite-data-model.md) §4.1
+**Traceable to**: [spec-llm.md](../../specs/spec-llm.md), [ADR-001](../adr/ADR-001-ollama-local-llm-backend.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [Architecture](../architecture.md) §4, [DES-001 Data Model](DES-001-sqlite-data-model.md) §4.1/§4.3
 
 ---
 
@@ -45,7 +45,7 @@ Registers an LLM in the global SQLite database. For local (Ollama) LLMs, optiona
 
 ```
 CLI (cli/llm.py)
-  │ Parse: name, --provider, --model, --source, --api-key-env, --base-url, --pull, --temperature
+  │ Parse: name, --provider, --model, --source, --api-key-env, --base-url, --pull, --temperature, --reasoning-effort
   │ Validate: mutual exclusivity (--provider vs --source ollama)
   ▼
 Core (core/llm.py) → register_llm()
@@ -236,16 +236,18 @@ Adds a member LLM to an existing ensemble.
 
 ```
 CLI (cli/llm.py) → ensemble_app
-  │ Parse: name, llm, --weight, --temperature, --max-tokens
+  │ Parse: name, llm, --weight, --temperature, --max-tokens, --reasoning-effort
   ▼
 Core (core/llm.py) → add_ensemble_member(ensemble_name, llm_name, weight, conn, ...)
   │ 1. Verify ensemble exists               ──► Infra: db.get_ensemble(name)
   │ 2. Verify LLM is registered             ──► Infra: db.get_llm(llm_name)
   │ 3. Insert member row                    ──► Infra: db.insert_ensemble_member(...)
+  │    (per-member --reasoning-effort overrides the member LLM's registry value,
+  │     mirroring the --temperature/--max-tokens override precedence)
   │ 4. Check weight sum, warn if != ~1.0    ──► Infra: db.get_ensemble_members(name)
   ▼
 Infra (infra/db.py)
-  INSERT INTO ensemble_members (ensemble_name, llm_name, weight, temperature, max_tokens) VALUES (?, ?, ?, ?, ?)
+  INSERT INTO ensemble_members (ensemble_name, llm_name, weight, temperature, max_tokens, reasoning_effort) VALUES (?, ?, ?, ?, ?, ?)
 ```
 
 **Ollama endpoints**: None (DB-only command)
@@ -428,6 +430,7 @@ def register_llm(
     base_url: str | None = None,
     pull: bool = False,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,   # "min" | "low" | "medium" | "high" | "max" (ADR-007 A3.2)
 ) -> LLMEntry:
     """Register a new LLM in the global database."""
 
@@ -436,6 +439,7 @@ def update_llm(
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,   # update the registry-level reasoning effort
 ) -> LLMEntry:
     """Update configuration fields of a registered LLM."""
 
@@ -468,6 +472,7 @@ def add_ensemble_member(
     *,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    reasoning_effort: str | None = None,  # per-member override; falls back to the member LLM's registry value
 ) -> None:
     """Add a member LLM to an ensemble with a sampling weight."""
 
@@ -500,6 +505,7 @@ def add(
     base_url: str = typer.Option(None, "--base-url", help="Override API base URL"),
     pull: bool = typer.Option(False, "--pull", help="Pull model immediately (Ollama)"),
     temperature: float = typer.Option(None, "--temperature", help="Sampling temperature 0.0-2.0"),
+    reasoning_effort: str = typer.Option(None, "--reasoning-effort", help="Reasoning effort: min|low|medium|high|max (per-member on OpenEvolve; global pool on ShinkaEvolve — ADR-007 A3.2)"),
 ): ...
 
 @app.command()
@@ -533,6 +539,7 @@ def update(
     max_tokens: int = typer.Option(None, "--max-tokens", help="Max tokens per response"),
     timeout: int = typer.Option(None, "--timeout", help="Request timeout in seconds"),
     temperature: float = typer.Option(None, "--temperature", help="Sampling temperature 0.0-2.0"),
+    reasoning_effort: str = typer.Option(None, "--reasoning-effort", help="Reasoning effort: min|low|medium|high|max"),
 ): ...
 ```
 
@@ -556,6 +563,7 @@ def ensemble_add(
     weight: Annotated[float, typer.Option("--weight", help="Sampling weight (0.0-1.0)")],
     temperature: Annotated[float | None, typer.Option("--temperature", help="Per-member temperature")] = None,
     max_tokens: Annotated[int | None, typer.Option("--max-tokens", help="Per-member max tokens")] = None,
+    reasoning_effort: Annotated[str | None, typer.Option("--reasoning-effort", help="Per-member reasoning effort: min|low|medium|high|max (overrides the member LLM's registry value)")] = None,
 ): ...
 
 @ensemble_app.command("list")

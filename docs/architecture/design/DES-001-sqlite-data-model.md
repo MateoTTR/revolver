@@ -1,7 +1,7 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.7 — migrations through v11 landed: runs.backend (v9, ADR-007), drop llms pricing columns (v10, #300), widen datasets.split CHECK to include 'both' (v11)
-**Date**: 2026-06-20
+**Version**: 0.8 — migrations through v13: v12 llms.reasoning_effort, v13 ensemble_members.reasoning_effort (Sprint 017, ADR-007 Amendment A3.2); v11 head prior (runs.backend v9, drop llms pricing v10, widen datasets.split v11)
+**Date**: 2026-07-01
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
@@ -297,6 +297,7 @@ CREATE TABLE llms (
     base_url        TEXT,                   -- e.g., "http://localhost:11434/v1"
     api_key_env     TEXT,                   -- env var name (e.g., "ANTHROPIC_API_KEY")
     temperature     REAL,                   -- default sampling temperature (NULL = use provider default)
+    reasoning_effort TEXT,                  -- min|low|medium|high|max (NULL = provider default); migration v12, ADR-007 A3.2
     registered_at   TEXT NOT NULL           -- ISO 8601
 );
 ```
@@ -323,6 +324,7 @@ CREATE TABLE ensemble_members (
     weight          REAL NOT NULL,          -- sampling weight (0.0–1.0)
     temperature     REAL,                   -- per-member temperature override (optional)
     max_tokens      INTEGER,               -- per-member max tokens override (optional)
+    reasoning_effort TEXT,                  -- per-member reasoning effort override (optional); migration v13, ADR-007 A3.2
     UNIQUE(ensemble_name, llm_name)
 );
 ```
@@ -534,6 +536,38 @@ UPDATE schema_version SET version = 11, applied_at = datetime('now');
 The `datasets` table lives only in the project DB; on the global DB the migration is a no-op that
 just records the version bump.
 
+### 5.11 Migration: v11 → v12 (Sprint 017)
+
+Schema version 12 adds the `reasoning_effort` column to the `llms` table (global DB) for per-LLM
+reasoning-effort control (ADR-007 Amendment A3.2, FR-LLM-026). A simple additive column — no table
+recreation needed (mirrors the v4/v6 `ALTER TABLE ADD COLUMN` pattern):
+
+```sql
+ALTER TABLE llms ADD COLUMN reasoning_effort TEXT;
+UPDATE schema_version SET version = 12, applied_at = datetime('now');
+```
+
+The `ALTER TABLE` is executed with error suppression (SQLite does not support
+`ADD COLUMN IF NOT EXISTS`). Existing rows are preserved with `NULL` (provider default). The `llms`
+table lives only in the global DB; on the project DB the migration is a no-op that just records the
+version bump.
+
+### 5.12 Migration: v12 → v13 (Sprint 017)
+
+Schema version 13 adds the `reasoning_effort` column to the `ensemble_members` table (global DB) for
+a per-member reasoning-effort override (ADR-007 Amendment A3.2). Kept **separate** from v12 per the
+one-column-per-migration discipline (mirrors the v10/v11 sequencing in Sprint 016):
+
+```sql
+ALTER TABLE ensemble_members ADD COLUMN reasoning_effort TEXT;
+UPDATE schema_version SET version = 13, applied_at = datetime('now');
+```
+
+The `ALTER TABLE` is executed with error suppression. Existing member rows are preserved with `NULL`
+(falls back to the member LLM's registry-level `reasoning_effort`). The `ensemble_members` table
+lives only in the global DB; on the project DB the migration is a no-op that just records the version
+bump.
+
 ---
 
 ## 6. Key Queries
@@ -684,8 +718,17 @@ MIGRATIONS = {
     6: "add_llm_temperature.sql",               # Add temperature to llms (Sprint 009)
     7: "add_failed_run_status.sql",             # Add 'failed' to runs.status CHECK (Sprint 009)
     8: "add_ensemble_tables_and_llm_snapshot.sql",  # Ensemble tables (global) + llm_type/llm_snapshot (project) (Sprint 011)
+    9: "add_runs_backend.sql",                  # Add backend to runs (Sprint 013, ADR-007) — §5.8
+    10: "drop_llms_pricing_columns.sql",        # Recreate llms without pricing columns (Sprint 016, #300) — §5.9
+    11: "widen_datasets_split_check.sql",       # Widen datasets.split CHECK to include 'both' (Sprint 016, UX-3) — §5.10
+    12: "add_llms_reasoning_effort.sql",        # Add reasoning_effort to llms (Sprint 017, ADR-007 A3.2) — §5.11
+    13: "add_ensemble_members_reasoning_effort.sql",  # Add reasoning_effort to ensemble_members (Sprint 017) — §5.12
 }
 ```
+
+> **CURRENT_SCHEMA_VERSION = 13** after Sprint 017 (v11 head prior to this sprint; v12 and v13 added
+> here, one column per migration). Entries 9–11 (§5.8–§5.10) are listed here for completeness — the
+> narrative sections were added ahead of this dict.
 
 ---
 

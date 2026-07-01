@@ -143,6 +143,7 @@ instance_003.json     FAILED          —         —
 | FR-EVL-018 | MUST | If evaluation results already exist for a (solution, dataset) pair, require confirmation before re-evaluating. `--force` skips confirmation. In `--json` mode, return error without `--force`. | — |
 | FR-EVL-019 | MUST | For legacy evaluators (`evaluate()`), perform a global aggregation call after per-instance evaluation: call `evaluate()` with `REVOLVER_DATASET_DIR` set and `REVOLVER_INSTANCE_PATH` unset. Store result in `user_aggregates`. | DES-006 v0.2 |
 | FR-EVL-020 | MUST | Display both Revolver-computed aggregates and user aggregates (if available) in results output. | DES-006 v0.2 |
+| FR-EVL-021 | MUST | Metric aggregation (both the training/run aggregation loop and eval aggregation) MUST guard against non-numeric metric fields: only values that are `int` or `float` (excluding `bool`) are aggregated; non-numeric fields (e.g. an `error` string returned on some instances) are skipped, not coerced to 0.0 or allowed to crash the aggregation. A candidate returning a non-numeric field on some instances is scored on its numeric metrics only (B1). | DES-006 §4.3 |
 
 ---
 

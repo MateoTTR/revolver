@@ -1,7 +1,7 @@
 # DES-005 — `revolver run` — Run Orchestration
 
-**Version**: 0.7.0 — backend integration rewrite (§4, ADR-007)
-**Date**: 2026-06-20
+**Version**: 0.8.0 — v0.17 multi-LLM ensemble selection + B2/B7 correctness (§4.2/§4.4/§4.6/§7.2/§8/§11/§14.1, ADR-007 Amendment A1–A5)
+**Date**: 2026-07-01
 **Status**: Draft
 **Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
 
@@ -46,8 +46,13 @@ Launch an OpenEvolve evolution run.
 ```
 CLI (cli/run.py)
   │ Parse: --version, --llm, --dataset, --iterations, --alias,
-  │        --config-override, --dry-run
+  │        --config-override, --temperature, --parallel, --rewrite-mode,
+  │        --selection, --selection-kwarg, --llm-weight,
+  │        --dry-run
   │ Validate: all required options provided
+  │        (--selection/--selection-kwarg/--llm-weight are neutral ensemble
+  │         levers mapped per backend, §4.2; capability-checked at build time —
+  │         --selection non-supported → reject, ADR-007 A2/A4)
   ▼
 Core (core/run.py) → launch_run()
   │ 1. Resolve project root                        ──► Infra: store.find_project_root()
@@ -442,7 +447,17 @@ Each tier is detailed below, naming the real method signatures (`infra/backends/
 with the LLM registry projection and CLI overrides into the engine's native config shape. The merge
 order is **last-wins** and identical in spirit across backends (base config → LLM projection → CLI
 `--temperature`/`--parallel` → problem-description injection → `--iterations` → `--rewrite-mode` →
-`--config-override` dotted `key=value`). `resolved_config(config, overrides)` projects the merged
+**ensemble neutral levers** (`--selection` → sampler/selection strategy, `--llm-weight` → per-member
+weight patch, `--selection-kwarg` → per-sampler kwargs) → `--config-override` dotted `key=value`). Per-LLM
+`reasoning_effort` is **not** a `run` flag — it rides on the LLM/ensemble-member registry entry and is
+projected at the *LLM projection* step above (per-member on OE, a single global pool on Shinka; FR-LLM-026).
+The ensemble levers land in the
+last-wins order **before** `--config-override`, so a raw `--config-override` still wins as the final
+escape hatch. **The neutral levers are first-class** — common ensemble/selection knobs get neutral
+names mapped per backend (ADR-007 A1); **`--config-override` is the reserved escape hatch** for
+backend-exclusive structural keys, not the normal path for these levers (it also cannot address
+array members — `_set_nested` has no `[i]` indexing — so per-member weight/effort is *only*
+reachable via the dedicated flags). `resolved_config(config, overrides)` projects the merged
 config to the engine-neutral `ResolvedConfig` for `--dry-run` display, routing backend-exclusive
 parameters into a `backend_extras` dict ([ADR-007 D4](../adr/ADR-007-pluggable-evolution-backend.md#d4--neutral-config-surface-resolvedconfig--backend_extras)).
 `validate_config()` returns human-readable warnings (never raises) and degrades gracefully to `[]`
@@ -456,8 +471,20 @@ served by `project init`.
   secret — DD-15). Local (`source == "local"`) entries with no key get an `api_key: "ollama"`
   placeholder (the OpenAI SDK requires a non-empty key).
 - Ensemble mode (`--llm <ensemble>`) emits an `llm.models` array instead of `llm.primary_model`,
-  mapping each member to `name`/`api_base`/`api_key`/`weight`/`temperature`/`max_tokens` (the
-  `${ENV}` syntax for keys). OpenEvolve's ensemble selection is **weighted**.
+  mapping each member to `name`/`api_base`/`api_key`/`weight`/`temperature`/`max_tokens`/
+  `reasoning_effort` (the `${ENV}` syntax for keys). OpenEvolve's ensemble selection is
+  **weighted** (a static weighted-random sampler; `capabilities().selection_strategies ==
+  ("weighted",)`).
+- **Selection strategy (ADR-007 A2/A4).** `--selection` non-`fixed`/non-weighted (`ucb`/`ucb1`/
+  `thompson`) → **rejected** with a clear error naming `weighted` as the only OE strategy (the
+  orchestrator-level capability check in `core/run.py` gates this before `build_config()`; a
+  defensive belt-and-braces error also lives here). `fixed`/unset is the implicit weighted mode.
+- **`--llm-weight model=w` (ADR-007 A1/M3)** is **honored**: it patches the resolved member's
+  `weight` (CLI override wins over the registry `weight`) before the `llm.models` array is built.
+- **Per-member `reasoning_effort` (ADR-007 A3.2, FACT A) is honored per member**
+  (`LLMModelConfig.reasoning_effort`): the effective value is `member.reasoning_effort` if set, else
+  the member LLM's registry-level `reasoning_effort`; written onto `llm.models[].reasoning_effort`
+  when non-`None`. The single-LLM path maps `spec.llm.reasoning_effort` directly.
 - `cascade_evaluation` is forced to `false` unless the problem config sets it (Revolver evaluators
   do not define `evaluate_stage1/2/3`). Google's `generativelanguage.googleapis.com` endpoint is
   detected by `base_url` and `random_seed` is nulled at both the top level and under `llm` (DD-17),
@@ -480,16 +507,45 @@ served by `project init`.
   local entries become `local/<model>@<base_url>?api_key_env=<env>` (synthesizing
   `OLLAMA_API_KEY` when none is registered); remote entries use the model id as-is and map the
   provider-standard env var (`ANTHROPIC_API_KEY`, …) to the registered key var via an `llm_env`
-  export map consumed by `launch()`. `evo_config.llm_models` is a single-element list and
-  `llm_dynamic_selection = "fixed"`.
+  export map consumed by `launch()`. For a single LLM, `evo_config.llm_models` is a single-element
+  list and `llm_dynamic_selection = "fixed"`.
+- **Multi-LLM ensemble → bandit selection (ADR-007 A2/A3, supersedes the earlier "ensembles raise
+  ValidationError" text).** Ensembles are now **first-class**: each member is projected to a Shinka
+  model string and appended to `evo_config.llm_models[]` (order-preserving). `evo_config.
+  llm_dynamic_selection` is set from `--selection` (`fixed`/`ucb`/`ucb1` [alias of `AsymmetricUCB`,
+  same class]/`thompson`; default `fixed` when unset — the S14 single-LLM path is the one-member,
+  `fixed` case of this same code, zero behavior change).
+  - **Weights → `prior_probs`, fixed-only (FACT B).** Under `--selection` `fixed` (or unset), member
+    weights (registry weights with `--llm-weight model=w` overrides applied on top) build the
+    `FixedSampler.prior_probs` positional vector, aligned to `llm_models` order and renormalized to
+    sum 1 (**apples-to-apples with the OE weighted ensemble**). Under `ucb`/`ucb1`/`thompson` the
+    arms start **uniform** and weights are **ignored**; `prior_probs` exists only on `FixedSampler`,
+    so it is **not** sent to the adaptive samplers (passing it raises `TypeError`). Revolver **warns**
+    when non-uniform weights or `--llm-weight` are supplied under an adaptive mode.
+  - **`--selection-kwarg k=v` branched per sampler (ADR-007 A5).** Shinka spreads
+    `llm_dynamic_selection_kwargs` **verbatim** into the *selected* sampler's constructor, so a wrong
+    key raises `TypeError`. Revolver routes kwargs per sampler and never sends a union:
+    `cost_aware_coef` is valid **only for `ucb`/`ucb1`** (Revolver default **0** — the flat-rate/
+    bridge case, M4 — not Shinka's own `0.5`; inert anyway when per-model cost is undifferentiated);
+    a kwarg not accepted by the selected sampler is dropped with a warning (would be silently ignored
+    by `FixedSampler`, or `TypeError` under `ThompsonSampler`).
+  - **`reasoning_efforts` is a single global pool (FACT A).** Per-member effort is **OE-only**;
+    Shinka's `reasoning_efforts` (like `temperatures`/`max_tokens`) is one global pool sampled
+    independently of the chosen model. Revolver collects each member's effective effort; if all
+    agree it writes `llm_kwargs.reasoning_efforts = [<value>]`; if members **disagree** it applies
+    the **highest-effort-wins** disagreement policy (total order `min < low < medium < high < max`,
+    a conservative default that never under-thinks) **and warns** that Shinka cannot honor per-member
+    effort. It additionally warns (once) that effort is **inert for `local`/bridge-sourced members**
+    (Shinka classes them `is_reasoning_model=False` → effort forced to `"disabled"`).
 - Revolver injects safer defaults than Shinka's own: `llm_kwargs.max_tokens` defaults to 16384
   (Shinka's 4096 starves thinking-capable models, which return empty content) and
   `max_patch_attempts` defaults to 10 (Shinka's 1 loses a whole generation on a single malformed
   patch). Both respect an explicit `config.yaml` value and `--config-override`.
 - Unsupported options are reported honestly (**FR-RUN-048**, map-with-warn): `--parallel` has no
-  neutral Shinka mapping and warns on stderr instead of silently no-opping; ensembles raise a
-  `ValidationError` (weighted→bandit mapping is a later phase). `build_config()` raises
-  `BackendUnavailableError` (exit 3) when shinka is not installed, before any side effect.
+  neutral Shinka mapping and warns on stderr instead of silently no-opping. **Ensembles are now
+  supported via the bandit mapping above** (the earlier "ensembles raise `ValidationError` /
+  weighted→bandit is a later phase" behavior is superseded by v0.17 — ADR-007 A2). `build_config()`
+  raises `BackendUnavailableError` (exit 3) when shinka is not installed, before any side effect.
 - `resolved_config()` maps `evo_config.num_generations` → iterations, `db_config.num_islands` →
   num_islands, a single-valued `llm_kwargs.temperatures` → temperature, and pushes Shinka-exclusive
   keys (`patch_types`, `max_patch_attempts`, `max_tokens`, `reasoning_efforts`, `max_api_costs`,
@@ -542,6 +598,16 @@ contract rather than silently defaulting. `on_progress` may be ignored (live pro
 The orchestrator owns the fail-fast resume precheck *before* inserting the run record; the adapters'
 parent-state checks are a defensive fallback, not a parallel implementation.
 
+**Post-run teardown, both backends (B2 — symmetric to #224).** `launch()`/`resume()` wrap the engine
+call in `try/finally` so the runner always tears down its child processes and executors, even when
+the engine raises — preventing the post-run busy-loop/hang. The two child-reaping helpers
+(`_current_child_pids()` snapshotting live PIDs before launch, `_reap_run_children()` reaping the
+diff after) are **hoisted to `infra/backends/base.py`** and shared by both adapters (previously
+Shinka-only). Each adapter adds a backend-specific `_shutdown_runner()`: `getattr`-guarded access to
+the controller's executor(s), `shutdown(wait=False)` wrapped in `contextlib.suppress(Exception)` —
+**never `wait=True`** (that reintroduces the #159 `ProcessPoolExecutor.shutdown(wait=True)` hang).
+The run result is persisted **before** teardown runs, so reaping/shutdown cannot truncate it.
+
 ### 4.5 Live Progress, Population, and Counts Tier
 
 These read-only methods serve `run status` (active path), `run population`, and the
@@ -575,6 +641,8 @@ reproducibility caveat (NFR-024, [ADR-007 D3](../adr/ADR-007-pluggable-evolution
 | `native_cost_tracking` | `False` | `True` | Engine persists token accounting itself (OE relies on the HTTP proxy) |
 | `multi_language` | `False` | `True` | Evolution of non-Python programs |
 | `ensemble_model` | `"weighted"` | `"bandit"` | Multi-LLM selection semantics |
+| `selection_strategies` | `("weighted",)` | `("fixed","ucb","ucb1","thompson")` | Accepted `--selection` values (ADR-007 A4); `--selection` outside this tuple is rejected |
+| `per_member_reasoning_effort` | `True` | `False` | Whether `--reasoning-effort` is honored per ensemble member (OE) or collapses to a single global pool with map-with-warn (Shinka — FACT A) |
 | `top_n_extraction` | `False` | `True` | Reliable top-N program extraction |
 
 ### 4.7 OpenEvolve Token Proxy (DD-14)
@@ -636,6 +704,9 @@ FR-RUN-042 numbering gap is cleared here.
 | FR-RUN-042 | **N/A (numbering gap)** | No requirement is defined at FR-RUN-042 — the spec list jumps FR-RUN-041 → FR-RUN-043 (a known gap carried since S13, see sprint-013 §Carry-over). Recorded here so the cross-reference resolves; no behavior is owed, so coverage is not applicable. |
 | FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume` (§4.1–§4.6, §14.1). |
 | FR-RUN-048 | **Covered** | Backend capability map-with-warn (§4.2 Shinka `--parallel`/ensemble warnings, §4.6 `capabilities()`). |
+| FR-RUN-049 | **Covered** | `--selection {fixed,ucb,ucb1,thompson}` neutral ensemble lever, mapped per backend; OE rejects non-weighted `--selection` via `capabilities().selection_strategies` (§2.1, §4.2, §4.6, §14.1; ADR-007 A2/A4). |
+| FR-RUN-050 | **Covered** | `--llm-weight model=w` per-run weight override; honored on OE and Shinka-`fixed`, warned+ignored under Shinka adaptive modes (§4.2; ADR-007 A1/M3). |
+| FR-RUN-051 | **Covered** | `solution extract --from-checkpoint` recovers the best program of an interrupted/failed OE run from the latest checkpoint via `recover_best_from_checkpoint()` (§7.2, B7). |
 
 ---
 
@@ -756,8 +827,30 @@ This ensures the run directory and its checkpoint are preserved for recovery. Th
 - Inspect the error via `run-error.log`
 - Use `solution extract` on the run if programs were already collected (FR-RUN-033)
 - Use `run resume` to retry from the checkpoint (FR-RUN-034)
+- Recover the best program of an **interrupted/failed** run from its latest checkpoint via
+  `solution extract --from-checkpoint` (B7, below)
 
 **On-demand extraction**: When a user later calls `revolver solution extract --run <id> --rank N`, the same evaluation is performed on the newly extracted solution. This ensures every solution has training eval results, whether auto-created or extracted. `extract` accepts runs with status `completed` or `completed_with_errors` (FR-RUN-033).
+
+### 7.2 Best-of-interrupt recovery: `solution extract --from-checkpoint` (B7, FR-RUN-051)
+
+An `interrupted`/`failed` OpenEvolve run never materializes `programs/rank-N.py` (post-processing
+did not run), so the default `solution extract` correctly **rejects** it. What survives is the
+latest `oe-output/checkpoints/checkpoint_N/`: `best_program_id` in `metadata.json` plus the code in
+`programs/{id}.json`. The new `--from-checkpoint` flag recovers the best program from that checkpoint
+for `interrupted`/`failed` runs, dispatched through a **backend-neutral** protocol method
+`recover_best_from_checkpoint(run_dir) -> (code, score)` on `EvolutionBackend`:
+
+- **`OpenEvolveBackend`** locates the latest `checkpoint_N/`, reads `best_program_id`, loads the
+  program code and score. It raises a clear, typed `RevolverError` subclass — distinguishable from
+  "backend does not support checkpoint recovery" — when **no checkpoint exists yet** (run too short
+  to checkpoint).
+- **`ShinkaBackend`** does not need this path (its `programs.sqlite` already survives an interrupted
+  run and the DB-driven collection recovers the best directly); the method may no-op / raise
+  "not needed".
+
+**Default behavior is unchanged**: without `--from-checkpoint`, `solution extract` still rejects an
+interrupted run (the pre-v0.17 contract). Only the explicit flag path recovers from the checkpoint.
 
 ---
 
@@ -776,6 +869,10 @@ class RunConfig(BaseModel):
     iterations: int | None = None
     alias: str | None = None
     config_overrides: list[str] = []
+    # Ensemble neutral levers (ADR-007 A1). None/empty on single-LLM runs.
+    selection: str | None = None            # fixed | ucb | ucb1 | thompson (capability-checked per backend)
+    selection_kwargs: list[str] = []        # raw "k=v" strings, branched per selected sampler (A5)
+    llm_weight_overrides: list[str] = []     # raw "model=w" strings, per-run weight override (M3)
     dry_run: bool = False
 
 class TokenUsage(BaseModel):
@@ -1023,9 +1120,12 @@ def run_default(
     dataset: str = typer.Option(..., "--dataset", help="Training dataset name"),
     iterations: int | None = typer.Option(None, "--iterations", help="Override iteration count"),
     alias: str | None = typer.Option(None, "--alias", help="Solution alias"),
-    config_override: list[str] | None = typer.Option(None, "--config-override", help="key=value overrides"),
+    config_override: list[str] | None = typer.Option(None, "--config-override", help="key=value overrides (escape hatch for backend-exclusive structural keys)"),
     temperature: float | None = typer.Option(None, "--temperature", help="Override LLM sampling temperature"),
     parallel: int | None = typer.Option(None, "--parallel", help="Override number of parallel evaluations"),
+    selection: str | None = typer.Option(None, "--selection", help="Ensemble selection strategy: fixed | ucb | ucb1 | thompson (capability-checked per backend; OE accepts weighted/fixed only, ADR-007 A2/A4)"),
+    selection_kwarg: list[str] | None = typer.Option(None, "--selection-kwarg", help="Repeatable k=v routed to the selected sampler (e.g. cost_aware_coef=0.3 for ucb/ucb1; A5)"),
+    llm_weight: list[str] | None = typer.Option(None, "--llm-weight", help="Repeatable model=w per-run weight override (OE + Shinka-fixed; warned/ignored under Shinka adaptive modes; M3)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate inputs and show config without launching"),
 ): ...
 
@@ -1035,6 +1135,10 @@ def status(): ...
 @app.command()
 def resume(
     run: str = typer.Option(..., "--run", help="Run ID to resume from"),
+    # Ensemble neutral levers may be overridden on resume; unset inherits the parent run's values.
+    selection: str | None = typer.Option(None, "--selection", help="Override the ensemble selection strategy for the resumed run"),
+    selection_kwarg: list[str] | None = typer.Option(None, "--selection-kwarg", help="Repeatable k=v for the selected sampler"),
+    llm_weight: list[str] | None = typer.Option(None, "--llm-weight", help="Repeatable model=w per-run weight override"),
 ): ...
 
 @app.command()
@@ -1327,6 +1431,8 @@ parsing / token collection through the `EvolutionBackend` interface:
 | **Backend selection** | `--backend {openevolve,shinka}` (default `openevolve`); stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047) |
 | **Resume semantics** | Backend-defined (FR-RUN-024), parent never mutated: OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve **clones** the parent `results_dir` (its SQLite DB is the resume state) into the new run dir and continues on the clone (clone-resume parity — S16 / TD-3). A `resume_precheck` hook validates the parent before any record is created |
 | **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
+| **Ensemble selection** | Neutral levers `--selection` / `--selection-kwarg` / `--llm-weight` + the registry `reasoning_effort` field, mapped per backend (ADR-007 A1/A2, §4.2). **OE** (`ensemble_model="weighted"`): weighted-random sampler; `--selection` non-weighted → rejected; `--llm-weight` honored; per-member `reasoning_effort` honored. **Shinka** (`ensemble_model="bandit"`): `--selection` → `llm_dynamic_selection` (`fixed`/`ucb`/`ucb1`/`thompson`); weights → `FixedSampler.prior_probs` **fixed-only** (adaptive modes start uniform, weights warned+ignored — FACT B); `--selection-kwarg` branched per sampler (`cost_aware_coef` ucb-only, default 0 — A5); `reasoning_efforts` a single global pool with highest-effort-wins on disagreement + warn (FACT A) |
+| **Capabilities** | `capabilities()` carries `selection_strategies` (OE `("weighted",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) so `--selection`/effort validation is capability-driven, not backend-name-branched (ADR-007 A4, §4.6) |
 | **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.7, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable. The inert pricing flags/columns were fully removed in S16 (schema migration v10) |
 | **Capabilities** | `capabilities()` drives map-with-warn behavior for unsupported options (FR-RUN-048) and the per-backend reproducibility caveat (NFR-024) |
 

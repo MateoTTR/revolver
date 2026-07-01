@@ -2,13 +2,13 @@
 
 **MLOps CLI platform for LLM-guided evolutionary optimization via a pluggable evolution backend — [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) by default, [ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve) optional.**
 
-Revolver adds the operational layer that OpenEvolve lacks: LLM lifecycle management, problem versioning, dataset registration, solution traceability, and multi-solution benchmarking — all from the command line.
+Revolver adds the operational layer that evolution backends lack: LLM lifecycle management, problem versioning, dataset registration, solution traceability, and multi-solution benchmarking — all from the command line.
 
 ## Why Revolver?
 
-OpenEvolve provides the core evolutionary loop for LLM-guided code optimization. Revolver wraps it with everything a domain expert needs to run reproducible experiments:
+OpenEvolve and ShinkaEvolve provide the core evolutionary loop for LLM-guided code optimization. Revolver wraps either backend with everything a domain expert needs to run reproducible experiments:
 
-| Capability | OpenEvolve alone | With Revolver |
+| Capability | Backend alone | With Revolver |
 |---|---|---|
 | LLM management | Manual URL in YAML | Register, start/stop, GPU monitoring |
 | Problem versioning | Files on disk | Immutable snapshots with SHA-256 manifests |
@@ -51,7 +51,7 @@ src/revolver/
 └── models/        # Pydantic data models (frozen, type-safe)
 ```
 
-Three-layer architecture: **CLI → Core → Infra**. Each layer only depends on the one below. External services (Ollama, LLM APIs, OpenEvolve) are abstracted behind infra modules for testability.
+Three-layer architecture: **CLI → Core → Infra**. Each layer only depends on the one below. External services (Ollama, LLM APIs, evolution backends) are abstracted behind infra modules for testability.
 
 ## Quick Start
 

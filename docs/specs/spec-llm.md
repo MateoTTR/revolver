@@ -41,6 +41,7 @@ Register a new LLM in the global registry.
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Injected into OpenEvolve config at run time. |
 | `--timeout <seconds>` | int | No | Request timeout in seconds. Injected into OpenEvolve config at run time. |
 | `--temperature <float>` | float | No | Sampling temperature (0.0–2.0). Injected into OpenEvolve config at run time. |
+| `--reasoning-effort <level>` | string | No | Reasoning effort for reasoning-capable models: `min`, `low`, `medium`, `high`, or `max`. Stored in the registry and projected per backend at run time (FR-LLM-026). |
 
 **Output** (human):
 ```
@@ -217,6 +218,7 @@ Update configuration fields of a registered LLM. At least one option must be pro
 | `--max-tokens <n>` | int | No | Maximum tokens per LLM response |
 | `--timeout <seconds>` | int | No | Request timeout in seconds |
 | `--temperature <float>` | float | No | Sampling temperature (0.0–2.0) |
+| `--reasoning-effort <level>` | string | No | Reasoning effort: `min`, `low`, `medium`, `high`, or `max` (FR-LLM-026) |
 
 **Output** (human):
 ```
@@ -260,6 +262,7 @@ Add a member LLM to an existing ensemble with a sampling weight.
 | `--weight <w>` | float | Yes | Sampling weight for this member (0.0–1.0) |
 | `--temperature <float>` | float | No | Per-member temperature override (0.0–2.0) |
 | `--max-tokens <n>` | int | No | Per-member max tokens override |
+| `--reasoning-effort <level>` | string | No | Per-member reasoning-effort override: `min`, `low`, `medium`, `high`, `max`. Takes precedence over the member LLM's registry-level value. Honored per-member on OpenEvolve; global-only on ShinkaEvolve (FR-LLM-026) |
 
 **Behavior**:
 1. Validate the ensemble exists
@@ -374,13 +377,21 @@ Ensemble "multi-model-v1" removed (2 members deleted)
 | FR-LLM-023 | MUST | Show ensemble details including members, weights, and per-member overrides | — |
 | FR-LLM-024 | MUST | Remove an ensemble with cascade deletion of its members | — |
 | FR-LLM-025 | SHOULD | Warn if member weights do not sum to approximately 1.0 when adding a member | — |
+| FR-LLM-026 | SHOULD | Store a per-LLM `reasoning_effort` (`min`/`low`/`medium`/`high`/`max`) in the registry, settable via `llm add --reasoning-effort`, `llm update --reasoning-effort`, and per-member via `ensemble add --reasoning-effort` (member override wins over the LLM's registry value). Projected per backend at run time: OpenEvolve maps it **per member** (`LLMModelConfig.reasoning_effort`); ShinkaEvolve maps it to a **single global** pool (`llm_kwargs.reasoning_efforts`). When ensemble members disagree on ShinkaEvolve, Revolver aligns on the **highest** effort (total order `min < low < medium < high < max`, a conservative default that never under-thinks) and **warns** that per-member effort is not honored. Also inert (warned) for local/bridge models, which ShinkaEvolve classes as non-reasoning (ADR-007 A1/A3.2). | — |
 
-> **Note — per-backend projection (ADR-007 D5)**: the registry stores backend-agnostic data; each
-> evolution backend projects it at run time. The registry schema is unchanged by ADR-007. On
-> ShinkaEvolve: local entries map to `local/<model>@<base_url>?api_key_env=…`; remote entries
-> require the model id to be recognized by Shinka's pricing table (documented limitation); custom
-> `api_key_env` names are bridged by exporting the provider-standard variable; ensemble **weights
-> and per-member overrides are dropped** (bandit selection) with a warning at run launch.
+> **Note — per-backend projection (ADR-007 D5, amended by the v0.17 Amendment)**: the registry stores backend-agnostic data; each
+> evolution backend projects it at run time. On ShinkaEvolve: local entries map to
+> `local/<model>@<base_url>?api_key_env=…`; remote entries require the model id to be recognized by
+> Shinka's pricing table (documented limitation); custom `api_key_env` names are bridged by exporting
+> the provider-standard variable. Ensemble mapping is now **first-class** (ADR-007 A2/A3), not a silent
+> drop: all members project to `evo_config.llm_models[]`, and under `--selection fixed` member weights
+> seed `FixedSampler.prior_probs` (apples-to-apples with the OE weighted ensemble). Two verified
+> ShinkaEvolve 0.0.7 asymmetries remain, surfaced via `capabilities()` (map-with-warn): (1) member
+> weights seed the bandit **only under `fixed`** — under `ucb`/`ucb1`/`thompson` the arms start uniform
+> and weights are **ignored with a warning**; (2) per-member `reasoning_effort` is **OpenEvolve-only** —
+> ShinkaEvolve has a single global `reasoning_efforts` pool, so on disagreement Revolver aligns on the
+> **highest** effort and warns (also inert for local/bridge models). The registry gains a
+> `reasoning_effort` field for both `llms` and `ensemble_members` (FR-LLM-026; DB migrations v12/v13).
 
 ---
 
@@ -418,6 +429,7 @@ Using SQLite (rather than individual YAML files) ensures atomic writes and preve
 | `max_tokens` | Optional | Optional |
 | `timeout_s` | Optional | Optional |
 | `temperature` | Optional (0.0–2.0) | Optional (0.0–2.0) |
+| `reasoning_effort` | Optional (`min`/`low`/`medium`/`high`/`max`; inert for local) | Optional (`min`/`low`/`medium`/`high`/`max`) |
 | `registered_at` | ISO 8601 | ISO 8601 |
 
 ### 5.1 Ensemble Storage
@@ -440,6 +452,7 @@ Ensembles are stored in two additional tables in the **global SQLite database** 
 | `weight` | Sampling weight (0.0–1.0) |
 | `temperature` | Per-member temperature override (optional) |
 | `max_tokens` | Per-member max tokens override (optional) |
+| `reasoning_effort` | Per-member reasoning-effort override (optional; `min`/`low`/`medium`/`high`/`max`) |
 
 **Runtime-only fields** (not persisted in the `llms` table, queried live):
 - VRAM usage → from Ollama `GET /api/ps`
