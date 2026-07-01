@@ -48,8 +48,11 @@ pytest.importorskip("shinka.database", reason="shinka-evolve not installed")
 from revolver.cli import app
 from revolver.core.project import init_project
 from revolver.core.run import get_run_info
+from revolver.infra.backends.base import BackendRunSpec
+from revolver.infra.backends.shinka import ShinkaBackend
 from revolver.infra.db import get_global_db_at
 from revolver.infra.store import REVOLVER_DIR, read_run_manifest
+from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
 from tests.fixtures.programs_sqlite import (
     EXPECTED_COMPLETION_TOKENS,
     EXPECTED_LAST_GENERATION,
@@ -712,3 +715,300 @@ def test_shinka_population_no_cell_indices(project_with_prereqs: dict[str, Path]
             assert key in entry
     scored = [e for e in population if e["combined_score"] is not None]
     assert [e["id"] for e in scored] == list(EXPECTED_RANKED_IDS)
+
+
+# ── (f) Ensemble → bandit mapping (S17-19/20/21, ADR-007 A2/A5) ───────────────
+# These drive ``ShinkaBackend.build_config()`` directly with a constructed
+# ``BackendRunSpec``: the ensemble→bandit projection lives entirely in the
+# backend adapter (PR-W1b); the ``--selection``/``--llm-weight`` CLI flags that
+# populate the spec are wired separately in PR-W1c. Building the config directly
+# is the tightest unit for the mapping and captures the exact evo_config keys.
+
+
+def _local_llm_entry(name: str) -> LLMEntry:
+    """Build a local (Ollama-shaped) ``LLMEntry`` for spec construction."""
+    return LLMEntry(
+        name=name,
+        provider="ollama",
+        model=f"{name}-model",
+        source="local",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+
+
+def _register_llm_entry(global_db_path: Path, entry: LLMEntry) -> None:
+    """Insert an ``LLMEntry`` into the temp global registry (for member lookup)."""
+    conn = get_global_db_at(global_db_path)
+    try:
+        conn.execute(
+            "INSERT INTO llms (name, provider, model, source, base_url, "
+            "api_key_env, registered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                entry.name,
+                entry.provider,
+                entry.model,
+                entry.source,
+                entry.base_url,
+                entry.api_key_env,
+                entry.registered_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _ensemble_spec(
+    snapshot_dir: Path,
+    global_db_path: Path,
+    members: list[EnsembleMember],
+    *,
+    selection: str | None = None,
+    selection_kwargs: dict[str, Any] | None = None,
+    llm_weight_overrides: dict[str, float] | None = None,
+) -> BackendRunSpec:
+    """Register the member LLMs and build an ensemble ``BackendRunSpec``."""
+    for member in members:
+        _register_llm_entry(global_db_path, _local_llm_entry(member.llm_name))
+    conn = get_global_db_at(global_db_path)
+    primary = _local_llm_entry(members[0].llm_name)
+    ensemble = EnsembleEntry(name="ens", members=members, created_at=datetime.now(UTC))
+    return BackendRunSpec(
+        snapshot_dir=snapshot_dir,
+        llm=primary,
+        ensemble=ensemble,
+        conn=conn,
+        selection=selection,
+        selection_kwargs=selection_kwargs,
+        llm_weight_overrides=llm_weight_overrides,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_single_llm_config_unchanged(tmp_path: Path) -> None:
+    """Zero behaviour change: a single-LLM (no-ensemble) spec builds the same
+    evo_config LLM projection as before A2 — fixed, one model, and crucially NO
+    ``llm_dynamic_selection_kwargs`` / ``prior_probs`` key."""
+    llm = _local_llm_entry("solo")
+    spec = BackendRunSpec(snapshot_dir=tmp_path, llm=llm)
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+
+    assert evo["llm_models"] == [
+        "local/solo-model@http://localhost:11434/v1?api_key_env=OLLAMA_API_KEY"
+    ]
+    assert evo["llm_dynamic_selection"] == "fixed"
+    # The single-LLM path must not gain a sampler-kwargs key (regression pin).
+    assert "llm_dynamic_selection_kwargs" not in evo
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_ensemble_projects_all_members(tmp_path: Path, global_db_path: Path) -> None:
+    """An N-member ensemble projects N entries into ``llm_models`` in order."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(tmp_path, global_db_path, members)
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+
+    assert len(evo["llm_models"]) == 2
+    assert evo["llm_models"][0].startswith("local/m-a-model@")
+    assert evo["llm_models"][1].startswith("local/m-b-model@")
+    assert evo["llm_dynamic_selection"] == "fixed"
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_selection_fixed_prior_probs(tmp_path: Path, global_db_path: Path) -> None:
+    """--selection fixed with 2 members weighted 0.7/0.3 → prior_probs [0.7, 0.3]
+    aligned to llm_models order (S17-20)."""
+    members = [
+        EnsembleMember(llm_name="m-a", weight=0.7),
+        EnsembleMember(llm_name="m-b", weight=0.3),
+    ]
+    spec = _ensemble_spec(tmp_path, global_db_path, members, selection="fixed")
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+
+    assert evo["llm_dynamic_selection"] == "fixed"
+    prior = evo["llm_dynamic_selection_kwargs"]["prior_probs"]
+    assert prior == pytest.approx([0.7, 0.3])
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_selection_fixed_prior_probs_renormalized(
+    tmp_path: Path, global_db_path: Path
+) -> None:
+    """Non-normalized weights (3/1) renormalize to sum 1 → [0.75, 0.25]."""
+    members = [
+        EnsembleMember(llm_name="m-a", weight=3.0),
+        EnsembleMember(llm_name="m-b", weight=1.0),
+    ]
+    spec = _ensemble_spec(tmp_path, global_db_path, members, selection="fixed")
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    prior = evo["llm_dynamic_selection_kwargs"]["prior_probs"]
+    assert prior == pytest.approx([0.75, 0.25])
+    assert sum(prior) == pytest.approx(1.0)
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_fixed_llm_weight_override_wins(tmp_path: Path, global_db_path: Path) -> None:
+    """--llm-weight overrides win over registry member weights under fixed."""
+    members = [
+        EnsembleMember(llm_name="m-a", weight=0.5),
+        EnsembleMember(llm_name="m-b", weight=0.5),
+    ]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        selection="fixed",
+        llm_weight_overrides={"m-a": 0.9, "m-b": 0.1},
+    )
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    prior = evo["llm_dynamic_selection_kwargs"]["prior_probs"]
+    assert prior == pytest.approx([0.9, 0.1])
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+@pytest.mark.parametrize("selection", ["ucb", "ucb1", "thompson"])
+def test_shinka_adaptive_ignores_weights_warns(
+    tmp_path: Path,
+    global_db_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    selection: str,
+) -> None:
+    """Adaptive samplers must NOT receive prior_probs (FACT B TypeError) and
+    warn that weights are ignored (S17-20)."""
+    members = [
+        EnsembleMember(llm_name="m-a", weight=0.7),
+        EnsembleMember(llm_name="m-b", weight=0.3),
+    ]
+    spec = _ensemble_spec(tmp_path, global_db_path, members, selection=selection)
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+
+    assert evo["llm_dynamic_selection"] == selection
+    kwargs = evo.get("llm_dynamic_selection_kwargs", {})
+    assert "prior_probs" not in kwargs
+    warning = capsys.readouterr().err
+    assert "ignored" in warning and selection in warning
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_ucb_cost_aware_coef_default_zero(tmp_path: Path, global_db_path: Path) -> None:
+    """ucb/ucb1 get Revolver's cost_aware_coef default of 0 (not Shinka's 0.5)."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(tmp_path, global_db_path, members, selection="ucb")
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    assert evo["llm_dynamic_selection_kwargs"]["cost_aware_coef"] == 0.0
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_ucb_cost_aware_coef_user_value(tmp_path: Path, global_db_path: Path) -> None:
+    """--selection-kwarg cost_aware_coef=0.3 is honored on ucb."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        selection="ucb",
+        selection_kwargs={"cost_aware_coef": 0.3},
+    )
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    assert evo["llm_dynamic_selection_kwargs"]["cost_aware_coef"] == 0.3
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_fixed_drops_cost_aware_coef_warns(
+    tmp_path: Path, global_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """cost_aware_coef under fixed is dropped-with-warning (FixedSampler would
+    silently ignore it — S17-21)."""
+    members = [
+        EnsembleMember(llm_name="m-a", weight=0.6),
+        EnsembleMember(llm_name="m-b", weight=0.4),
+    ]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        selection="fixed",
+        selection_kwargs={"cost_aware_coef": 0.3},
+    )
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    kwargs = evo["llm_dynamic_selection_kwargs"]
+    assert "cost_aware_coef" not in kwargs
+    assert "prior_probs" in kwargs  # weights still projected
+    assert "cost_aware_coef" in capsys.readouterr().err
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_thompson_drops_cost_aware_coef_warns(
+    tmp_path: Path, global_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """cost_aware_coef under thompson is dropped-with-warning (would TypeError if
+    spread into ThompsonSampler — S17-21)."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        selection="thompson",
+        selection_kwargs={"cost_aware_coef": 0.3},
+    )
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    kwargs = evo.get("llm_dynamic_selection_kwargs", {})
+    assert "cost_aware_coef" not in kwargs
+    assert "cost_aware_coef" in capsys.readouterr().err
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_ucb_drops_unknown_kwarg_warns(
+    tmp_path: Path, global_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unrecognized selection-kwarg on ucb is dropped-with-warning (never
+    spread — it would TypeError in AsymmetricUCB, which has no **kwargs)."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        selection="ucb",
+        selection_kwargs={"epsilon": 0.4, "bogus_key": 1},
+    )
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    kwargs = evo["llm_dynamic_selection_kwargs"]
+    assert kwargs["epsilon"] == 0.4  # accepted ucb kwarg passes through
+    assert "bogus_key" not in kwargs
+    assert "bogus_key" in capsys.readouterr().err
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_fixed_uniform_ensemble_prior_probs(tmp_path: Path, global_db_path: Path) -> None:
+    """A uniform (default-weight) ensemble under fixed still gets an explicit
+    even prior_probs vector (weights are 'present' as an ensemble signal)."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(tmp_path, global_db_path, members, selection="fixed")
+
+    evo = ShinkaBackend().build_config(spec)["evo_config"]
+    prior = evo["llm_dynamic_selection_kwargs"]["prior_probs"]
+    assert prior == pytest.approx([0.5, 0.5])
