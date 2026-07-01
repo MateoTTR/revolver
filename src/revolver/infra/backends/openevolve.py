@@ -554,13 +554,14 @@ def build_config(
             cannot honor (only static weighted sampling is supported).
     """
     # 0. Defensive selection guard (ADR-007 A2/A4): OpenEvolve only offers the
-    # static weighted sampler. The orchestrator-level capability check
-    # (core.run._validate_selection) is primary and rejects this earlier; this
-    # belt-and-braces guard keeps build_config honest if called directly.
+    # static weighted sampler, whose sole neutral selection value is "fixed".
+    # The orchestrator-level capability check (core.run._validate_selection) is
+    # primary and rejects an unsupported value earlier; this belt-and-braces
+    # guard keeps build_config honest if called directly.
     if selection is not None and selection != "fixed":
         raise ValidationError(
             f"Selection strategy '{selection}' is not supported by backend "
-            f"'openevolve'. Supported: weighted."
+            f"'openevolve'. Supported: fixed."
         )
 
     # 1. Base config from problem version
@@ -1508,7 +1509,7 @@ class OpenEvolveBackend:
             multi_language=False,
             ensemble_model="weighted",
             top_n_extraction=False,
-            selection_strategies=("weighted",),
+            selection_strategies=("fixed",),
             per_member_reasoning_effort=True,
         )
 

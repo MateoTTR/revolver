@@ -371,7 +371,7 @@ class TestBuildConfigEnsemble:
 
         conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
 
-        with pytest.raises(ValidationError, match="weighted"):
+        with pytest.raises(ValidationError, match="ucb"):
             build_config(
                 problem_config=None,
                 llm=primary_llm,

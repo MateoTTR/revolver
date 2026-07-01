@@ -20,7 +20,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from revolver.core.exceptions import ExternalError, IntegrityError, RevolverError
+from revolver.core.exceptions import (
+    ExternalError,
+    IntegrityError,
+    RevolverError,
+    ValidationError,
+)
 from revolver.core.run import (
     _apply_unproductive_override,
     _collect_programs,
@@ -28,6 +33,8 @@ from revolver.core.run import (
     _determine_run_status,
     _handle_post_run_failure,
     _is_pid_alive,
+    _parse_llm_weight_overrides,
+    _parse_selection_kwargs,
     _post_run_evaluation,
     generate_run_id,
     generate_solution_id,
@@ -3189,3 +3196,69 @@ class TestDetermineCrashStatus:
         status, valid_iters = _determine_crash_status(run_dir, iterations=30)
         assert status == "completed_with_errors"
         assert valid_iters == 5
+
+
+# ── Ensemble lever parsers (S17-W1c: --selection-kwarg / --llm-weight) ────────
+
+
+@pytest.mark.unit
+class TestParseSelectionKwargs:
+    """Unit tests for _parse_selection_kwargs (raw k=v → dict; A5)."""
+
+    def test_none_and_empty_return_none(self) -> None:
+        assert _parse_selection_kwargs(None) is None
+        assert _parse_selection_kwargs([]) is None
+
+    def test_valid_single_and_multiple(self) -> None:
+        assert _parse_selection_kwargs(["cost_aware_coef=0.0"]) == {"cost_aware_coef": "0.0"}
+        assert _parse_selection_kwargs(["a=1", "b=two"]) == {"a": "1", "b": "two"}
+
+    def test_value_with_equals_kept_verbatim(self) -> None:
+        # Only the first '=' splits key from value.
+        assert _parse_selection_kwargs(["k=a=b"]) == {"k": "a=b"}
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert _parse_selection_kwargs([" k = v "]) == {"k": "v"}
+
+    def test_missing_equals_raises(self) -> None:
+        with pytest.raises(ValidationError, match="expected key=value"):
+            _parse_selection_kwargs(["noequals"])
+
+    def test_empty_key_raises(self) -> None:
+        with pytest.raises(ValidationError, match="empty key"):
+            _parse_selection_kwargs(["=v"])
+
+
+@pytest.mark.unit
+class TestParseLlmWeightOverrides:
+    """Unit tests for _parse_llm_weight_overrides (raw model=w → dict; A1/M3)."""
+
+    def test_none_and_empty_return_none(self) -> None:
+        assert _parse_llm_weight_overrides(None) is None
+        assert _parse_llm_weight_overrides([]) is None
+
+    def test_valid_single_and_multiple(self) -> None:
+        assert _parse_llm_weight_overrides(["gpt4o=0.9"]) == {"gpt4o": 0.9}
+        assert _parse_llm_weight_overrides(["a=0.7", "b=0.3"]) == {"a": 0.7, "b": 0.3}
+
+    def test_integer_weight_coerced_to_float(self) -> None:
+        assert _parse_llm_weight_overrides(["m=2"]) == {"m": 2.0}
+
+    def test_zero_weight_allowed(self) -> None:
+        assert _parse_llm_weight_overrides(["m=0"]) == {"m": 0.0}
+
+    def test_missing_equals_raises(self) -> None:
+        with pytest.raises(ValidationError, match="expected model=weight"):
+            _parse_llm_weight_overrides(["noequals"])
+
+    def test_empty_model_raises(self) -> None:
+        with pytest.raises(ValidationError, match="empty model name"):
+            _parse_llm_weight_overrides(["=0.5"])
+
+    def test_non_numeric_weight_raises(self) -> None:
+        with pytest.raises(ValidationError, match="must be a number"):
+            _parse_llm_weight_overrides(["m=heavy"])
+
+    def test_negative_weight_raises(self) -> None:
+        with pytest.raises(ValidationError, match="non-negative"):
+            _parse_llm_weight_overrides(["m=-0.1"])

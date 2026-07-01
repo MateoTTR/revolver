@@ -103,7 +103,7 @@ def run_launch(
             "--selection",
             help=(
                 "Ensemble selection strategy: fixed | ucb | ucb1 | thompson "
-                "(capability-checked per backend; OpenEvolve accepts weighted/fixed "
+                "(capability-checked per backend; OpenEvolve accepts fixed "
                 "only, ShinkaEvolve all four — ADR-007 A2/A4)."
             ),
         ),

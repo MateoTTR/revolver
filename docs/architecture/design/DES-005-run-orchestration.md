@@ -472,13 +472,14 @@ served by `project init`.
   placeholder (the OpenAI SDK requires a non-empty key).
 - Ensemble mode (`--llm <ensemble>`) emits an `llm.models` array instead of `llm.primary_model`,
   mapping each member to `name`/`api_base`/`api_key`/`weight`/`temperature`/`max_tokens`/
-  `reasoning_effort` (the `${ENV}` syntax for keys). OpenEvolve's ensemble selection is
-  **weighted** (a static weighted-random sampler; `capabilities().selection_strategies ==
-  ("weighted",)`).
-- **Selection strategy (ADR-007 A2/A4).** `--selection` non-`fixed`/non-weighted (`ucb`/`ucb1`/
-  `thompson`) → **rejected** with a clear error naming `weighted` as the only OE strategy (the
-  orchestrator-level capability check in `core/run.py` gates this before `build_config()`; a
-  defensive belt-and-braces error also lives here). `fixed`/unset is the implicit weighted mode.
+  `reasoning_effort` (the `${ENV}` syntax for keys). OpenEvolve's ensemble sampler is
+  **weighted** (`ensemble_model="weighted"`, static weighted-random), exposed under the neutral
+  selection vocabulary `capabilities().selection_strategies == ("fixed",)`.
+- **Selection strategy (ADR-007 A2/A4).** `--selection` non-`fixed` (`ucb`/`ucb1`/
+  `thompson`) → **rejected** with a clear error naming `fixed` as the only accepted OE value (the
+  orchestrator-level capability check in `core/run.py` gates this before `build_config()` via a plain
+  `selection in selection_strategies` membership test; a defensive belt-and-braces error also lives
+  here). `fixed`/unset is the implicit weighted mode.
 - **`--llm-weight model=w` (ADR-007 A1/M3)** is **honored**: it patches the resolved member's
   `weight` (CLI override wins over the registry `weight`) before the `llm.models` array is built.
 - **Per-member `reasoning_effort` (ADR-007 A3.2, FACT A) is honored per member**
@@ -641,7 +642,7 @@ reproducibility caveat (NFR-024, [ADR-007 D3](../adr/ADR-007-pluggable-evolution
 | `native_cost_tracking` | `False` | `True` | Engine persists token accounting itself (OE relies on the HTTP proxy) |
 | `multi_language` | `False` | `True` | Evolution of non-Python programs |
 | `ensemble_model` | `"weighted"` | `"bandit"` | Multi-LLM selection semantics |
-| `selection_strategies` | `("weighted",)` | `("fixed","ucb","ucb1","thompson")` | Accepted `--selection` values (ADR-007 A4); `--selection` outside this tuple is rejected |
+| `selection_strategies` | `("fixed",)` | `("fixed","ucb","ucb1","thompson")` | Accepted `--selection` values (ADR-007 A4); OE's static weighted sampler is exposed under the neutral `fixed` value — `ensemble_model` above is the separate sampler-semantics axis. `--selection` outside this tuple is rejected |
 | `per_member_reasoning_effort` | `True` | `False` | Whether `--reasoning-effort` is honored per ensemble member (OE) or collapses to a single global pool with map-with-warn (Shinka — FACT A) |
 | `top_n_extraction` | `False` | `True` | Reliable top-N program extraction |
 
@@ -704,7 +705,7 @@ FR-RUN-042 numbering gap is cleared here.
 | FR-RUN-042 | **N/A (numbering gap)** | No requirement is defined at FR-RUN-042 — the spec list jumps FR-RUN-041 → FR-RUN-043 (a known gap carried since S13, see sprint-013 §Carry-over). Recorded here so the cross-reference resolves; no behavior is owed, so coverage is not applicable. |
 | FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume` (§4.1–§4.6, §14.1). |
 | FR-RUN-048 | **Covered** | Backend capability map-with-warn (§4.2 Shinka `--parallel`/ensemble warnings, §4.6 `capabilities()`). |
-| FR-RUN-049 | **Covered** | `--selection {fixed,ucb,ucb1,thompson}` neutral ensemble lever, mapped per backend; OE rejects non-weighted `--selection` via `capabilities().selection_strategies` (§2.1, §4.2, §4.6, §14.1; ADR-007 A2/A4). |
+| FR-RUN-049 | **Covered** | `--selection {fixed,ucb,ucb1,thompson}` neutral ensemble lever, mapped per backend; OE rejects non-`fixed` `--selection` via `capabilities().selection_strategies == ("fixed",)` (§2.1, §4.2, §4.6, §14.1; ADR-007 A2/A4). |
 | FR-RUN-050 | **Covered** | `--llm-weight model=w` per-run weight override; honored on OE and Shinka-`fixed`, warned+ignored under Shinka adaptive modes (§4.2; ADR-007 A1/M3). |
 | FR-RUN-051 | **Covered** | `solution extract --from-checkpoint` recovers the best program of an interrupted/failed OE run from the latest checkpoint via `recover_best_from_checkpoint()` (§7.2, B7). |
 
@@ -1135,8 +1136,11 @@ def status(): ...
 @app.command()
 def resume(
     run: str = typer.Option(..., "--run", help="Run ID to resume from"),
-    # Ensemble neutral levers may be overridden on resume; unset inherits the parent run's values.
-    selection: str | None = typer.Option(None, "--selection", help="Override the ensemble selection strategy for the resumed run"),
+    # Ensemble neutral levers are RE-SPECIFIED per resume, not inherited from the parent run —
+    # consistent with `--config-override` (neither is persisted or auto-carried; §14.1). When a
+    # resume of an *ensemble* parent omits `--selection`, the run falls back to the backend default
+    # and `resume_run()` emits a warning so the reset is not silent.
+    selection: str | None = typer.Option(None, "--selection", help="Ensemble selection strategy for the resumed run (re-specify; not inherited)"),
     selection_kwarg: list[str] | None = typer.Option(None, "--selection-kwarg", help="Repeatable k=v for the selected sampler"),
     llm_weight: list[str] | None = typer.Option(None, "--llm-weight", help="Repeatable model=w per-run weight override"),
 ): ...
@@ -1432,7 +1436,7 @@ parsing / token collection through the `EvolutionBackend` interface:
 | **Resume semantics** | Backend-defined (FR-RUN-024), parent never mutated: OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve **clones** the parent `results_dir` (its SQLite DB is the resume state) into the new run dir and continues on the clone (clone-resume parity — S16 / TD-3). A `resume_precheck` hook validates the parent before any record is created |
 | **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
 | **Ensemble selection** | Neutral levers `--selection` / `--selection-kwarg` / `--llm-weight` + the registry `reasoning_effort` field, mapped per backend (ADR-007 A1/A2, §4.2). **OE** (`ensemble_model="weighted"`): weighted-random sampler; `--selection` non-weighted → rejected; `--llm-weight` honored; per-member `reasoning_effort` honored. **Shinka** (`ensemble_model="bandit"`): `--selection` → `llm_dynamic_selection` (`fixed`/`ucb`/`ucb1`/`thompson`); weights → `FixedSampler.prior_probs` **fixed-only** (adaptive modes start uniform, weights warned+ignored — FACT B); `--selection-kwarg` branched per sampler (`cost_aware_coef` ucb-only, default 0 — A5); `reasoning_efforts` a single global pool with highest-effort-wins on disagreement + warn (FACT A) |
-| **Capabilities** | `capabilities()` carries `selection_strategies` (OE `("weighted",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) so `--selection`/effort validation is capability-driven, not backend-name-branched (ADR-007 A4, §4.6) |
+| **Capabilities** | `capabilities()` carries `selection_strategies` (OE `("fixed",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) so `--selection`/effort validation is capability-driven, not backend-name-branched (ADR-007 A4, §4.6) |
 | **Token strategy** | Backend decision via `wants_http_proxy()` / `collect_token_usage(run_dir)` — token-primary on all backends (ADR-007 D2). OE: proxy (§4.7, DD-14); Shinka: native per-program accounting read from `programs.sqlite`. **No cost is reported (S15 / #300)**: the `cost_usd` figure was dropped — the engines do not persist per-attempt or reasoning/thinking tokens, so no realistic cost is reachable. The inert pricing flags/columns were fully removed in S16 (schema migration v10) |
 | **Capabilities** | `capabilities()` drives map-with-warn behavior for unsupported options (FR-RUN-048) and the per-backend reproducibility caveat (NFR-024) |
 

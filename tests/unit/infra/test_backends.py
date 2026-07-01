@@ -166,9 +166,9 @@ class TestBackendCapabilitySelectionAxes:
     """The two new capability axes are exposed per backend (A4)."""
 
     def test_openevolve_selection_and_effort_axes(self) -> None:
-        """OpenEvolve: weighted-only selection, per-member reasoning_effort."""
+        """OpenEvolve: fixed-only selection, per-member reasoning_effort."""
         caps = get_backend("openevolve").capabilities()
-        assert caps.selection_strategies == ("weighted",)
+        assert caps.selection_strategies == ("fixed",)
         assert caps.per_member_reasoning_effort is True
 
     def test_shinka_selection_and_effort_axes(self) -> None:
@@ -194,7 +194,7 @@ class TestOpenEvolveBackendCapabilities:
             multi_language=False,
             ensemble_model="weighted",
             top_n_extraction=False,
-            selection_strategies=("weighted",),
+            selection_strategies=("fixed",),
             per_member_reasoning_effort=True,
         )
 

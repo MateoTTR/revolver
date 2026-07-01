@@ -173,8 +173,9 @@ flags, not `--config-override llm.models[i]...`.)
 ### A2 — Weighted→bandit is **first-class, gated by `capabilities()`** (supersedes the D5 bullet + the "Negative: lossy" consequence)
 
 - **OpenEvolve** (`ensemble_model="weighted"`): static weighted-random sampler. `--selection` non-`fixed`
-  → **rejected** with a clear error (weighted only). `--llm-weight` honored (patches per-member `weight`).
-  Per-member `reasoning_effort` honored (`LLMModelConfig.reasoning_effort`).
+  → **rejected** with a clear error (`fixed` is the only accepted value; `selection_strategies=("fixed",)`).
+  `--llm-weight` honored (patches per-member `weight`). Per-member `reasoning_effort` honored
+  (`LLMModelConfig.reasoning_effort`).
 - **ShinkaEvolve** (`ensemble_model="bandit"`): `--selection` → `evo_config.llm_dynamic_selection`
   (`fixed`/`ucb`/`ucb1` [alias of AsymmetricUCB]/`thompson`). Under `fixed`, member weights → the
   `FixedSampler.prior_probs` positional vector (**apples-to-apples with the OE weighted ensemble**). Under
@@ -202,9 +203,12 @@ These are real ShinkaEvolve 0.0.7 constraints (source-verified; the adversarial 
 ### A4 — `capabilities()` widens to carry the selection surface honestly
 
 Add two axes so validation is capability-driven, not hard-coded:
-`selection_strategies: tuple[str, ...]` (OE → `("weighted",)`; Shinka → `("fixed","ucb","ucb1","thompson")`)
-and `per_member_reasoning_effort: bool` (OE `True`, Shinka `False`). The CLI rejects an unsupported
-`--selection` and warns on a capability-limited lever, instead of diverging silently.
+`selection_strategies: tuple[str, ...]` — the accepted `--selection` values (OE → `("fixed",)`, the
+neutral vocabulary for its static weighted sampler; Shinka → `("fixed","ucb","ucb1","thompson")`) — and
+`per_member_reasoning_effort: bool` (OE `True`, Shinka `False`). The `ensemble_model` axis
+(`"weighted"`/`"bandit"`) describes the *sampler semantics* and is distinct from this selection vocabulary.
+The CLI rejects an unsupported `--selection` and warns on a capability-limited lever, instead of diverging
+silently.
 
 ### A5 — Sampler-kwarg projection is **per-strategy**
 

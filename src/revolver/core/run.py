@@ -136,13 +136,6 @@ DEFAULT_BACKEND = "openevolve"
 # (S14-05); backends never apply their own fallback on the run path.
 DEFAULT_ITERATIONS = 10
 
-# Neutral cross-backend name for the static (non-adaptive) ensemble mode:
-# it maps onto whatever static strategy the backend exposes (OpenEvolve's
-# "weighted" static sampler, ShinkaEvolve's "fixed" sampler). Accepted on
-# every backend so `--selection fixed` is the portable "no bandit" baseline
-# (ADR-007 Amendment A2/A4, DES-005 §4.2).
-_NEUTRAL_STATIC_SELECTION = "fixed"
-
 
 def _parse_selection_kwargs(raw: list[str] | None) -> dict[str, Any] | None:
     """Parse ``--selection-kwarg key=value`` strings into a dict (A5).
@@ -203,25 +196,54 @@ def _parse_llm_weight_overrides(raw: list[str] | None) -> dict[str, float] | Non
 def _validate_selection(spec: BackendRunSpec, backend: EvolutionBackend) -> None:
     """Reject a ``--selection`` value the resolved backend cannot honor (A2/A4).
 
-    Capability-driven — no hard-coded backend name. A selection is accepted
-    when it is the neutral static alias (:data:`_NEUTRAL_STATIC_SELECTION`) or
-    is present in the backend's advertised
+    Capability-driven — no hard-coded backend name: a selection is accepted iff
+    it is present in the backend's advertised
     :attr:`~revolver.infra.backends.base.BackendCapabilities.selection_strategies`.
-    Anything else (e.g. ``ucb`` on OpenEvolve, whose only strategy is
-    ``"weighted"``) raises :class:`ValidationError` (exit 1) naming the backend
-    and the strategies it supports.
+    OpenEvolve exposes only ``("fixed",)`` (its static weighted sampler under
+    the neutral ``fixed`` vocabulary), so ``ucb``/``ucb1``/``thompson`` are
+    rejected; ShinkaEvolve exposes all four. A rejected value raises
+    :class:`ValidationError` (exit 1) naming the backend and its strategies.
     """
     selection = spec.selection
     if selection is None:
         return
     supported = backend.capabilities().selection_strategies
-    if selection == _NEUTRAL_STATIC_SELECTION or selection in supported:
+    if selection in supported:
         return
     supported_display = ", ".join(supported) if supported else "(none)"
     raise ValidationError(
         f"Selection strategy '{selection}' is not supported by backend "
         f"'{backend.name}'. Supported: {supported_display}."
     )
+
+
+def _validate_llm_weight_overrides(spec: BackendRunSpec) -> None:
+    """Reject ``--llm-weight`` keys that name no ensemble member (A1/M3).
+
+    A ``--llm-weight <name>=w`` whose ``<name>`` is not a member of the
+    resolved ensemble would otherwise be a silent no-op. Validating here — in
+    the orchestrator, after ensemble resolution — covers *both* backends
+    (OpenEvolve and ShinkaEvolve) with a single check. Raises
+    :class:`ValidationError` (exit 1) naming the unknown key(s) and the valid
+    member names. A ``--llm-weight`` supplied for a non-ensemble (single-LLM)
+    run is likewise rejected, since there are no members to weight.
+    """
+    overrides = spec.llm_weight_overrides
+    if not overrides:
+        return
+    if spec.ensemble is None:
+        raise ValidationError(
+            "--llm-weight requires an ensemble (--llm <ensemble>); it has no "
+            "effect on a single-LLM run."
+        )
+    member_names = {member.llm_name for member in spec.ensemble.members}
+    unknown = sorted(name for name in overrides if name not in member_names)
+    if unknown:
+        valid = ", ".join(sorted(member_names))
+        raise ValidationError(
+            f"--llm-weight names unknown ensemble member(s): {', '.join(unknown)}. "
+            f"Ensemble '{spec.ensemble.name}' members: {valid}."
+        )
 
 
 def _determine_run_status(
@@ -697,9 +719,11 @@ def launch_run(
         )
 
         # Capability-gate --selection against the resolved backend before the
-        # config is built (ADR-007 A2/A4): OpenEvolve rejects non-weighted
+        # config is built (ADR-007 A2/A4): OpenEvolve rejects non-fixed
         # strategies, ShinkaEvolve accepts all four (S17-18).
         _validate_selection(spec, backend)
+        # Reject --llm-weight keys that name no ensemble member (both backends).
+        _validate_llm_weight_overrides(spec)
 
         oe_config = backend.build_config(spec)
 
@@ -1351,6 +1375,19 @@ def resume_run(
         else:
             llm = llm_or_ensemble
 
+        # Per-run ensemble levers are re-specified on resume, not inherited
+        # (consistent with --config-override; DES-005 §11/§14.1). Resuming an
+        # ensemble parent WITHOUT --selection therefore falls back to the
+        # backend default rather than the parent's strategy — warn so the reset
+        # is not silent.
+        if ensemble is not None and selection is None and not quiet:
+            sys.stderr.write(
+                "Warning: resuming an ensemble run without --selection. Ensemble "
+                "selection levers (--selection/--selection-kwarg/--llm-weight) are "
+                "re-specified per resume, not inherited from the parent run; the "
+                "resumed run uses the backend default selection strategy.\n"
+            )
+
         ds = get_dataset(proj_conn, parent_dataset_name)
         if ds is None:
             raise RevolverError(f"Dataset '{parent_dataset_name}' not found.")
@@ -1430,6 +1467,8 @@ def resume_run(
         # Capability-gate --selection against the resumed run's (parent's)
         # backend before the config is built (ADR-007 A2/A4, S17-18).
         _validate_selection(spec, backend)
+        # Reject --llm-weight keys that name no ensemble member (both backends).
+        _validate_llm_weight_overrides(spec)
 
         oe_config = backend.build_config(spec)
 

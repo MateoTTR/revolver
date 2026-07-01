@@ -137,8 +137,9 @@ class BackendCapabilities:
         top_n_extraction: Reliable top-N program extraction
             (OpenEvolve: False, ShinkaEvolve: True).
         selection_strategies: Accepted ``--selection`` values (ADR-007
-            Amendment A4). OpenEvolve exposes only ``("weighted",)`` (static
-            weighted sampling); ShinkaEvolve exposes
+            Amendment A4). OpenEvolve exposes only ``("fixed",)`` — the neutral
+            vocabulary for its static weighted sampler (``ensemble_model`` is a
+            separate axis); ShinkaEvolve exposes
             ``("fixed", "ucb", "ucb1", "thompson")``. ``--selection`` values
             outside this tuple are rejected for the resolved backend rather
             than silently dropped.
