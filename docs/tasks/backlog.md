@@ -522,31 +522,33 @@ Found while validating Revolver 0.16.0 through the **TSP + beamforming** demos (
 
 Plan: [sprint-017.md](../sprints/sprint-017.md). Per [ADR-007 — v0.17 Amendment](../architecture/adr/ADR-007-pluggable-evolution-backend.md#amendment--v017-multi-llm-ensemble-selection-2026-07-01) and the source-verified [v017-multi-llm-research.md](../analysis/v017-multi-llm-research.md). Front-loads a correctness slice (B1/B2/B7) then delivers the multi-LLM ensemble flagship (weighted OE + full adaptive-bandit Shinka), gated by two verified capability asymmetries (weights fixed-only, `reasoning_effort` OE-only). 33 tasks (S17-01..33), 7 PRs across 4 waves. DB migrations v12 (`llms.reasoning_effort`) then v13 (`ensemble_members.reasoning_effort`), kept separate per the project's one-column-per-migration discipline. Top-N (#299) explicitly deferred to **S18**.
 
+**Progress (session 055):** formalization done (ADR-007 amendment + specs/DES/validation cascade + both reviewers) — committed `fcc79b8`. **Wave 0 (PR #229) + Wave 1 (PR #228 W1a, #232 W1b, #233 W1c) all merged** → the flagship cross-engine comparison (OE-weighted / Shinka-fixed / Shinka-ucb) + the correctness slice are on `develop`. **Remaining: Wave 2 (W2a reasoning_effort, W2b doc+B9) + Wave 3 (W3 template/REVOLVER_HOME + regression) → v0.17.0 release.**
+
 | # | Task | Status | Sprint |
 |---|---|---|---|
-| 321 | **B1 — OE wrapper aggregation crash on non-numeric metric.** Copy the numeric guard from `shinka.py:322-331` into the OE `_WRAPPER_TEMPLATE` aggregation loop (`openevolve.py:1140-1144`) + harden the `combined_score` mean (L1133). (S17-01) | [ ] | S17 — PR-W0 |
-| 322 | **B1 — test the generated OE wrapper aggregation** (none existed before): mixed numeric/non-numeric metrics dict does not crash, numeric result returned. (S17-02) | [ ] | S17 — PR-W0 |
-| 323 | **B2 — wrap `OpenEvolveRunner.run()` in try/finally**; snapshot pre-run child PIDs (mirror `shinka.py:1377`). (S17-03) | [ ] | S17 — PR-W0 |
-| 324 | **B2 — hoist `_current_child_pids`/`_reap_run_children`** from `ShinkaBackend` to `infra/backends/base.py`; both backends reuse. (S17-04) | [ ] | S17 — PR-W0 |
-| 325 | **B2 — OE-specific `_shutdown_runner()`**: guarded `getattr` on the controller's executor(s), `shutdown(wait=False)` + `contextlib.suppress` (never `wait=True` — cf. #159). (S17-05) | [ ] | S17 — PR-W0 |
-| 326 | **B2 — regression test `test_openevolve_shutdown.py`** (mirror `test_shinka_shutdown.py`): teardown+reap runs even on exception; no leftover children. (S17-06) | [ ] | S17 — PR-W0 |
-| 327 | **B7 — `EvolutionBackend.recover_best_from_checkpoint()` method**: OE reads latest `oe-output/checkpoints/checkpoint_N/` `best_program_id` + program code; clear error when no checkpoint exists yet. (S17-07) | [ ] | S17 — PR-W0 |
-| 328 | **B7 — `solution extract --from-checkpoint` flag**: dispatches to the backend recovery method for `interrupted`/`failed` runs; default (flag unset) behavior unchanged. (S17-08) | [ ] | S17 — PR-W0 |
-| 329 | **B7 — revise `test_extract_rejects_interrupted_run`** (`test_solution.py:643`, conscious F3 policy revision) + add `--from-checkpoint` success/no-checkpoint-yet tests. (S17-09) | [ ] | S17 — PR-W0 |
-| 330 | **DB migration v12 — `reasoning_effort` column on `llms`** (global DB, simple `ALTER TABLE ADD COLUMN`); `CURRENT_SCHEMA_VERSION = 12`. (S17-10) | [ ] | S17 — PR-W1a |
-| 331 | **DB migration v13 — `reasoning_effort` column on `ensemble_members`** (both DDL copies kept in sync); `CURRENT_SCHEMA_VERSION = 13`. (S17-11) | [ ] | S17 — PR-W1a |
-| 332 | **`models/llm.py` — `reasoning_effort` field** on `LLMEntry` and `EnsembleMember`. (S17-12) | [ ] | S17 — PR-W1a |
-| 333 | **A4 — widen `BackendCapabilities`**: `selection_strategies` (OE `("weighted",)`, Shinka `("fixed","ucb","ucb1","thompson")`) + `per_member_reasoning_effort` (OE `True`, Shinka `False`). (S17-13) | [ ] | S17 — PR-W1a |
-| 334 | **Widen `BackendRunSpec`**: `selection`, `selection_kwargs`, `llm_weight_overrides` fields. (S17-14) | [ ] | S17 — PR-W1a |
-| 335 | **Mirror the new levers on `RunConfig`** (`models/run.py`): `selection`, `selection_kwargs`, `llm_weight_overrides`. (S17-15) | [ ] | S17 — PR-W1a |
-| 336 | **`cli/run.py` — `--selection`/`--selection-kwarg`/`--llm-weight` flags on `run_launch`**, threaded into `RunConfig`. (S17-16) | [ ] | S17 — PR-W1c |
-| 337 | **Mirror the three flags on `run_resume`**; both `launch_run`/`resume_run` copy the new fields into `BackendRunSpec`. (S17-17) | [ ] | S17 — PR-W1c |
-| 338 | **`core/run.py` — validate `--selection` against `capabilities().selection_strategies`** before `build_config()`; OE rejects non-`fixed` (A2). (S17-18) | [ ] | S17 — PR-W1c |
-| 339 | **M1 — Shinka: lift the ensemble hard-raise, project all members** → `evo_config.llm_models[]`; `llm_dynamic_selection` from `--selection` (default `fixed`, zero behavior change for single-LLM). (S17-19) | [ ] | S17 — PR-W1b |
-| 340 | **M1/A3 — Shinka weights → `prior_probs` under `fixed` only**; warn when weights supplied under `ucb`/`ucb1`/`thompson` (FACT B). (S17-20) | [ ] | S17 — PR-W1b |
-| 341 | **A5/M4 — per-sampler `--selection-kwarg` routing** on Shinka; `cost_aware_coef` ucb/ucb1-only, default **0** (not Shinka's 0.5). (S17-21) | [ ] | S17 — PR-W1b |
-| 342 | **M3 — OE `--llm-weight` override** in `_build_ensemble_llm_config()`; defensive `--selection` non-fixed rejection at the OE adapter level. (S17-22) | [ ] | S17 — PR-W1c |
-| 343 | **L2 tests — selection-strategy validation + `--llm-weight`** across OE/Shinka-fixed/Shinka-bandit. (S17-23) | [ ] | S17 — PR-W1b/c |
+| 321 | **B1 — OE wrapper aggregation crash on non-numeric metric.** Copy the numeric guard from `shinka.py:322-331` into the OE `_WRAPPER_TEMPLATE` aggregation loop (`openevolve.py:1140-1144`) + harden the `combined_score` mean (L1133). (S17-01) | [x] | S17 — PR-W0 (#229) |
+| 322 | **B1 — test the generated OE wrapper aggregation** (none existed before): mixed numeric/non-numeric metrics dict does not crash, numeric result returned. (S17-02) | [x] | S17 — PR-W0 (#229) |
+| 323 | **B2 — wrap `OpenEvolveRunner.run()` in try/finally**; snapshot pre-run child PIDs (mirror `shinka.py:1377`). (S17-03) | [x] | S17 — PR-W0 (#229) |
+| 324 | **B2 — hoist `_current_child_pids`/`_reap_run_children`** from `ShinkaBackend` to `infra/backends/base.py`; both backends reuse. (S17-04) | [x] | S17 — PR-W0 (#229) |
+| 325 | **B2 — OE-specific `_shutdown_runner()`**: guarded `getattr` on the controller's executor(s), `shutdown(wait=False)` + `contextlib.suppress` (never `wait=True` — cf. #159). (S17-05) | [x] | S17 — PR-W0 (#229) |
+| 326 | **B2 — regression test `test_openevolve_shutdown.py`** (mirror `test_shinka_shutdown.py`): teardown+reap runs even on exception; no leftover children. (S17-06) | [x] | S17 — PR-W0 (#229) |
+| 327 | **B7 — `EvolutionBackend.recover_best_from_checkpoint()` method**: OE reads latest `oe-output/checkpoints/checkpoint_N/` `best_program_id` + program code; clear error when no checkpoint exists yet. (S17-07) | [x] | S17 — PR-W0 (#229) |
+| 328 | **B7 — `solution extract --from-checkpoint` flag**: dispatches to the backend recovery method for `interrupted`/`failed` runs; default (flag unset) behavior unchanged. (S17-08) | [x] | S17 — PR-W0 (#229) |
+| 329 | **B7 — revise `test_extract_rejects_interrupted_run`** (`test_solution.py:643`, conscious F3 policy revision) + add `--from-checkpoint` success/no-checkpoint-yet tests. (S17-09) | [x] | S17 — PR-W0 (#229) |
+| 330 | **DB migration v12 — `reasoning_effort` column on `llms`** (global DB, simple `ALTER TABLE ADD COLUMN`); `CURRENT_SCHEMA_VERSION = 12`. (S17-10) | [x] | S17 — PR-W1a (#228) |
+| 331 | **DB migration v13 — `reasoning_effort` column on `ensemble_members`** (both DDL copies kept in sync); `CURRENT_SCHEMA_VERSION = 13`. (S17-11) | [x] | S17 — PR-W1a (#228) |
+| 332 | **`models/llm.py` — `reasoning_effort` field** on `LLMEntry` and `EnsembleMember`. (S17-12) | [x] | S17 — PR-W1a (#228) |
+| 333 | **A4 — widen `BackendCapabilities`**: `selection_strategies` (OE `("fixed",)` — neutral vocab, revised from `("weighted",)` in W1c review; `ensemble_model="weighted"` is the separate sampler-semantics axis; Shinka `("fixed","ucb","ucb1","thompson")`) + `per_member_reasoning_effort` (OE `True`, Shinka `False`). (S17-13) | [x] | S17 — PR-W1a (#228) |
+| 334 | **Widen `BackendRunSpec`**: `selection`, `selection_kwargs`, `llm_weight_overrides` fields. (S17-14) | [x] | S17 — PR-W1a (#228) |
+| 335 | **Mirror the new levers on `RunConfig`** (`models/run.py`): `selection`, `selection_kwargs`, `llm_weight_overrides`. (S17-15) | [x] | S17 — PR-W1a (#228) |
+| 336 | **`cli/run.py` — `--selection`/`--selection-kwarg`/`--llm-weight` flags on `run_launch`**, threaded into `RunConfig`. (S17-16) | [x] | S17 — PR-W1c (#233) |
+| 337 | **Mirror the three flags on `run_resume`**; both `launch_run`/`resume_run` copy the new fields into `BackendRunSpec`. (S17-17) | [x] | S17 — PR-W1c (#233) |
+| 338 | **`core/run.py` — validate `--selection` against `capabilities().selection_strategies`** before `build_config()`; OE rejects non-`fixed` (A2). (S17-18) | [x] | S17 — PR-W1c (#233) |
+| 339 | **M1 — Shinka: lift the ensemble hard-raise, project all members** → `evo_config.llm_models[]`; `llm_dynamic_selection` from `--selection` (default `fixed`, zero behavior change for single-LLM). (S17-19) | [x] | S17 — PR-W1b (#232) |
+| 340 | **M1/A3 — Shinka weights → `prior_probs` under `fixed` only**; warn when weights supplied under `ucb`/`ucb1`/`thompson` (FACT B). (S17-20) | [x] | S17 — PR-W1b (#232) |
+| 341 | **A5/M4 — per-sampler `--selection-kwarg` routing** on Shinka; `cost_aware_coef` ucb/ucb1-only, default **0** (not Shinka's 0.5). (S17-21) | [x] | S17 — PR-W1b (#232) |
+| 342 | **M3 — OE `--llm-weight` override** in `_build_ensemble_llm_config()`; defensive `--selection` non-fixed rejection at the OE adapter level. (S17-22) | [x] | S17 — PR-W1c (#233) |
+| 343 | **L2 tests — selection-strategy validation + `--llm-weight`** across OE/Shinka-fixed/Shinka-bandit. (S17-23) | [x] | S17 — PR-W1b/c (#232/#233) |
 | 344 | **B4/M2 — `--reasoning-effort` on `llm add`/`llm update`**, threaded through `core/llm.py` → DB. (S17-24) | [ ] | S17 — PR-W2a |
 | 345 | **B4/M2 — `--reasoning-effort` on `ensemble add`** (per-member override, same precedence pattern as temperature/max_tokens). (S17-25) | [ ] | S17 — PR-W2a |
 | 346 | **OE — per-member `reasoning_effort` mapping** in `_build_ensemble_llm_config()` + single-LLM path. (S17-26) | [ ] | S17 — PR-W2a |
