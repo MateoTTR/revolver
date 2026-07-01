@@ -522,7 +522,9 @@ Found while validating Revolver 0.16.0 through the **TSP + beamforming** demos (
 
 Plan: [sprint-017.md](../sprints/sprint-017.md). Per [ADR-007 — v0.17 Amendment](../architecture/adr/ADR-007-pluggable-evolution-backend.md#amendment--v017-multi-llm-ensemble-selection-2026-07-01) and the source-verified [v017-multi-llm-research.md](../analysis/v017-multi-llm-research.md). Front-loads a correctness slice (B1/B2/B7) then delivers the multi-LLM ensemble flagship (weighted OE + full adaptive-bandit Shinka), gated by two verified capability asymmetries (weights fixed-only, `reasoning_effort` OE-only). 33 tasks (S17-01..33), 7 PRs across 4 waves. DB migrations v12 (`llms.reasoning_effort`) then v13 (`ensemble_members.reasoning_effort`), kept separate per the project's one-column-per-migration discipline. Top-N (#299) explicitly deferred to **S18**.
 
-**Progress (session 055):** formalization done (ADR-007 amendment + specs/DES/validation cascade + both reviewers) — committed `fcc79b8`. **Wave 0 (PR #229) + Wave 1 (PR #228 W1a, #232 W1b, #233 W1c) all merged** → the flagship cross-engine comparison (OE-weighted / Shinka-fixed / Shinka-ucb) + the correctness slice are on `develop`. **Remaining: Wave 2 (W2a reasoning_effort, W2b doc+B9) + Wave 3 (W3 template/REVOLVER_HOME + regression) → v0.17.0 release.**
+**Progress (session 055):** formalization done (ADR-007 amendment + specs/DES/validation cascade + both reviewers) — committed `fcc79b8`. **Wave 0 (PR #229) + Wave 1 (PR #228 W1a, #232 W1b, #233 W1c) all merged** → the flagship cross-engine comparison (OE-weighted / Shinka-fixed / Shinka-ucb) + the correctness slice are on `develop`.
+
+**Progress (session 056):** **Wave 2 fully merged** — W2a (#235, per-LLM `reasoning_effort`, S17-24..28) + W2b (#237, B9 no-op `--config-override` warn + cross-engine ensemble doc, S17-29/30). Both reviewed (APPROVE, non-blocking suggestions applied). **Remaining: Wave 3 (W3 — S17-31/32/33: OE template `feature_dimensions/bins`, `REVOLVER_HOME`/`--global-db`, full regression sweep) → v0.17.0 release.**
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
@@ -549,13 +551,13 @@ Plan: [sprint-017.md](../sprints/sprint-017.md). Per [ADR-007 — v0.17 Amendmen
 | 341 | **A5/M4 — per-sampler `--selection-kwarg` routing** on Shinka; `cost_aware_coef` ucb/ucb1-only, default **0** (not Shinka's 0.5). (S17-21) | [x] | S17 — PR-W1b (#232) |
 | 342 | **M3 — OE `--llm-weight` override** in `_build_ensemble_llm_config()`; defensive `--selection` non-fixed rejection at the OE adapter level. (S17-22) | [x] | S17 — PR-W1c (#233) |
 | 343 | **L2 tests — selection-strategy validation + `--llm-weight`** across OE/Shinka-fixed/Shinka-bandit. (S17-23) | [x] | S17 — PR-W1b/c (#232/#233) |
-| 344 | **B4/M2 — `--reasoning-effort` on `llm add`/`llm update`**, threaded through `core/llm.py` → DB. (S17-24) | [ ] | S17 — PR-W2a |
-| 345 | **B4/M2 — `--reasoning-effort` on `ensemble add`** (per-member override, same precedence pattern as temperature/max_tokens). (S17-25) | [ ] | S17 — PR-W2a |
-| 346 | **OE — per-member `reasoning_effort` mapping** in `_build_ensemble_llm_config()` + single-LLM path. (S17-26) | [ ] | S17 — PR-W2a |
-| 347 | **Shinka — global `reasoning_efforts` pool + disagreement/local-inert warnings** (FACT A). (S17-27) | [ ] | S17 — PR-W2a |
-| 348 | **L2 tests — `reasoning_effort` projection** (OE per-member, Shinka global-pool, disagreement warning, local-inert warning). (S17-28) | [ ] | S17 — PR-W2a |
-| 349 | **OE ensemble dry-run example + doc section** — cross-engine comparison (OE-weighted vs Shinka-fixed vs Shinka-ucb). (S17-29) | [ ] | S17 — PR-W2b |
-| 350 | **B9 — warn on no-op `--config-override` key** (generalizes the A5 per-sampler routing check to the rest of `--config-override`). (S17-30) | [ ] | S17 — PR-W2b |
+| 344 | **B4/M2 — `--reasoning-effort` on `llm add`/`llm update`**, threaded through `core/llm.py` → DB. (S17-24) | [x] | S17 — PR-W2a (#235) |
+| 345 | **B4/M2 — `--reasoning-effort` on `ensemble add`** (per-member override, same precedence pattern as temperature/max_tokens). (S17-25) | [x] | S17 — PR-W2a (#235) |
+| 346 | **OE — per-member `reasoning_effort` mapping** in `_build_ensemble_llm_config()` + single-LLM path. (S17-26) | [x] | S17 — PR-W2a (#235) |
+| 347 | **Shinka — global `reasoning_efforts` pool + disagreement/local-inert warnings** (FACT A). (S17-27) | [x] | S17 — PR-W2a (#235) |
+| 348 | **L2 tests — `reasoning_effort` projection** (OE per-member, Shinka global-pool, disagreement warning, local-inert warning). (S17-28) | [x] | S17 — PR-W2a (#235) |
+| 349 | **OE ensemble dry-run example + doc section** — cross-engine comparison (OE-weighted vs Shinka-fixed vs Shinka-ucb). (S17-29) | [x] | S17 — PR-W2b (#237) |
+| 350 | **B9 — warn on no-op `--config-override` key** (generalizes the A5 per-sampler routing check to the rest of `--config-override`). (S17-30) | [x] | S17 — PR-W2b (#237) |
 | 351 | **A6/M5 — OE config template: surface `feature_dimensions`/`feature_bins`** (extends the #318 `database.*` realignment). (S17-31) | [ ] | S17 — PR-W3 |
 | 352 | **B6 — finish `REVOLVER_HOME`**: `config.py:68` consistent with `db.py`'s existing resolution; document; optional `--global-db` flag. (S17-32) | [ ] | S17 — PR-W3 |
 | 353 | **Full regression sweep + doc-edit follow-up issue** listing every FR/DES/validation edit from the research doc §4 (FR-RUN-049/050/051, FR-LLM-026, FR-EVL-021, ADR-007 D5/spec-run FR-RUN-046 supersession) for the spec-reviewer/validation-reviewer pass before the v0.17.0 tag. (S17-33) | [ ] | S17 — PR-W3 |
