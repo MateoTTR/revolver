@@ -27,6 +27,10 @@ class LLMEntry(BaseModel):
         max_tokens: Maximum tokens per LLM response (injected into OE config).
         timeout_s: Request timeout in seconds (injected into OE config).
         temperature: Sampling temperature (0.0-2.0) injected into OE config.
+        reasoning_effort: Reasoning-effort level (``min|low|medium|high|max``;
+            ``None`` = provider default). Per-member on OpenEvolve; merged into
+            a single global pool with a disagreement warning on ShinkaEvolve
+            (FR-LLM-026, ADR-007 Amendment A3.2).
         registered_at: Timestamp of registration.
     """
 
@@ -41,6 +45,7 @@ class LLMEntry(BaseModel):
     max_tokens: int | None = None
     timeout_s: int | None = None
     temperature: float | None = None
+    reasoning_effort: str | None = None
     registered_at: datetime
 
 
@@ -107,6 +112,9 @@ class EnsembleMember(BaseModel):
         weight: Sampling weight for this member (default 1.0).
         temperature: Optional per-member temperature override.
         max_tokens: Optional per-member max_tokens override.
+        reasoning_effort: Optional per-member reasoning-effort override
+            (``min|low|medium|high|max``). ``None`` falls back to the member
+            LLM's registry-level ``reasoning_effort`` (ADR-007 Amendment A3.2).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -115,6 +123,7 @@ class EnsembleMember(BaseModel):
     weight: float = 1.0
     temperature: float | None = None
     max_tokens: int | None = None
+    reasoning_effort: str | None = None
 
 
 class EnsembleEntry(BaseModel):

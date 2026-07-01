@@ -29,7 +29,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 13
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS llms (
     max_tokens      INTEGER,
     timeout_s       INTEGER,
     temperature     REAL,
+    reasoning_effort TEXT,
     registered_at   TEXT NOT NULL
 );
 
@@ -185,6 +186,7 @@ CREATE TABLE IF NOT EXISTS ensemble_members (
     weight              REAL NOT NULL DEFAULT 1.0,
     temperature_override REAL,
     max_tokens_override INTEGER,
+    reasoning_effort    TEXT,
     UNIQUE(ensemble_name, llm_name)
 );
 """
@@ -468,6 +470,14 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 11:
         _migrate_v10_to_v11(conn)
 
+    # Migration v12: Add reasoning_effort column to the llms table (global).
+    if current < 12:
+        _migrate_v11_to_v12(conn)
+
+    # Migration v13: Add reasoning_effort column to ensemble_members (global).
+    if current < 13:
+        _migrate_v12_to_v13(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -537,6 +547,12 @@ def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
     Project DB: adds ``llm_type`` and ``llm_snapshot`` columns to the ``runs`` table.
     """
     # Global DB: create ensemble tables (idempotent via IF NOT EXISTS).
+    #
+    # NB: this ensemble_members DDL is the migration-schema copy — it must
+    # stay in sync with the fresh-schema copy in _GLOBAL_SCHEMA_SQL. The
+    # reasoning_effort column below is the fresh-at-v8 form; on an existing
+    # v8..v12 DB the column is added by migration v13 (_migrate_v12_to_v13),
+    # whose ALTER is suppressed here if the column already exists.
     conn.executescript("""\
 CREATE TABLE IF NOT EXISTS ensembles (
     name        TEXT PRIMARY KEY,
@@ -550,6 +566,7 @@ CREATE TABLE IF NOT EXISTS ensemble_members (
     weight              REAL NOT NULL DEFAULT 1.0,
     temperature_override REAL,
     max_tokens_override INTEGER,
+    reasoning_effort    TEXT,
     UNIQUE(ensemble_name, llm_name)
 );
 """)
@@ -706,6 +723,66 @@ ALTER TABLE datasets_new RENAME TO datasets;
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
         (11, now),
+    )
+    conn.commit()
+
+
+def _migrate_v11_to_v12(conn: sqlite3.Connection) -> None:
+    """Migration v11->v12: Add reasoning_effort TEXT column to the llms table (global DB).
+
+    Adds a per-LLM ``reasoning_effort`` control (``min|low|medium|high|max``,
+    ``NULL`` = provider default) to the ``llms`` table (ADR-007 Amendment A3.2,
+    FR-LLM-026, DES-001 §5.11). A simple additive column — no table recreation
+    (mirrors the v4/v6 ``ALTER TABLE ADD COLUMN`` pattern). The ``ALTER`` is
+    executed with error suppression because SQLite does not support
+    ``ADD COLUMN IF NOT EXISTS``; existing rows are preserved with ``NULL``.
+
+    The ``llms`` table lives only in the global DB. Project databases have no
+    such table, so the migration is a no-op there and only the schema version
+    is bumped.
+    """
+    # Guard: only the global DB has the llms table.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='llms'")
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE llms ADD COLUMN reasoning_effort TEXT")
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (12, now),
+    )
+    conn.commit()
+
+
+def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
+    """Migration v12->v13: Add reasoning_effort TEXT column to ensemble_members (global DB).
+
+    Adds a per-member ``reasoning_effort`` override to the ``ensemble_members``
+    table (ADR-007 Amendment A3.2, DES-001 §5.12). ``NULL`` falls back to the
+    member LLM's registry-level ``reasoning_effort``. Kept **separate** from
+    migration v12 per the one-column-per-migration discipline (mirrors the
+    v10/v11 sequencing in Sprint 016). A simple additive column with error
+    suppression; existing rows are preserved with ``NULL``.
+
+    The ``ensemble_members`` table lives only in the global DB. Project
+    databases have no such table, so the migration is a no-op there and only
+    the schema version is bumped.
+    """
+    # Guard: only the global DB has the ensemble_members table.
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ensemble_members'"
+    )
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE ensemble_members ADD COLUMN reasoning_effort TEXT")
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (13, now),
     )
     conn.commit()
 
@@ -931,7 +1008,7 @@ def delete_problem_version(conn: sqlite3.Connection, tag: str) -> bool:
 
 _LLM_COLUMNS = (
     "name, provider, model, source, base_url, api_key_env, "
-    "max_tokens, timeout_s, temperature, registered_at"
+    "max_tokens, timeout_s, temperature, reasoning_effort, registered_at"
 )
 
 
@@ -947,7 +1024,8 @@ def _row_to_llm_entry(row: tuple[object, ...]) -> LLMEntry:
         max_tokens=row[6],  # type: ignore[arg-type]
         timeout_s=row[7],  # type: ignore[arg-type]
         temperature=row[8],  # type: ignore[arg-type]
-        registered_at=row[9],  # type: ignore[arg-type]
+        reasoning_effort=row[9],  # type: ignore[arg-type]
+        registered_at=row[10],  # type: ignore[arg-type]
     )
 
 
@@ -966,8 +1044,8 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
             """\
             INSERT INTO llms (
                 name, provider, model, source, base_url, api_key_env,
-                max_tokens, timeout_s, temperature, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                max_tokens, timeout_s, temperature, reasoning_effort, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.name,
@@ -979,6 +1057,7 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
                 entry.max_tokens,
                 entry.timeout_s,
                 entry.temperature,
+                entry.reasoning_effort,
                 entry.registered_at.isoformat(),
             ),
         )
@@ -1039,6 +1118,7 @@ def update_llm(
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
 ) -> int:
     """Update mutable fields of an LLM entry.
 
@@ -1052,6 +1132,8 @@ def update_llm(
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
         temperature: New value for sampling temperature (0.0-2.0).
+        reasoning_effort: New reasoning-effort level
+            (``min|low|medium|high|max``; FR-LLM-026, ADR-007 A3.2).
 
     Returns:
         The number of rows affected (0 if name not found, 1 if updated).
@@ -1065,6 +1147,8 @@ def update_llm(
         fields["timeout_s"] = timeout_s
     if temperature is not None:
         fields["temperature"] = temperature
+    if reasoning_effort is not None:
+        fields["reasoning_effort"] = reasoning_effort
 
     if not fields:
         return 0

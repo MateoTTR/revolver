@@ -55,6 +55,17 @@ class BackendCapabilities:
             ``"weighted"`` (OpenEvolve) or ``"bandit"`` (ShinkaEvolve).
         top_n_extraction: Reliable top-N program extraction
             (OpenEvolve: False, ShinkaEvolve: True).
+        selection_strategies: Accepted ``--selection`` values (ADR-007
+            Amendment A4). OpenEvolve exposes only ``("weighted",)`` (static
+            weighted sampling); ShinkaEvolve exposes
+            ``("fixed", "ucb", "ucb1", "thompson")``. ``--selection`` values
+            outside this tuple are rejected for the resolved backend rather
+            than silently dropped.
+        per_member_reasoning_effort: Whether the backend honors a distinct
+            ``reasoning_effort`` per ensemble member (ADR-007 Amendment A4).
+            OpenEvolve: True (per-model ``LLMModelConfig.reasoning_effort``);
+            ShinkaEvolve: False (single global ``reasoning_efforts`` pool —
+            per-member values are merged with a disagreement warning).
     """
 
     global_seed: bool
@@ -63,6 +74,8 @@ class BackendCapabilities:
     multi_language: bool
     ensemble_model: str
     top_n_extraction: bool
+    selection_strategies: tuple[str, ...]
+    per_member_reasoning_effort: bool
 
 
 @dataclass
@@ -108,6 +121,21 @@ class BackendRunSpec:
         parallel: CLI ``--parallel`` override for parallel evaluations.
         rewrite_mode: Full-rewrite mode shortcut (``--rewrite-mode``).
         ensemble: Ensemble entry for multi-model mode.
+        selection: Resolved ensemble selection strategy (ADR-007 Amendment
+            A2). ``None`` means the backend's implicit default (OpenEvolve:
+            static weighted; ShinkaEvolve: ``"fixed"`` — the S14 single-LLM
+            path). Validated against the resolved backend's
+            :attr:`BackendCapabilities.selection_strategies`.
+        selection_kwargs: Parsed per-sampler keyword arguments for the
+            adaptive selection strategy (e.g. ``{"cost_aware_coef": 0.0}``
+            for ``ucb``/``ucb1``). ``None`` when no ``--selection-kwarg`` was
+            supplied. Routed per-sampler by the backend (never spread as a
+            union — ADR-007 Amendment A5).
+        llm_weight_overrides: Per-run ``--llm-weight model=w`` overrides keyed
+            by LLM registry name (ADR-007 Amendment A1/M3). Applied on top of
+            registry weights. Honored on OpenEvolve (weighted) and on
+            ShinkaEvolve only under ``fixed``; warned-and-ignored under the
+            adaptive Shinka modes.
         conn: Global DB connection, required when *ensemble* is provided
             (member LLM resolution at config-build time).
         timeout_per_instance: Per-instance evaluation timeout in seconds.
@@ -126,6 +154,9 @@ class BackendRunSpec:
     parallel: int | None = None
     rewrite_mode: bool = False
     ensemble: EnsembleEntry | None = None
+    selection: str | None = None
+    selection_kwargs: dict[str, Any] | None = None
+    llm_weight_overrides: dict[str, float] | None = None
     conn: Any | None = None
     timeout_per_instance: float | None = None
     wrapper_path: Path | None = None

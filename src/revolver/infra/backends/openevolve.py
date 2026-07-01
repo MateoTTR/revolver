@@ -1335,6 +1335,8 @@ class OpenEvolveBackend:
             multi_language=False,
             ensemble_model="weighted",
             top_n_extraction=False,
+            selection_strategies=("weighted",),
+            per_member_reasoning_effort=True,
         )
 
     def is_available(self) -> tuple[bool, str | None]:

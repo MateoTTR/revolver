@@ -49,6 +49,21 @@ def test_llm_entry_minimal() -> None:
     assert entry.provider is None
     assert entry.base_url is None
     assert entry.api_key_env is None
+    assert entry.reasoning_effort is None
+
+
+@pytest.mark.unit
+def test_llm_entry_reasoning_effort_round_trips() -> None:
+    """LLMEntry accepts and round-trips the reasoning_effort field (FR-LLM-026)."""
+    entry = LLMEntry(
+        name="reasoner",
+        model="o3",
+        source="remote",
+        reasoning_effort="high",
+        registered_at=datetime.now(UTC),
+    )
+    assert entry.reasoning_effort == "high"
+    assert LLMEntry.model_validate(entry.model_dump()).reasoning_effort == "high"
 
 
 @pytest.mark.unit
@@ -258,6 +273,15 @@ def test_ensemble_member_defaults() -> None:
     assert member.weight == 1.0
     assert member.temperature is None
     assert member.max_tokens is None
+    assert member.reasoning_effort is None
+
+
+@pytest.mark.unit
+def test_ensemble_member_reasoning_effort_round_trips() -> None:
+    """EnsembleMember accepts a per-member reasoning_effort override (ADR-007 A3.2)."""
+    member = EnsembleMember(llm_name="pro", weight=0.7, reasoning_effort="low")
+    assert member.reasoning_effort == "low"
+    assert EnsembleMember.model_validate(member.model_dump()).reasoning_effort == "low"
 
 
 @pytest.mark.unit
