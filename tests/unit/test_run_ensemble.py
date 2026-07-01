@@ -77,6 +77,7 @@ def _register_ensemble(
             weight=m.get("weight", 1.0),
             temperature_override=m.get("temperature_override"),
             max_tokens_override=m.get("max_tokens_override"),
+            reasoning_effort_override=m.get("reasoning_effort_override"),
         )
 
 
@@ -269,6 +270,87 @@ class TestBuildConfigEnsemble:
         # llm-b: member override = 16384
         assert models[1]["max_tokens"] == 16384
         conn.close()
+
+    def test_oe_ensemble_reasoning_effort_per_member(self, tmp_path: Path) -> None:
+        """OE maps per-member reasoning_effort onto llm.models[] (S17-26, FACT A)."""
+        conn = _setup_global_db(tmp_path)
+
+        # llm-a carries a registry-level effort; llm-b has none.
+        _register_llm(
+            conn,
+            _make_llm(name="llm-a", model="model-a", reasoning_effort="low"),
+        )
+        _register_llm(conn, _make_llm(name="llm-b", model="model-b"))
+
+        ensemble = EnsembleEntry(
+            name="test-ensemble",
+            members=[
+                # No override → falls back to registry-level "low".
+                EnsembleMember(llm_name="llm-a", weight=0.5),
+                # Per-member override wins (member has none in registry).
+                EnsembleMember(llm_name="llm-b", weight=0.5, reasoning_effort="high"),
+            ],
+            created_at=datetime.now(UTC),
+        )
+
+        primary = _make_llm(name="llm-a", model="model-a", reasoning_effort="low")
+        config = build_config(
+            problem_config=None,
+            llm=primary,
+            ensemble=ensemble,
+            conn=conn,
+        )
+
+        models = config["llm"]["models"]
+        # llm-a: registry-level effort applied.
+        assert models[0]["reasoning_effort"] == "low"
+        # llm-b: per-member override applied.
+        assert models[1]["reasoning_effort"] == "high"
+        conn.close()
+
+    def test_oe_ensemble_reasoning_effort_absent_when_unset(self, tmp_path: Path) -> None:
+        """No reasoning_effort anywhere → key omitted from every model (zero-change)."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+        )
+
+        for model in config["llm"]["models"]:
+            assert "reasoning_effort" not in model
+        conn.close()
+
+    def test_oe_single_llm_reasoning_effort_mapped(self, tmp_path: Path) -> None:
+        """Single-LLM run maps spec.llm.reasoning_effort onto config['llm']."""
+        llm = _make_llm(
+            name="flash",
+            model="gemini-2.5-flash",
+            base_url="https://api.example.com/v1",
+            api_key_env="FLASH_KEY",
+            reasoning_effort="high",
+        )
+
+        config = build_config(problem_config=None, llm=llm)
+        assert config["llm"]["reasoning_effort"] == "high"
+
+    def test_oe_single_llm_reasoning_effort_absent_when_unset(self, tmp_path: Path) -> None:
+        """Single-LLM run without reasoning_effort omits the key (zero-change)."""
+        llm = _make_llm(name="flash", model="gemini-2.5-flash")
+        config = build_config(problem_config=None, llm=llm)
+        assert "reasoning_effort" not in config.get("llm", {})
+
+    def test_oe_single_llm_reasoning_effort_override_wins(self, tmp_path: Path) -> None:
+        """--config-override llm.reasoning_effort=… wins over the registry value."""
+        llm = _make_llm(name="flash", model="gemini-2.5-flash", reasoning_effort="high")
+        config = build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["llm.reasoning_effort=low"],
+        )
+        assert config["llm"]["reasoning_effort"] == "low"
 
     def test_single_llm_no_regression(self, tmp_path: Path) -> None:
         """build_config without ensemble still works as before."""

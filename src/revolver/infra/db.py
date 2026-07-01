@@ -1277,6 +1277,7 @@ def add_ensemble_member(
     weight: float,
     temperature_override: float | None = None,
     max_tokens_override: int | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> None:
     """Add a member LLM to an ensemble.
 
@@ -1287,6 +1288,9 @@ def add_ensemble_member(
         weight: Sampling weight for this member.
         temperature_override: Optional per-member temperature override.
         max_tokens_override: Optional per-member max_tokens override.
+        reasoning_effort_override: Optional per-member reasoning-effort override
+            (``min|low|medium|high|max``). Kept separate from the member LLM's
+            registry-level ``reasoning_effort`` (FR-LLM-026, ADR-007 A3.2).
 
     Raises:
         DuplicateNameError: If this LLM is already a member of the ensemble.
@@ -1295,10 +1299,18 @@ def add_ensemble_member(
         conn.execute(
             """\
             INSERT INTO ensemble_members
-                (ensemble_name, llm_name, weight, temperature_override, max_tokens_override)
-            VALUES (?, ?, ?, ?, ?)
+                (ensemble_name, llm_name, weight, temperature_override,
+                 max_tokens_override, reasoning_effort)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (ensemble_name, llm_name, weight, temperature_override, max_tokens_override),
+            (
+                ensemble_name,
+                llm_name,
+                weight,
+                temperature_override,
+                max_tokens_override,
+                reasoning_effort_override,
+            ),
         )
         conn.commit()
     except sqlite3.IntegrityError as exc:
@@ -1319,12 +1331,14 @@ def get_ensemble_members(
 
     Returns:
         A list of dicts with ``llm_name``, ``weight``, ``temperature_override``,
-        and ``max_tokens_override`` keys, ordered by ``llm_name``.
+        ``max_tokens_override``, and ``reasoning_effort`` keys, ordered by
+        ``llm_name``.
     """
     conn.row_factory = sqlite3.Row
     cursor = conn.execute(
         """\
-        SELECT llm_name, weight, temperature_override, max_tokens_override
+        SELECT llm_name, weight, temperature_override, max_tokens_override,
+               reasoning_effort
         FROM ensemble_members
         WHERE ensemble_name = ?
         ORDER BY llm_name

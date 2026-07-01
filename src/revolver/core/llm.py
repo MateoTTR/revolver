@@ -43,6 +43,24 @@ _PROVIDER_BASE_URLS: dict[str, str] = {
 
 _KNOWN_PROVIDERS = {"anthropic", "openai", "google", "openai-compat"}
 
+# Valid reasoning-effort levels (FR-LLM-026, ADR-007 Amendment A3.2). Ordered
+# lowest→highest so callers that need the ranking (e.g. the ShinkaEvolve
+# disagreement policy — pick the *highest* effort) can index into it.
+_REASONING_EFFORT_LEVELS: tuple[str, ...] = ("min", "low", "medium", "high", "max")
+
+
+def _validate_reasoning_effort(reasoning_effort: str | None) -> None:
+    """Raise :class:`ValidationError` if *reasoning_effort* is not a valid level.
+
+    ``None`` is always valid (means "provider default"). Any non-``None`` value
+    must be one of :data:`_REASONING_EFFORT_LEVELS`.
+    """
+    if reasoning_effort is not None and reasoning_effort not in _REASONING_EFFORT_LEVELS:
+        raise ValidationError(
+            f"--reasoning-effort must be one of "
+            f"{', '.join(_REASONING_EFFORT_LEVELS)} (got {reasoning_effort!r})"
+        )
+
 
 # ── resolve_llm_or_ensemble (S11-06) ──────────────────────────────────────
 
@@ -90,6 +108,9 @@ def resolve_llm_or_ensemble(
                     if m.get("max_tokens_override") is not None
                     else None
                 ),
+                reasoning_effort=(
+                    str(m["reasoning_effort"]) if m.get("reasoning_effort") is not None else None
+                ),
             )
             for m in member_rows
         ]
@@ -129,6 +150,7 @@ def register_llm(
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
     client: OllamaClient | None = None,
 ) -> LLMEntry:
     """Register a new LLM in the global database.
@@ -152,6 +174,9 @@ def register_llm(
         max_tokens: Maximum tokens per LLM response (injected into OE config).
         timeout_s: Request timeout in seconds (injected into OE config).
         temperature: Sampling temperature (0.0-2.0) injected into OE config.
+        reasoning_effort: Reasoning-effort level (``min|low|medium|high|max``;
+            ``None`` = provider default). Per-member on OpenEvolve; merged into
+            a single global pool on ShinkaEvolve (FR-LLM-026, ADR-007 A3.2).
         client: OllamaClient instance (local only; created if not provided).
 
     Returns:
@@ -169,6 +194,7 @@ def register_llm(
         raise ValidationError("--timeout must be a positive integer")
     if temperature is not None and (temperature < 0.0 or temperature > 2.0):
         raise ValidationError("--temperature must be between 0.0 and 2.0")
+    _validate_reasoning_effort(reasoning_effort)
 
     # Check uniqueness
     existing = db.get_llm(conn, name)
@@ -238,6 +264,7 @@ def register_llm(
         max_tokens=max_tokens,
         timeout_s=timeout_s,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
         registered_at=datetime.now(UTC),
     )
 
@@ -256,6 +283,7 @@ def update_llm(
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
 ) -> LLMEntry:
     """Update mutable fields of a registered LLM.
 
@@ -268,6 +296,8 @@ def update_llm(
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
         temperature: New value for sampling temperature (0.0-2.0).
+        reasoning_effort: New reasoning-effort level
+            (``min|low|medium|high|max``; FR-LLM-026, ADR-007 A3.2).
 
     Returns:
         The updated :class:`LLMEntry`.
@@ -287,6 +317,7 @@ def update_llm(
         raise ValidationError("--timeout must be a positive integer")
     if temperature is not None and (temperature < 0.0 or temperature > 2.0):
         raise ValidationError("--temperature must be between 0.0 and 2.0")
+    _validate_reasoning_effort(reasoning_effort)
 
     row_count = db.update_llm(
         conn,
@@ -295,6 +326,7 @@ def update_llm(
         max_tokens=max_tokens,
         timeout_s=timeout_s,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
     )
 
     if row_count == 0:
@@ -635,7 +667,8 @@ def _build_ensemble_entry(
     """Construct an EnsembleEntry from raw DB rows.
 
     Maps DB column names (``temperature_override``, ``max_tokens_override``)
-    to Pydantic field names (``temperature``, ``max_tokens``).
+    to Pydantic field names (``temperature``, ``max_tokens``). The
+    ``reasoning_effort`` column keeps its name across DB and model.
     """
     members = [
         EnsembleMember(
@@ -650,6 +683,9 @@ def _build_ensemble_entry(
                 int(row["max_tokens_override"])  # type: ignore[call-overload]
                 if row["max_tokens_override"] is not None
                 else None
+            ),
+            reasoning_effort=(
+                str(row["reasoning_effort"]) if row.get("reasoning_effort") is not None else None
             ),
         )
         for row in member_rows
@@ -687,6 +723,7 @@ def add_ensemble_member(
     *,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> None:
     """Add a member LLM to an ensemble.
 
@@ -700,11 +737,18 @@ def add_ensemble_member(
         conn: Global database connection.
         temperature: Optional per-member temperature override.
         max_tokens: Optional per-member max_tokens override.
+        reasoning_effort: Optional per-member reasoning-effort override
+            (``min|low|medium|high|max``). When set, it wins over the member
+            LLM's registry-level ``reasoning_effort`` (same precedence as
+            ``temperature``/``max_tokens``; FR-LLM-026, ADR-007 A3.2).
 
     Raises:
         RevolverError: If the ensemble or LLM is not found.
+        ValidationError: If ``reasoning_effort`` is not a valid level.
         DuplicateNameError: If the LLM is already a member.
     """
+    _validate_reasoning_effort(reasoning_effort)
+
     # Validate ensemble exists
     ensemble_row = db.get_ensemble(conn, ensemble_name)
     if ensemble_row is None:
@@ -722,6 +766,7 @@ def add_ensemble_member(
         weight,
         temperature_override=temperature,
         max_tokens_override=max_tokens,
+        reasoning_effort_override=reasoning_effort,
     )
 
     # Check weight sum and warn if not close to 1.0
