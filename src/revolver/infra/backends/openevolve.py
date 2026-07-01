@@ -38,6 +38,7 @@ from typing import Any
 import yaml
 
 from revolver.core.exceptions import (
+    CheckpointRecoveryError,
     EvaluatorLoadError,
     ExternalError,
     RevolverError,
@@ -47,7 +48,9 @@ from revolver.infra.backends.base import (
     BackendCapabilities,
     BackendRunResult,
     BackendRunSpec,
+    ChildProcessReaperMixin,
     ProgressInfo,
+    RecoveredProgram,
 )
 from revolver.models.llm import EnsembleEntry, LLMEntry
 from revolver.models.run import ResolvedConfig, TokenUsage
@@ -240,7 +243,7 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
 # ── OpenEvolve runner ─────────────────────────────────────────────────────────
 
 
-class OpenEvolveRunner:
+class OpenEvolveRunner(ChildProcessReaperMixin):
     """Wrapper around the OpenEvolve controller for Revolver integration.
 
     Uses conditional import to avoid hard dependency on OpenEvolve
@@ -326,6 +329,12 @@ class OpenEvolveRunner:
         if self._controller is None:
             self._init_controller()
 
+        # Snapshot the process's child PIDs BEFORE the run so the post-run
+        # backstop only reaps children the run itself spawned (B2 / S17-03,
+        # symmetric to the Shinka teardown #314). Children predating the run
+        # are excluded.
+        pre_run_children = self._current_child_pids()
+
         # Ensure unbuffered output for real-time progress (S8a-09); this
         # affects any child processes OpenEvolve may spawn. Scoped through
         # revolver_env so the caller's PYTHONUNBUFFERED is restored on exit
@@ -347,6 +356,46 @@ class OpenEvolveRunner:
                 )
             except Exception as exc:
                 raise ExternalError(f"OpenEvolve run failed: {exc}") from exc
+            finally:
+                # Orchestrator-owned teardown (B2 / S17-05, symmetric to the
+                # Shinka path #314). OpenEvolve's own ``_cleanup`` normally
+                # stops the ``ProcessParallelController`` and joins its
+                # ``ProcessPoolExecutor``, yet on an abnormal exit a worker /
+                # evaluator child can survive and pin the CLI at ~100% CPU.
+                # This teardown is purely defensive: idempotent with the
+                # engine's cleanup, never raises, and only touches the OE path.
+                # By the time ``asyncio.run`` returns the best program is
+                # already persisted in the checkpoint, so neither the resource
+                # shutdown nor the child reap can truncate the result.
+                self._shutdown_runner(self._controller)
+                self._reap_run_children(pre_run_children)
+
+    @staticmethod
+    def _shutdown_runner(controller: Any) -> None:
+        """Defensively tear down the OE controller's reachable process pool.
+
+        OpenEvolve drives evaluations through a
+        ``ProcessParallelController`` whose ``executor`` is a
+        ``ProcessPoolExecutor``. On a clean run the controller's own cleanup
+        already stops it, so this is a no-op backstop for the case where the
+        controller returns with the pool still alive.
+
+        ``shutdown(wait=False)`` is used **deliberately**: calling
+        ``ProcessPoolExecutor.shutdown(wait=True)`` here would block the
+        orchestrator on a wedged worker — the exact #159 hang. Every step is
+        ``getattr``-guarded and suppressed so a partially-constructed
+        controller (or a future upstream rename) can never turn teardown into
+        a crash.
+        """
+        if controller is None:
+            return
+
+        parallel_controller = getattr(controller, "parallel_controller", None)
+        executor = getattr(parallel_controller, "executor", None)
+        executor_shutdown = getattr(executor, "shutdown", None)
+        if callable(executor_shutdown):
+            with contextlib.suppress(Exception):
+                executor_shutdown(wait=False)
 
 
 # ── Config builder (DES-005 §4.2) ────────────────────────────────────────────
@@ -1005,6 +1054,84 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
         return None
 
 
+def recover_best_from_checkpoint(run_dir: Path) -> RecoveredProgram:
+    """Recover the best program from a run's latest OpenEvolve checkpoint (B7).
+
+    Locates the latest ``oe-output/checkpoints/checkpoint_N/`` in *run_dir*,
+    reads ``best_program_id`` from ``metadata.json``, and loads the program's
+    ``code`` (and score) from ``programs/{id}.json`` — the state that survives
+    a killed/interrupted run before it reaches the normal ``programs/``
+    extraction path (FR-RUN-051, DES-005 §7.2).
+
+    Args:
+        run_dir: Directory of the interrupted/failed run
+            (``.revolver/runs/<run_id>``).
+
+    Returns:
+        The recovered best :class:`RecoveredProgram`.
+
+    Raises:
+        CheckpointRecoveryError: No checkpoint exists yet (run too short), or
+            the checkpoint / best program is missing or unreadable.
+    """
+    checkpoint = find_latest_checkpoint(run_dir)
+    if checkpoint is None:
+        raise CheckpointRecoveryError(
+            f"No checkpoint found for run '{run_dir.name}'. The run may have "
+            "been interrupted before its first checkpoint was written."
+        )
+
+    metadata_path = checkpoint / "metadata.json"
+    try:
+        metadata = _json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CheckpointRecoveryError(
+            f"Failed to read checkpoint metadata at {metadata_path}: {exc}"
+        ) from exc
+
+    best_id = metadata.get("best_program_id")
+    if not best_id:
+        raise CheckpointRecoveryError(
+            f"Checkpoint '{checkpoint.name}' has no tracked best program "
+            "(no 'best_program_id' in metadata)."
+        )
+
+    program_path = checkpoint / "programs" / f"{best_id}.json"
+    try:
+        program_data = _json.loads(program_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CheckpointRecoveryError(
+            f"Best program '{best_id}' not found or unreadable in checkpoint "
+            f"'{checkpoint.name}': {exc}"
+        ) from exc
+
+    code = program_data.get("code")
+    if not isinstance(code, str) or not code:
+        raise CheckpointRecoveryError(
+            f"Best program '{best_id}' in checkpoint '{checkpoint.name}' has "
+            "no usable code."
+        )
+
+    # Score: sum of numeric metric values (consistent with parse_population
+    # and read_checkpoint_best_score).
+    metrics = program_data.get("metrics", {})
+    score: float | None = None
+    if isinstance(metrics, dict):
+        numeric_vals = [
+            v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+        ]
+        if numeric_vals:
+            score = float(sum(numeric_vals))
+
+    language = program_data.get("language")
+    return RecoveredProgram(
+        program_id=str(best_id),
+        code=code,
+        score=score,
+        language=language if isinstance(language, str) and language else "python",
+    )
+
+
 def count_valid_programs(checkpoint_dir: Path) -> int | None:
     """Count valid program entries in an OpenEvolve checkpoint database.
 
@@ -1130,16 +1257,28 @@ def evaluate(program_path: str) -> dict[str, float]:
     if not all_metrics:
         return {{"combined_score": 0.0}}
 
-    combined = statistics.mean(m["combined_score"] for m in all_metrics)
+    # Numeric guard (B1 / FR-EVL-021): a user evaluate_instance may emit
+    # non-numeric fields (e.g. {{"error": "boom"}}) alongside numeric metrics.
+    # Aggregation must skip those rather than crash statistics.mean on a str,
+    # so filter to real numbers (bool is an int subclass -> exclude it).
+    def _is_number(x) -> bool:
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    combined_vals = [
+        m["combined_score"]
+        for m in all_metrics
+        if "combined_score" in m and _is_number(m["combined_score"])
+    ]
+    combined = statistics.mean(combined_vals) if combined_vals else 0.0
     result: dict[str, float] = {{"combined_score": combined}}
 
-    # Include other metrics as aggregated means
+    # Include other metrics as aggregated means, dropping non-numeric values.
     all_keys: set[str] = set()
     for m in all_metrics:
         all_keys.update(m.keys())
     for key in sorted(all_keys):
         if key != "combined_score":
-            vals = [m[key] for m in all_metrics if key in m]
+            vals = [m[key] for m in all_metrics if key in m and _is_number(m[key])]
             if vals:
                 result[key] = statistics.mean(vals)
 
@@ -1470,6 +1609,17 @@ class OpenEvolveBackend:
         protocol's default no-op behaviour.
         """
         return None
+
+    def recover_best_from_checkpoint(self, run_dir: Path) -> RecoveredProgram:
+        """Recover the best program from the run's latest checkpoint (B7).
+
+        Delegates to the module-level :func:`recover_best_from_checkpoint`,
+        which reads ``oe-output/checkpoints/checkpoint_N/`` (FR-RUN-051,
+        DES-005 §7.2). Raises
+        :class:`~revolver.core.exceptions.CheckpointRecoveryError` when no
+        usable checkpoint exists yet.
+        """
+        return recover_best_from_checkpoint(run_dir)
 
     def resume(
         self,

@@ -639,12 +639,8 @@ def test_extract_accepts_completed_with_errors(tmp_project: Path) -> None:
     assert "sol-" in output
 
 
-@pytest.mark.integration
-def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
-    """``solution extract`` rejects a run with status='interrupted'.
-
-    Validates: F3 fix — interrupted runs should NOT be extractable.
-    """
+def _seed_interrupted_run(tmp_project: Path, run_id: str) -> Path:
+    """Seed an interrupted OpenEvolve run (with rank-1 program) and return its dir."""
     _create_problem_version_in_db(tmp_project, "v1.0")
     _create_dataset_in_db(tmp_project, "train-small")
 
@@ -653,7 +649,7 @@ def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
     try:
         insert_run(
             conn,
-            run_id="run-interrupted",
+            run_id=run_id,
             problem_version="v1.0",
             llm="test-llm",
             dataset="train-small",
@@ -663,13 +659,51 @@ def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
             llm_model="gpt-4",
             created_at=datetime.now(UTC),
             status="interrupted",
+            backend="openevolve",
         )
     finally:
         conn.close()
 
-    programs_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / "run-interrupted" / "programs"
+    run_dir = tmp_project / REVOLVER_DIR / RUNS_DIR / run_id
+    programs_dir = run_dir / "programs"
     programs_dir.mkdir(parents=True, exist_ok=True)
     (programs_dir / "rank-1.py").write_text("def solve(): pass\n", encoding="utf-8")
+    return run_dir
+
+
+def _write_oe_checkpoint(run_dir: Path, best_code: str, best_score: float) -> None:
+    """Write a minimal OpenEvolve checkpoint with a tracked best program."""
+    checkpoint = run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    programs = checkpoint / "programs"
+    programs.mkdir(parents=True, exist_ok=True)
+    best_id = "prog-best-123"
+    (checkpoint / "metadata.json").write_text(
+        json.dumps({"best_program_id": best_id}), encoding="utf-8"
+    )
+    (programs / f"{best_id}.json").write_text(
+        json.dumps(
+            {
+                "id": best_id,
+                "code": best_code,
+                "language": "python",
+                "metrics": {"combined_score": best_score},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.integration
+def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
+    """``solution extract`` (default) rejects a run with status='interrupted'.
+
+    v0.17 policy change (B7 / S17-09): this consciously revises the original
+    F3 decision. The **default** behaviour is unchanged — interrupted runs are
+    still NOT extractable without the explicit ``--from-checkpoint`` flag (see
+    ``test_extract_from_checkpoint_recovers_interrupted_run`` for the opt-in
+    recovery path). This test pins the default-rejects contract.
+    """
+    _seed_interrupted_run(tmp_project, "run-interrupted")
 
     result = _invoke_with_cwd(
         ["solution", "extract", "--run", "run-interrupted"],
@@ -678,6 +712,63 @@ def test_extract_rejects_interrupted_run(tmp_project: Path) -> None:
     assert result.exit_code == 1  # type: ignore[union-attr]
     output = _get_all_output(result)
     assert "not completed" in output.lower()
+
+
+@pytest.mark.integration
+def test_extract_from_checkpoint_recovers_interrupted_run(tmp_project: Path) -> None:
+    """``solution extract --from-checkpoint`` recovers an interrupted run (B7).
+
+    The flag path succeeds where the default rejects: the best program is
+    recovered from the latest OpenEvolve checkpoint, materialized to the
+    run's ``programs/rank-1.py``, and promoted to a solution carrying the
+    recovered ``combined_score``.
+    """
+    run_dir = _seed_interrupted_run(tmp_project, "run-recover")
+    recovered_code = "def solve():\n    return 42  # recovered from checkpoint\n"
+    _write_oe_checkpoint(run_dir, recovered_code, best_score=0.87)
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-recover", "--from-checkpoint"],
+        tmp_project,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "sol-" in output
+
+    # The recovered code was materialized to rank-1.py.
+    rank1 = run_dir / "programs" / "rank-1.py"
+    assert rank1.read_text(encoding="utf-8") == recovered_code
+
+    # The recovered score is persisted on the solution.
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT best_score FROM solutions WHERE run_id = ?", ("run-recover",)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == pytest.approx(0.87)
+
+
+@pytest.mark.integration
+def test_extract_from_checkpoint_no_checkpoint_yet_errors(tmp_project: Path) -> None:
+    """``--from-checkpoint`` errors cleanly when no checkpoint exists yet (B7).
+
+    A run interrupted before its first checkpoint has no state to recover; the
+    command must fail with a clear, non-zero-exit error rather than crash.
+    """
+    _seed_interrupted_run(tmp_project, "run-tooshort")
+    # No checkpoint written (run too short).
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-tooshort", "--from-checkpoint"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "no checkpoint" in output.lower()
 
 
 @pytest.mark.integration
