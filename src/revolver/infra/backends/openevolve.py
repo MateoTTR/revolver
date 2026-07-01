@@ -240,6 +240,53 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
         return []
 
 
+def _warn_noop_config_overrides(
+    config_overrides: list[str] | None,
+    parsed_values: dict[str, Any],
+) -> None:
+    """Warn on ``--config-override`` keys that land on no OpenEvolve field (B9).
+
+    ``build_config`` writes every override into the merged config via
+    :func:`_set_nested` regardless of whether the dotted key names a real
+    OpenEvolve ``Config`` field, so a typo (``llm.nonexistent_key=1``) is
+    silently set-and-ignored by the engine. This surfaces the no-op instead
+    of swallowing it (spec §4.5, ADR-007 A5) — the ``--config-override``
+    escape hatch must never quietly do nothing.
+
+    Detection reuses the strict-dacite machinery of :func:`validate_oe_config`
+    (no hand-rolled schema): each override is validated **in isolation** as a
+    minimal ``{path: value}`` config. Per-key isolation is required because a
+    single dacite parse only reports the first dataclass it rejects, so a
+    whole-config pass would miss unknown keys in later sections. Revolver-owned
+    keys/sections (``evaluation:``, ``initial_program``, ``num_generations`` —
+    :data:`REVOLVER_KEYS` / :data:`REVOLVER_SECTIONS`, stripped before the
+    strict parse) never warn, so this cannot regress those tolerated paths.
+
+    Degrades to silence when OpenEvolve/dacite are unavailable (validation
+    returns ``[]``), mirroring ``problem version create``.
+
+    Args:
+        config_overrides: The raw ``key=value`` override strings.
+        parsed_values: Map of dotted override key → already-parsed value, so
+            the probe carries the real value (a type mismatch on a *recognized*
+            key must not masquerade as an unknown key).
+    """
+    for override in config_overrides or []:
+        if "=" not in override:
+            continue
+        key = override.split("=", 1)[0].strip()
+        probe: dict[str, Any] = {}
+        _set_nested(probe, key, parsed_values.get(key))
+        # Only "unknown key" findings are no-ops. Deprecation notices (e.g.
+        # ``num_generations``, which build_config remaps to ``max_iterations``)
+        # are recognized keys and must NOT warn as no-ops.
+        if any("Unknown OE config key" in msg for msg in validate_oe_config(probe)):
+            sys.stderr.write(
+                f"Warning: --config-override '{key}' matches no field in the "
+                f"OpenEvolve config schema; it will have no effect.\n"
+            )
+
+
 # ── OpenEvolve runner ─────────────────────────────────────────────────────────
 
 
@@ -729,13 +776,18 @@ def build_config(
 
     # 5. Config overrides (key=value pairs, dotted keys supported)
     if config_overrides:
+        parsed_overrides: dict[str, Any] = {}
         for override in config_overrides:
             if "=" not in override:
                 raise ValidationError(
                     f"Malformed config override (expected key=value): {override!r}"
                 )
             key, value = override.split("=", 1)
-            _set_nested(config, key.strip(), _parse_value(value.strip()))
+            parsed = _parse_value(value.strip())
+            parsed_overrides[key.strip()] = parsed
+            _set_nested(config, key.strip(), parsed)
+        # B9 (S17-30): warn on override keys that land on no OpenEvolve field.
+        _warn_noop_config_overrides(config_overrides, parsed_overrides)
 
     # 5b. Guard: ensure checkpoint_interval <= iterations for resume capability
     effective_interval = config.get("checkpoint_interval", 100)  # OE default

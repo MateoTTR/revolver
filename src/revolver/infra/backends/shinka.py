@@ -738,6 +738,48 @@ class ShinkaBackend(ChildProcessReaperMixin):
                 )
         return warnings
 
+    def _warn_noop_config_overrides(self, config_overrides: list[str] | None) -> None:
+        """Warn on ``--config-override`` keys that land on no Shinka field (B9).
+
+        ``build_config`` writes every override via :func:`_set_nested`
+        regardless of whether the dotted key names a real section/field, so a
+        typo (``evo_config.nonexistent_key=1``) or an unknown section
+        (``bogus.x=1``) is silently set-and-ignored (the engine projection in
+        ``_dataclass_kwargs`` drops per-section unknowns at *run* time, but a
+        ``--dry-run`` never reaches it, and an unknown top-level section is
+        dropped by neither). This surfaces the no-op at build time on both
+        paths (spec §4.5, ADR-007 A5).
+
+        Detection reuses :meth:`validate_config` (no hand-rolled schema): each
+        override is validated **in isolation** as a minimal probe built from
+        its first two dotted segments (``section`` + first field). Only the top
+        two segments are probed so a deeper key under a dict-valued field
+        (``evo_config.llm_kwargs.max_tokens``) is not mistaken for a no-op.
+        Revolver-owned sections (:data:`_REVOLVER_SECTIONS`:
+        ``evaluation``/``output_dir``/``llm_env``) are tolerated by
+        ``validate_config`` and never warn. Degrades to silence when shinka is
+        not installed (``validate_config`` returns ``[]``).
+
+        This intentionally overlaps ``_dataclass_kwargs`` for the
+        unknown-per-section-key case on a real run (build-time + run-time
+        belt-and-braces); a ``--dry-run`` warns exactly once.
+        """
+        for override in config_overrides or []:
+            if "=" not in override:
+                continue
+            key = override.split("=", 1)[0].strip()
+            parts = key.split(".")
+            probe: dict[str, Any] = {}
+            # Probe only the top two segments: section + first field. A deeper
+            # path lands inside a dict-valued dataclass field (validated as a
+            # whole), so its leaf is not a schema field and must not warn.
+            _set_nested(probe, ".".join(parts[:2]), {} if len(parts) > 2 else None)
+            if any("Unknown" in msg for msg in self.validate_config(probe)):
+                sys.stderr.write(
+                    f"Warning: --config-override '{key}' matches no field in the "
+                    f"shinka config schema; it will have no effect.\n"
+                )
+
     @staticmethod
     def _import_section_dataclasses() -> dict[str, Any] | None:
         """Import the Shinka config dataclasses; ``None`` when unavailable."""
@@ -914,6 +956,9 @@ class ShinkaBackend(ChildProcessReaperMixin):
                 )
             key, value = override.split("=", 1)
             _set_nested(config, key.strip(), _parse_value(value.strip()))
+
+        # B9 (S17-30): warn on override keys that land on no Shinka field.
+        self._warn_noop_config_overrides(spec.config_overrides)
 
         return config
 
