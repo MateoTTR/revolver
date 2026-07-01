@@ -396,6 +396,141 @@ def test_run_dry_run(project_with_prereqs: dict[str, Path]) -> None:
         conn.close()
 
 
+# ── Selection strategy validation + --llm-weight on OpenEvolve (S17) ────────
+
+
+def _register_oe_ensemble(global_db_path: Path, weights: tuple[float, float]) -> None:
+    """Register a 2-member OE ensemble (``gpt4o`` + ``claude``) with *weights*.
+
+    ``test-llm`` already exists from the fixture (model ``gpt-4``); this adds a
+    second distinct-model LLM so the two members map to distinct
+    ``llm.models[].name`` entries.
+    """
+    _register_llm(global_db_path, name="claude", model="claude-3-5-sonnet")
+    _register_ensemble(
+        global_db_path,
+        "oe-ensemble",
+        [
+            {"llm_name": "test-llm", "weight": weights[0]},
+            {"llm_name": "claude", "weight": weights[1]},
+        ],
+    )
+
+
+@pytest.mark.integration
+def test_run_selection_ucb_rejected_on_oe(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """--selection ucb on OpenEvolve exits 1 naming weighted (S17-18/23, A2/A4)."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    _register_oe_ensemble(global_db_path, (0.8, 0.2))
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "oe-ensemble",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "openevolve",
+            "--selection",
+            "ucb",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "ucb" in output.lower()
+    # The error names the OE-supported strategy so the user knows what to use.
+    assert "weighted" in output.lower()
+    assert "openevolve" in output.lower()
+
+
+@pytest.mark.integration
+def test_run_selection_fixed_accepted_on_oe(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """--selection fixed is accepted on OpenEvolve (implicit weighted mode)."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    _register_oe_ensemble(global_db_path, (0.8, 0.2))
+
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "oe-ensemble",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "openevolve",
+            "--selection",
+            "fixed",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+
+@pytest.mark.integration
+def test_run_llm_weight_overrides_oe_ensemble(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """--llm-weight patches llm.models[].weight, not the registry weight (S17-22/23)."""
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    # Registry weights: test-llm=0.5, claude=0.5.
+    _register_oe_ensemble(global_db_path, (0.5, 0.5))
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "oe-ensemble",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "openevolve",
+            "--llm-weight",
+            "test-llm=0.9",
+            "--llm-weight",
+            "claude=0.1",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    resolved = data["resolved_config"]
+    models = resolved["llm_models"]
+    by_name = {m["name"]: m["weight"] for m in models}
+    # Overrides win over the registry 0.5/0.5. Member LLM models: test-llm →
+    # gpt-4 (fixture default), claude → claude-3-5-sonnet.
+    assert by_name["gpt-4"] == 0.9
+    assert by_name["claude-3-5-sonnet"] == 0.1
+
+
 # ── Test 4: run — unknown LLM name → exit code 1 (FR-RUN-001) ──────────────
 
 

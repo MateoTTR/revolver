@@ -97,6 +97,38 @@ def run_launch(
             ),
         ),
     ] = False,
+    selection: Annotated[
+        str | None,
+        typer.Option(
+            "--selection",
+            help=(
+                "Ensemble selection strategy: fixed | ucb | ucb1 | thompson "
+                "(capability-checked per backend; OpenEvolve accepts weighted/fixed "
+                "only, ShinkaEvolve all four — ADR-007 A2/A4)."
+            ),
+        ),
+    ] = None,
+    selection_kwarg: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--selection-kwarg",
+            help=(
+                "Per-sampler keyword argument (key=value). Repeatable. Routed to "
+                "the selected sampler (e.g. cost_aware_coef=0.0 for ucb/ucb1)."
+            ),
+        ),
+    ] = None,
+    llm_weight: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--llm-weight",
+            help=(
+                "Per-run ensemble weight override (model=weight). Repeatable. "
+                "Honored on OpenEvolve and ShinkaEvolve-fixed; ignored (with a "
+                "warning) under ShinkaEvolve adaptive modes."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Launch an evolution run on the selected backend."""
     # If a subcommand was invoked, skip the launch logic
@@ -132,6 +164,9 @@ def run_launch(
             parallel=parallel,
             rewrite_mode=rewrite_mode,
             backend=backend,
+            selection=selection,
+            selection_kwargs=selection_kwarg or None,
+            llm_weight_overrides=llm_weight or None,
         )
 
         if not dry_run:
@@ -372,6 +407,27 @@ def run_resume(
             ),
         ),
     ] = False,
+    selection: Annotated[
+        str | None,
+        typer.Option(
+            "--selection",
+            help="Override the ensemble selection strategy for the resumed run.",
+        ),
+    ] = None,
+    selection_kwarg: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--selection-kwarg",
+            help="Per-sampler keyword argument (key=value). Repeatable.",
+        ),
+    ] = None,
+    llm_weight: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--llm-weight",
+            help="Per-run ensemble weight override (model=weight). Repeatable.",
+        ),
+    ] = None,
 ) -> None:
     """Resume an interrupted or completed run from its checkpoint.
 
@@ -406,6 +462,9 @@ def run_resume(
             llm_name=llm,
             config_overrides=config_override or None,
             rewrite_mode=rewrite_mode,
+            selection=selection,
+            selection_kwargs=selection_kwarg or None,
+            llm_weight_overrides=llm_weight or None,
             quiet=(json_mode or quiet),
         )
 

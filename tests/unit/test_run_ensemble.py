@@ -296,6 +296,91 @@ class TestBuildConfigEnsemble:
         assert "models" not in config["llm"]
         assert config["max_iterations"] == 10
 
+    def test_llm_weight_override_wins(self, tmp_path: Path) -> None:
+        """--llm-weight overrides the registry member weight (S17-22, A1/M3)."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        # Registry weights are flash-lite=0.8, pro=0.2; override both.
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+            llm_weight_overrides={"flash-lite": 0.9, "pro": 0.1},
+        )
+
+        models = config["llm"]["models"]
+        assert models[0]["name"] == "gemini-2.5-flash-lite"
+        assert models[0]["weight"] == 0.9  # overridden (registry was 0.8)
+        assert models[1]["name"] == "gemini-2.5-pro"
+        assert models[1]["weight"] == 0.1  # overridden (registry was 0.2)
+        conn.close()
+
+    def test_llm_weight_partial_override_keeps_registry(self, tmp_path: Path) -> None:
+        """A member absent from --llm-weight keeps its registry weight."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        # Only override flash-lite; pro must keep its registry weight (0.2).
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+            llm_weight_overrides={"flash-lite": 0.5},
+        )
+
+        models = config["llm"]["models"]
+        assert models[0]["weight"] == 0.5  # overridden
+        assert models[1]["weight"] == 0.2  # registry weight retained
+        conn.close()
+
+    def test_no_override_uses_registry_weights(self, tmp_path: Path) -> None:
+        """Without --llm-weight the registry weights are used unchanged."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+        )
+
+        models = config["llm"]["models"]
+        assert models[0]["weight"] == 0.8
+        assert models[1]["weight"] == 0.2
+        conn.close()
+
+    def test_selection_fixed_accepted(self, tmp_path: Path) -> None:
+        """--selection fixed is the implicit weighted mode on OE (accepted)."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        # Must not raise: "fixed" maps onto OE's static weighted sampler.
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+            selection="fixed",
+        )
+        assert len(config["llm"]["models"]) == 2
+        conn.close()
+
+    def test_selection_adaptive_rejected(self, tmp_path: Path) -> None:
+        """--selection ucb is rejected by the OE builder (defensive; A2/A4)."""
+        from revolver.core.exceptions import ValidationError
+
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        with pytest.raises(ValidationError, match="weighted"):
+            build_config(
+                problem_config=None,
+                llm=primary_llm,
+                ensemble=ensemble,
+                conn=conn,
+                selection="ucb",
+            )
+        conn.close()
+
 
 # ── LLM snapshot tests ──────────────────────────────────────────────────────
 
