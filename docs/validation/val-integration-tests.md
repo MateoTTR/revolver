@@ -51,10 +51,10 @@ recorded end-to-end by default.
 **bandit ensemble** block (multi-member projection, `--selection {fixed,ucb,ucb1,thompson}`,
 `--llm-weight`, per-sampler kwarg routing, `reasoning_effort` global-pool mapping, `capabilities()`
 axes, and the B9 `--config-override` no-op warning), plus the OE-side selection-rejection and
-`--llm-weight` scenarios in `test_run_oe.py`. §2.13 adds the v12/v13 migration tests; §2.14 adds the
+`--llm-weight` scenarios in `test_run.py`. §2.13 adds the v12/v13 migration tests; §2.14 adds the
 B1/B2/B7 correctness-slice regression tests. The generated-wrapper aggregation exec test
-(`test_oe_wrapper_aggregation_mixed_types`) is new — no existing test previously exercised the OE
-wrapper aggregation.
+(`test_mixed_numeric_and_non_numeric_metrics_no_crash`, L1 unit in `tests/unit/core/test_run_wrapper.py`)
+is new — no existing test previously exercised the OE wrapper aggregation.
 
 ---
 
@@ -118,7 +118,7 @@ wrapper aggregation.
 | `run --llm <ensemble>` | Full run with mocked OE | Run record stores `llm_type=ensemble` and `llm_snapshot` JSON | FR-RUN-044, 045 |
 | `run info` | Ensemble run | Displays ensemble name and member models | FR-RUN-044 |
 | `run resume --llm <ensemble>` | Override LLM on resume | New run uses ensemble config | FR-RUN-046 |
-| `run` | Single LLM (no regression) | Run record stores `llm_type=single` and `llm_snapshot` JSON | FR-RUN-044, 045 |
+| `run` | Single LLM (no regression) | Run record stores `llm_type=single` and `llm_snapshot` JSON; `test_shinka_single_llm_config_unchanged` (L2) | FR-RUN-044, 045 |
 
 ### 2.3 `revolver problem`
 
@@ -283,17 +283,17 @@ New scenarios in `tests/integration/test_run_shinka.py` (Shinka half) and `tests
 
 | Command | Scenario | Validates | Test ID | FRs |
 |---|---|---|---|---|
-| `run --backend openevolve --llm <ensemble> --selection ucb` | Non-`weighted` selection on OE | Exit code 1, clear message naming `weighted` as the only OE strategy (`capabilities().selection_strategies == ("weighted",)`) | `test_run_oe_rejects_non_weighted_selection` | FR-RUN-049 |
+| `run --backend openevolve --llm <ensemble> --selection ucb` | Non-`fixed` selection on OE | Exit code 1, clear message naming `fixed` as the only OE strategy (`capabilities().selection_strategies == ("fixed",)`) | `test_run_selection_ucb_rejected_on_oe`, `test_run_selection_fixed_accepted_on_oe` | FR-RUN-049 |
 | `run --backend shinka --selection fixed --llm <weighted-ensemble>` | Fixed selection maps weights | `FixedSampler.prior_probs` == the renormalized member weights, order-aligned to `llm_models` | `test_shinka_selection_fixed_prior_probs` | FR-RUN-046, FR-RUN-049 |
-| `run --backend shinka --selection ucb --llm <weighted-ensemble>` | Adaptive bandit ignores weights | Warning emitted (weights ignored under adaptive mode); **no** `prior_probs` key in the sampler kwargs (avoids the verified `TypeError`); uniform start | `test_shinka_selection_ucb_ignores_weights_warns` | FR-RUN-049 |
-| `run --backend shinka --selection thompson --selection-kwarg cost_aware_coef=0.3` | Per-sampler kwarg routing | `cost_aware_coef` warned + dropped for `thompson` (would `TypeError`); for `--selection ucb` it is kept in `llm_dynamic_selection_kwargs`; for `--selection fixed` it is warned + dropped | `test_shinka_selection_kwarg_routed_per_sampler` | FR-RUN-049 |
+| `run --backend shinka --selection ucb --llm <weighted-ensemble>` | Adaptive bandit ignores weights | Warning emitted (weights ignored under adaptive mode); **no** `prior_probs` key in the sampler kwargs (avoids the verified `TypeError`); uniform start | `test_shinka_adaptive_ignores_weights_warns` | FR-RUN-049 |
+| `run --backend shinka --selection thompson --selection-kwarg cost_aware_coef=0.3` | Per-sampler kwarg routing | `cost_aware_coef` warned + dropped for `thompson` (would `TypeError`); for `--selection ucb` it is kept in `llm_dynamic_selection_kwargs`; for `--selection fixed` it is warned + dropped | `test_shinka_ucb_cost_aware_coef_default_zero`, `test_shinka_ucb_cost_aware_coef_user_value`, `test_shinka_fixed_drops_cost_aware_coef_warns`, `test_shinka_thompson_drops_cost_aware_coef_warns`, `test_shinka_ucb_drops_unknown_kwarg_warns` | FR-RUN-049 |
 
 #### `--llm-weight` per-run override
 
 | Command | Scenario | Validates | Test ID | FRs |
 |---|---|---|---|---|
-| `run --backend openevolve --llm <ensemble> --llm-weight gpt4o=0.9 --llm-weight claude=0.1` | Override honored on OE | `llm.models[].weight` reflects the CLI override, not the registry weight | `test_run_oe_llm_weight_override` | FR-RUN-050 |
-| `run --backend shinka --selection fixed --llm-weight ...` vs `--selection ucb --llm-weight ...` | Honored on Shinka-fixed; warned-and-ignored on Shinka-adaptive | Fixed → weights fold into `prior_probs`; `ucb`/`thompson` → warning + weights ignored | `test_shinka_llm_weight_fixed_vs_bandit` | FR-RUN-050 |
+| `run --backend openevolve --llm <ensemble> --llm-weight gpt4o=0.9 --llm-weight claude=0.1` | Override honored on OE | `llm.models[].weight` reflects the CLI override, not the registry weight | `test_run_llm_weight_overrides_oe_ensemble`, `test_run_llm_weight_unknown_member_rejected`, `test_run_llm_weight_on_single_llm_rejected` | FR-RUN-050 |
+| `run --backend shinka --selection fixed --llm-weight ...` vs `--selection ucb --llm-weight ...` | Honored on Shinka-fixed; warned-and-ignored on Shinka-adaptive | Fixed → weights fold into `prior_probs`; `ucb`/`thompson` → warning + weights ignored | `test_shinka_fixed_llm_weight_override_wins`, `test_shinka_adaptive_ignores_weights_warns` | FR-RUN-050 |
 
 #### Multi-member bandit ensemble projection
 
@@ -306,20 +306,20 @@ New scenarios in `tests/integration/test_run_shinka.py` (Shinka half) and `tests
 | Command | Scenario | Validates | Test ID | FRs |
 |---|---|---|---|---|
 | `run --backend openevolve --llm <ensemble>` (per-member effort) | Per-member effort onto OE | `llm.models[].reasoning_effort` matches each member's effective effort | `test_oe_ensemble_reasoning_effort_per_member` | FR-LLM-026 |
-| `run --backend shinka --llm <ensemble>` (uniform / disagreeing effort) | Global pool + highest-wins on disagreement | Uniform → `llm_kwargs.reasoning_efforts` set silently; disagreeing → warning + the **highest** effort chosen (order `min < low < medium < high < max`) | `test_shinka_reasoning_effort_global_pool` | FR-LLM-026 |
+| `run --backend shinka --llm <ensemble>` (uniform / disagreeing effort) | Global pool + highest-wins on disagreement | Uniform → `llm_kwargs.reasoning_efforts` set silently; disagreeing → warning + the **highest** effort chosen (order `min < low < medium < high < max`) | `test_shinka_reasoning_effort_global_pool`, `test_shinka_reasoning_effort_disagreement_picks_highest` | FR-LLM-026 |
 | `run --backend shinka --llm <local-source ensemble>` (effort set) | Local/bridge inert warning | Warning that `reasoning_effort` is inert for `local`/bridge members (Shinka `is_reasoning_model=False`) | `test_shinka_reasoning_effort_inert_local_warns` | FR-LLM-026 |
 
 #### `capabilities()` axes
 
 | Scenario | Validates | Test ID | FRs |
 |---|---|---|---|
-| `capabilities()` on both backends | `selection_strategies` (OE `("weighted",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) exposed with documented values | `test_backend_capabilities_selection_and_effort_axes` | FR-RUN-049, FR-LLM-026 |
+| `capabilities()` on both backends | `selection_strategies` (OE `("fixed",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) exposed with documented values | `test_openevolve_selection_and_effort_axes`, `test_shinka_selection_and_effort_axes` | FR-RUN-049, FR-LLM-026 |
 
 #### `--config-override` no-op key warning (B9)
 
 | Command | Scenario | Validates | Test ID | FRs |
 |---|---|---|---|---|
-| `run --config-override evo_config.nonexistent_key=1` | Unrecognized override key | Warning naming the dropped key (not a silent no-op); a recognized key (e.g. `db_config.num_islands=4`) does not warn | `test_config_override_noop_key_warns` | — (B9; composes with A5 per-sampler routing) |
+| `run --config-override evo_config.nonexistent_key=1` | Unrecognized override key | Warning naming the dropped key (not a silent no-op); a recognized key (e.g. `db_config.num_islands=4`) does not warn | `test_config_override_noop_key_warns` (L1 unit — in both `tests/unit/infra/test_openevolve.py` and `tests/unit/infra/test_shinka_backend.py`) | — (B9; composes with A5 per-sampler routing) |
 
 ### 2.13 DB Migrations v12 / v13 (S17)
 
@@ -327,16 +327,16 @@ Mirror the `unit/test_db_migration_v10` / `v11` structure. Simple additive `ALTE
 
 | Test | Scenario | Validates | FRs |
 |---|---|---|---|
-| `test_db_migration_v12_llms_reasoning_effort` | Fresh + v11→v12 global DB | `llms.reasoning_effort` column present; existing LLM rows preserved with `NULL` | FR-LLM-026, NFR-013 |
-| `test_db_migration_v13_ensemble_members_reasoning_effort` | Fresh + v12→v13 global DB | `ensemble_members.reasoning_effort` column present (both DDL copies in sync); existing member rows preserved with `NULL` | FR-LLM-026, NFR-013 |
+| `test_fresh_global_db_has_reasoning_effort_column`, `test_migration_v11_to_v12_adds_column_preserves_rows`, `test_migration_v11_to_v12_project_db` | Fresh + v11→v12 global/project DB | `llms.reasoning_effort` column present; existing LLM rows preserved with `NULL` (also `test_current_schema_version_at_least_12`, `test_reasoning_effort_round_trips_through_crud`) | FR-LLM-026, NFR-013 |
+| `test_fresh_global_db_has_member_reasoning_effort_column`, `test_migration_v12_to_v13_adds_column_preserves_rows`, `test_migration_v12_to_v13_project_db` | Fresh + v12→v13 global/project DB | `ensemble_members.reasoning_effort` column present (both DDL copies in sync); existing member rows preserved with `NULL` (also `test_current_schema_version_at_least_13`) | FR-LLM-026, NFR-013 |
 
 ### 2.14 Correctness-Slice Regression (S17 — B1 / B2 / B7)
 
 | Test | Scenario | Validates | FRs |
 |---|---|---|---|
-| `test_oe_wrapper_aggregation_mixed_types` | Generated OE `evaluate.py` wrapper fed an instance returning `{'combined_score': 0.5, 'error': 'boom'}` (non-numeric mixed in) and a fully-numeric instance | Aggregates without raising; non-numeric keys dropped from the aggregate, numeric `combined_score` result; runs without OpenEvolve installed (pure wrapper exec) | FR-EVL-021 (B1) |
-| `test_openevolve_shutdown_reaps_on_completion` | `OpenEvolveRunner.run()` completes | Teardown+reap sequence runs after completion; no process left in the pre/post child-PID diff | B2 |
-| `test_openevolve_shutdown_reaps_on_exception` | Exception raised inside the controller | `finally` block still runs teardown+reap; `_shutdown_runner` uses `shutdown(wait=False)` (no `wait=True` call site — guards against the #159 hang) | B2 |
+| `test_mixed_numeric_and_non_numeric_metrics_no_crash`, `test_all_numeric_metrics_aggregate_normally` | Generated OE `evaluate.py` wrapper fed an instance returning `{'combined_score': 0.5, 'error': 'boom'}` (non-numeric mixed in) and a fully-numeric instance | Aggregates without raising; non-numeric keys dropped from the aggregate, numeric `combined_score` result; runs without OpenEvolve installed (pure wrapper exec). Real tests are L1 unit (`tests/unit/core/test_run_wrapper.py`) | FR-EVL-021 (B1) |
+| `test_run_invokes_teardown_on_success` | `OpenEvolveRunner.run()` completes | Teardown+reap sequence runs after completion; no process left in the pre/post child-PID diff | B2 |
+| `test_run_teardown_runs_on_failure`, `test_shutdown_runner_never_raises` | Exception raised inside the controller | `finally` block still runs teardown+reap; `_shutdown_runner` uses `shutdown(wait=False)` (no `wait=True` call site — guards against the #159 hang) | B2 |
 | `test_extract_from_checkpoint_recovers_interrupted_run` | `solution extract --from-checkpoint` on an interrupted OE run with a checkpoint | Best program recovered from latest `checkpoint_N/`, solution created | FR-RUN-051 (B7) |
 | `test_extract_rejects_interrupted_run` (revised) | Default `solution extract` on an interrupted run (no flag) | Still rejects (unchanged default); docstring notes the v0.17 policy change vs the original F3 decision | FR-RUN-033, FR-RUN-051 |
 | `test_extract_from_checkpoint_no_checkpoint_yet_errors` | `--from-checkpoint` on a run too short to have checkpointed | Clear typed error, distinct from "backend does not support checkpoint recovery" | FR-RUN-051 (B7) |

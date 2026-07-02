@@ -122,12 +122,26 @@ Run in progress: run-20260310-143000
 
 Resume an interrupted run from its checkpoint. Creates a NEW run from the parent run's checkpoint.
 
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `RUN_ID` | Yes | Run whose checkpoint to resume from (primary positional argument) |
+
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `--run <run-id>` | string | Yes | Run whose checkpoint to resume from |
+| `--run <run-id>` | string | No | **Deprecated** fallback alias for the positional `RUN_ID`, kept for backward compatibility. The positional argument wins when both are supplied. |
 | `--llm <name>` | string | No | Override the LLM or ensemble used for the resumed run. Accepts both single LLM and ensemble names, allowing switching between single and ensemble mode. |
+| `--iterations <n>` | int | No | Number of additional iterations on top of the parent chain (the parent run's iteration count is reused when omitted). |
+| `--temperature <t>` | float | No | LLM temperature override (0.0–2.0). |
+| `--parallel <n>` | int | No | Number of parallel evaluations. |
+| `--config-override <k=v>` | string[] | No | Backend config override (key=value, repeatable). Not persisted or auto-carried across resumes. |
+| `--rewrite-mode` | flag | No | Full-rewrite mode (same semantics as `run start`). |
+| `--selection <strategy>` | string | No | Ensemble member-selection strategy for the resumed run. **Not inherited** on resume — it must be re-specified each time; when omitted for an *ensemble* parent, the run falls back to the backend default and `resume_run()` emits a warning so the reset is not silent (cf. DES-005 §2.3). |
+| `--selection-kwarg <k=v>` | string[] | No | Per-sampler constructor kwarg (key=value, repeatable), routed to the selected strategy's sampler. ShinkaEvolve only. |
+| `--llm-weight <model=w>` | string[] | No | Per-run ensemble member weight override (model=weight, repeatable). |
 
 **Behavior**:
 1. Locate the parent run's backend resume state (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir with `programs.sqlite`)
@@ -158,10 +172,10 @@ List all runs in the current project.
 ID                    Version  LLM              Dataset      Backend     Iter  Score   Status      Date
 run-20260310-143000   v1.0     codestral-local  train-small  openevolve  100   0.74    completed   2026-03-10
 run-20260310-173000   v1.0     claude-opus      train-small  openevolve  100   0.82    completed   2026-03-10
-run-20260310-190000   v1.0     multi-model-v1*  train-small  shinka      200   0.91    completed   2026-03-10
+run-20260310-190000   v1.0     (E) multi-model-v1  train-small  shinka   200   0.91    completed   2026-03-10
 ```
 
-Note: Ensemble names are marked with `*` in the LLM column. The `Backend` column surfaces the evolution backend (FR-RUN-047).
+Note: Ensemble names are marked with a `(E) ` prefix in the LLM column. The `Backend` column surfaces the evolution backend (FR-RUN-047).
 
 **Exit codes**: 0 always
 
@@ -347,7 +361,7 @@ Deleted run "run-20260310-143000"
 | Resume with no resume state | Error: "No checkpoint found for run '<run-id>'" (OE) / "No results database found for run '<run-id>'" (Shinka) | 1 |
 | `--backend shinka` but ShinkaEvolve not installed | Error: "Backend 'shinka' is not installed. Install with `pip install revolver[shinka]`." | 3 |
 | `--backend` with unknown name | Error: "Unknown backend '<name>'. Available: openevolve, shinka." | 1 |
-| `--selection` value not supported by the selected backend (e.g. `--selection ucb` on `--backend openevolve`) | Error: "Backend 'openevolve' does not support selection strategy '<value>'. Supported: weighted (fixed)." | 1 |
+| `--selection` value not supported by the selected backend (e.g. `--selection ucb` on `--backend openevolve`) | Error: "Selection strategy '<value>' is not supported by backend 'openevolve'. Supported: fixed." | 1 |
 | `--from-checkpoint` on a run with no checkpoint yet (too short to checkpoint) | Error: "No checkpoint found for run '<run-id>' — the run stopped before its first checkpoint." | 1 |
 | Another local run already in progress | Error: "A local LLM run is already in progress (see `.revolver/runs/locks/`). Wait for it to complete or cancel it." | 3 |
 | `--dry-run` with missing or invalid inputs | Error reported as normal (exit 1), no run launched | 1 |

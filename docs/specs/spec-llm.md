@@ -244,7 +244,7 @@ Ensemble "multi-model-v1" created (0 members)
 
 **Exit codes**: 0 success, 1 if name already exists
 
-### 2.9 `revolver llm ensemble add <name> <llm> --weight <w>`
+### 2.9 `revolver llm ensemble add <name> --llm <llm> --weight <w>`
 
 Add a member LLM to an existing ensemble with a sampling weight.
 
@@ -252,13 +252,13 @@ Add a member LLM to an existing ensemble with a sampling weight.
 
 | Argument | Required | Description |
 |---|---|---|
-| `name` | Yes | Ensemble name |
-| `llm` | Yes | Registered LLM name to add as member |
+| `name` | Yes | Ensemble name (positional) |
 
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
+| `--llm <name>` | string | Yes | Registered LLM name to add as member |
 | `--weight <w>` | float | Yes | Sampling weight for this member (0.0–1.0) |
 | `--temperature <float>` | float | No | Per-member temperature override (0.0–2.0) |
 | `--max-tokens <n>` | int | No | Per-member max tokens override |

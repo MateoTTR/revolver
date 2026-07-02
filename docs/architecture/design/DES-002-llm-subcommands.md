@@ -230,13 +230,13 @@ Infra (infra/db.py)
 
 **Ollama endpoints**: None (DB-only command)
 
-### 2.8 `revolver llm ensemble add <name> <llm> --weight <w>`
+### 2.8 `revolver llm ensemble add <name> --llm <llm> --weight <w>`
 
 Adds a member LLM to an existing ensemble.
 
 ```
 CLI (cli/llm.py) → ensemble_app
-  │ Parse: name, llm, --weight, --temperature, --max-tokens, --reasoning-effort
+  │ Parse: name (positional), --llm, --weight, --temperature, --max-tokens, --reasoning-effort
   ▼
 Core (core/llm.py) → add_ensemble_member(ensemble_name, llm_name, weight, conn, ...)
   │ 1. Verify ensemble exists               ──► Infra: db.get_ensemble(name)

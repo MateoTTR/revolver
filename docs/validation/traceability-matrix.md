@@ -74,9 +74,9 @@ Design: [DES-002](../architecture/design/DES-002-llm-subcommands.md), [DES-001 �
 | FR-LLM-023 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_info` | Implemented |
 | FR-LLM-024 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_remove_cascade` | Implemented |
 | FR-LLM-025 | SHOULD | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_weight_sum_warning` | Implemented |
-| FR-LLM-026 | SHOULD | ADR-007 A1/A3, DES-002 §2.1/§2.8 | L1 | `unit/test_db_migration_v12::test_db_migration_v12_llms_reasoning_effort`, `unit/test_db_migration_v13::test_db_migration_v13_ensemble_members_reasoning_effort` | Planned (S17 — `reasoning_effort` registry field on `llms` + `ensemble_members`; `llm add`/`update`/`ensemble add --reasoning-effort`) |
-| FR-LLM-026 | SHOULD | ADR-007 A3, DES-002 §5/§6 | L2-OE | `integration/test_run_oe::test_oe_ensemble_reasoning_effort_per_member` | Planned (S17 — OE maps effort **per member** onto `llm.models[].reasoning_effort`) |
-| FR-LLM-026 | SHOULD | ADR-007 A3, DES-002 §5/§6 | L2-Shinka | `integration/test_run_shinka::test_shinka_reasoning_effort_global_pool`, `integration/test_run_shinka::test_shinka_reasoning_effort_inert_local_warns` | Planned (S17 — Shinka maps effort to the **single global** `llm_kwargs.reasoning_efforts` pool; highest-effort-wins on member disagreement + warn; inert-for-local warn) |
+| FR-LLM-026 | SHOULD | ADR-007 A1/A3, DES-002 §2.1/§2.8 | L1 | `unit/test_db_migration_v12::test_reasoning_effort_round_trips_through_crud`, `unit/test_db_migration_v13::test_fresh_global_db_has_member_reasoning_effort_column` | Implemented (S17 — `reasoning_effort` registry field on `llms` + `ensemble_members`; `llm add`/`update`/`ensemble add --reasoning-effort`) |
+| FR-LLM-026 | SHOULD | ADR-007 A3, DES-002 §5/§6 | L1 | `unit/test_run_ensemble::test_oe_ensemble_reasoning_effort_per_member` | Implemented (S17 — OE maps effort **per member** onto `llm.models[].reasoning_effort`) |
+| FR-LLM-026 | SHOULD | ADR-007 A3, DES-002 §5/§6 | L1 | `unit/infra/test_shinka_backend::test_shinka_reasoning_effort_global_pool`, `::test_shinka_reasoning_effort_disagreement_picks_highest`, `::test_shinka_reasoning_effort_inert_local_warns` | Implemented (S17 — Shinka maps effort to the **single global** `llm_kwargs.reasoning_efforts` pool; highest-effort-wins on member disagreement + warn; inert-for-local warn) |
 
 ---
 
@@ -207,18 +207,18 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-044 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_type_stored` | Implemented |
 | FR-RUN-045 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_snapshot_stored` | Implemented |
 | FR-RUN-046 | MUST | DES-005 §4.3 | L2 | `integration/test_run::test_run_with_ensemble` | Implemented |
-| FR-RUN-046 | MUST | ADR-007 A2, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_selection_fixed_prior_probs` | Planned (S17 — Shinka bandit ensemble, weights → `FixedSampler.prior_probs`; supersedes the "weights dropped/warned" framing) |
+| FR-RUN-046 | MUST | ADR-007 A2, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_selection_fixed_prior_probs` | Implemented (S17 — Shinka bandit ensemble, weights → `FixedSampler.prior_probs`; supersedes the "weights dropped/warned" framing) |
 | FR-RUN-047 | MUST | ADR-007, DES-005 §14.1, DES-001 §3.5 | L2 | `integration/test_run::test_run_backend_flag_and_default` | Implemented |
 | FR-RUN-047 | MUST | ADR-007, DES-005 §14.1 | L2 | `integration/test_run::test_resume_inherits_parent_backend` | Implemented |
 | FR-RUN-048 | MUST | ADR-007, DES-005 §14.1 | L1 | `unit/infra/test_shinka_backend::test_parallel_warns` | Implemented |
-| FR-RUN-049 | MUST | ADR-007 A1/A2/A4, DES-005 §2.1/§14.1 | L2-OE | `integration/test_run_oe::test_run_oe_rejects_non_weighted_selection` | Planned (S17 — `--selection`; OE `capabilities().selection_strategies == ("weighted",)` rejects non-`fixed` → exit 1) |
-| FR-RUN-049 | MUST | ADR-007 A1/A2, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_selection_ucb_ignores_weights_warns`, `integration/test_run_shinka::test_shinka_selection_kwarg_routed_per_sampler` | Planned (S17 — `--selection {fixed,ucb,ucb1,thompson}` → `llm_dynamic_selection`; per-sampler kwarg routing) |
-| FR-RUN-050 | MUST | ADR-007 A1/A3, DES-005 §4.2 | L2-OE | `integration/test_run_oe::test_run_oe_llm_weight_override` | Planned (S17 — `--llm-weight model=w`; honored on OE weighted sampler) |
-| FR-RUN-050 | MUST | ADR-007 A1/A3, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_llm_weight_fixed_vs_bandit` | Planned (S17 — `--llm-weight model=w`; honored on Shinka-`fixed` (`FixedSampler.prior_probs`), warned-and-ignored on Shinka-adaptive) |
-| FR-RUN-051 | MUST | ADR-007 scope note, DES-005 §7.2 | L2 | `integration/test_solution::test_extract_from_checkpoint_recovers_interrupted_run`, `integration/test_solution::test_extract_rejects_interrupted_run` (revised), `integration/test_solution::test_extract_from_checkpoint_no_checkpoint_yet_errors` | Planned (S17 / B7 — `solution extract --from-checkpoint` recovers best of an interrupted/failed OE run; default still rejects) |
-| B2 (no FR) | infra | ADR-007 scope note, DES-005 §4.4 | L2 | `integration/test_openevolve_shutdown::test_openevolve_shutdown_reaps_on_completion`, `integration/test_openevolve_shutdown::test_openevolve_shutdown_reaps_on_exception` | Planned (S17 / B2 — OE post-run teardown reaps children / shuts down executors on completion and on exception; symmetric to #224) |
-| FR-RUN-049 + FR-LLM-026 | MUST | DES-005 §4.6 | L2 | `integration/test_run::test_backend_capabilities_selection_and_effort_axes` | Planned (S17 — `capabilities().selection_strategies` (OE `("weighted",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) axes exposed with documented values on both backends) |
-| B9 (no FR) | infra | DES-005 §4.2 | L2 | `integration/test_run::test_config_override_noop_key_warns` | Planned (S17 / B9 — unrecognized `--config-override` key warns naming the dropped key, not a silent no-op; recognized key does not warn) |
+| FR-RUN-049 | MUST | ADR-007 A1/A2/A4, DES-005 §2.1/§14.1 | L2 | `integration/test_run::test_run_selection_ucb_rejected_on_oe`, `::test_run_selection_fixed_accepted_on_oe` | Implemented (S17 — `--selection`; OE `capabilities().selection_strategies == ("fixed",)` rejects non-`fixed` → exit 1) |
+| FR-RUN-049 | MUST | ADR-007 A1/A2, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_adaptive_ignores_weights_warns`, `::test_shinka_ucb_cost_aware_coef_default_zero`, `::test_shinka_ucb_cost_aware_coef_user_value`, `::test_shinka_fixed_drops_cost_aware_coef_warns`, `::test_shinka_thompson_drops_cost_aware_coef_warns`, `::test_shinka_ucb_drops_unknown_kwarg_warns` | Implemented (S17 — `--selection {fixed,ucb,ucb1,thompson}` → `llm_dynamic_selection`; per-sampler kwarg routing) |
+| FR-RUN-050 | MUST | ADR-007 A1/A3, DES-005 §4.2 | L2 | `integration/test_run::test_run_llm_weight_overrides_oe_ensemble`, `::test_run_llm_weight_unknown_member_rejected`, `::test_run_llm_weight_on_single_llm_rejected` | Implemented (S17 — `--llm-weight model=w`; honored on OE weighted sampler) |
+| FR-RUN-050 | MUST | ADR-007 A1/A3, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_fixed_llm_weight_override_wins`, `::test_shinka_adaptive_ignores_weights_warns` | Implemented (S17 — `--llm-weight model=w`; honored on Shinka-`fixed` (`FixedSampler.prior_probs`), warned-and-ignored on Shinka-adaptive) |
+| FR-RUN-051 | MUST | ADR-007 scope note, DES-005 §7.2 | L2 | `integration/test_solution::test_extract_from_checkpoint_recovers_interrupted_run`, `integration/test_solution::test_extract_rejects_interrupted_run` (revised), `integration/test_solution::test_extract_from_checkpoint_no_checkpoint_yet_errors` | Implemented (S17 / B7 — `solution extract --from-checkpoint` recovers best of an interrupted/failed OE run; default still rejects) |
+| B2 (no FR) | infra | ADR-007 scope note, DES-005 §4.4 | L2 | `integration/test_openevolve_shutdown::test_run_invokes_teardown_on_success`, `::test_run_teardown_runs_on_failure`, `::test_shutdown_runner_never_raises` | Implemented (S17 / B2 — OE post-run teardown reaps children / shuts down executors on completion and on exception; symmetric to #224) |
+| FR-RUN-049 + FR-LLM-026 | MUST | DES-005 §4.6 | L1 | `unit/infra/test_backends::test_openevolve_selection_and_effort_axes`, `::test_shinka_selection_and_effort_axes` | Implemented (S17 — `capabilities().selection_strategies` (OE `("fixed",)`, Shinka `("fixed","ucb","ucb1","thompson")`) and `per_member_reasoning_effort` (OE `True`, Shinka `False`) axes exposed with documented values on both backends) |
+| B9 (no FR) | infra | DES-005 §4.2 | L1 | `unit/infra/test_openevolve::test_config_override_noop_key_warns`, `unit/infra/test_shinka_backend::test_config_override_noop_key_warns` | Implemented (S17 / B9 — unrecognized `--config-override` key warns naming the dropped key, not a silent no-op; recognized key does not warn) |
 
 ---
 
@@ -251,7 +251,7 @@ Design: [DES-006](../architecture/design/DES-006-eval-loop.md), [DES-001 §eval_
 | FR-EVL-001 | MUST | DES-006 §loop | L1 | `unit/core/test_collect_eval_wrapper::test_evaluate_instance_only` | Implemented |
 | FR-EVL-019 | MUST | DES-006 §legacy | L1 | `unit/core/test_collect_eval_wrapper::test_evaluate_legacy_still_works` | Implemented |
 | FR-EVL-001 | MUST | DES-006 §loop | L1 | `unit/core/test_collect_eval_wrapper::test_warning_emitted_for_both_functions` | Implemented |
-| FR-EVL-021 | MUST | DES-006 §1.3/§4.3, ADR-007 scope note | L2 | `integration/test_run_oe::test_oe_wrapper_aggregation_mixed_types` | Planned (S17 / B1 — generated OE `evaluate.py` wrapper aggregates mixed numeric/non-numeric metrics without crashing; numeric guard on the per-instance loop + `combined_score` mean) |
+| FR-EVL-021 | MUST | DES-006 §1.3/§4.3, ADR-007 scope note | L1 | `unit/core/test_run_wrapper::test_mixed_numeric_and_non_numeric_metrics_no_crash`, `::test_all_numeric_metrics_aggregate_normally` | Implemented (S17 / B1 — generated OE `evaluate.py` wrapper aggregates mixed numeric/non-numeric metrics without crashing; numeric guard on the per-instance loop + `combined_score` mean) |
 
 ---
 
@@ -352,11 +352,12 @@ Design: [Architecture §4.2](../architecture/architecture.md)
 | NFR-007 | MUST | CLI | L2 | `integration/test_cross_cutting::test_single_binary_subcommands` | Implemented |
 | NFR-010 | MUST | Storage | L2 | `test_project_integration::test_init_creates_structure` (checks .revolver/ dir) | Implemented |
 | NFR-011 | MUST | Storage | L2 | `integration/test_llm::test_global_data_in_home` | Planned |
+| B6 (no FR) | MUST | Storage — `--global-db` / `REVOLVER_HOME` | L1, L2 | `test_config::test_global_config_respects_revolver_home`, `test_db::test_global_db_respects_revolver_home`, `test_db::test_global_db_path_override_beats_revolver_home`, `integration/test_llm::test_global_db_flag_routes_reads_and_writes` (+ `::test_global_db_flag_equals_form`, `::test_global_db_flag_beats_revolver_home`, `::test_global_db_flag_does_not_swallow_following_option`, `::test_global_db_flag_empty_value_is_ignored`) | Implemented (S17 / B6 — global DB path resolution via `--global-db` flag and `REVOLVER_HOME`; documented override precedence) |
 | NFR-013 | MUST | Storage | L2 | `test_project_integration::test_init_creates_structure` (checks revolver.db) | Implemented |
 | NFR-013 | MUST | DES-001 §5.9 | L1 | `unit/test_db_migration_v10::test_migration_v9_to_v10_drops_cost_columns`, `::test_migration_v9_to_v10_project_db` | Implemented (S16 — drop `llms` pricing columns, #300) |
 | NFR-013 | MUST | DES-001 §5.10 | L1 | `unit/test_db_migration_v11::test_migration_v10_to_v11_widens_split_check`, `::test_migration_v10_to_v11_global_db` | Implemented (S16 — widen `datasets.split` to `both`, UX-3) |
-| NFR-013 | MUST | DES-001 §4.1 | L1 | `unit/test_db_migration_v12::test_db_migration_v12_llms_reasoning_effort` | Planned (S17 — add `llms.reasoning_effort` column; v11→v12 upgrade preserves existing rows) |
-| NFR-013 | MUST | DES-001 §4.3 | L1 | `unit/test_db_migration_v13::test_db_migration_v13_ensemble_members_reasoning_effort` | Planned (S17 — add `ensemble_members.reasoning_effort` column; v12→v13 upgrade preserves existing rows) |
+| NFR-013 | MUST | DES-001 §4.1 | L1 | `unit/test_db_migration_v12::test_current_schema_version_at_least_12`, `::test_fresh_global_db_has_reasoning_effort_column`, `::test_migration_v11_to_v12_adds_column_preserves_rows`, `::test_reasoning_effort_round_trips_through_crud`, `::test_migration_v11_to_v12_project_db` | Implemented (S17 — add `llms.reasoning_effort` column; v11→v12 upgrade preserves existing rows) |
+| NFR-013 | MUST | DES-001 §4.3 | L1 | `unit/test_db_migration_v13::test_current_schema_version_at_least_13`, `::test_fresh_global_db_has_member_reasoning_effort_column`, `::test_migration_v12_to_v13_adds_column_preserves_rows`, `::test_migration_v12_to_v13_project_db` | Implemented (S17 — add `ensemble_members.reasoning_effort` column; v12→v13 upgrade preserves existing rows) |
 | NFR-014 | MUST | Storage | L1 | `test_hashing::test_sha256_used` | Implemented |
 | NFR-015 | MUST | Storage | L2 | `integration/test_problem::test_snapshot_immutable` | Planned |
 | NFR-016 | SHOULD | Storage | L1 | `test_db::test_wal_mode_enabled` | Implemented |
@@ -413,7 +414,7 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
 | spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
-| spec-llm | 25 | 16 | 9 | 0 | 4 | 14 | via Sc.1 | 6 |
+| spec-llm | 26 | 18 | 7 | 0 | 4 | 14 | via Sc.1 | 6 |
 | spec-problem | 15 | 10 | 4 | 1 | 1 | 10 | via Sc.1 | 3 |
 | spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
 | spec-run | 50 | 39 | 10 | 0 | 30 | 17 | via Sc.1 | 6 |
@@ -423,12 +424,12 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
 | NFR (direct) | 28 | 19 | 9 | 0 | 10 | 12 | — | 5 (3 perf manual + 2 planned) |
 | NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **233** | **171** | **56** | **2** | **77** | **133** | **3 scenarios (1 planned)** | **28** |
+| **Total** | **234** | **173** | **54** | **2** | **77** | **133** | **3 scenarios (1 planned)** | **28** |
 
 Notes:
 - FR-RUN-030 (cost estimation) and FR-LLM-018 (`--input-cost`/`--output-cost` pricing) are both **Removed** (S15 / #300, completed in S16): cost is no longer reported. The `estimate_cost()` helper and the LLM pricing flags/columns were dropped — schema migration v10 removes the two `llms` pricing columns. Both rows carry no test (status **Removed**); their former coverage is dropped from the counts. The renamed test `test_llm_add_remote_with_pricing` → `test_llm_add_remote` is re-pointed to FR-LLM-001.
 - Schema migrations v10 (drop `llms` pricing columns, #300) and v11 (widen `datasets.split` to `both`, UX-3) add 4 new L1 migration-test rows under NFR-013 (`unit/test_db_migration_v10`, `unit/test_db_migration_v11`).
-- **S17 (v0.17 multi-LLM ensemble, ADR-007 Amendment A1–A5)**: FR-RUN-049 (`--selection`, incl. OE-rejects-non-weighted), FR-RUN-050 (`--llm-weight`), FR-RUN-051 (B7 OE best-on-interrupt via `solution extract --from-checkpoint`), FR-LLM-026 (per-LLM `reasoning_effort`, both backends), and FR-EVL-021 (B1 aggregation numeric guard) added. FR-RUN-046 gains a second row targeting the Shinka **bandit** ensemble (`FixedSampler.prior_probs`), superseding the "weights dropped/warned" framing (ADR-007 A2). B2 (OE post-run teardown) gets its own regression row. Schema migrations v12 (`llms.reasoning_effort`) and v13 (`ensemble_members.reasoning_effort`) add 2 L1 migration-test rows under NFR-013. All S17 rows are **Planned** pending the code diff. The new L3 Shinka bandit-ensemble scenario is tracked in §12 (E2E Scenario 4).
+- **S17 (v0.17 multi-LLM ensemble, ADR-007 Amendment A1–A5)**: FR-RUN-049 (`--selection`, incl. OE-rejects-non-weighted), FR-RUN-050 (`--llm-weight`), FR-RUN-051 (B7 OE best-on-interrupt via `solution extract --from-checkpoint`), FR-LLM-026 (per-LLM `reasoning_effort`, both backends), and FR-EVL-021 (B1 aggregation numeric guard) added. FR-RUN-046 gains a second row targeting the Shinka **bandit** ensemble (`FixedSampler.prior_probs`), superseding the "weights dropped/warned" framing (ADR-007 A2). B2 (OE post-run teardown) gets its own regression row. Schema migrations v12 (`llms.reasoning_effort`) and v13 (`ensemble_members.reasoning_effort`) add 2 L1 migration-test rows under NFR-013. All S17 rows are now **Implemented** (code shipped and passing); the repointed Test IDs reference the real test functions. The new L3 Shinka bandit-ensemble scenario is tracked in §12 (E2E Scenario 4).
 - Run delete: FR-RUN-035 keeps its 11 entries; FR-RUN-036..039 (previously absorbed under FR-RUN-035) now have **dedicated rows** mapped to `DES-005 §4.8` and the real `test_run_delete::*` / `integration/test_run::test_run_delete_all*` tests.
 - Benchmark delete (FR-BEN-018) adds 3 new test entries covering confirmation, nonexistent, and force delete.
 - Many FR-level tests cover multiple requirements. The total counts distinct test assignments (some FRs have both L1 and L2 tests).

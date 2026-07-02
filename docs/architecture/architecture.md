@@ -266,7 +266,7 @@ Detailed schema in [DES-001 — SQLite Data Model](design/DES-001-sqlite-data-mo
 | `dataset_compat` | Version compatibility | dataset_name, problem_version |
 | `llms` | LLM registry (global DB) | name, provider, model, source, base_url, api_key_env |
 | `ensembles` | Named LLM ensembles (global DB) | name, created_at |
-| `ensemble_members` | Ensemble member LLMs with weights (global DB) | ensemble_name, llm_name, weight, temperature, max_tokens |
+| `ensemble_members` | Ensemble member LLMs with weights (global DB) | ensemble_name, llm_name, weight, temperature, max_tokens, reasoning_effort |
 | `runs` | Evolution run metadata + lineage | id, problem_version, llm, dataset, status, llm_type, llm_snapshot, resumed_from, created_at |
 | `solutions` | Lightweight solution references | id, run_id, rank, best_score, alias |
 | `eval_metadata` | Evaluation session metadata | eval_id, solution_id, dataset_name, instance_count, instances_solved, eval_time_s, user_aggregates, evaluated_at |
