@@ -31,6 +31,9 @@ Launch an evolution run on the selected backend.
 | `--dry-run` | flag | No | Validate all inputs and display the resolved config (neutral fields + backend extras) without launching the run |
 | `--temperature <float>` | float | No | Override the LLM sampling temperature (range: 0.0–2.0). Mapped per backend (OE: `llm.temperature`; Shinka: per-model `llm_kwargs`) |
 | `--parallel <int>` | int | No | Override evaluation parallelism (positive integer). Mapped per backend (OE: `evaluator.parallel_evaluations`; Shinka: evaluation job pool, with a warning) |
+| `--selection <strategy>` | string | No | Ensemble member-selection strategy: `fixed`, `ucb`, `ucb1`, or `thompson`. Capability-driven per backend (OE supports only weighted/`fixed`; Shinka maps it to `evo_config.llm_dynamic_selection`). See FR-RUN-049 |
+| `--selection-kwarg <k=v>` | string[] | No | Sampler constructor kwarg (repeatable), routed to the **selected** strategy's sampler only (e.g. `cost_aware_coef` applies to `ucb`/`ucb1`). Shinka only. See FR-RUN-049 |
+| `--llm-weight <model=w>` | string[] | No | Per-run override of an ensemble member's weight (repeatable). Honored on OE (weighted) and Shinka `fixed`; ignored with a warning under Shinka adaptive modes. See FR-RUN-050 |
 
 **Behavior**:
 1. **Validate inputs**:
@@ -119,12 +122,26 @@ Run in progress: run-20260310-143000
 
 Resume an interrupted run from its checkpoint. Creates a NEW run from the parent run's checkpoint.
 
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `RUN_ID` | Yes | Run whose checkpoint to resume from (primary positional argument) |
+
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `--run <run-id>` | string | Yes | Run whose checkpoint to resume from |
+| `--run <run-id>` | string | No | **Deprecated** fallback alias for the positional `RUN_ID`, kept for backward compatibility. The positional argument wins when both are supplied. |
 | `--llm <name>` | string | No | Override the LLM or ensemble used for the resumed run. Accepts both single LLM and ensemble names, allowing switching between single and ensemble mode. |
+| `--iterations <n>` | int | No | Number of additional iterations on top of the parent chain (the parent run's iteration count is reused when omitted). |
+| `--temperature <t>` | float | No | LLM temperature override (0.0–2.0). |
+| `--parallel <n>` | int | No | Number of parallel evaluations. |
+| `--config-override <k=v>` | string[] | No | Backend config override (key=value, repeatable). Not persisted or auto-carried across resumes. |
+| `--rewrite-mode` | flag | No | Full-rewrite mode (same semantics as `run start`). |
+| `--selection <strategy>` | string | No | Ensemble member-selection strategy for the resumed run. **Not inherited** on resume — it must be re-specified each time; when omitted for an *ensemble* parent, the run falls back to the backend default and `resume_run()` emits a warning so the reset is not silent (cf. DES-005 §2.3). |
+| `--selection-kwarg <k=v>` | string[] | No | Per-sampler constructor kwarg (key=value, repeatable), routed to the selected strategy's sampler. ShinkaEvolve only. |
+| `--llm-weight <model=w>` | string[] | No | Per-run ensemble member weight override (model=weight, repeatable). |
 
 **Behavior**:
 1. Locate the parent run's backend resume state (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir with `programs.sqlite`)
@@ -155,10 +172,10 @@ List all runs in the current project.
 ID                    Version  LLM              Dataset      Backend     Iter  Score   Status      Date
 run-20260310-143000   v1.0     codestral-local  train-small  openevolve  100   0.74    completed   2026-03-10
 run-20260310-173000   v1.0     claude-opus      train-small  openevolve  100   0.82    completed   2026-03-10
-run-20260310-190000   v1.0     multi-model-v1*  train-small  shinka      200   0.91    completed   2026-03-10
+run-20260310-190000   v1.0     (E) multi-model-v1  train-small  shinka   200   0.91    completed   2026-03-10
 ```
 
-Note: Ensemble names are marked with `*` in the LLM column. The `Backend` column surfaces the evolution backend (FR-RUN-047).
+Note: Ensemble names are marked with a `(E) ` prefix in the LLM column. The `Backend` column surfaces the evolution backend (FR-RUN-047).
 
 **Exit codes**: 0 always
 
@@ -319,9 +336,12 @@ Deleted run "run-20260310-143000"
 | FR-RUN-043 | MUST | If the backend completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
 | FR-RUN-044 | MUST | Run metadata stores `llm_type` (`single` or `ensemble`) indicating whether a single LLM or an ensemble was used | — |
 | FR-RUN-045 | MUST | Run metadata stores `llm_snapshot` (JSON) capturing the full LLM or ensemble configuration at run time for traceability | NFR-020 |
-| FR-RUN-046 | MUST | `--llm` accepts ensemble names; when an ensemble is used, the backend is configured with multiple models (OpenEvolve: weighted `llm.models` array; ShinkaEvolve: bandit selection — member weights are dropped with a warning, ADR-007 D5) | — |
+| FR-RUN-046 | MUST | `--llm` accepts ensemble names; when an ensemble is used, the backend is configured with multiple models, mapped first-class per backend (ADR-007 A2/A3). OpenEvolve uses a weighted `llm.models` array (member weights honored; per-member `reasoning_effort` honored). ShinkaEvolve maps all members to `evo_config.llm_models[]` with `--selection` driving `llm_dynamic_selection`; under `fixed`, member weights seed `FixedSampler.prior_probs` (apples-to-apples with the OE weighted ensemble). Weights carry across **OE-weighted** and **Shinka-`fixed`** only — under Shinka adaptive modes (`ucb`/`ucb1`/`thompson`) weights are ignored **by design** (bandit starts uniform) and per-member `reasoning_effort` is OpenEvolve-only. Both asymmetries are verified ShinkaEvolve 0.0.7 constraints surfaced via `capabilities()` (map-with-warn), **not** a silent drop. | — |
 | FR-RUN-047 | MUST | `--backend {openevolve,shinka}` selects the evolution backend (default: `openevolve`). The backend is stored in the run record and manifest, and surfaced in `run info`, `run list`, and dry-run output. `resume` inherits the parent run's backend. | ADR-007 |
 | FR-RUN-048 | MUST | Backend capability differences are reported honestly: an option not supported by the selected backend produces a warning (map-with-warn), never a silent no-op or an error that breaks scripts | ADR-007 D3/D4 |
+| FR-RUN-049 | MUST | `--selection {fixed,ucb,ucb1,thompson}` is a neutral run lever selecting the ensemble member-selection strategy, validated against the resolved backend's `capabilities().selection_strategies` (ADR-007 A1/A4). OpenEvolve supports only weighted (`fixed`) selection and **rejects** any non-`fixed` value with a clear error naming the supported strategy (exit 1). ShinkaEvolve maps it to `evo_config.llm_dynamic_selection` (`fixed`/`ucb`/`ucb1` [alias of `AsymmetricUCB`]/`thompson`). `--selection-kwarg k=v` (repeatable) is routed only to the **selected** sampler's constructor (never a union); `cost_aware_coef` applies to `ucb`/`ucb1` and defaults to 0 (ADR-007 A5). | ADR-007 A1/A4/A5 |
+| FR-RUN-050 | MUST | `--llm-weight model=w` (repeatable) overrides an ensemble member's weight for this run only, taking precedence over the registry weight. Honored on OpenEvolve (patches the weighted sampler's per-member `weight`) and on ShinkaEvolve **only under `--selection fixed`** (folded into the `FixedSampler.prior_probs` vector). Under Shinka adaptive modes it is **ignored with a warning** (the bandit starts uniform — ADR-007 A3). Per-member weight/effort is reachable only via this dedicated flag, not `--config-override` (which cannot address list members). | ADR-007 A1/A3 |
+| FR-RUN-051 | MUST | `revolver solution extract --from-checkpoint` recovers the best program of an `interrupted`/`failed` OpenEvolve run from its latest checkpoint (`best_program_id` in the checkpoint `metadata.json` + `programs/{id}.json`), routed via a backend-neutral `EvolutionBackend` recovery method (B7). The **default** `solution extract` behavior is unchanged — it still rejects `interrupted` runs. A run too short to have produced a checkpoint yields a clear error. | — |
 
 ---
 
@@ -341,6 +361,8 @@ Deleted run "run-20260310-143000"
 | Resume with no resume state | Error: "No checkpoint found for run '<run-id>'" (OE) / "No results database found for run '<run-id>'" (Shinka) | 1 |
 | `--backend shinka` but ShinkaEvolve not installed | Error: "Backend 'shinka' is not installed. Install with `pip install revolver[shinka]`." | 3 |
 | `--backend` with unknown name | Error: "Unknown backend '<name>'. Available: openevolve, shinka." | 1 |
+| `--selection` value not supported by the selected backend (e.g. `--selection ucb` on `--backend openevolve`) | Error: "Selection strategy '<value>' is not supported by backend 'openevolve'. Supported: fixed." | 1 |
+| `--from-checkpoint` on a run with no checkpoint yet (too short to checkpoint) | Error: "No checkpoint found for run '<run-id>' — the run stopped before its first checkpoint." | 1 |
 | Another local run already in progress | Error: "A local LLM run is already in progress (see `.revolver/runs/locks/`). Wait for it to complete or cancel it." | 3 |
 | `--dry-run` with missing or invalid inputs | Error reported as normal (exit 1), no run launched | 1 |
 | Not in a Revolver project | Error: "Not a Revolver project" | 1 |

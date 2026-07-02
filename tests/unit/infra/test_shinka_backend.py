@@ -50,6 +50,7 @@ from revolver.infra.backends.shinka import (
     SHINKA_WRAPPER_FILENAME,
     ShinkaBackend,
 )
+from revolver.infra.db import get_global_db_at, insert_llm
 from revolver.models.llm import EnsembleEntry, EnsembleMember, LLMEntry
 from tests.fixtures.programs_sqlite import (
     EXPECTED_BEST_SCORE,
@@ -136,6 +137,11 @@ class _FakeLocalJobConfig:
     extra_cmd_args: dict[str, Any] = dataclasses.field(default_factory=dict)
     time: str | None = None
     conda_env: str | None = None
+    # Revolver's local-endpoint pin (UX-5/S16-21) writes this field, and it is
+    # a real LocalJobConfig field — the stand-in must include it so the B9
+    # no-op-override check (S17-30) does not flag ``job_config.max_proposal_jobs``
+    # as unknown against an incomplete fake schema.
+    max_proposal_jobs: int | None = None
 
 
 @pytest.fixture
@@ -538,6 +544,81 @@ class TestShinkaBuildConfig:
         with pytest.raises(ValidationError, match="Malformed config override"):
             ShinkaBackend().build_config(_make_spec(tmp_path, config_overrides=["num_islands"]))
 
+    # ── B9: no-op --config-override key warning (S17-30) ──────────────────────
+
+    def test_config_override_noop_key_warns(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An override key on no Shinka field warns naming the key (spec §4.5)."""
+        ShinkaBackend().build_config(
+            _make_spec(tmp_path, config_overrides=["evo_config.nonexistent_key=1"])
+        )
+        err = capsys.readouterr().err
+        assert "evo_config.nonexistent_key" in err
+        assert "no effect" in err
+
+    def test_config_override_unknown_section_warns(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An override key under an unknown top-level section warns (build time)."""
+        ShinkaBackend().build_config(
+            _make_spec(tmp_path, config_overrides=["bogus_section.key=1"])
+        )
+        err = capsys.readouterr().err
+        assert "bogus_section.key" in err
+        assert "no effect" in err
+
+    def test_config_override_recognized_key_silent(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A recognized override key emits no no-op warning."""
+        ShinkaBackend().build_config(
+            _make_spec(tmp_path, config_overrides=["db_config.num_islands=4"])
+        )
+        err = capsys.readouterr().err
+        assert "no effect" not in err
+
+    def test_config_override_nested_dict_field_silent(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A deep key under a dict-valued field (llm_kwargs) is not a no-op."""
+        ShinkaBackend().build_config(
+            _make_spec(tmp_path, config_overrides=["evo_config.llm_kwargs.max_tokens=8192"])
+        )
+        err = capsys.readouterr().err
+        assert "no effect" not in err
+
+    def test_config_override_revolver_key_silent(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Revolver-owned sections (evaluation/output_dir/llm_env) are silent."""
+        ShinkaBackend().build_config(
+            _make_spec(
+                tmp_path,
+                config_overrides=[
+                    "evaluation.timeout_per_instance=5",
+                    "output_dir=/tmp/x",
+                    "llm_env.OLLAMA_API_KEY=none",
+                ],
+            )
+        )
+        err = capsys.readouterr().err
+        assert "no effect" not in err
+
+    def test_config_override_noop_names_only_the_bad_key(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """With a mix, only the genuinely unrecognized key is warned about."""
+        ShinkaBackend().build_config(
+            _make_spec(
+                tmp_path,
+                config_overrides=["db_config.num_islands=4", "db_config.bogus_field=1"],
+            )
+        )
+        err = capsys.readouterr().err
+        assert "db_config.bogus_field" in err
+        assert "db_config.num_islands" not in err
+
     # ── B (#301/S15-05..07): thinking-model LLM-setting defaults ──────────────
 
     def test_max_patch_attempts_default(self, fake_shinka: None, tmp_path: Path) -> None:
@@ -587,6 +668,143 @@ class TestShinkaBuildConfig:
             )
         )
         assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "low"
+
+    # ── S17-27: per-member reasoning_effort → single global pool (FACT A) ─────
+
+    def test_reasoning_efforts_absent_when_unset(self, fake_shinka: None, tmp_path: Path) -> None:
+        """No reasoning_effort anywhere → llm_kwargs gains no reasoning_efforts key."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm()))
+        assert "reasoning_efforts" not in config["evo_config"]["llm_kwargs"]
+
+    def test_reasoning_efforts_single_llm_from_registry(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """A single reasoning-capable remote LLM projects its registry effort."""
+        llm = _make_llm(source="remote", provider="openai", reasoning_effort="high")
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=llm))
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == ["high"]
+
+    def test_reasoning_efforts_config_value_wins(self, fake_shinka: None, tmp_path: Path) -> None:
+        """A config.yaml llm_kwargs.reasoning_efforts wins over the registry value."""
+        llm = _make_llm(source="remote", provider="openai", reasoning_effort="high")
+        spec = _make_spec(tmp_path, llm=llm)
+        (spec.snapshot_dir / "config.yaml").write_text(
+            "evo_config:\n  llm_kwargs:\n    reasoning_efforts: low\n"
+        )
+        config = ShinkaBackend().build_config(spec)
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "low"
+
+    def test_shinka_reasoning_effort_global_pool(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Uniform effort across members → single pool, set silently (S17-27)."""
+        db_path = tmp_path / "global.db"
+        conn = get_global_db_at(db_path)
+        try:
+            insert_llm(
+                conn,
+                _make_llm(name="m-a", source="remote", provider="openai", reasoning_effort="high"),
+            )
+            insert_llm(
+                conn,
+                _make_llm(name="m-b", source="remote", provider="openai", reasoning_effort="high"),
+            )
+            ensemble = EnsembleEntry(
+                name="ens",
+                members=[
+                    EnsembleMember(llm_name="m-a", weight=0.5),
+                    EnsembleMember(llm_name="m-b", weight=0.5),
+                ],
+                created_at=datetime(2026, 1, 1),
+            )
+            spec = _make_spec(
+                tmp_path,
+                llm=_make_llm(name="m-a", source="remote", provider="openai"),
+                ensemble=ensemble,
+                conn=conn,
+            )
+            config = ShinkaBackend().build_config(spec)
+        finally:
+            conn.close()
+
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == ["high"]
+        # Uniform, all-remote → no warning at all.
+        assert capsys.readouterr().err == ""
+
+    def test_shinka_reasoning_effort_disagreement_picks_highest(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Disagreeing efforts → highest chosen (never under-think) + warning."""
+        db_path = tmp_path / "global.db"
+        conn = get_global_db_at(db_path)
+        try:
+            insert_llm(
+                conn,
+                _make_llm(name="m-a", source="remote", provider="openai", reasoning_effort="low"),
+            )
+            insert_llm(
+                conn,
+                _make_llm(name="m-b", source="remote", provider="openai", reasoning_effort="high"),
+            )
+            ensemble = EnsembleEntry(
+                name="ens",
+                members=[
+                    EnsembleMember(llm_name="m-a", weight=0.5),
+                    # Per-member override to "medium" (still lower than m-a's? no:
+                    # low < medium < high; m-b registry is high, override medium wins).
+                    EnsembleMember(llm_name="m-b", weight=0.5, reasoning_effort="medium"),
+                ],
+                created_at=datetime(2026, 1, 1),
+            )
+            spec = _make_spec(
+                tmp_path,
+                llm=_make_llm(name="m-a", source="remote", provider="openai"),
+                ensemble=ensemble,
+                conn=conn,
+            )
+            config = ShinkaBackend().build_config(spec)
+        finally:
+            conn.close()
+
+        # Effective efforts are {low, medium} → highest is "medium".
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == ["medium"]
+        err = capsys.readouterr().err
+        assert "different reasoning_effort" in err
+        # Assert on the distinct "chosen" phrase, not the bare level (which also
+        # appears in the listed distinct levels), to lock the highest-wins policy.
+        assert "Choosing the highest level 'medium'" in err
+
+    def test_shinka_reasoning_effort_inert_local_warns(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """All-local ensemble with effort set → inert warning (FACT A)."""
+        db_path = tmp_path / "global.db"
+        conn = get_global_db_at(db_path)
+        try:
+            insert_llm(conn, _make_llm(name="m-a", source="local", reasoning_effort="high"))
+            insert_llm(conn, _make_llm(name="m-b", source="local", reasoning_effort="high"))
+            ensemble = EnsembleEntry(
+                name="ens",
+                members=[
+                    EnsembleMember(llm_name="m-a", weight=0.5),
+                    EnsembleMember(llm_name="m-b", weight=0.5),
+                ],
+                created_at=datetime(2026, 1, 1),
+            )
+            spec = _make_spec(
+                tmp_path,
+                llm=_make_llm(name="m-a", source="local"),
+                ensemble=ensemble,
+                conn=conn,
+            )
+            config = ShinkaBackend().build_config(spec)
+        finally:
+            conn.close()
+
+        # Effort still projected (uniform "high"), but flagged inert for local.
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == ["high"]
+        err = capsys.readouterr().err
+        assert "inert for local" in err
 
     def test_evaluation_section_passthrough(self, fake_shinka: None, tmp_path: Path) -> None:
         """The Revolver 'evaluation' section survives the projection."""

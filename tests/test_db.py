@@ -120,3 +120,68 @@ def test_global_db_respects_revolver_home(tmp_path: Path, monkeypatch: pytest.Mo
         assert not (home_dir / ".revolver").exists()
     finally:
         conn.close()
+
+
+# ── S17-32(b): --global-db / REVOLVER_GLOBAL_DB override ──────────────────────
+
+
+@pytest.mark.unit
+def test_global_db_path_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """global_db_path() defaults to ~/.revolver/revolver.db with no env set."""
+    monkeypatch.delenv("REVOLVER_HOME", raising=False)
+    monkeypatch.delenv("REVOLVER_GLOBAL_DB", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))  # type: ignore[arg-type]
+
+    from revolver.infra.db import global_db_path
+
+    assert global_db_path() == tmp_path / ".revolver" / "revolver.db"
+
+
+@pytest.mark.unit
+def test_global_db_path_revolver_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REVOLVER_HOME (a base dir) overrides home when --global-db is unset."""
+    monkeypatch.delenv("REVOLVER_GLOBAL_DB", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))  # type: ignore[arg-type]
+    monkeypatch.setenv("REVOLVER_HOME", str(tmp_path / "state"))
+
+    from revolver.infra.db import global_db_path
+
+    assert global_db_path() == tmp_path / "state" / ".revolver" / "revolver.db"
+
+
+@pytest.mark.unit
+def test_global_db_path_override_beats_revolver_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Precedence: --global-db (a full file path) beats REVOLVER_HOME beats home."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))  # type: ignore[arg-type]
+    monkeypatch.setenv("REVOLVER_HOME", str(tmp_path / "state"))
+    override = tmp_path / "custom" / "x.db"
+    monkeypatch.setenv("REVOLVER_GLOBAL_DB", str(override))
+
+    from revolver.infra.db import global_db_path
+
+    assert global_db_path() == override
+
+
+@pytest.mark.unit
+def test_get_global_db_uses_override_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_global_db() opens the exact --global-db path, creating parents.
+
+    The default store (home / REVOLVER_HOME) must be untouched.
+    """
+    home_dir = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))  # type: ignore[arg-type]
+    monkeypatch.delenv("REVOLVER_HOME", raising=False)
+    override = tmp_path / "nested" / "override.db"
+    monkeypatch.setenv("REVOLVER_GLOBAL_DB", str(override))
+
+    from revolver.infra.db import get_global_db
+
+    conn = get_global_db()
+    try:
+        assert override.exists()
+        # The default home store was never created.
+        assert not (home_dir / ".revolver").exists()
+    finally:
+        conn.close()

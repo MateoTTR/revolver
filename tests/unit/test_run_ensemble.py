@@ -77,6 +77,7 @@ def _register_ensemble(
             weight=m.get("weight", 1.0),
             temperature_override=m.get("temperature_override"),
             max_tokens_override=m.get("max_tokens_override"),
+            reasoning_effort_override=m.get("reasoning_effort_override"),
         )
 
 
@@ -270,6 +271,87 @@ class TestBuildConfigEnsemble:
         assert models[1]["max_tokens"] == 16384
         conn.close()
 
+    def test_oe_ensemble_reasoning_effort_per_member(self, tmp_path: Path) -> None:
+        """OE maps per-member reasoning_effort onto llm.models[] (S17-26, FACT A)."""
+        conn = _setup_global_db(tmp_path)
+
+        # llm-a carries a registry-level effort; llm-b has none.
+        _register_llm(
+            conn,
+            _make_llm(name="llm-a", model="model-a", reasoning_effort="low"),
+        )
+        _register_llm(conn, _make_llm(name="llm-b", model="model-b"))
+
+        ensemble = EnsembleEntry(
+            name="test-ensemble",
+            members=[
+                # No override → falls back to registry-level "low".
+                EnsembleMember(llm_name="llm-a", weight=0.5),
+                # Per-member override wins (member has none in registry).
+                EnsembleMember(llm_name="llm-b", weight=0.5, reasoning_effort="high"),
+            ],
+            created_at=datetime.now(UTC),
+        )
+
+        primary = _make_llm(name="llm-a", model="model-a", reasoning_effort="low")
+        config = build_config(
+            problem_config=None,
+            llm=primary,
+            ensemble=ensemble,
+            conn=conn,
+        )
+
+        models = config["llm"]["models"]
+        # llm-a: registry-level effort applied.
+        assert models[0]["reasoning_effort"] == "low"
+        # llm-b: per-member override applied.
+        assert models[1]["reasoning_effort"] == "high"
+        conn.close()
+
+    def test_oe_ensemble_reasoning_effort_absent_when_unset(self, tmp_path: Path) -> None:
+        """No reasoning_effort anywhere → key omitted from every model (zero-change)."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+        )
+
+        for model in config["llm"]["models"]:
+            assert "reasoning_effort" not in model
+        conn.close()
+
+    def test_oe_single_llm_reasoning_effort_mapped(self, tmp_path: Path) -> None:
+        """Single-LLM run maps spec.llm.reasoning_effort onto config['llm']."""
+        llm = _make_llm(
+            name="flash",
+            model="gemini-2.5-flash",
+            base_url="https://api.example.com/v1",
+            api_key_env="FLASH_KEY",
+            reasoning_effort="high",
+        )
+
+        config = build_config(problem_config=None, llm=llm)
+        assert config["llm"]["reasoning_effort"] == "high"
+
+    def test_oe_single_llm_reasoning_effort_absent_when_unset(self, tmp_path: Path) -> None:
+        """Single-LLM run without reasoning_effort omits the key (zero-change)."""
+        llm = _make_llm(name="flash", model="gemini-2.5-flash")
+        config = build_config(problem_config=None, llm=llm)
+        assert "reasoning_effort" not in config.get("llm", {})
+
+    def test_oe_single_llm_reasoning_effort_override_wins(self, tmp_path: Path) -> None:
+        """--config-override llm.reasoning_effort=… wins over the registry value."""
+        llm = _make_llm(name="flash", model="gemini-2.5-flash", reasoning_effort="high")
+        config = build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["llm.reasoning_effort=low"],
+        )
+        assert config["llm"]["reasoning_effort"] == "low"
+
     def test_single_llm_no_regression(self, tmp_path: Path) -> None:
         """build_config without ensemble still works as before."""
         llm = _make_llm(
@@ -295,6 +377,128 @@ class TestBuildConfigEnsemble:
         assert config["llm"]["max_tokens"] == 8192
         assert "models" not in config["llm"]
         assert config["max_iterations"] == 10
+
+    def test_single_llm_default_config_byte_identical(self, tmp_path: Path) -> None:
+        """S17-33 exit criterion: single-LLM (no ensemble, no new flags) OE config
+        is byte-identical to the pre-sprint output.
+
+        This whole-dict pin fails loudly if any future change perturbs the
+        default single-LLM path. Keep it in lockstep with build_config().
+        """
+        llm = _make_llm(
+            name="flash",
+            model="gemini-2.5-flash",
+            base_url="https://api.example.com/v1",
+            api_key_env="FLASH_KEY",
+            temperature=0.8,
+            max_tokens=8192,
+        )
+
+        config = build_config(
+            problem_config=None,
+            llm=llm,
+            iterations=10,
+        )
+
+        assert config == {
+            "max_iterations": 10,
+            "checkpoint_interval": 10,
+            "llm": {
+                "primary_model": "gemini-2.5-flash",
+                "api_base": "https://api.example.com/v1",
+                "api_key_env": "FLASH_KEY",
+                "temperature": 0.8,
+                "max_tokens": 8192,
+            },
+            "evaluator": {
+                "cascade_evaluation": False,
+            },
+        }
+
+    def test_llm_weight_override_wins(self, tmp_path: Path) -> None:
+        """--llm-weight overrides the registry member weight (S17-22, A1/M3)."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        # Registry weights are flash-lite=0.8, pro=0.2; override both.
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+            llm_weight_overrides={"flash-lite": 0.9, "pro": 0.1},
+        )
+
+        models = config["llm"]["models"]
+        assert models[0]["name"] == "gemini-2.5-flash-lite"
+        assert models[0]["weight"] == 0.9  # overridden (registry was 0.8)
+        assert models[1]["name"] == "gemini-2.5-pro"
+        assert models[1]["weight"] == 0.1  # overridden (registry was 0.2)
+        conn.close()
+
+    def test_llm_weight_partial_override_keeps_registry(self, tmp_path: Path) -> None:
+        """A member absent from --llm-weight keeps its registry weight."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        # Only override flash-lite; pro must keep its registry weight (0.2).
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+            llm_weight_overrides={"flash-lite": 0.5},
+        )
+
+        models = config["llm"]["models"]
+        assert models[0]["weight"] == 0.5  # overridden
+        assert models[1]["weight"] == 0.2  # registry weight retained
+        conn.close()
+
+    def test_no_override_uses_registry_weights(self, tmp_path: Path) -> None:
+        """Without --llm-weight the registry weights are used unchanged."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+        )
+
+        models = config["llm"]["models"]
+        assert models[0]["weight"] == 0.8
+        assert models[1]["weight"] == 0.2
+        conn.close()
+
+    def test_selection_fixed_accepted(self, tmp_path: Path) -> None:
+        """--selection fixed is the implicit weighted mode on OE (accepted)."""
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        # Must not raise: "fixed" maps onto OE's static weighted sampler.
+        config = build_config(
+            problem_config=None,
+            llm=primary_llm,
+            ensemble=ensemble,
+            conn=conn,
+            selection="fixed",
+        )
+        assert len(config["llm"]["models"]) == 2
+        conn.close()
+
+    def test_selection_adaptive_rejected(self, tmp_path: Path) -> None:
+        """--selection ucb is rejected by the OE builder (defensive; A2/A4)."""
+        from revolver.core.exceptions import ValidationError
+
+        conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
+
+        with pytest.raises(ValidationError, match="ucb"):
+            build_config(
+                problem_config=None,
+                llm=primary_llm,
+                ensemble=ensemble,
+                conn=conn,
+                selection="ucb",
+            )
+        conn.close()
 
 
 # ── LLM snapshot tests ──────────────────────────────────────────────────────

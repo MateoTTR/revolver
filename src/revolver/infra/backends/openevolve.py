@@ -38,6 +38,7 @@ from typing import Any
 import yaml
 
 from revolver.core.exceptions import (
+    CheckpointRecoveryError,
     EvaluatorLoadError,
     ExternalError,
     RevolverError,
@@ -47,7 +48,9 @@ from revolver.infra.backends.base import (
     BackendCapabilities,
     BackendRunResult,
     BackendRunSpec,
+    ChildProcessReaperMixin,
     ProgressInfo,
+    RecoveredProgram,
 )
 from revolver.models.llm import EnsembleEntry, LLMEntry
 from revolver.models.run import ResolvedConfig, TokenUsage
@@ -130,6 +133,11 @@ REVOLVER_SECTIONS = frozenset({"evaluation"})
 # endpoints (e.g. the claude-ollama-bridge at 50-530 s/call) -> a retry
 # storm and a proxy BrokenPipeError. Remote APIs keep OpenEvolve's default.
 DEFAULT_LOCAL_LLM_TIMEOUT_S = 600
+
+# Marker prefixing every "unknown key" finding emitted by validate_oe_config().
+# Shared with _warn_noop_config_overrides()'s B9 filter (below) so that a reword
+# of these messages cannot silently break no-op detection there.
+_UNKNOWN_OE_KEY_MARKER = "Unknown OE config key"
 
 
 def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
@@ -225,11 +233,12 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
         for key in sorted(exc.keys):
             if key in _DATABASE_KEYS:
                 warnings.append(
-                    f"Unknown OE config key '{key}' at top level. Did you mean 'database.{key}'?"
+                    f"{_UNKNOWN_OE_KEY_MARKER} '{key}' at top level. "
+                    f"Did you mean 'database.{key}'?"
                 )
             else:
                 warnings.append(
-                    f"Unknown OE config key '{key}' (not in OpenEvolve Config schema)."
+                    f"{_UNKNOWN_OE_KEY_MARKER} '{key}' (not in OpenEvolve Config schema)."
                 )
         return warnings
     except Exception:
@@ -237,10 +246,64 @@ def validate_oe_config(config: Path | dict[str, Any]) -> list[str]:
         return []
 
 
+def _warn_noop_config_overrides(
+    config_overrides: list[str] | None,
+    parsed_values: dict[str, Any],
+) -> None:
+    """Warn on ``--config-override`` keys that land on no OpenEvolve field (B9).
+
+    ``build_config`` writes every override into the merged config via
+    :func:`_set_nested` regardless of whether the dotted key names a real
+    OpenEvolve ``Config`` field, so a typo (``llm.nonexistent_key=1``) is
+    silently set-and-ignored by the engine. This surfaces the no-op instead
+    of swallowing it (spec §4.5, ADR-007 A5) — the ``--config-override``
+    escape hatch must never quietly do nothing.
+
+    Detection reuses the strict-dacite machinery of :func:`validate_oe_config`
+    (no hand-rolled schema): each override is validated **in isolation** as a
+    minimal ``{path: value}`` config. Per-key isolation is required because a
+    single dacite parse only reports the first dataclass it rejects, so a
+    whole-config pass would miss unknown keys in later sections. Revolver-owned
+    keys/sections (``evaluation:``, ``initial_program``, ``num_generations`` —
+    :data:`REVOLVER_KEYS` / :data:`REVOLVER_SECTIONS`, stripped before the
+    strict parse) never warn, so this cannot regress those tolerated paths.
+
+    Degrades to silence when OpenEvolve/dacite are unavailable (validation
+    returns ``[]``), mirroring ``problem version create``.
+
+    Note: dacite recurses into JSON-object override *values*, so a whole-section
+    override like ``evaluator={"bogus_sub": 1}`` is also caught here — a bonus,
+    though the warning names the override key (``evaluator``) rather than the
+    offending leaf (``bogus_sub``). The Shinka B9 probe deliberately substitutes
+    an empty dict for the value and so does *not* recurse into JSON-object
+    contents; this OE-vs-Shinka asymmetry is harmless (both err toward warning).
+
+    Args:
+        config_overrides: The raw ``key=value`` override strings.
+        parsed_values: Map of dotted override key → already-parsed value, so
+            the probe carries the real value (a type mismatch on a *recognized*
+            key must not masquerade as an unknown key).
+    """
+    for override in config_overrides or []:
+        if "=" not in override:
+            continue
+        key = override.split("=", 1)[0].strip()
+        probe: dict[str, Any] = {}
+        _set_nested(probe, key, parsed_values.get(key))
+        # Only "unknown key" findings are no-ops. Deprecation notices (e.g.
+        # ``num_generations``, which build_config remaps to ``max_iterations``)
+        # are recognized keys and must NOT warn as no-ops.
+        if any(_UNKNOWN_OE_KEY_MARKER in msg for msg in validate_oe_config(probe)):
+            sys.stderr.write(
+                f"Warning: --config-override '{key}' matches no field in the "
+                f"OpenEvolve config schema; it will have no effect.\n"
+            )
+
+
 # ── OpenEvolve runner ─────────────────────────────────────────────────────────
 
 
-class OpenEvolveRunner:
+class OpenEvolveRunner(ChildProcessReaperMixin):
     """Wrapper around the OpenEvolve controller for Revolver integration.
 
     Uses conditional import to avoid hard dependency on OpenEvolve
@@ -326,6 +389,12 @@ class OpenEvolveRunner:
         if self._controller is None:
             self._init_controller()
 
+        # Snapshot the process's child PIDs BEFORE the run so the post-run
+        # backstop only reaps children the run itself spawned (B2 / S17-03,
+        # symmetric to the Shinka teardown #314). Children predating the run
+        # are excluded.
+        pre_run_children = self._current_child_pids()
+
         # Ensure unbuffered output for real-time progress (S8a-09); this
         # affects any child processes OpenEvolve may spawn. Scoped through
         # revolver_env so the caller's PYTHONUNBUFFERED is restored on exit
@@ -347,6 +416,46 @@ class OpenEvolveRunner:
                 )
             except Exception as exc:
                 raise ExternalError(f"OpenEvolve run failed: {exc}") from exc
+            finally:
+                # Orchestrator-owned teardown (B2 / S17-05, symmetric to the
+                # Shinka path #314). OpenEvolve's own ``_cleanup`` normally
+                # stops the ``ProcessParallelController`` and joins its
+                # ``ProcessPoolExecutor``, yet on an abnormal exit a worker /
+                # evaluator child can survive and pin the CLI at ~100% CPU.
+                # This teardown is purely defensive: idempotent with the
+                # engine's cleanup, never raises, and only touches the OE path.
+                # By the time ``asyncio.run`` returns the best program is
+                # already persisted in the checkpoint, so neither the resource
+                # shutdown nor the child reap can truncate the result.
+                self._shutdown_runner(self._controller)
+                self._reap_run_children(pre_run_children)
+
+    @staticmethod
+    def _shutdown_runner(controller: Any) -> None:
+        """Defensively tear down the OE controller's reachable process pool.
+
+        OpenEvolve drives evaluations through a
+        ``ProcessParallelController`` whose ``executor`` is a
+        ``ProcessPoolExecutor``. On a clean run the controller's own cleanup
+        already stops it, so this is a no-op backstop for the case where the
+        controller returns with the pool still alive.
+
+        ``shutdown(wait=False)`` is used **deliberately**: calling
+        ``ProcessPoolExecutor.shutdown(wait=True)`` here would block the
+        orchestrator on a wedged worker — the exact #159 hang. Every step is
+        ``getattr``-guarded and suppressed so a partially-constructed
+        controller (or a future upstream rename) can never turn teardown into
+        a crash.
+        """
+        if controller is None:
+            return
+
+        parallel_controller = getattr(controller, "parallel_controller", None)
+        executor = getattr(parallel_controller, "executor", None)
+        executor_shutdown = getattr(executor, "shutdown", None)
+        if callable(executor_shutdown):
+            with contextlib.suppress(Exception):
+                executor_shutdown(wait=False)
 
 
 # ── Config builder (DES-005 §4.2) ────────────────────────────────────────────
@@ -357,6 +466,7 @@ def _build_ensemble_llm_config(
     ensemble: EnsembleEntry,
     primary_llm: LLMEntry,
     conn: Any | None,
+    weight_overrides: dict[str, float] | None = None,
 ) -> None:
     """Build the ``llm.models`` array for ensemble mode (S11-07).
 
@@ -369,19 +479,26 @@ def _build_ensemble_llm_config(
     - ``EnsembleMember.weight`` → ``models[].weight``
     - ``EnsembleMember.temperature`` → ``models[].temperature`` (optional)
     - ``EnsembleMember.max_tokens`` → ``models[].max_tokens`` (optional)
+    - ``EnsembleMember.reasoning_effort`` → ``models[].reasoning_effort``
+      (optional; S17-26, FACT A: OpenEvolve honours effort per model)
 
-    Falls back to the member's LLM registry defaults for temperature and
-    max_tokens when no per-member override is set.
+    Falls back to the member's LLM registry defaults for temperature,
+    max_tokens, and reasoning_effort when no per-member override is set.
 
     Args:
         config: The OE config dict to mutate (adds ``llm.models``).
         ensemble: The ensemble entry with member definitions.
         primary_llm: The first member's LLM entry, used for shared defaults.
         conn: Global DB connection for resolving member LLM details.
+        weight_overrides: Per-run ``--llm-weight model=weight`` overrides keyed
+            by member LLM registry name (ADR-007 A1/M3). When a member's name
+            is present the override *wins* over the registry ``member.weight``;
+            otherwise the registry weight is used unchanged.
     """
     from revolver.infra.db import get_llm
 
     config["llm"] = config.get("llm") if isinstance(config.get("llm"), dict) else {}
+    overrides = weight_overrides or {}
 
     models: list[dict[str, Any]] = []
     for member in ensemble.members:
@@ -394,9 +511,12 @@ def _build_ensemble_llm_config(
                 f"Ensemble member LLM '{member.llm_name}' not found in registry."
             )
 
+        # --llm-weight override wins over the registry weight (CLI wins).
+        effective_weight = overrides.get(member.llm_name, member.weight)
+
         entry: dict[str, Any] = {
             "name": member_llm.model,
-            "weight": member.weight,
+            "weight": effective_weight,
         }
 
         if member_llm.base_url:
@@ -418,6 +538,17 @@ def _build_ensemble_llm_config(
         if effective_max_tokens is not None:
             entry["max_tokens"] = effective_max_tokens
 
+        # Per-member reasoning_effort override wins over the member LLM's
+        # registry-level value (S17-26, ADR-007 A3.2). OpenEvolve honours
+        # reasoning_effort per model in its llm.models array (FACT A).
+        effective_reasoning_effort = (
+            member.reasoning_effort
+            if member.reasoning_effort is not None
+            else member_llm.reasoning_effort
+        )
+        if effective_reasoning_effort is not None:
+            entry["reasoning_effort"] = effective_reasoning_effort
+
         models.append(entry)
 
     config["llm"]["models"] = models
@@ -435,6 +566,8 @@ def build_config(
     rewrite_mode: bool = False,
     ensemble: EnsembleEntry | None = None,
     conn: Any | None = None,
+    selection: str | None = None,
+    llm_weight_overrides: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build the OpenEvolve config dict.
 
@@ -477,10 +610,33 @@ def build_config(
         ensemble: Ensemble entry for multi-model mode (optional).
         conn: Global database connection, required when *ensemble* is provided
             to resolve member LLM details.
+        selection: Resolved ``--selection`` strategy (optional). OpenEvolve's
+            only ensemble selection is the static weighted sampler, so any
+            value other than ``None``/``"fixed"`` is rejected here as a
+            defensive belt-and-braces guard behind the primary orchestrator
+            check (ADR-007 A2/A4, DES-005 §4.2).
+        llm_weight_overrides: Per-run ``--llm-weight model=weight`` overrides
+            keyed by member LLM registry name, applied on top of the registry
+            weights when building the ``llm.models`` array (ADR-007 A1/M3).
 
     Returns:
         Merged configuration dictionary.
+
+    Raises:
+        ValidationError: If *selection* is an adaptive strategy OpenEvolve
+            cannot honor (only static weighted sampling is supported).
     """
+    # 0. Defensive selection guard (ADR-007 A2/A4): OpenEvolve only offers the
+    # static weighted sampler, whose sole neutral selection value is "fixed".
+    # The orchestrator-level capability check (core.run._validate_selection) is
+    # primary and rejects an unsupported value earlier; this belt-and-braces
+    # guard keeps build_config honest if called directly.
+    if selection is not None and selection != "fixed":
+        raise ValidationError(
+            f"Selection strategy '{selection}' is not supported by backend "
+            f"'openevolve'. Supported: fixed."
+        )
+
     # 1. Base config from problem version
     config: dict[str, Any] = {}
     if problem_config and problem_config.exists():
@@ -506,7 +662,7 @@ def build_config(
     # 2. LLM endpoint injection (DES-005 §4.3)
     if ensemble is not None:
         # Ensemble mode: emit llm.models array (S11-07)
-        _build_ensemble_llm_config(config, ensemble, llm, conn)
+        _build_ensemble_llm_config(config, ensemble, llm, conn, llm_weight_overrides)
     else:
         # Single-LLM mode (unchanged)
         llm_config: dict[str, Any] = {}
@@ -547,6 +703,14 @@ def build_config(
         config.setdefault("llm", {})
         if isinstance(config.get("llm"), dict):
             config["llm"]["temperature"] = llm.temperature
+    # 2b (S17-26): single-LLM reasoning_effort from the registry entry. In
+    # ensemble mode the per-member value is already mapped onto llm.models[]
+    # above, so only inject the top-level key on the single-LLM path.
+    # --config-override llm.reasoning_effort=… (step 5) still wins.
+    if ensemble is None and llm.reasoning_effort is not None:
+        config.setdefault("llm", {})
+        if isinstance(config.get("llm"), dict):
+            config["llm"]["reasoning_effort"] = llm.reasoning_effort
 
     # Google provider detection (FB-02): Google's Generative Language API
     # rejects the ``seed`` parameter with HTTP 400.  Disable random_seed.
@@ -625,13 +789,18 @@ def build_config(
 
     # 5. Config overrides (key=value pairs, dotted keys supported)
     if config_overrides:
+        parsed_overrides: dict[str, Any] = {}
         for override in config_overrides:
             if "=" not in override:
                 raise ValidationError(
                     f"Malformed config override (expected key=value): {override!r}"
                 )
             key, value = override.split("=", 1)
-            _set_nested(config, key.strip(), _parse_value(value.strip()))
+            parsed = _parse_value(value.strip())
+            parsed_overrides[key.strip()] = parsed
+            _set_nested(config, key.strip(), parsed)
+        # B9 (S17-30): warn on override keys that land on no OpenEvolve field.
+        _warn_noop_config_overrides(config_overrides, parsed_overrides)
 
     # 5b. Guard: ensure checkpoint_interval <= iterations for resume capability
     effective_interval = config.get("checkpoint_interval", 100)  # OE default
@@ -1005,6 +1174,85 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
         return None
 
 
+def recover_best_from_checkpoint(run_dir: Path) -> RecoveredProgram:
+    """Recover the best program from a run's latest OpenEvolve checkpoint (B7).
+
+    Locates the latest ``oe-output/checkpoints/checkpoint_N/`` in *run_dir*,
+    reads ``best_program_id`` from ``metadata.json``, and loads the program's
+    ``code`` (and score) from ``programs/{id}.json`` — the state that survives
+    a killed/interrupted run before it reaches the normal ``programs/``
+    extraction path (FR-RUN-051, DES-005 §7.2).
+
+    Args:
+        run_dir: Directory of the interrupted/failed run
+            (``.revolver/runs/<run_id>``).
+
+    Returns:
+        The recovered best :class:`RecoveredProgram`.
+
+    Raises:
+        CheckpointRecoveryError: No checkpoint exists yet (run too short), or
+            the checkpoint / best program is missing or unreadable.
+    """
+    checkpoint = find_latest_checkpoint(run_dir)
+    if checkpoint is None:
+        raise CheckpointRecoveryError(
+            f"No checkpoint found for run '{run_dir.name}'. The run may have "
+            "been interrupted before its first checkpoint was written."
+        )
+
+    metadata_path = checkpoint / "metadata.json"
+    try:
+        metadata = _json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CheckpointRecoveryError(
+            f"Failed to read checkpoint metadata at {metadata_path}: {exc}"
+        ) from exc
+
+    best_id = metadata.get("best_program_id")
+    if not best_id:
+        raise CheckpointRecoveryError(
+            f"Checkpoint '{checkpoint.name}' has no tracked best program "
+            "(no 'best_program_id' in metadata)."
+        )
+
+    program_path = checkpoint / "programs" / f"{best_id}.json"
+    try:
+        program_data = _json.loads(program_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CheckpointRecoveryError(
+            f"Best program '{best_id}' not found or unreadable in checkpoint "
+            f"'{checkpoint.name}': {exc}"
+        ) from exc
+
+    code = program_data.get("code")
+    if not isinstance(code, str) or not code:
+        raise CheckpointRecoveryError(
+            f"Best program '{best_id}' in checkpoint '{checkpoint.name}' has no usable code."
+        )
+
+    # Score: the program's ``combined_score`` metric — the single scalar
+    # solutions/populations are ranked by everywhere else. NOT the sum of all
+    # numeric metrics: a program carrying ``combined_score`` alongside other
+    # numeric metrics (accuracy, latency, ...) would otherwise be over-counted.
+    # When the checkpoint predates aggregation and has no ``combined_score``,
+    # fall back to ``None`` (unknown) rather than fabricating a summed value.
+    metrics = program_data.get("metrics", {})
+    score: float | None = None
+    if isinstance(metrics, dict):
+        raw_score = metrics.get("combined_score")
+        if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
+            score = float(raw_score)
+
+    language = program_data.get("language")
+    return RecoveredProgram(
+        program_id=str(best_id),
+        code=code,
+        score=score,
+        language=language if isinstance(language, str) and language else "python",
+    )
+
+
 def count_valid_programs(checkpoint_dir: Path) -> int | None:
     """Count valid program entries in an OpenEvolve checkpoint database.
 
@@ -1130,16 +1378,28 @@ def evaluate(program_path: str) -> dict[str, float]:
     if not all_metrics:
         return {{"combined_score": 0.0}}
 
-    combined = statistics.mean(m["combined_score"] for m in all_metrics)
+    # Numeric guard (B1 / FR-EVL-021): a user evaluate_instance may emit
+    # non-numeric fields (e.g. {{"error": "boom"}}) alongside numeric metrics.
+    # Aggregation must skip those rather than crash statistics.mean on a str,
+    # so filter to real numbers (bool is an int subclass -> exclude it).
+    def _is_number(x) -> bool:
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    combined_vals = [
+        m["combined_score"]
+        for m in all_metrics
+        if "combined_score" in m and _is_number(m["combined_score"])
+    ]
+    combined = statistics.mean(combined_vals) if combined_vals else 0.0
     result: dict[str, float] = {{"combined_score": combined}}
 
-    # Include other metrics as aggregated means
+    # Include other metrics as aggregated means, dropping non-numeric values.
     all_keys: set[str] = set()
     for m in all_metrics:
         all_keys.update(m.keys())
     for key in sorted(all_keys):
         if key != "combined_score":
-            vals = [m[key] for m in all_metrics if key in m]
+            vals = [m[key] for m in all_metrics if key in m and _is_number(m[key])]
             if vals:
                 result[key] = statistics.mean(vals)
 
@@ -1297,8 +1557,12 @@ llm:
 # MAP-Elites database settings.
 # Population size — number of candidate programs kept in the archive.
 # OpenEvolve defaults to 1000; uncomment to shrink it for quick experiments.
+# feature_dimensions / feature_bins are the MAP-Elites feature axes and the
+# per-axis bin counts (the archive grid); uncomment to customise the grid.
 # database:
 #   population_size: 10
+#   feature_dimensions: ["complexity", "diversity"]
+#   feature_bins: 10
 
 # Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:
@@ -1335,6 +1599,8 @@ class OpenEvolveBackend:
             multi_language=False,
             ensemble_model="weighted",
             top_n_extraction=False,
+            selection_strategies=("fixed",),
+            per_member_reasoning_effort=True,
         )
 
     def is_available(self) -> tuple[bool, str | None]:
@@ -1364,6 +1630,8 @@ class OpenEvolveBackend:
             rewrite_mode=spec.rewrite_mode,
             ensemble=spec.ensemble,
             conn=spec.conn,
+            selection=spec.selection,
+            llm_weight_overrides=spec.llm_weight_overrides,
         )
 
     def resolved_config(
@@ -1470,6 +1738,17 @@ class OpenEvolveBackend:
         protocol's default no-op behaviour.
         """
         return None
+
+    def recover_best_from_checkpoint(self, run_dir: Path) -> RecoveredProgram:
+        """Recover the best program from the run's latest checkpoint (B7).
+
+        Delegates to the module-level :func:`recover_best_from_checkpoint`,
+        which reads ``oe-output/checkpoints/checkpoint_N/`` (FR-RUN-051,
+        DES-005 §7.2). Raises
+        :class:`~revolver.core.exceptions.CheckpointRecoveryError` when no
+        usable checkpoint exists yet.
+        """
+        return recover_best_from_checkpoint(run_dir)
 
     def resume(
         self,

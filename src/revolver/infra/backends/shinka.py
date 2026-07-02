@@ -45,10 +45,8 @@ import json
 import os
 from pathlib import Path
 import shutil
-import signal
 import sqlite3
 import sys
-import time
 from typing import Any
 
 import yaml
@@ -56,6 +54,7 @@ import yaml
 from revolver.core.exceptions import (
     EvaluatorLoadError,
     ExternalError,
+    RecoveryNotSupportedError,
     RevolverError,
     ValidationError,
 )
@@ -64,7 +63,9 @@ from revolver.infra.backends.base import (
     BackendRunResult,
     BackendRunSpec,
     BackendUnavailableError,
+    ChildProcessReaperMixin,
     ProgressInfo,
+    RecoveredProgram,
 )
 from revolver.infra.backends.openevolve import (
     # Backend-neutral config plumbing shared with the OpenEvolve adapter.
@@ -75,7 +76,12 @@ from revolver.infra.backends.openevolve import (
     _set_nested,
     revolver_env,
 )
-from revolver.models.llm import LLMEntry
+from revolver.models.llm import (
+    REASONING_EFFORT_LEVELS,
+    EnsembleEntry,
+    EnsembleMember,
+    LLMEntry,
+)
 from revolver.models.run import ResolvedConfig, TokenUsage
 
 _INSTALL_HINT = "Install with: pip install 'revolver[shinka]'"
@@ -97,12 +103,6 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # top-N extraction (capabilities().top_n_extraction) is an S15 extension.
 _BEST_PROGRAMS_COUNT = 1
 
-# Grace period (seconds) between SIGTERM and SIGKILL when the post-run
-# backstop reaps an evaluator child that survived ``runner.run()`` (A2 /
-# #314). The child's result is already on disk in ``programs.sqlite`` by the
-# time the runner returns, so reaping it cannot truncate persistence.
-_CHILD_REAP_GRACE_SECONDS = 3.0
-
 # Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
 # ShinkaEvolve's own defaults are tuned for cheap non-thinking models and
 # silently break thinking-capable ones:
@@ -113,6 +113,78 @@ _CHILD_REAP_GRACE_SECONDS = 3.0
 #     patch loses the whole generation; ShinkaEvolve's examples use 10.
 _SHINKA_DEFAULT_MAX_TOKENS = 16384
 _SHINKA_DEFAULT_MAX_PATCH_ATTEMPTS = 10
+
+# ── Multi-LLM ensemble → bandit mapping (S17-19/20/21, ADR-007 A2/A5) ─────────
+#
+# ShinkaEvolve picks the *model* with a bandit; ``llm_dynamic_selection`` names
+# the sampler and ``llm_dynamic_selection_kwargs`` is spread VERBATIM into that
+# sampler's constructor (verified async_runner.py 0.0.7 L361-383 —
+# ``<Sampler>(arm_names=llm_models, **llm_dynamic_selection_kwargs)``). A key the
+# selected sampler's ``__init__`` does not accept therefore raises ``TypeError``
+# at launch (AsymmetricUCB/ThompsonSampler have no ``**kwargs``), so Revolver
+# must route kwargs per sampler and never send a union.
+#
+# Default selection strategy when ``--selection`` is unset: ``fixed`` keeps the
+# S14 single-LLM path a one-member FixedSampler case (zero behaviour change).
+_SHINKA_DEFAULT_SELECTION = "fixed"
+
+# ``ucb`` and ``ucb1`` are aliases for the same ``AsymmetricUCB`` class
+# (verified: no separate ucb1 class — v017 research §0 FACT B / §1).
+_SHINKA_ADAPTIVE_SELECTIONS = frozenset({"ucb", "ucb1", "thompson"})
+
+# Per-sampler accepted ``selection_kwargs`` keys (verified against
+# shinka/llm/prioritization.py 0.0.7 constructor signatures). ``prior_probs`` is
+# injected by build_config itself under ``fixed`` (weight vector) — it is NOT in
+# the user-facing allow-list. Any kwarg not listed for the selected sampler is
+# dropped with a warning rather than spread (would ``TypeError`` under
+# ucb/ucb1/thompson, be silently ignored under fixed).
+_SHINKA_SAMPLER_KWARG_KEYS: dict[str, frozenset[str]] = {
+    "fixed": frozenset(),
+    "ucb": frozenset(
+        {
+            "exploration_coef",
+            "epsilon",
+            "auto_decay",
+            "shift_by_baseline",
+            "shift_by_parent",
+            "adaptive_scale",
+            "asymmetric_scaling",
+            "exponential_base",
+            "cost_aware_coef",
+            "cost_exploration_coef",
+            "cost_power",
+            "cost_ref_percentile",
+        }
+    ),
+    "thompson": frozenset(
+        {
+            "epsilon",
+            "prior_alpha",
+            "prior_beta",
+            "auto_decay",
+            "shift_by_baseline",
+            "shift_by_parent",
+            "adaptive_scale",
+            "asymmetric_scaling",
+            "exponential_base",
+        }
+    ),
+}
+# ``ucb1`` is a bandit alias of ``ucb`` — same accepted-kwarg set.
+_SHINKA_SAMPLER_KWARG_KEYS["ucb1"] = _SHINKA_SAMPLER_KWARG_KEYS["ucb"]
+
+# Revolver's own default for the cost-aware coefficient on ucb/ucb1: 0 (flat-rate
+# / bridge case), NOT ShinkaEvolve's own 0.5. Inert when per-model cost is
+# undifferentiated (all-local/bridge) but must default correctly (M4, ADR-007 A5).
+_SHINKA_DEFAULT_COST_AWARE_COEF = 0.0
+
+# Total order over reasoning-effort levels (lowest → highest). ShinkaEvolve has
+# a single global reasoning_efforts pool (FACT A: no per-member effort), so when
+# ensemble members disagree Revolver picks the *highest* effort under this order
+# — never under-thinking — and warns (S17-27, ADR-007 A3.2). Aliased to the
+# canonical tuple in ``revolver.models.llm`` (single source of truth shared with
+# the core validator), so the two can no longer drift.
+_REASONING_EFFORT_ORDER: tuple[str, ...] = REASONING_EFFORT_LEVELS
 
 # Default env var name synthesized for local OpenAI-compatible endpoints
 # when the registry entry has no api_key_env (ADR-007 D5). launch()
@@ -443,6 +515,111 @@ def _project_llm_model(llm: LLMEntry) -> tuple[str, dict[str, str | None]]:
     return llm.model, {}
 
 
+def _resolve_ensemble_members(
+    ensemble: EnsembleEntry,
+    conn: Any | None,
+) -> list[tuple[EnsembleMember, LLMEntry]]:
+    """Resolve every ensemble member to its registered ``LLMEntry`` (ADR-007 A2).
+
+    Mirrors the OpenEvolve adapter's member resolution: each
+    :class:`~revolver.models.llm.EnsembleMember` is looked up by name in the
+    global registry via ``conn`` so the projection sees the endpoint details
+    (model id, base_url, api_key_env, source).
+
+    Returns:
+        A list of ``(member, member_llm)`` pairs in ``ensemble.members`` order —
+        which becomes the ``llm_models`` / ``prior_probs`` alignment order.
+
+    Raises:
+        ValidationError: When a member LLM is not found in the registry (or no
+            DB connection was provided to resolve it).
+    """
+    from revolver.infra.db import get_llm
+
+    resolved: list[tuple[EnsembleMember, LLMEntry]] = []
+    for member in ensemble.members:
+        member_llm: LLMEntry | None = None
+        if conn is not None:
+            member_llm = get_llm(conn, member.llm_name)
+        if member_llm is None:
+            raise ValidationError(
+                f"Ensemble member LLM '{member.llm_name}' not found in registry."
+            )
+        resolved.append((member, member_llm))
+    return resolved
+
+
+def _prior_probs_vector(
+    members: list[tuple[EnsembleMember, LLMEntry]],
+    weight_overrides: dict[str, float] | None,
+) -> list[float]:
+    """Build the ``FixedSampler.prior_probs`` vector aligned to ``llm_models``.
+
+    Registry/member weights are taken first, then any per-run
+    ``--llm-weight model=w`` override (keyed by LLM registry name) is applied on
+    top (CLI wins). The vector is renormalized to sum 1 (Shinka renormalizes too,
+    but doing it here keeps the dry-run/display honest). A degenerate all-zero /
+    negative sum falls back to a uniform vector so the sampler never rejects it.
+
+    Args:
+        members: ``(member, member_llm)`` pairs in ``llm_models`` order.
+        weight_overrides: ``--llm-weight`` overrides keyed by LLM registry name.
+
+    Returns:
+        The renormalized weight vector, one entry per member, in order.
+    """
+    overrides = weight_overrides or {}
+    raw = [float(overrides.get(member.llm_name, member.weight)) for member, _llm in members]
+    total = sum(raw)
+    if total <= 0.0:
+        # Degenerate weights → uniform (never send a sum<=0 vector: FixedSampler
+        # raises on it). This also matches the bandit's uniform default.
+        n = len(raw)
+        return [1.0 / n for _ in raw] if n else []
+    return [value / total for value in raw]
+
+
+def _route_selection_kwargs(
+    selection: str,
+    selection_kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Filter ``selection_kwargs`` to what the selected sampler's ctor accepts.
+
+    ``llm_dynamic_selection_kwargs`` is spread verbatim into the chosen sampler's
+    constructor (async_runner.py 0.0.7 L361-383), and AsymmetricUCB /
+    ThompsonSampler have no ``**kwargs`` — a stray key raises ``TypeError`` at
+    launch. Keys the selected sampler does not accept are therefore **dropped
+    with a stderr warning** rather than forwarded (never spread as a union —
+    ADR-007 A5). For ``ucb``/``ucb1`` the Revolver-specific ``cost_aware_coef``
+    default (0, not Shinka's 0.5 — M4) is applied when the user did not set it.
+
+    Args:
+        selection: The resolved sampler name (``fixed``/``ucb``/``ucb1``/
+            ``thompson``).
+        selection_kwargs: Parsed per-sampler kwargs from ``--selection-kwarg``
+            (``None`` when none supplied).
+
+    Returns:
+        The accepted-only kwargs dict for the sampler (may be empty). Never
+        contains ``prior_probs`` — that is set separately for ``fixed``.
+    """
+    accepted = _SHINKA_SAMPLER_KWARG_KEYS.get(selection, frozenset())
+    routed: dict[str, Any] = {}
+    for key, value in (selection_kwargs or {}).items():
+        if key in accepted:
+            routed[key] = value
+        else:
+            sys.stderr.write(
+                f"Warning: --selection-kwarg '{key}' is not accepted by the "
+                f"'{selection}' selection strategy on the shinka backend and was "
+                f"dropped (it would otherwise be ignored or raise a TypeError).\n"
+            )
+    # M4: default cost_aware_coef to 0 (flat-rate/bridge) on ucb/ucb1 only.
+    if selection in ("ucb", "ucb1"):
+        routed.setdefault("cost_aware_coef", _SHINKA_DEFAULT_COST_AWARE_COEF)
+    return routed
+
+
 def _ensure_section(config: dict[str, Any], name: str) -> dict[str, Any]:
     """Return ``config[name]`` as a dict, (re)creating it when needed."""
     section = config.get(name)
@@ -459,7 +636,7 @@ def _as_number(value: Any) -> float:
     return 0.0
 
 
-class ShinkaBackend:
+class ShinkaBackend(ChildProcessReaperMixin):
     """``EvolutionBackend`` adapter for ShinkaEvolve (ADR-007, Sprint 014)."""
 
     name: str = "shinka"
@@ -478,6 +655,8 @@ class ShinkaBackend:
             multi_language=True,
             ensemble_model="bandit",
             top_n_extraction=True,
+            selection_strategies=("fixed", "ucb", "ucb1", "thompson"),
+            per_member_reasoning_effort=False,
         )
 
     def is_available(self) -> tuple[bool, str | None]:
@@ -559,6 +738,53 @@ class ShinkaBackend:
                 )
         return warnings
 
+    def _warn_noop_config_overrides(self, config_overrides: list[str] | None) -> None:
+        """Warn on ``--config-override`` keys that land on no Shinka field (B9).
+
+        ``build_config`` writes every override via :func:`_set_nested`
+        regardless of whether the dotted key names a real section/field, so a
+        typo (``evo_config.nonexistent_key=1``) or an unknown section
+        (``bogus.x=1``) is silently set-and-ignored (the engine projection in
+        ``_dataclass_kwargs`` drops per-section unknowns at *run* time, but a
+        ``--dry-run`` never reaches it, and an unknown top-level section is
+        dropped by neither). This surfaces the no-op at build time on both
+        paths (spec §4.5, ADR-007 A5).
+
+        Detection reuses :meth:`validate_config` (no hand-rolled schema): each
+        override is validated **in isolation** as a minimal probe built from
+        its first two dotted segments (``section`` + first field). Only the top
+        two segments are probed so a deeper key under a dict-valued field
+        (``evo_config.llm_kwargs.max_tokens``) is not mistaken for a no-op.
+        Revolver-owned sections (:data:`_REVOLVER_SECTIONS`:
+        ``evaluation``/``output_dir``/``llm_env``) are tolerated by
+        ``validate_config`` and never warn. Degrades to silence when shinka is
+        not installed (``validate_config`` returns ``[]``).
+
+        This intentionally overlaps ``_dataclass_kwargs`` for the
+        unknown-per-section-key case on a real run (build-time + run-time
+        belt-and-braces); a ``--dry-run`` warns exactly once.
+        """
+        for override in config_overrides or []:
+            if "=" not in override:
+                continue
+            key = override.split("=", 1)[0].strip()
+            parts = key.split(".")
+            probe: dict[str, Any] = {}
+            # Probe only the top two segments: section + first field. A deeper
+            # path lands inside a dict-valued dataclass field (validated as a
+            # whole), so its leaf is not a schema field and must not warn.
+            _set_nested(probe, ".".join(parts[:2]), {} if len(parts) > 2 else None)
+            # Both no-op findings from validate_config start with "Unknown "
+            # ("Unknown config section ..." / "Unknown <section> key ..."); the
+            # only other message ("... must be a mapping.") does not. Match the
+            # prefix rather than a bare substring so an unrelated future message
+            # that merely contains the word cannot trigger a false warning.
+            if any(msg.startswith("Unknown ") for msg in self.validate_config(probe)):
+                sys.stderr.write(
+                    f"Warning: --config-override '{key}' matches no field in the "
+                    f"shinka config schema; it will have no effect.\n"
+                )
+
     @staticmethod
     def _import_section_dataclasses() -> dict[str, Any] | None:
         """Import the Shinka config dataclasses; ``None`` when unavailable."""
@@ -584,8 +810,15 @@ class ShinkaBackend:
 
         Merge order (last wins):
             1. Problem version's ``config.yaml`` (base sections)
-            2. LLM projection (ADR-007 D5): ``llm_models`` single entry,
-               ``llm_dynamic_selection="fixed"``, ``llm_kwargs`` from the
+            2. LLM projection (ADR-007 D5 + A2/A5): ``llm_models`` (the single
+               primary LLM, or every ensemble member in order),
+               ``llm_dynamic_selection`` from ``spec.selection`` (default
+               ``"fixed"``); under ``fixed`` an ensemble's member weights
+               (registry + ``--llm-weight`` overrides) become
+               ``llm_dynamic_selection_kwargs.prior_probs`` (renormalized to sum
+               1) — inert-and-warned under ``ucb``/``ucb1``/``thompson``;
+               per-sampler ``--selection-kwarg`` routing (dropped-with-warning
+               when the sampler rejects the key); ``llm_kwargs`` from the primary
                registry entry
             2b. CLI ``--temperature`` (overrides registry temperature)
             3. Problem description → ``task_sys_msg``
@@ -604,19 +837,12 @@ class ShinkaBackend:
             BackendUnavailableError: When shinka is not installed — keeps
                 ``revolver run --backend shinka`` failing fast before any
                 side effect (exit 3).
-            ValidationError: For ensembles (bandit mapping is S15) or
-                malformed config overrides.
+            ValidationError: For an ensemble member LLM missing from the
+                registry, or malformed config overrides.
         """
         available, _hint = self.is_available()
         if not available:
             raise self._unavailable()
-
-        if spec.ensemble is not None:
-            raise ValidationError(
-                "Ensembles are not supported on the shinka backend yet "
-                "(weighted-to-bandit mapping is planned for Sprint 015). "
-                "Use a single registered LLM."
-            )
 
         # 1. Base config from the problem version snapshot
         config: dict[str, Any] = {}
@@ -630,12 +856,11 @@ class ShinkaBackend:
         _ensure_section(config, "db_config")
         job = _ensure_section(config, "job_config")
 
-        # 2. LLM projection (ADR-007 D5) — single LLM, fixed selection
-        model_string, llm_env = _project_llm_model(spec.llm)
-        evo["llm_models"] = [model_string]
-        evo["llm_dynamic_selection"] = "fixed"
-        if llm_env:
-            config["llm_env"] = llm_env
+        # 2. LLM projection (ADR-007 D5 + A2/A5) — single LLM or ensemble bandit.
+        #    The single-LLM path (no ensemble) stays a one-member ``fixed`` case
+        #    and produces the identical config as before this change (no
+        #    ``prior_probs`` / ``llm_dynamic_selection_kwargs`` are emitted for it).
+        self._project_llm_selection(spec, config, evo)
 
         # 2/2b. llm_kwargs from the registry entry + CLI --temperature
         llm_kwargs = evo.get("llm_kwargs")
@@ -654,6 +879,11 @@ class ShinkaBackend:
             spec.llm.max_tokens if spec.llm.max_tokens is not None else _SHINKA_DEFAULT_MAX_TOKENS
         )
         llm_kwargs.setdefault("max_tokens", default_max_tokens)
+        # Collapse per-member reasoning_effort into Shinka's single global pool
+        # (FACT A: no per-member effort). Disagreements pick the highest level
+        # (never under-think) with a warning; local/bridge members warn as inert
+        # (S17-27, ADR-007 A3.2).
+        self._project_reasoning_efforts(spec, llm_kwargs)
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
 
@@ -732,7 +962,166 @@ class ShinkaBackend:
             key, value = override.split("=", 1)
             _set_nested(config, key.strip(), _parse_value(value.strip()))
 
+        # B9 (S17-30): warn on override keys that land on no Shinka field.
+        self._warn_noop_config_overrides(spec.config_overrides)
+
         return config
+
+    @staticmethod
+    def _project_llm_selection(
+        spec: BackendRunSpec,
+        config: dict[str, Any],
+        evo: dict[str, Any],
+    ) -> None:
+        """Project the LLM(s) + selection strategy into ``evo_config`` (A2/A5).
+
+        Sets ``llm_models`` (all ensemble members, or the single primary LLM),
+        ``llm_dynamic_selection`` (from ``spec.selection``, default ``fixed``),
+        and merges the members' env-var export maps into ``config['llm_env']``.
+
+        Weight / kwarg mapping (verified v017 research §0 FACT B / §1):
+
+        - **fixed** (or unset): member weights (registry, then ``--llm-weight``
+          overrides on top) become ``FixedSampler.prior_probs`` — a vector
+          aligned to ``llm_models`` order, renormalized to sum 1. Emitted only
+          when there is a real weighting to express (an ensemble, or a weight
+          override): a plain single-LLM run stays byte-identical to the pre-A2
+          projection (no ``prior_probs`` / ``llm_dynamic_selection_kwargs``).
+        - **ucb/ucb1/thompson**: the bandit learns from a uniform start;
+          ``prior_probs`` is FixedSampler-only and would ``TypeError`` on these
+          samplers, so weights are **ignored with a warning** when non-uniform
+          weights are present (registry or ``--llm-weight``).
+
+        Per-sampler ``--selection-kwarg`` routing (never a union): kwargs the
+        selected sampler's constructor does not accept are dropped with a warning
+        (see :func:`_route_selection_kwargs`).
+        """
+        selection = spec.selection or _SHINKA_DEFAULT_SELECTION
+
+        # Members in llm_models / prior_probs order: the ensemble members, or a
+        # synthetic single-member view of the primary LLM (single-LLM path).
+        if spec.ensemble is not None:
+            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
+        else:
+            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
+
+        llm_models: list[str] = []
+        llm_env: dict[str, str | None] = {}
+        for _member, member_llm in members:
+            model_string, member_env = _project_llm_model(member_llm)
+            llm_models.append(model_string)
+            llm_env.update(member_env)
+
+        evo["llm_models"] = llm_models
+        evo["llm_dynamic_selection"] = selection
+        if llm_env:
+            config["llm_env"] = llm_env
+
+        overrides = spec.llm_weight_overrides or None
+        # Whether any non-uniform weighting is present (ensemble member weights
+        # or a --llm-weight override). A plain single-LLM run has neither.
+        has_ensemble = spec.ensemble is not None
+        has_weight_signal = has_ensemble or bool(overrides)
+
+        selection_kwargs = _route_selection_kwargs(selection, spec.selection_kwargs)
+
+        if selection == "fixed":
+            if has_weight_signal:
+                # Only emit prior_probs when there is a weighting to express, so
+                # the single-LLM default path stays byte-identical (no extra key).
+                selection_kwargs["prior_probs"] = _prior_probs_vector(members, overrides)
+        elif selection in _SHINKA_ADAPTIVE_SELECTIONS and has_weight_signal:
+            # FACT B: prior_probs is FixedSampler-only — sending it to
+            # ucb/ucb1/thompson raises TypeError. The bandit starts uniform, so
+            # weights are inert here; warn and do NOT send them.
+            sys.stderr.write(
+                f"Warning: ensemble weights (registry weights / --llm-weight) are "
+                f"ignored under '--selection {selection}' on the shinka backend — "
+                f"the bandit learns arm weights adaptively from a uniform start.\n"
+            )
+
+        if selection_kwargs:
+            evo["llm_dynamic_selection_kwargs"] = selection_kwargs
+
+    @staticmethod
+    def _project_reasoning_efforts(
+        spec: BackendRunSpec,
+        llm_kwargs: dict[str, Any],
+    ) -> None:
+        """Collapse per-member reasoning_effort into Shinka's single global pool.
+
+        FACT A (v017 research §0, ADR-007 A3.2): ShinkaEvolve exposes a single
+        ``llm_kwargs.reasoning_efforts`` pool — it cannot honour a *different*
+        effort per ensemble member. This projection:
+
+        - collects each member's **effective** effort (per-member override else
+          the member LLM's registry ``reasoning_effort``);
+        - if no member sets one → leaves ``reasoning_efforts`` unset (zero
+          behaviour change);
+        - if the set members agree (or only one is set) → writes
+          ``llm_kwargs["reasoning_efforts"] = [<value>]`` **silently**;
+        - if they **disagree** → picks the **highest** effort under
+          :data:`_REASONING_EFFORT_ORDER` (never under-think) and **warns**;
+        - warns **once** that effort is *inert* for ``local``/bridge-sourced
+          members (Shinka classes them ``is_reasoning_model=False``).
+
+        Mutates *llm_kwargs* in place (the caller writes it back into
+        ``evo['llm_kwargs']``). An explicit ``config.yaml`` /
+        ``--config-override`` ``reasoning_efforts`` is preserved: only unset when
+        the setdefault-style guard below sees no existing value.
+        """
+        # Resolve members in the same order as _project_llm_selection.
+        if spec.ensemble is not None:
+            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
+        else:
+            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
+
+        efforts: list[str] = []
+        any_local_with_effort = False
+        for member, member_llm in members:
+            effective = (
+                member.reasoning_effort
+                if member.reasoning_effort is not None
+                else member_llm.reasoning_effort
+            )
+            if effective is None:
+                continue
+            efforts.append(effective)
+            if member_llm.source == "local":
+                any_local_with_effort = True
+
+        if not efforts:
+            # Nothing to project — keep the config byte-identical to pre-S17-27.
+            return
+
+        # A config.yaml / --config-override value takes precedence: config
+        # overrides are applied *after* build_config's llm_kwargs assembly, but
+        # a value already present in llm_kwargs came from the problem config.yaml
+        # and must win over the registry-derived pool (mirrors max_tokens).
+        if "reasoning_efforts" in llm_kwargs:
+            return
+
+        distinct = set(efforts)
+        if len(distinct) > 1:
+            chosen = max(distinct, key=_REASONING_EFFORT_ORDER.index)
+            sys.stderr.write(
+                "Warning: ensemble members request different reasoning_effort "
+                f"levels ({', '.join(sorted(distinct, key=_REASONING_EFFORT_ORDER.index))}), "
+                "but the shinka backend has a single global reasoning_efforts pool "
+                "(it cannot honour per-member effort). Choosing the highest level "
+                f"'{chosen}' so no member under-thinks.\n"
+            )
+        else:
+            chosen = efforts[0]
+
+        if any_local_with_effort:
+            sys.stderr.write(
+                "Warning: reasoning_effort is inert for local/bridge-sourced members "
+                "on the shinka backend (they are treated as non-reasoning models); "
+                "it applies only to reasoning-capable remote models.\n"
+            )
+
+        llm_kwargs["reasoning_efforts"] = [chosen]
 
     def resolved_config(
         self,
@@ -930,6 +1319,22 @@ class ShinkaBackend:
                 "database has no completed generation (last_iteration is 0). "
                 "The run may have been interrupted before its first generation."
             )
+
+    def recover_best_from_checkpoint(self, run_dir: Path) -> RecoveredProgram:
+        """Not supported on ShinkaEvolve (B7 / FR-RUN-051).
+
+        ShinkaEvolve does not write filesystem checkpoints that survive an
+        interrupted run: its state is ``programs.sqlite``. There is no
+        checkpoint to recover a best program *from*, so this raises
+        :class:`~revolver.core.exceptions.RecoveryNotSupportedError`
+        (distinct from OpenEvolve's checkpoint recovery) to be surfaced
+        cleanly by ``solution extract --from-checkpoint``.
+        """
+        raise RecoveryNotSupportedError(
+            "ShinkaEvolve has no filesystem checkpoint to recover from "
+            "(interrupted-run state lives in programs.sqlite). "
+            "Best-of-checkpoint recovery is an OpenEvolve capability."
+        )
 
     def resume(
         self,
@@ -1445,65 +1850,9 @@ class ShinkaBackend:
                 with contextlib.suppress(Exception):
                     executor_shutdown(wait=False)
 
-    @staticmethod
-    def _current_child_pids() -> set[int]:
-        """Return the PIDs of the current process's direct children (Linux).
-
-        Reads ``/proc/self/task/*/children`` — the kernel-maintained list of
-        child PIDs — which needs no third-party dependency. Returns an empty
-        set on any platform without that interface (macOS, Windows) or on any
-        read error, so the caller's reap backstop simply becomes a no-op
-        rather than failing the run.
-        """
-        children: set[int] = set()
-        task_dir = Path("/proc/self/task")
-        if not task_dir.is_dir():
-            return children
-        try:
-            for tid_dir in task_dir.iterdir():
-                children_file = tid_dir / "children"
-                with contextlib.suppress(OSError):
-                    for token in children_file.read_text().split():
-                        with contextlib.suppress(ValueError):
-                            children.add(int(token))
-        except OSError:
-            return children
-        return children
-
-    def _reap_run_children(self, pre_run_children: set[int]) -> None:
-        """Terminate evaluator children that outlived ``runner.run()`` (A2).
-
-        ShinkaEvolve spawns each local evaluation as a ``subprocess.Popen``
-        child and normally reaps it via its ``monitor()`` poll loop. As a
-        backstop against a child that survives the run (and could keep the CLI
-        alive / pinned at ~100% CPU), any child PID that appeared *after* the
-        pre-run snapshot is sent ``SIGTERM``, then ``SIGKILL`` after a short
-        grace period. The run's result is already in ``programs.sqlite`` when
-        ``run()`` returns, so this cannot truncate persistence. No-op on
-        platforms without ``/proc`` child enumeration.
-        """
-        survivors = self._current_child_pids() - pre_run_children
-        if not survivors:
-            return
-
-        for pid in survivors:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGTERM)
-
-        deadline = time.monotonic() + _CHILD_REAP_GRACE_SECONDS
-        remaining = set(survivors)
-        while remaining and time.monotonic() < deadline:
-            for pid in list(remaining):
-                try:
-                    os.kill(pid, 0)
-                except (ProcessLookupError, OSError):
-                    remaining.discard(pid)
-            if remaining:
-                time.sleep(0.1)
-
-        for pid in remaining:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGKILL)
+    # ``_current_child_pids`` / ``_reap_run_children`` are inherited from
+    # ``ChildProcessReaperMixin`` (base.py) — hoisted in S17-04 so both
+    # backends share one definition.
 
     def _materialize_best_programs(self, results_dir: Path) -> tuple[float | None, Path | None]:
         """Write the top ranked program(s) into ``<results_dir>/best/``.

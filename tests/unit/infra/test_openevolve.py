@@ -6,6 +6,7 @@ All tests mock the OpenEvolve controller to avoid a hard dependency.
 from __future__ import annotations
 
 from datetime import datetime
+import importlib.util
 import os
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,20 @@ from revolver.infra.backends.openevolve import (
     revolver_env,
 )
 from revolver.models.llm import LLMEntry
+
+# The B9 no-op-override warning (S17-30) fires only when the OpenEvolve +
+# dacite schema is importable (validate_oe_config degrades to silence
+# otherwise). OpenEvolve is not a dev/CI dependency, so gate the tests that
+# assert the warning *fires* on its presence; the silent-path tests below run
+# unconditionally (absent-warning is correct with or without OpenEvolve).
+_OE_SCHEMA_AVAILABLE = (
+    importlib.util.find_spec("openevolve") is not None
+    and importlib.util.find_spec("dacite") is not None
+)
+requires_oe_schema = pytest.mark.skipif(
+    not _OE_SCHEMA_AVAILABLE,
+    reason="openevolve/dacite not installed — B9 no-op detection degrades to silence",
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -184,7 +199,7 @@ class TestBuildConfig:
             yaml.dump(
                 {
                     "max_iterations": 10,
-                    "population_size": 5,
+                    "database": {"population_size": 5},
                     "llm": {"primary_model": "base-model", "temperature": 0.8},
                 }
             )
@@ -199,12 +214,12 @@ class TestBuildConfig:
             problem_config=config_file,
             llm=llm,
             iterations=20,
-            config_overrides=["llm.temperature=0.5", "population_size=10"],
+            config_overrides=["llm.temperature=0.5", "database.population_size=10"],
             output_dir=tmp_path / "output",
         )
 
         # Base values preserved
-        assert result["population_size"] == 10  # overridden
+        assert result["database"]["population_size"] == 10  # overridden
         # LLM endpoint injected (OpenEvolve field names)
         assert result["llm"]["api_base"] == "http://myhost:1234/v1"
         assert result["llm"]["primary_model"] == "override-model"
@@ -265,24 +280,28 @@ class TestBuildConfig:
         assert "api_key" not in result.get("llm", {})
 
     def test_config_override_types(self) -> None:
-        """Config overrides parse int, float, bool, and string values."""
+        """Config overrides parse int, float, bool, and string values.
+
+        Uses recognized OE fields (of the right type) so the B9 no-op warning
+        (S17-30) stays silent — the intent is exercising ``_parse_value``.
+        """
         llm = _make_llm()
         result = build_config(
             problem_config=None,
             llm=llm,
             config_overrides=[
-                "count=42",
-                "rate=3.14",
-                "enabled=true",
-                "disabled=false",
-                "name=hello",
+                "random_seed=42",
+                "llm.temperature=3.14",
+                "diff_based_evolution=true",
+                "evaluator.cascade_evaluation=false",
+                "language=hello",
             ],
         )
-        assert result["count"] == 42
-        assert result["rate"] == pytest.approx(3.14)
-        assert result["enabled"] is True
-        assert result["disabled"] is False
-        assert result["name"] == "hello"
+        assert result["random_seed"] == 42
+        assert result["llm"]["temperature"] == pytest.approx(3.14)
+        assert result["diff_based_evolution"] is True
+        assert result["evaluator"]["cascade_evaluation"] is False
+        assert result["language"] == "hello"
 
     def test_config_override_json_array(self) -> None:
         """Config override with JSON array value is parsed as Python list (S9-12)."""
@@ -290,10 +309,10 @@ class TestBuildConfig:
         result = build_config(
             problem_config=None,
             llm=llm,
-            config_overrides=["feature_dimensions=[0,1]"],
+            config_overrides=["database.feature_dimensions=[0,1]"],
         )
-        assert result["feature_dimensions"] == [0, 1]
-        assert isinstance(result["feature_dimensions"], list)
+        assert result["database"]["feature_dimensions"] == [0, 1]
+        assert isinstance(result["database"]["feature_dimensions"], list)
 
     def test_config_override_json_object(self) -> None:
         """Config override with JSON object value is parsed as Python dict (S9-12)."""
@@ -301,10 +320,71 @@ class TestBuildConfig:
         result = build_config(
             problem_config=None,
             llm=llm,
-            config_overrides=['evaluator.params={"key":"val"}'],
+            config_overrides=['prompt.template_variations={"key":["val"]}'],
         )
-        assert result["evaluator"]["params"] == {"key": "val"}
-        assert isinstance(result["evaluator"]["params"], dict)
+        assert result["prompt"]["template_variations"] == {"key": ["val"]}
+        assert isinstance(result["prompt"]["template_variations"], dict)
+
+    # ── B9: no-op --config-override key warning (S17-30) ──────────────────────
+
+    @requires_oe_schema
+    def test_config_override_noop_key_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """An override key on no OE field warns naming the key (spec §4.5)."""
+        llm = _make_llm()
+        build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["llm.nonexistent_key=1"],
+        )
+        err = capsys.readouterr().err
+        assert "llm.nonexistent_key" in err
+        assert "no effect" in err
+
+    def test_config_override_recognized_key_silent(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A recognized override key emits no no-op warning."""
+        llm = _make_llm()
+        build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["database.num_islands=4"],
+        )
+        err = capsys.readouterr().err
+        assert "no effect" not in err
+
+    def test_config_override_revolver_key_silent(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A Revolver-owned/tolerated key (evaluation:, num_generations) is silent.
+
+        These are stripped before the strict OE parse, so B9 must not flag them
+        as no-ops even though they are absent from the OpenEvolve schema.
+        """
+        llm = _make_llm()
+        build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=[
+                "evaluation.timeout_per_instance=5",
+                "num_generations=5",
+            ],
+        )
+        err = capsys.readouterr().err
+        assert "no effect" not in err
+
+    @requires_oe_schema
+    def test_config_override_noop_names_only_the_bad_key(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """With a mix, only the genuinely unrecognized key is warned about."""
+        llm = _make_llm()
+        build_config(
+            problem_config=None,
+            llm=llm,
+            config_overrides=["llm.temperature=0.5", "evaluator.bogus_field=1"],
+        )
+        err = capsys.readouterr().err
+        assert "evaluator.bogus_field" in err
+        assert "llm.temperature" not in err
 
     def test_missing_config_file(self) -> None:
         """Missing config file produces empty base config."""
@@ -869,3 +949,45 @@ class TestParseValue:
         """Empty JSON object parses correctly."""
         result = _parse_value("{}")
         assert result == {}
+
+
+# ── S17-31: OE config template surfaces feature_dimensions/feature_bins ────────
+
+
+class TestConfigTemplateFeatureKeys:
+    """The scaffold surfaces the MAP-Elites feature keys, still validating clean."""
+
+    def test_template_mentions_feature_keys(self) -> None:
+        """The commented database block advertises feature_dimensions/feature_bins."""
+        from revolver.infra.backends.openevolve import _CONFIG_TEMPLATE
+
+        assert "feature_dimensions" in _CONFIG_TEMPLATE
+        assert "feature_bins" in _CONFIG_TEMPLATE
+
+    def test_template_feature_keys_are_commented_out(self) -> None:
+        """The new keys are commented, so they never reach the YAML parser."""
+        from revolver.infra.backends.openevolve import _CONFIG_TEMPLATE
+
+        loaded = yaml.safe_load(_CONFIG_TEMPLATE)
+        assert isinstance(loaded, dict)
+        # The whole ``database:`` block is commented → absent from the parsed dict.
+        assert "database" not in loaded
+
+    def test_backend_config_template_includes_feature_keys(self) -> None:
+        """The backend's served scaffold carries the surfaced keys."""
+        from revolver.infra.backends.openevolve import OpenEvolveBackend
+
+        template = OpenEvolveBackend().config_template()
+        assert "feature_dimensions" in template
+        assert "feature_bins" in template
+
+    @requires_oe_schema
+    def test_generated_template_validates_clean(self) -> None:
+        """HARD constraint: validate_oe_config() on the scaffold returns []."""
+        from revolver.infra.backends.openevolve import (
+            _CONFIG_TEMPLATE,
+            validate_oe_config,
+        )
+
+        loaded = yaml.safe_load(_CONFIG_TEMPLATE)
+        assert validate_oe_config(loaded) == []

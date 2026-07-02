@@ -64,3 +64,37 @@ def test_hierarchy_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert config["from_global"] == "project-overrides-global"
     # Env (level 5) overrides CLI (level 4) which overrides project (level 3)
     assert config["from_project"] == "env-overrides-project"
+
+
+@pytest.mark.unit
+def test_global_config_respects_revolver_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S17-32(a): the global config.yaml base honours $REVOLVER_HOME.
+
+    Mirrors ``db.get_global_db`` so the global config.yaml and the global DB
+    resolve their base identically ($REVOLVER_HOME wins, else home).
+    """
+    home_dir = tmp_path / "home"
+    state_dir = tmp_path / "state"
+    home_dir.mkdir()
+    # Home points elsewhere; REVOLVER_HOME must win.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))  # type: ignore[arg-type]
+    monkeypatch.setenv("REVOLVER_HOME", str(state_dir))
+
+    global_dir = state_dir / ".revolver"
+    global_dir.mkdir(parents=True)
+    with open(global_dir / "config.yaml", "w") as f:
+        yaml.dump({"from_revolver_home": "state-val"}, f)
+
+    # A stray file under home must NOT be read when REVOLVER_HOME is set.
+    home_revolver = home_dir / ".revolver"
+    home_revolver.mkdir()
+    with open(home_revolver / "config.yaml", "w") as f:
+        yaml.dump({"from_revolver_home": "home-val"}, f)
+
+    # cwd without a project.yaml so level-3 does not interfere.
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+    assert config["from_revolver_home"] == "state-val"

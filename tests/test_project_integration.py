@@ -274,8 +274,12 @@ llm:
 # MAP-Elites database settings.
 # Population size — number of candidate programs kept in the archive.
 # OpenEvolve defaults to 1000; uncomment to shrink it for quick experiments.
+# feature_dimensions / feature_bins are the MAP-Elites feature axes and the
+# per-axis bin counts (the archive grid); uncomment to customise the grid.
 # database:
 #   population_size: 10
+#   feature_dimensions: ["complexity", "diversity"]
+#   feature_bins: 10
 
 # Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:

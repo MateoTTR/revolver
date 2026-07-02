@@ -137,6 +137,115 @@ DEFAULT_BACKEND = "openevolve"
 DEFAULT_ITERATIONS = 10
 
 
+def _parse_selection_kwargs(raw: list[str] | None) -> dict[str, Any] | None:
+    """Parse ``--selection-kwarg key=value`` strings into a dict (A5).
+
+    Values are kept as *strings* here; the backend routes them into the
+    selected sampler's constructor and coerces per-parameter. ``None`` in →
+    ``None`` out (no kwargs supplied).
+
+    Raises:
+        ValidationError: If any entry is missing ``=`` or has an empty key.
+    """
+    if not raw:
+        return None
+    parsed: dict[str, Any] = {}
+    for item in raw:
+        if "=" not in item:
+            raise ValidationError(f"Invalid --selection-kwarg '{item}': expected key=value.")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValidationError(f"Invalid --selection-kwarg '{item}': empty key.")
+        parsed[key] = value.strip()
+    return parsed
+
+
+def _parse_llm_weight_overrides(raw: list[str] | None) -> dict[str, float] | None:
+    """Parse ``--llm-weight model=weight`` strings into a dict (A1/M3).
+
+    Keys are ensemble member LLM registry names; values are non-negative
+    floats. ``None`` in → ``None`` out.
+
+    Raises:
+        ValidationError: If any entry is malformed, has an empty model name,
+            or a non-numeric / negative weight.
+    """
+    if not raw:
+        return None
+    parsed: dict[str, float] = {}
+    for item in raw:
+        if "=" not in item:
+            raise ValidationError(f"Invalid --llm-weight '{item}': expected model=weight.")
+        model, value = item.split("=", 1)
+        model = model.strip()
+        if not model:
+            raise ValidationError(f"Invalid --llm-weight '{item}': empty model name.")
+        try:
+            weight = float(value.strip())
+        except ValueError:
+            raise ValidationError(
+                f"Invalid --llm-weight '{item}': weight must be a number."
+            ) from None
+        if weight < 0:
+            raise ValidationError(f"Invalid --llm-weight '{item}': weight must be non-negative.")
+        parsed[model] = weight
+    return parsed
+
+
+def _validate_selection(spec: BackendRunSpec, backend: EvolutionBackend) -> None:
+    """Reject a ``--selection`` value the resolved backend cannot honor (A2/A4).
+
+    Capability-driven — no hard-coded backend name: a selection is accepted iff
+    it is present in the backend's advertised
+    :attr:`~revolver.infra.backends.base.BackendCapabilities.selection_strategies`.
+    OpenEvolve exposes only ``("fixed",)`` (its static weighted sampler under
+    the neutral ``fixed`` vocabulary), so ``ucb``/``ucb1``/``thompson`` are
+    rejected; ShinkaEvolve exposes all four. A rejected value raises
+    :class:`ValidationError` (exit 1) naming the backend and its strategies.
+    """
+    selection = spec.selection
+    if selection is None:
+        return
+    supported = backend.capabilities().selection_strategies
+    if selection in supported:
+        return
+    supported_display = ", ".join(supported) if supported else "(none)"
+    raise ValidationError(
+        f"Selection strategy '{selection}' is not supported by backend "
+        f"'{backend.name}'. Supported: {supported_display}."
+    )
+
+
+def _validate_llm_weight_overrides(spec: BackendRunSpec) -> None:
+    """Reject ``--llm-weight`` keys that name no ensemble member (A1/M3).
+
+    A ``--llm-weight <name>=w`` whose ``<name>`` is not a member of the
+    resolved ensemble would otherwise be a silent no-op. Validating here — in
+    the orchestrator, after ensemble resolution — covers *both* backends
+    (OpenEvolve and ShinkaEvolve) with a single check. Raises
+    :class:`ValidationError` (exit 1) naming the unknown key(s) and the valid
+    member names. A ``--llm-weight`` supplied for a non-ensemble (single-LLM)
+    run is likewise rejected, since there are no members to weight.
+    """
+    overrides = spec.llm_weight_overrides
+    if not overrides:
+        return
+    if spec.ensemble is None:
+        raise ValidationError(
+            "--llm-weight requires an ensemble (--llm <ensemble>); it has no "
+            "effect on a single-LLM run."
+        )
+    member_names = {member.llm_name for member in spec.ensemble.members}
+    unknown = sorted(name for name in overrides if name not in member_names)
+    if unknown:
+        valid = ", ".join(sorted(member_names))
+        raise ValidationError(
+            f"--llm-weight names unknown ensemble member(s): {', '.join(unknown)}. "
+            f"Ensemble '{spec.ensemble.name}' members: {valid}."
+        )
+
+
 def _determine_run_status(
     valid_iters: int | None, total_iters: int
 ) -> Literal["failed", "completed_with_errors", "completed"]:
@@ -603,8 +712,19 @@ def launch_run(
             parallel=config.parallel,
             rewrite_mode=config.rewrite_mode,
             ensemble=ensemble,
+            selection=config.selection,
+            selection_kwargs=_parse_selection_kwargs(config.selection_kwargs),
+            llm_weight_overrides=_parse_llm_weight_overrides(config.llm_weight_overrides),
             conn=global_conn,
         )
+
+        # Capability-gate --selection against the resolved backend before the
+        # config is built (ADR-007 A2/A4): OpenEvolve rejects non-fixed
+        # strategies, ShinkaEvolve accepts all four (S17-18).
+        _validate_selection(spec, backend)
+        # Reject --llm-weight keys that name no ensemble member (both backends).
+        _validate_llm_weight_overrides(spec)
+
         oe_config = backend.build_config(spec)
 
         # Single-owner iterations resolution (S14-05, ADR-007 D4): the
@@ -1145,6 +1265,9 @@ def resume_run(
     llm_name: str | None = None,
     config_overrides: list[str] | None = None,
     rewrite_mode: bool = False,
+    selection: str | None = None,
+    selection_kwargs: list[str] | None = None,
+    llm_weight_overrides: list[str] | None = None,
     project_root: Path | None = None,
     *,
     backend_name: str | None = None,
@@ -1168,6 +1291,12 @@ def resume_run(
         config_overrides: Engine config overrides (key=value strings).
         rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
             ``diff_based_evolution=false`` and ``max_code_length=50000``.
+        selection: Override the ensemble selection strategy for the resumed
+            run (``None`` = keep the backend's implicit default).
+        selection_kwargs: Raw ``--selection-kwarg key=value`` strings for the
+            resumed run's sampler.
+        llm_weight_overrides: Raw ``--llm-weight model=weight`` strings applied
+            to the resumed run's ensemble members.
         project_root: Explicit project root, or ``None`` to auto-detect.
         backend_name: Optional explicit backend. Must match the parent
             run's backend; a mismatch raises :class:`ValidationError`.
@@ -1246,6 +1375,19 @@ def resume_run(
         else:
             llm = llm_or_ensemble
 
+        # Per-run ensemble levers are re-specified on resume, not inherited
+        # (consistent with --config-override; DES-005 §11/§14.1). Resuming an
+        # ensemble parent WITHOUT --selection therefore falls back to the
+        # backend default rather than the parent's strategy — warn so the reset
+        # is not silent.
+        if ensemble is not None and selection is None and not quiet:
+            sys.stderr.write(
+                "Warning: resuming an ensemble run without --selection. Ensemble "
+                "selection levers (--selection/--selection-kwarg/--llm-weight) are "
+                "re-specified per resume, not inherited from the parent run; the "
+                "resumed run uses the backend default selection strategy.\n"
+            )
+
         ds = get_dataset(proj_conn, parent_dataset_name)
         if ds is None:
             raise RevolverError(f"Dataset '{parent_dataset_name}' not found.")
@@ -1315,9 +1457,19 @@ def resume_run(
             parallel=parallel,
             rewrite_mode=rewrite_mode,
             ensemble=ensemble,
+            selection=selection,
+            selection_kwargs=_parse_selection_kwargs(selection_kwargs),
+            llm_weight_overrides=_parse_llm_weight_overrides(llm_weight_overrides),
             conn=global_conn,
             wrapper_path=new_run_dir / backend.wrapper_filename,
         )
+
+        # Capability-gate --selection against the resumed run's (parent's)
+        # backend before the config is built (ADR-007 A2/A4, S17-18).
+        _validate_selection(spec, backend)
+        # Reject --llm-weight keys that name no ensemble member (both backends).
+        _validate_llm_weight_overrides(spec)
+
         oe_config = backend.build_config(spec)
 
         # Build LLM snapshot for traceability (S11-08)

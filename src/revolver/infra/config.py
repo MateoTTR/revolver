@@ -18,6 +18,8 @@ from typing import Any
 
 import yaml
 
+from revolver.infra.db import revolver_home_base
+
 # ── Built-in defaults ────────────────────────────────────────────────────────
 
 _DEFAULTS: dict[str, Any] = {
@@ -64,8 +66,9 @@ def load_config(**cli_overrides: Any) -> dict[str, Any]:
     # Level 1: defaults
     merged: dict[str, Any] = dict(_DEFAULTS)
 
-    # Level 2: global config
-    global_config_path = Path.home() / ".revolver" / "config.yaml"
+    # Level 2: global config — base directory resolved the same way as the
+    # global DB (``$REVOLVER_HOME`` wins, else home), see ``db.revolver_home_base``.
+    global_config_path = revolver_home_base() / ".revolver" / "config.yaml"
     merged.update(_load_yaml_file(global_config_path))
 
     # Level 3: project config (look in cwd)

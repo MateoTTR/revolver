@@ -176,6 +176,12 @@ Configuration is resolved in this order (last wins):
 4. Command-line arguments
 5. Environment variables (`REVOLVER_*`)
 
+### 4.5 Neutral Run Levers vs `--config-override` (normative)
+
+Common run levers that exist in more than one evolution backend (under different native names) are exposed as **neutral, first-class CLI flags**, each mapped per backend by Revolver — for example `--iterations`, `--temperature`, `--parallel`, `--selection`, `--llm-weight`, and per-LLM `--reasoning-effort` (ADR-007 D4, Amendment A1). These flags are the supported, discoverable, capability-checked path: an unsupported combination is rejected or warned via the backend's `capabilities()`, never silently ignored.
+
+`--config-override key=value` is the **reserved escape hatch** for backend-exclusive *structural* keys that have no neutral equivalent (OE `feature_dimensions`, Shinka `archive_size`, …). It is **not** the normal path for a common lever, and it cannot address list/array members (so per-member weight or reasoning-effort is reachable only through the dedicated flags, not `--config-override`). When a `--config-override` key does not match any field the selected backend's config schema recognizes, Revolver **warns** on the no-op key instead of silently accepting it (backlog B9).
+
 ---
 
 ## 5. Specification Index

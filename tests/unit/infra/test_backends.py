@@ -136,6 +136,48 @@ class TestBackendUnavailableError:
         assert BackendUnavailableError("nope").exit_code == 3
 
 
+# ── BackendRunSpec / capability-axes widening (S17-13/14) ─────────────────────
+
+
+class TestBackendRunSpecSelectionFields:
+    """The Sprint 017 ensemble levers on BackendRunSpec (ADR-007 Amendment)."""
+
+    def test_selection_fields_default_none(self, tmp_path: Path) -> None:
+        """selection / selection_kwargs / llm_weight_overrides default to None."""
+        spec = _make_spec(tmp_path)
+        assert spec.selection is None
+        assert spec.selection_kwargs is None
+        assert spec.llm_weight_overrides is None
+
+    def test_selection_fields_carry_values(self, tmp_path: Path) -> None:
+        """The new fields carry the resolved/parsed selection levers."""
+        spec = _make_spec(
+            tmp_path,
+            selection="ucb",
+            selection_kwargs={"cost_aware_coef": 0.0},
+            llm_weight_overrides={"gpt4o": 0.7, "claude": 0.3},
+        )
+        assert spec.selection == "ucb"
+        assert spec.selection_kwargs == {"cost_aware_coef": 0.0}
+        assert spec.llm_weight_overrides == {"gpt4o": 0.7, "claude": 0.3}
+
+
+class TestBackendCapabilitySelectionAxes:
+    """The two new capability axes are exposed per backend (A4)."""
+
+    def test_openevolve_selection_and_effort_axes(self) -> None:
+        """OpenEvolve: fixed-only selection, per-member reasoning_effort."""
+        caps = get_backend("openevolve").capabilities()
+        assert caps.selection_strategies == ("fixed",)
+        assert caps.per_member_reasoning_effort is True
+
+    def test_shinka_selection_and_effort_axes(self) -> None:
+        """ShinkaEvolve: fixed/ucb/ucb1/thompson selection, no per-member effort."""
+        caps = get_backend("shinka").capabilities()
+        assert caps.selection_strategies == ("fixed", "ucb", "ucb1", "thompson")
+        assert caps.per_member_reasoning_effort is False
+
+
 # ── OpenEvolveBackend tests ───────────────────────────────────────────────────
 
 
@@ -152,6 +194,8 @@ class TestOpenEvolveBackendCapabilities:
             multi_language=False,
             ensemble_model="weighted",
             top_n_extraction=False,
+            selection_strategies=("fixed",),
+            per_member_reasoning_effort=True,
         )
 
     def test_wants_http_proxy(self) -> None:
@@ -437,6 +481,8 @@ class TestShinkaBackendAvailability:
             multi_language=True,
             ensemble_model="bandit",
             top_n_extraction=True,
+            selection_strategies=("fixed", "ucb", "ucb1", "thompson"),
+            per_member_reasoning_effort=False,
         )
 
     def test_is_available_false_with_install_hint(self, no_shinka: None) -> None:

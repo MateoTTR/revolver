@@ -1,8 +1,9 @@
 # ADR-007 — Pluggable Evolution Backend (OpenEvolve default, ShinkaEvolve optional)
 
 **Date**: 2026-06-11
-**Status**: Accepted
+**Status**: Accepted (amended 2026-07-01)
 **Deciders**: Mathieu (domain expert), Claude (architecture assistant)
+**Amended**: 2026-07-01 — v0.17 multi-LLM ensemble selection (see the *Amendment* section below; supersedes parts of D4/D5, the "lossy" consequence, and the S15 roadmap line).
 
 ---
 
@@ -123,8 +124,12 @@ projects the registry at build time:
   key Revolver already resolves; Shinka ignores custom `api_key_env` names for remote.
 - **Documented limitation**: remote model ids must be recognized by Shinka's `pricing.csv` (or use
   a `openrouter/`/`local/` prefix), else Shinka raises `ValueError`.
-- Weighted ensemble → bandit selection (`ucb`) is **lossy** (weights and per-member overrides
-  dropped) → adapter warns.
+- ~~Weighted ensemble → bandit selection (`ucb`) is **lossy** (weights and per-member overrides
+  dropped) → adapter warns.~~ **Superseded by the v0.17 Amendment (A2/A3).** The mapping is now
+  first-class: `--selection` chooses `fixed`/`ucb`/`ucb1`/`thompson`; under `fixed`, member weights are
+  honored (→ `FixedSampler.prior_probs`). Weight-seeding and per-member `reasoning_effort` remain
+  unavailable under the *adaptive* bandit modes — a verified ShinkaEvolve 0.0.7 limitation now surfaced
+  honestly via `capabilities()`, not a silent drop.
 
 ### D6 — Dependency strategy: opt-in extra, in-process launch
 
@@ -141,6 +146,84 @@ OE-only, exit criterion *zero behavior change* (existing L2/L3 suites stay green
 MVP (single-LLM, fixed selection, contract tests on the `evaluate.py` wrapper front-loaded);
 **S15** — parity (ensemble→bandit, top-N extraction capability, cost/token columns in `benchmark`,
 backend surfaced everywhere).
+
+> **Roadmap correction (v0.17 Amendment, 2026-07-01)**: S15 was re-scoped to token-honesty (#300) and
+> S16/S16a to tech-debt + corrective work. The **ensemble→bandit** mapping and **top-N extraction** did
+> not ship in S15 — they move to **S17/v0.17** (ensemble→bandit, this amendment) and **S18** (top-N #299).
+
+## Amendment — v0.17 Multi-LLM Ensemble Selection (2026-07-01)
+
+The S14 MVP shipped single-LLM **fixed** selection; the weighted→bandit ensemble mapping was deferred
+(D5 anticipated it as "lossy", the roadmap placed it in S15). v0.17 **delivers** the multi-LLM ensemble as
+a first-class, honestly-gated feature. This amendment refines D4/D5 and supersedes their "lossy/dropped"
+framing. It is grounded in a source-verified, adversarially-checked study of ShinkaEvolve 0.0.7 and
+OpenEvolve — [v017-multi-llm-research.md](../../analysis/v017-multi-llm-research.md).
+
+### A1 — Ensemble selection is a first-class **neutral run lever**, not `--config-override`
+
+New neutral flags on `revolver run` / `run resume`, each mapped per backend (never exposed only through the
+escape hatch): `--selection {fixed,ucb,ucb1,thompson}`, `--selection-kwarg k=v` (repeatable),
+`--llm-weight model=w` (repeatable). Per-LLM `reasoning_effort` becomes a **registry field**
+(`llm add` / `llm update` / `ensemble add --reasoning-effort`). This generalizes D4's neutral-lever
+principle into a normative rule: **`--config-override` is the reserved escape hatch for backend-exclusive
+structural keys; common levers get neutral names mapped per backend.** (Also forced by mechanism:
+`_set_nested` cannot address list members — per-member weight/effort is *only* reachable via dedicated
+flags, not `--config-override llm.models[i]...`.)
+
+### A2 — Weighted→bandit is **first-class, gated by `capabilities()`** (supersedes the D5 bullet + the "Negative: lossy" consequence)
+
+- **OpenEvolve** (`ensemble_model="weighted"`): static weighted-random sampler. `--selection` non-`fixed`
+  → **rejected** with a clear error (`fixed` is the only accepted value; `selection_strategies=("fixed",)`).
+  `--llm-weight` honored (patches per-member `weight`). Per-member `reasoning_effort` honored
+  (`LLMModelConfig.reasoning_effort`).
+- **ShinkaEvolve** (`ensemble_model="bandit"`): `--selection` → `evo_config.llm_dynamic_selection`
+  (`fixed`/`ucb`/`ucb1` [alias of AsymmetricUCB]/`thompson`). Under `fixed`, member weights → the
+  `FixedSampler.prior_probs` positional vector (**apples-to-apples with the OE weighted ensemble**). Under
+  `ucb`/`thompson`, the arms are learned adaptively.
+
+The headline cross-engine comparison is thus **OE-weighted** vs **Shinka-fixed** (same weights) vs
+**Shinka-ucb** (adaptive) — the direct answer to the long-standing `multimodel-not-validated` gap.
+
+### A3 — Two **verified capability asymmetries** (surfaced, map-with-warn — not hidden)
+
+These are real ShinkaEvolve 0.0.7 constraints (source-verified; the adversarial verifiers returned
+**REFUTED** on per-member effort and **PLAUSIBLE** with a documented gap on weight-seeding):
+
+1. **Member weights seed the bandit only under `fixed`.** `prior_probs` exists only on `FixedSampler`;
+   `AsymmetricUCB`/`ThompsonSampler` accept no `prior_probs` (and no `**kwargs`) → the bandit modes start
+   **uniform** and **ignore** registry/`--llm-weight` weights. Revolver **warns** when weights are supplied
+   under an adaptive mode. Weights therefore carry across **OE-weighted** and **Shinka-fixed** only.
+2. **Per-member `reasoning_effort` is OpenEvolve-only.** Shinka's `reasoning_efforts` (like `temperatures`,
+   `max_tokens`) is a **single global pool** sampled independently of the chosen model. Revolver maps
+   `--reasoning-effort` **per member on OE**, and to a **single global value on Shinka** — when members
+   disagree, Revolver aligns on the **highest** effort (total order `min < low < medium < high < max`, a
+   conservative default that never under-thinks) and **warns** that per-member effort is not honored.
+   Additionally inert for local/bridge models, which Shinka classes as non-reasoning.
+
+### A4 — `capabilities()` widens to carry the selection surface honestly
+
+Add two axes so validation is capability-driven, not hard-coded:
+`selection_strategies: tuple[str, ...]` — the accepted `--selection` values (OE → `("fixed",)`, the
+neutral vocabulary for its static weighted sampler; Shinka → `("fixed","ucb","ucb1","thompson")`) — and
+`per_member_reasoning_effort: bool` (OE `True`, Shinka `False`). The `ensemble_model` axis
+(`"weighted"`/`"bandit"`) describes the *sampler semantics* and is distinct from this selection vocabulary.
+The CLI rejects an unsupported `--selection` and warns on a capability-limited lever, instead of diverging
+silently.
+
+### A5 — Sampler-kwarg projection is **per-strategy**
+
+Shinka spreads `llm_dynamic_selection_kwargs` verbatim into the selected sampler's constructor, so a wrong
+key raises `TypeError`. Revolver validates/routes `--selection-kwarg` against the **selected** sampler's
+accepted kwargs and never passes a union. `cost_aware_coef` applies only to `ucb`/`ucb1` (**default 0** for
+the flat-rate/bridge case — M4; note it is inert anyway when per-model cost is undifferentiated). This
+composes with the "warn on a no-op override key" rule (backlog B9).
+
+### Scope note
+
+v0.17 also folds in a front-of-sprint correctness slice (B1 aggregation guard, B2 OE post-run teardown,
+B7 OE best-of-interrupt recovery) — orthogonal to this ensemble amendment but shipped in the same release.
+The separate **judge ensemble** (`evaluator_models` / `use_llm_feedback`) is a known unexposed gap, **not**
+in v0.17 scope.
 
 ## Alternatives Considered
 
@@ -172,8 +255,10 @@ backend surfaced everywhere).
 
 - `revolver[shinka]` pulls **+75 transitive dependencies** and downgrades `httpx`/`rich` within
   Revolver's accepted ranges.
-- **Weighted→bandit ensemble mapping is lossy** on Shinka (weights, per-member overrides) — warned,
-  not preventable.
+- ~~**Weighted→bandit ensemble mapping is lossy** on Shinka (weights, per-member overrides) — warned,
+  not preventable.~~ **Superseded by the v0.17 Amendment (A2/A3).** The mapping is first-class; the
+  residual limits (weights honored only under `fixed`; global-only `reasoning_effort` on Shinka) are
+  verified engine constraints surfaced via `capabilities()`, not a Revolver-side loss.
 - **Remote model-id constraint** on Shinka (`pricing.csv` recognition) is a real user-facing
   limitation to document.
 - Token totals on Shinka exclude auxiliary LLM spend (embeddings/novelty, meta-LLM, summarizer) —

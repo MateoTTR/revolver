@@ -29,7 +29,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 13
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS llms (
     max_tokens      INTEGER,
     timeout_s       INTEGER,
     temperature     REAL,
+    reasoning_effort TEXT,
     registered_at   TEXT NOT NULL
 );
 
@@ -185,6 +186,7 @@ CREATE TABLE IF NOT EXISTS ensemble_members (
     weight              REAL NOT NULL DEFAULT 1.0,
     temperature_override REAL,
     max_tokens_override INTEGER,
+    reasoning_effort    TEXT,
     UNIQUE(ensemble_name, llm_name)
 );
 """
@@ -468,6 +470,14 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 11:
         _migrate_v10_to_v11(conn)
 
+    # Migration v12: Add reasoning_effort column to the llms table (global).
+    if current < 12:
+        _migrate_v11_to_v12(conn)
+
+    # Migration v13: Add reasoning_effort column to ensemble_members (global).
+    if current < 13:
+        _migrate_v12_to_v13(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -537,6 +547,12 @@ def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
     Project DB: adds ``llm_type`` and ``llm_snapshot`` columns to the ``runs`` table.
     """
     # Global DB: create ensemble tables (idempotent via IF NOT EXISTS).
+    #
+    # NB: this ensemble_members DDL is the migration-schema copy — it must
+    # stay in sync with the fresh-schema copy in _GLOBAL_SCHEMA_SQL. The
+    # reasoning_effort column below is the fresh-at-v8 form; on an existing
+    # v8..v12 DB the column is added by migration v13 (_migrate_v12_to_v13),
+    # whose ALTER is suppressed here if the column already exists.
     conn.executescript("""\
 CREATE TABLE IF NOT EXISTS ensembles (
     name        TEXT PRIMARY KEY,
@@ -550,6 +566,7 @@ CREATE TABLE IF NOT EXISTS ensemble_members (
     weight              REAL NOT NULL DEFAULT 1.0,
     temperature_override REAL,
     max_tokens_override INTEGER,
+    reasoning_effort    TEXT,
     UNIQUE(ensemble_name, llm_name)
 );
 """)
@@ -710,6 +727,66 @@ ALTER TABLE datasets_new RENAME TO datasets;
     conn.commit()
 
 
+def _migrate_v11_to_v12(conn: sqlite3.Connection) -> None:
+    """Migration v11->v12: Add reasoning_effort TEXT column to the llms table (global DB).
+
+    Adds a per-LLM ``reasoning_effort`` control (``min|low|medium|high|max``,
+    ``NULL`` = provider default) to the ``llms`` table (ADR-007 Amendment A3.2,
+    FR-LLM-026, DES-001 §5.11). A simple additive column — no table recreation
+    (mirrors the v4/v6 ``ALTER TABLE ADD COLUMN`` pattern). The ``ALTER`` is
+    executed with error suppression because SQLite does not support
+    ``ADD COLUMN IF NOT EXISTS``; existing rows are preserved with ``NULL``.
+
+    The ``llms`` table lives only in the global DB. Project databases have no
+    such table, so the migration is a no-op there and only the schema version
+    is bumped.
+    """
+    # Guard: only the global DB has the llms table.
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='llms'")
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE llms ADD COLUMN reasoning_effort TEXT")
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (12, now),
+    )
+    conn.commit()
+
+
+def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
+    """Migration v12->v13: Add reasoning_effort TEXT column to ensemble_members (global DB).
+
+    Adds a per-member ``reasoning_effort`` override to the ``ensemble_members``
+    table (ADR-007 Amendment A3.2, DES-001 §5.12). ``NULL`` falls back to the
+    member LLM's registry-level ``reasoning_effort``. Kept **separate** from
+    migration v12 per the one-column-per-migration discipline (mirrors the
+    v10/v11 sequencing in Sprint 016). A simple additive column with error
+    suppression; existing rows are preserved with ``NULL``.
+
+    The ``ensemble_members`` table lives only in the global DB. Project
+    databases have no such table, so the migration is a no-op there and only
+    the schema version is bumped.
+    """
+    # Guard: only the global DB has the ensemble_members table.
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ensemble_members'"
+    )
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE ensemble_members ADD COLUMN reasoning_effort TEXT")
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (13, now),
+    )
+    conn.commit()
+
+
 def get_project_db(path: Path) -> sqlite3.Connection:
     """Open (or create) the project SQLite database.
 
@@ -728,21 +805,60 @@ def get_project_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def get_global_db() -> sqlite3.Connection:
-    """Open (or create) the global user-level database at ``~/.revolver/revolver.db``.
+# Environment variable that overrides the *full* global DB file path. Set by
+# the ``--global-db <path>`` CLI flag (see ``cli/_global_options.py``); it wins
+# over ``REVOLVER_HOME`` and the user's home directory. Kept as an env-var bridge
+# (rather than threaded through ~17 call sites) so ``get_global_db()`` stays a
+# zero-argument factory and remains trivially isolatable in tests via
+# ``monkeypatch.setenv``.
+#
+# NOTE: this variable is process-global and is written once at the CLI entry
+# point (the ``--global-db`` handler); it is never cleared for the lifetime of
+# the process. That is correct for the one-shot CLI-per-process model, but a
+# long-lived/embedded host of the Typer ``app`` must set/clear it itself (or
+# call :func:`get_global_db_at` directly) to avoid cross-invocation bleed.
+REVOLVER_GLOBAL_DB_ENV = "REVOLVER_GLOBAL_DB"
 
-    The base directory is ``$REVOLVER_HOME`` when that env var is set (used e.g.
-    in CI to isolate the global store across parallel runners that share
-    ``$HOME``), otherwise the user's home directory.
+
+def revolver_home_base() -> Path:
+    """Return the base directory for the Revolver global store.
+
+    ``$REVOLVER_HOME`` when set (used e.g. in CI to isolate the global store
+    across parallel runners that share ``$HOME``), otherwise the user's home
+    directory. The ``.revolver/`` subdirectory is appended by callers.
+
+    Shared by :func:`get_global_db` and :func:`revolver.infra.config.load_config`
+    so the global config.yaml and the global DB resolve their base identically.
+    """
+    revolver_home = os.environ.get("REVOLVER_HOME")
+    return Path(revolver_home) if revolver_home else Path.home()
+
+
+def global_db_path() -> Path:
+    """Resolve the global DB file path with the documented precedence.
+
+    Precedence: ``$REVOLVER_GLOBAL_DB`` (the ``--global-db`` flag, a full file
+    path) > ``$REVOLVER_HOME`` (a base directory, ``.revolver/revolver.db``
+    appended) > the user's home directory.
+    """
+    override = os.environ.get(REVOLVER_GLOBAL_DB_ENV)
+    if override:
+        return Path(override)
+    return revolver_home_base() / ".revolver" / "revolver.db"
+
+
+def get_global_db() -> sqlite3.Connection:
+    """Open (or create) the global user-level database.
+
+    Resolution precedence (see :func:`global_db_path`): the ``--global-db``
+    override (``$REVOLVER_GLOBAL_DB``, a full file path) wins, else
+    ``$REVOLVER_HOME`` as a base directory, else ``~/.revolver/revolver.db``.
 
     Returns:
         A configured ``sqlite3.Connection`` with WAL mode and foreign keys enabled.
     """
-    revolver_home = os.environ.get("REVOLVER_HOME")
-    base = Path(revolver_home) if revolver_home else Path.home()
-    global_dir = base / ".revolver"
-    global_dir.mkdir(parents=True, exist_ok=True)
-    db_path = global_dir / "revolver.db"
+    db_path = global_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
     conn.executescript(_GLOBAL_SCHEMA_SQL)
@@ -931,7 +1047,7 @@ def delete_problem_version(conn: sqlite3.Connection, tag: str) -> bool:
 
 _LLM_COLUMNS = (
     "name, provider, model, source, base_url, api_key_env, "
-    "max_tokens, timeout_s, temperature, registered_at"
+    "max_tokens, timeout_s, temperature, reasoning_effort, registered_at"
 )
 
 
@@ -947,7 +1063,8 @@ def _row_to_llm_entry(row: tuple[object, ...]) -> LLMEntry:
         max_tokens=row[6],  # type: ignore[arg-type]
         timeout_s=row[7],  # type: ignore[arg-type]
         temperature=row[8],  # type: ignore[arg-type]
-        registered_at=row[9],  # type: ignore[arg-type]
+        reasoning_effort=row[9],  # type: ignore[arg-type]
+        registered_at=row[10],  # type: ignore[arg-type]
     )
 
 
@@ -966,8 +1083,8 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
             """\
             INSERT INTO llms (
                 name, provider, model, source, base_url, api_key_env,
-                max_tokens, timeout_s, temperature, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                max_tokens, timeout_s, temperature, reasoning_effort, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.name,
@@ -979,6 +1096,7 @@ def insert_llm(conn: sqlite3.Connection, entry: LLMEntry) -> None:
                 entry.max_tokens,
                 entry.timeout_s,
                 entry.temperature,
+                entry.reasoning_effort,
                 entry.registered_at.isoformat(),
             ),
         )
@@ -1039,6 +1157,7 @@ def update_llm(
     max_tokens: int | None = None,
     timeout_s: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
 ) -> int:
     """Update mutable fields of an LLM entry.
 
@@ -1052,6 +1171,8 @@ def update_llm(
         max_tokens: New value for maximum tokens per response.
         timeout_s: New value for request timeout in seconds.
         temperature: New value for sampling temperature (0.0-2.0).
+        reasoning_effort: New reasoning-effort level
+            (``min|low|medium|high|max``; FR-LLM-026, ADR-007 A3.2).
 
     Returns:
         The number of rows affected (0 if name not found, 1 if updated).
@@ -1065,6 +1186,8 @@ def update_llm(
         fields["timeout_s"] = timeout_s
     if temperature is not None:
         fields["temperature"] = temperature
+    if reasoning_effort is not None:
+        fields["reasoning_effort"] = reasoning_effort
 
     if not fields:
         return 0
@@ -1193,6 +1316,7 @@ def add_ensemble_member(
     weight: float,
     temperature_override: float | None = None,
     max_tokens_override: int | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> None:
     """Add a member LLM to an ensemble.
 
@@ -1203,6 +1327,9 @@ def add_ensemble_member(
         weight: Sampling weight for this member.
         temperature_override: Optional per-member temperature override.
         max_tokens_override: Optional per-member max_tokens override.
+        reasoning_effort_override: Optional per-member reasoning-effort override
+            (``min|low|medium|high|max``). Kept separate from the member LLM's
+            registry-level ``reasoning_effort`` (FR-LLM-026, ADR-007 A3.2).
 
     Raises:
         DuplicateNameError: If this LLM is already a member of the ensemble.
@@ -1211,10 +1338,18 @@ def add_ensemble_member(
         conn.execute(
             """\
             INSERT INTO ensemble_members
-                (ensemble_name, llm_name, weight, temperature_override, max_tokens_override)
-            VALUES (?, ?, ?, ?, ?)
+                (ensemble_name, llm_name, weight, temperature_override,
+                 max_tokens_override, reasoning_effort)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (ensemble_name, llm_name, weight, temperature_override, max_tokens_override),
+            (
+                ensemble_name,
+                llm_name,
+                weight,
+                temperature_override,
+                max_tokens_override,
+                reasoning_effort_override,
+            ),
         )
         conn.commit()
     except sqlite3.IntegrityError as exc:
@@ -1235,12 +1370,14 @@ def get_ensemble_members(
 
     Returns:
         A list of dicts with ``llm_name``, ``weight``, ``temperature_override``,
-        and ``max_tokens_override`` keys, ordered by ``llm_name``.
+        ``max_tokens_override``, and ``reasoning_effort`` keys, ordered by
+        ``llm_name``.
     """
     conn.row_factory = sqlite3.Row
     cursor = conn.execute(
         """\
-        SELECT llm_name, weight, temperature_override, max_tokens_override
+        SELECT llm_name, weight, temperature_override, max_tokens_override,
+               reasoning_effort
         FROM ensemble_members
         WHERE ensemble_name = ?
         ORDER BY llm_name

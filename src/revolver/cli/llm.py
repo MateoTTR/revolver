@@ -96,6 +96,16 @@ def llm_add(
             help="Sampling temperature 0.0-2.0 (injected into OE config).",
         ),
     ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help=(
+                "Reasoning-effort level (min|low|medium|high|max). Per-member "
+                "on OpenEvolve; merged into a single global pool on ShinkaEvolve."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Register a new LLM (local Ollama or remote API)."""
     with cli_error_boundary():
@@ -125,6 +135,7 @@ def llm_add(
                     max_tokens=max_tokens,
                     timeout_s=timeout,
                     temperature=temperature,
+                    reasoning_effort=reasoning_effort,
                     client=client,
                 )
             finally:
@@ -148,22 +159,23 @@ def llm_add(
                     "max_tokens": entry.max_tokens,
                     "timeout_s": entry.timeout_s,
                     "temperature": entry.temperature,
+                    "reasoning_effort": entry.reasoning_effort,
                     "registered_at": entry.registered_at.isoformat(),
                 },
                 json_mode=True,
             )
         else:
-            render(
-                {
-                    "status": "registered",
-                    "name": entry.name,
-                    "model": entry.model,
-                    "source": entry.source,
-                    "provider": entry.provider or "",
-                    "base_url": entry.base_url or "",
-                },
-                json_mode=False,
-            )
+            registered_row: dict[str, object] = {
+                "status": "registered",
+                "name": entry.name,
+                "model": entry.model,
+                "source": entry.source,
+                "provider": entry.provider or "",
+                "base_url": entry.base_url or "",
+            }
+            if entry.reasoning_effort is not None:
+                registered_row["reasoning_effort"] = entry.reasoning_effort
+            render(registered_row, json_mode=False)
             print_confirmation(
                 f"Done: LLM '{entry.name}' registered",
                 json_mode=json_mode,
@@ -344,6 +356,7 @@ def llm_list(
                         "max_tokens": e.max_tokens,
                         "timeout_s": e.timeout_s,
                         "temperature": e.temperature,
+                        "reasoning_effort": e.reasoning_effort,
                     }
                     for e in entries
                 ],
@@ -356,6 +369,7 @@ def llm_list(
                     e.max_tokens is not None or e.timeout_s is not None for e in entries
                 )
                 has_temperature = any(e.temperature is not None for e in entries)
+                has_reasoning_effort = any(e.reasoning_effort is not None for e in entries)
                 rows: list[dict[str, object]] = []
                 for e in entries:
                     row: dict[str, object] = {
@@ -370,6 +384,10 @@ def llm_list(
                     if has_temperature:
                         row["temperature"] = (
                             str(e.temperature) if e.temperature is not None else "-"
+                        )
+                    if has_reasoning_effort:
+                        row["reasoning_effort"] = (
+                            e.reasoning_effort if e.reasoning_effort is not None else "-"
                         )
                     rows.append(row)
                 render(rows, json_mode=False)
@@ -409,16 +427,23 @@ def llm_update(
             help="Sampling temperature 0.0-2.0 (injected into OE config).",
         ),
     ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help="Reasoning-effort level (min|low|medium|high|max).",
+        ),
+    ] = None,
 ) -> None:
     """Update configuration fields of a registered LLM."""
     with cli_error_boundary():
         # Require at least one update flag
-        if all(v is None for v in (model, max_tokens, timeout, temperature)):
+        if all(v is None for v in (model, max_tokens, timeout, temperature, reasoning_effort)):
             from revolver.core.exceptions import ValidationError
 
             raise ValidationError(
                 "No update flags provided. Use at least one of: "
-                "--model, --max-tokens, --timeout, --temperature"
+                "--model, --max-tokens, --timeout, --temperature, --reasoning-effort"
             )
 
         conn = get_global_db()
@@ -430,6 +455,7 @@ def llm_update(
                 max_tokens=max_tokens,
                 timeout_s=timeout,
                 temperature=temperature,
+                reasoning_effort=reasoning_effort,
             )
         finally:
             conn.close()
@@ -449,6 +475,7 @@ def llm_update(
                     "max_tokens": entry.max_tokens,
                     "timeout_s": entry.timeout_s,
                     "temperature": entry.temperature,
+                    "reasoning_effort": entry.reasoning_effort,
                     "registered_at": entry.registered_at.isoformat(),
                 },
                 json_mode=True,
@@ -463,6 +490,9 @@ def llm_update(
                     "timeout_s": str(entry.timeout_s) if entry.timeout_s is not None else "-",
                     "temperature": (
                         str(entry.temperature) if entry.temperature is not None else "-"
+                    ),
+                    "reasoning_effort": (
+                        entry.reasoning_effort if entry.reasoning_effort is not None else "-"
                     ),
                 },
                 json_mode=False,
@@ -594,6 +624,16 @@ def ensemble_add(
         int | None,
         typer.Option("--max-tokens", help="Per-member max_tokens override."),
     ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help=(
+                "Per-member reasoning-effort override (min|low|medium|high|max); "
+                "wins over the member LLM's registry-level reasoning_effort."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Add a member LLM to an ensemble."""
     with cli_error_boundary():
@@ -606,6 +646,7 @@ def ensemble_add(
                 conn=conn,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
             )
             # Fetch updated ensemble for display
             entry = llm_core.get_ensemble_info(name=name, conn=conn)
@@ -623,6 +664,7 @@ def ensemble_add(
                     "weight": weight,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
+                    "reasoning_effort": reasoning_effort,
                     "total_weight": sum(m.weight for m in entry.members),
                     "member_count": len(entry.members),
                 },
@@ -716,6 +758,7 @@ def ensemble_info(
                             "weight": m.weight,
                             "temperature": m.temperature,
                             "max_tokens": m.max_tokens,
+                            "reasoning_effort": m.reasoning_effort,
                         }
                         for m in entry.members
                     ],
@@ -742,6 +785,9 @@ def ensemble_info(
                         "weight": str(m.weight),
                         "temperature": str(m.temperature) if m.temperature is not None else "-",
                         "max_tokens": str(m.max_tokens) if m.max_tokens is not None else "-",
+                        "reasoning_effort": (
+                            m.reasoning_effort if m.reasoning_effort is not None else "-"
+                        ),
                     }
                     for m in entry.members
                 ]
