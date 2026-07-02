@@ -15,7 +15,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.14.0
+    ✓ revolver         0.17.0
     ✓ openevolve       0.2.0
     ℹ shinkaevolve     not installed (optional). Install with: pip install 'revolver[shinka]'
 
@@ -25,6 +25,13 @@ Revolver dependency check:
 
 All checks passed.
 ```
+
+> **Global store & isolation.** Registered LLMs, ensembles, and run history
+> live in a **global store** at `~/.revolver/` by default. To pin it elsewhere
+> — e.g. to isolate a CI job or keep experiments separate — set
+> `REVOLVER_HOME=<dir>` (Revolver appends `.revolver/`) or pass
+> `--global-db <file>` on any command (precedence: `--global-db` >
+> `REVOLVER_HOME` > `~`). See the README's global-store note for details.
 
 ```bash
 # Register the local LLM (Ollama + Codestral)
@@ -94,8 +101,8 @@ scheduling-optimizer/
 ├── initial_program.py      # template with EVOLVE-BLOCK markers
 ├── evaluator.py            # template with dual-mode pattern
 ├── config.yaml             # OpenEvolve defaults
-├── problem.md              # optional problem description (free-form markdown)
-└── project.yaml            # project metadata
+├── project.yaml            # project metadata
+└── problem.md              # created manually in Phase 2 (project init does NOT scaffold it)
 ```
 
 ---
@@ -142,8 +149,8 @@ Summary: 50 passed, 0 failed, mean time: 0.9s, max time: 3.8s
 ```
 
 ```bash
-# Satisfied — create an immutable version snapshot
-$ revolver problem version create --tag v1.0 --message "Initial formulation: greedy heuristic, makespan objective"
+# Satisfied — create an immutable version snapshot (TAG is positional)
+$ revolver problem version create v1.0 --message "Initial formulation: greedy heuristic, makespan objective"
 
  tag          v1.0
  hash         sha256:a1b2c3d4...
@@ -203,12 +210,16 @@ $ revolver dataset list
 
 ---
 
-## Phase 3b — Ensemble Setup (Optional)
+## Phase 3b — Multi-LLM Ensemble (v0.17 flagship, optional)
 
-Alice wants to try an AlphaEvolve-style multi-model ensemble combining a cheap model for broad exploration with an expensive model for targeted breakthroughs.
+Alice wants an AlphaEvolve-style ensemble: a cheap model for broad
+exploration plus an expensive model for occasional breakthroughs. Since
+v0.17 she can also control *how* the mixture is sampled per backend
+(`--selection`), set a per-member reasoning budget (`--reasoning-effort`),
+and override member weights for a single run (`--llm-weight`).
 
 ```bash
-# Register a second remote LLM
+# Register a cheap second remote LLM (claude-opus is already registered)
 $ revolver llm add flash-lite --provider google --model gemini-2.5-flash-lite \
     --api-key-env GEMINI_API_KEY
 
@@ -216,35 +227,89 @@ Done: LLM 'flash-lite' registered
 ```
 
 ```bash
-# Create a named ensemble
+# Create a named ensemble, then add two weighted members.
+# The expensive member gets a per-member reasoning budget so it thinks less
+# (min|low|medium|high|max) without touching the cheap member.
 $ revolver llm ensemble create flash-pro
-
-Ensemble "flash-pro" created (0 members)
-```
-
-```bash
-# Add members with sampling weights
 $ revolver llm ensemble add flash-pro --llm flash-lite --weight 0.8
-$ revolver llm ensemble add flash-pro --llm claude-opus --weight 0.2
+$ revolver llm ensemble add flash-pro --llm claude-opus --weight 0.2 --reasoning-effort low
 
-Added "flash-lite" to ensemble "flash-pro" (weight: 0.8)
-Added "claude-opus" to ensemble "flash-pro" (weight: 0.2)
+Done: ensemble 'flash-pro' created
+Done: LLM 'flash-lite' added to ensemble 'flash-pro'
+Done: LLM 'claude-opus' added to ensemble 'flash-pro'
 ```
 
-```bash
-# Launch an ensemble run
-$ revolver run --llm flash-pro --version v1.0 --dataset train-small --alias ensemble-v1.0
+### Selection strategy: the same ensemble, three behaviors
 
-Run started: v1.0 + flash-pro (ensemble: 2 members) + train-small
+`--selection` controls how the ensemble mixture is sampled, and is
+capability-checked per backend (ADR-007 A2/A4): **OpenEvolve accepts `fixed`
+only**, **ShinkaEvolve accepts `fixed | ucb | ucb1 | thompson`**. Omitting it
+defaults to `fixed` on both engines.
+
+```bash
+# OpenEvolve, static weighted sampling — member weights honored as configured
+$ revolver run --llm flash-pro --version v1.0 --dataset train-small \
+    --backend openevolve --selection fixed --iterations 200 --alias ensemble-v1.0
+
+Run started: v1.0 + (E) flash-pro (2 members) + train-small [openevolve/fixed]
   Iteration 200/200 | Best score: 0.91 | Elapsed: 2h45m
 
 Run completed: run-20260310-190000
-  200 iterations in 2h45m
   Solution: sol-20260310-190000 (rank #1, alias: ensemble-v1.0)
   Best combined_score: 0.91
-  Programs stored: 1 (rank-1 auto-promoted to solution; use `run population` to inspect the full population)
   Tokens: 2,100,000 prompt + 510,000 completion = 2,610,000 total
-  Stored in: .revolver/runs/run-20260310-190000/
+```
+
+```bash
+# ShinkaEvolve, adaptive UCB bandit — the SAME weights are IGNORED (with a
+# warning). The bandit starts uniform and learns per-arm weights from reward;
+# cost_aware_coef=0.0 turns off the sampler's cost penalty.
+$ revolver run --llm flash-pro --version v1.0 --dataset train-small \
+    --backend shinka --selection ucb --selection-kwarg cost_aware_coef=0.0 --iterations 200
+
+Warning: ensemble weights (registry weights / --llm-weight) are ignored under
+         '--selection ucb' on the shinka backend — the bandit learns arm weights
+         adaptively from a uniform start.
+Run started: v1.0 + (E) flash-pro (2 members) + train-small [shinka/ucb]
+  ...
+```
+
+> **Per-member `reasoning_effort` is OpenEvolve-only.** ShinkaEvolve exposes a
+> single global reasoning pool, so disagreeing member efforts collapse to the
+> highest level (never under-think) with a warning. If per-member effort
+> matters, keep the run on OpenEvolve. See the
+> [cross-engine ensemble section](../guides/tuning-oe-config.md#cross-engine-ensemble-the-same-ensemble-on-three-selection-strategies)
+> of the tuning guide for the full asymmetry.
+
+The capability gate fires **before** the run launches, so an unsupported
+strategy costs no compute:
+
+```bash
+# OpenEvolve only supports `fixed`; an adaptive strategy is rejected up front.
+$ revolver run --llm flash-pro --version v1.0 --dataset train-small \
+    --backend openevolve --selection ucb --iterations 200
+
+Error: Selection strategy 'ucb' is not supported by backend 'openevolve'. Supported: fixed.
+```
+
+A one-off `--llm-weight` override tweaks the mixture for a single run without
+mutating the registry (honored on OpenEvolve and ShinkaEvolve-`fixed`; ignored
+with a warning under adaptive modes):
+
+```bash
+# Push the cheap model to 0.9 for this run only.
+$ revolver run --llm flash-pro --version v1.0 --dataset train-small \
+    --backend openevolve --selection fixed --llm-weight flash-lite=0.9 --iterations 200
+```
+
+Ensemble runs are flagged with an `(E) ` prefix on the LLM name; the `backend`
+column shows which engine produced each run:
+
+```bash
+$ revolver run list
+
+ run_id                version  llm              dataset      backend     status     iterations  best_score  alias
+ run-20260310-190000   v1.0     (E) flash-pro    train-small  openevolve  completed  200         0.9100      ensemble-v1.0
 ```
 
 ---
@@ -302,13 +367,92 @@ Run completed: run-20260310-173000
   Stored in: .revolver/runs/run-20260310-173000/
 ```
 
+### Run 3: ShinkaEvolve backend (`--backend shinka`)
+
+Revolver's evolution backend is pluggable (ADR-007). The same problem and
+dataset can be evolved on **ShinkaEvolve** simply by passing `--backend shinka`
+(requires the extra: `pip install 'revolver[shinka]'`).
+
+> **Reminder.** ShinkaEvolve reads a different `config.yaml` shape
+> (`evo_config` / `db_config` / `job_config`). Scaffold a Shinka-shaped project
+> from the start with `revolver project init <name> --backend shinka`; an
+> OpenEvolve-shaped `config.yaml` will not validate under the Shinka backend.
+
 ```bash
-# See both solutions
+# Evolve the same problem on the ShinkaEvolve backend
+$ revolver run --version v1.0 --llm claude-opus --dataset train-small \
+    --backend shinka --iterations 100 --alias claude-shinka-v1.0
+
+Run started: v1.0 + claude-opus + train-small [shinka/fixed]
+  Iteration 100/100 | Best score: 0.80 | Elapsed: 2h05m
+
+Run completed: run-20260310-181500
+  Solution: sol-20260310-181500 (rank #1, alias: claude-shinka-v1.0)
+  Best combined_score: 0.80
+  Tokens: 1,190,000 prompt + 305,000 completion = 1,495,000 total
+```
+
+```bash
+# `run info` reports the backend that produced each run
+$ revolver run info run-20260310-181500
+
+ run_id            run-20260310-181500
+ problem_version   v1.0
+ llm               claude-opus
+ dataset           train-small
+ status            completed
+ backend           shinka
+ iterations        100
+ ...
+```
+
+```bash
+# See all three solutions
 $ revolver solution list
 
- id                      alias            version  llm              score   rank
- sol-20260310-143000     codestral-v1.0   v1.0     codestral-local  0.7400  #1
- sol-20260310-173000     claude-v1.0      v1.0     claude-opus      0.8200  #1
+ id                      alias                version  llm              score   rank
+ sol-20260310-143000     codestral-v1.0       v1.0     codestral-local  0.7400  #1
+ sol-20260310-173000     claude-v1.0          v1.0     claude-opus      0.8200  #1
+ sol-20260310-181500     claude-shinka-v1.0   v1.0     claude-opus      0.8000  #1
+```
+
+---
+
+## Phase 4b — Resuming a Run
+
+Alice wants to push the Codestral run further. `run resume` continues from a
+run's latest checkpoint, creating a **new** run linked to the parent
+(`RUN_ID` is positional).
+
+```bash
+$ revolver run resume run-20260310-143000 --iterations 50
+
+Resuming run from: run-20260310-143000
+  Iteration 50/50 | Best score: 0.77 | Elapsed: 48m
+
+Resumed run completed: run-20260310-201000 (from run-20260310-143000, ...)
+```
+
+> **Backend is inherited, selection is not.** A resumed run always reuses the
+> parent run's **backend** (cross-backend resume is rejected). The ensemble
+> selection levers (`--selection` / `--selection-kwarg` / `--llm-weight`) are
+> **not** inherited — re-specify them on the resume command. Resuming an
+> ensemble run without `--selection` falls back to the backend default and
+> emits a warning.
+
+---
+
+## Phase 4c — Recovering an Interrupted Run
+
+If a run is interrupted or fails before its solution is promoted, Alice can
+still recover the best program found so far from the backend's latest
+checkpoint with `solution extract --from-checkpoint` (OpenEvolve; B7).
+
+```bash
+$ revolver solution extract --run run-20260310-143000 --from-checkpoint --alias recovered-v1
+
+Extracted solution sol-20260310-143000-cp (run=run-20260310-143000, rank=1)
+Done: Solution extracted to .revolver/runs/run-20260310-143000/programs/recovered-v1.py
 ```
 
 ---
@@ -373,16 +517,24 @@ Done: Run 'run-20260310-143000' deleted (including 3 solutions and run files)
 | # | Phase | Command | Purpose |
 |---|---|---|---|
 | 1 | Setup | `revolver doctor` | Verify environment |
-| 2 | Setup | `revolver llm add` (x2) | Register LLMs |
-| 3 | Project | `revolver project init` | Create project |
+| 2 | Setup | `revolver llm add` (x2) | Register local + remote LLMs |
+| 3 | Project | `revolver project init` | Create project (`--backend shinka` for a Shinka-shaped scaffold) |
 | 4 | Problem | `revolver problem test --instance` | Quick smoke test |
 | 5 | Problem | `revolver problem test --dataset` | Full validation |
-| 6 | Problem | `revolver problem version create` | Freeze problem definition |
+| 6 | Problem | `revolver problem version create v1.0` | Freeze problem definition (positional TAG) |
 | 7 | Dataset | `revolver dataset add` (x2) | Register train + eval datasets |
-| 8 | Run | `revolver llm start` | Load local model |
-| 9 | Run | `revolver run` (x2) | Generate solutions |
-| 10 | Run | `revolver llm stop` | Free GPU |
-| 11 | Benchmark | `revolver benchmark` | Compare solutions |
-| 12 | Benchmark | `revolver benchmark results --per-instance` | Instance-level analysis |
-| 13 | Benchmark | `revolver benchmark export` | Export for external tools |
-| 14 | Cleanup | `revolver run delete` | Remove old runs |
+| 8 | Ensemble | `revolver llm ensemble create` / `ensemble add --reasoning-effort` | Build a weighted multi-LLM ensemble |
+| 9 | Ensemble | `revolver run --llm <ensemble> --selection fixed` | Run ensemble (OpenEvolve weighted sampling) |
+| 10 | Ensemble | `revolver run --backend shinka --selection ucb --selection-kwarg …` | Adaptive-bandit variant (weights ignored) |
+| 11 | Ensemble | `revolver run --llm-weight <model>=<w>` | One-off per-run weight override |
+| 12 | Run | `revolver llm start` / `llm stop` | Load / free local model |
+| 13 | Run | `revolver run` (local + remote) | Generate solutions |
+| 14 | Run | `revolver run --backend shinka` | Evolve on the ShinkaEvolve backend |
+| 15 | Run | `revolver run list` / `run info` | Inspect runs (shows `(E) ` prefix + `backend` column) |
+| 16 | Run | `revolver run resume <run-id>` | Continue from a checkpoint (new run) |
+| 17 | Run | `revolver solution extract --from-checkpoint` | Recover an interrupted/failed run |
+| 18 | Solution | `revolver solution list` | List generated solutions |
+| 19 | Benchmark | `revolver benchmark` | Compare solutions |
+| 20 | Benchmark | `revolver benchmark results --per-instance` | Instance-level analysis |
+| 21 | Benchmark | `revolver benchmark export` | Export for external tools |
+| 22 | Cleanup | `revolver run delete` | Remove old runs |

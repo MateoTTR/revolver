@@ -42,19 +42,24 @@ across the feature space.
 
 ### Default behavior
 
-By default, OpenEvolve uses a single feature dimension (index `0`), which
-typically corresponds to the primary score returned by the evaluator. This
-means the map is essentially one-dimensional.
+By default, OpenEvolve builds a 2D MAP-Elites grid on its two built-in
+feature dimensions, `complexity` and `diversity` — the default
+`feature_dimensions: ["complexity", "diversity"]`. `complexity` tracks
+program length and `diversity` tracks how different a program is from the
+rest of the population; neither requires anything from your evaluator.
 
 ### Configuring feature dimensions
 
-Use `--config-override` to set which evaluator metrics serve as feature
-dimensions:
+`feature_dimensions` is a **list of metric names** (strings) — not integer
+indices. Each name selects a MAP-Elites grid axis. Valid names are the
+OpenEvolve built-ins `complexity`, `diversity`, `score`, plus **any metric
+name your evaluator's `evaluate()` returns**. Use `--config-override` to
+choose them:
 
 ```bash
-# Use two feature dimensions (e.g., score and execution_time)
+# Use two feature dimensions by name: the built-in score + a custom metric
 revolver run --llm my-llm \
-  --config-override database.feature_dimensions=[0,1]
+  --config-override 'database.feature_dimensions=["score","execution_time"]'
 ```
 
 > **Note**: OpenEvolve organizes these parameters under the `database` namespace
@@ -62,29 +67,32 @@ revolver run --llm my-llm \
 > with `--config-override`. If you place them at the top level, Revolver will
 > warn you at `problem version` time.
 
-The integers refer to the *index* of metrics returned by your evaluator's
-`evaluate()` function. If your evaluator returns:
+If your evaluator returns:
 
 ```python
 return {
-    "score": combined_score,         # index 0
-    "execution_time": elapsed,       # index 1
-    "memory_usage": peak_memory_mb,  # index 2
+    "score": combined_score,         # OpenEvolve built-in name
+    "execution_time": elapsed,       # custom metric
+    "memory_usage": peak_memory_mb,  # custom metric
 }
 ```
 
-Then `database.feature_dimensions=[0,1]` creates a 2D map indexed by `score` and
-`execution_time`. This encourages OpenEvolve to find diverse programs: some
-that are fast, some that score high, and some that balance both.
+Then `database.feature_dimensions=["score","execution_time"]` creates a 2D map
+with `score` on one axis and `execution_time` on the other. This encourages
+OpenEvolve to find diverse programs: some that are fast, some that score high,
+and some that balance both.
+
+`feature_bins` (int, or a `{dimension: bins}` dict; default `10`) sets how
+many buckets each axis is divided into.
 
 ### When to add feature dimensions
 
 | Scenario | Recommendation |
 |----------|----------------|
-| Single-objective optimization (maximize score) | Default `[0]` is fine |
-| You care about multiple trade-offs (speed vs. quality) | Add a second dimension: `[0,1]` |
-| Evaluator returns many metrics | Pick the 2-3 most meaningful as dimensions |
-| Very few iterations (< 100) | Stick with 1 dimension — not enough iterations to fill a 2D map |
+| Single-objective optimization (maximize score) | The default `["complexity","diversity"]` is fine — it preserves behavioral diversity while the score improves |
+| You care about multiple trade-offs (speed vs. quality) | Swap in your own metric names, e.g. `["score","execution_time"]` |
+| Evaluator returns many metrics | Pick the 2-3 most meaningful metric names as dimensions |
+| Very few iterations (< 100) | Stick with a single dimension, e.g. `["score"]` — not enough iterations to fill a 2D map |
 
 > **Note**: More dimensions means a larger map with more cells to fill. With
 > too many dimensions and too few iterations, most cells stay empty and
@@ -405,7 +413,7 @@ the population. Best for complex problems where the solution space is large.
 revolver run --llm my-llm --iterations 2000 \
   --config-override database.num_islands=8 \
   --config-override database.migration_interval=100 \
-  --config-override database.feature_dimensions=[0,1] \
+  --config-override 'database.feature_dimensions=["score","execution_time"]' \
   --temperature 0.8 \
   --parallel 8
 ```
@@ -422,7 +430,7 @@ simulated annealing for TSP). With API models at `--parallel 8`, expect
 |-----------|----------|-----------|-------------|
 | `database.num_islands` | 2 | 5 | 5-8 |
 | `database.migration_interval` | 25 | 50 | 50-100 |
-| `database.feature_dimensions` | `[0]` | `[0]` | `[0,1]` |
+| `database.feature_dimensions` | `["complexity","diversity"]` | `["complexity","diversity"]` | `["score","execution_time"]` |
 | `temperature` | 0.5 | 0.7 | 0.8 |
 | `parallel` | 1 | 4 | 4-8 |
 | Expected improvement | Negligible | Moderate | Significant |
@@ -438,8 +446,8 @@ single score, you can explore trade-offs between competing objectives.
 
 ### Defining custom metrics in your evaluator
 
-Your evaluator must return a dictionary with named metrics. The order of
-keys determines the index used in `feature_dimensions`:
+Your evaluator must return a dictionary with named metrics. You reference
+those metric names directly in `feature_dimensions`:
 
 ```python
 import time
@@ -450,24 +458,24 @@ def evaluate(program_output, dataset_path):
     elapsed = time.time() - start
 
     return {
-        "score": quality_score,        # index 0: primary objective
-        "execution_time": elapsed,     # index 1: secondary objective
+        "score": quality_score,        # primary objective
+        "execution_time": elapsed,     # secondary objective
     }
 ```
 
 ### Configuring multi-objective search
 
-Use `feature_dimensions` to tell MAP-Elites which metrics define the map:
+Use `feature_dimensions` to tell MAP-Elites which metric names define the map:
 
 ```bash
 # Optimize score while exploring execution_time trade-offs
 revolver run --llm my-llm --iterations 500 \
-  --config-override database.feature_dimensions=[0,1]
+  --config-override 'database.feature_dimensions=["score","execution_time"]'
 ```
 
 This creates a 2D map where:
-- One axis is the `score` metric (index 0)
-- The other axis is `execution_time` (index 1)
+- One axis is the `score` metric
+- The other axis is `execution_time`
 
 MAP-Elites will keep the best program in each (score, execution_time) cell,
 giving you a *Pareto front* of solutions: some fast but lower-quality, some
@@ -487,7 +495,7 @@ revolver llm add claude-sonnet --provider anthropic \
 
 # Run with multi-objective configuration
 revolver run --llm claude-sonnet --iterations 500 \
-  --config-override database.feature_dimensions=[0,1] \
+  --config-override 'database.feature_dimensions=["score","execution_time"]' \
   --config-override database.num_islands=5 \
   --parallel 4
 ```
@@ -506,8 +514,9 @@ revolver solution show best-overall
 
 - Keep the number of objectives small (2-3). More objectives need
   exponentially more iterations to fill the map.
-- Put the primary objective at index 0. OpenEvolve's `combined_score`
-  (used for ranking) is typically based on the first metric.
+- Feature dimensions shape the MAP-Elites grid, not the ranking. OpenEvolve
+  ranks programs by its `combined_score`, so pick dimension names that
+  capture the trade-offs you care about (e.g. `score` vs `execution_time`).
 - Use `--iterations 500+` for 2D maps, `--iterations 2000+` for 3D maps.
 - The evaluator must return consistent metric names across all evaluations.
 
@@ -522,7 +531,7 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 |-----------|-----------|---------------|---------|
 | Islands | `database.num_islands` | `--config-override database.num_islands=N` | 5 |
 | Migration interval | `database.migration_interval` | `--config-override database.migration_interval=N` | 50 |
-| Feature dimensions | `database.feature_dimensions` | `--config-override database.feature_dimensions=[0,1]` | `[0]` |
+| Feature dimensions | `database.feature_dimensions` | `--config-override 'database.feature_dimensions=["score","execution_time"]'` | `["complexity","diversity"]` |
 | Population size | `database.population_size` | `--config-override database.population_size=N` | 20 |
 | Parallel evaluations | `evaluator.parallel_evaluations` | `--parallel N` | 1 |
 | Temperature | `llm.temperature` | `--temperature F` | Model default |
@@ -532,7 +541,7 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 | Diff-based evolution | `diff_based_evolution` | `--rewrite-mode` (sets to `false`) | `true` |
 | Max code length | `max_code_length` | `--rewrite-mode` (sets to `50000`) | 10000 |
 | Ensemble models | `llm.models` | `--llm <ensemble-name>` | N/A (auto-generated) |
-| Reasoning effort | `llm.reasoning_effort` | `--config-override llm.reasoning_effort=low` | Model default |
+| Reasoning effort | `llm.reasoning_effort` | `revolver llm add/update <name> --reasoning-effort low` (registry) or `llm ensemble add --reasoning-effort low` (per member) | Model default |
 
 ---
 
@@ -620,9 +629,11 @@ actual program. This results in truncated output and 0% valid programs.
 | Gemini Pro (`reasoning_effort=low`) | OK | Good quality, reasonable cost |
 | Gemini Pro (default reasoning) | OK | Best quality but expensive |
 
-> **Tip**: if you must use a thinking model, set `reasoning_effort=low` via
-> `--config-override llm.reasoning_effort=low` to minimize the token budget
-> consumed by internal reasoning.
+> **Tip**: if you must use a thinking model, lower its reasoning budget with
+> the first-class flag — `revolver llm update <name> --reasoning-effort low`
+> (persisted in the registry, applied to every run) — rather than
+> `--config-override`. A one-off `--config-override llm.reasoning_effort=low`
+> remains available as an escape hatch for a single non-ensemble run.
 
 ### Trade-offs
 
@@ -735,10 +746,12 @@ Common per-model settings:
 | Pro (expensive) | 0.3-0.5 | 16384 | Lower temperature for reliable output |
 | Thinking models | 0.5 | 32768 | Needs high `max_tokens` for reasoning budget |
 
-> **Gemini Pro tip**: When using Gemini Pro in an ensemble, set
-> `reasoning_effort=low` via `--config-override llm.reasoning_effort=low`
-> to prevent the model from consuming its token budget on internal
-> reasoning instead of generating code.
+> **Gemini Pro tip**: When using Gemini Pro in an ensemble, set its reasoning
+> budget per member with the first-class flag —
+> `revolver llm ensemble add <ensemble> --llm pro --weight 0.2 --reasoning-effort low` —
+> so the expensive member thinks less without touching the cheap member. This
+> is the canonical path; `--config-override llm.reasoning_effort=` is a
+> non-ensemble escape hatch only.
 
 ### Cost implications
 
@@ -789,7 +802,7 @@ revolver run --llm alphevo --iterations 500
 revolver run --llm flash-lite --iterations 500
 
 # Phase 2: refine with expensive model, resuming from Phase 1
-revolver run resume --run <run-id> --llm pro --iterations 100
+revolver run resume <run-id> --llm pro --iterations 100
 ```
 
 | Aspect | Ensemble | Sequential resume |
