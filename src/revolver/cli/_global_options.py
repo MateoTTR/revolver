@@ -53,10 +53,17 @@ def _extract_global_flags(args: list[str]) -> tuple[list[str], set[str], str | N
         if arg in _GLOBAL_FLAGS:
             found.add(arg)
         elif arg == _GLOBAL_DB_FLAG:
-            # ``--global-db <path>`` — consume the following token as the value.
-            if i + 1 < len(args):
+            # ``--global-db <path>`` — consume the following token as the value,
+            # but only when it looks like a value (not another option). A bare
+            # flag, or one immediately followed by another option, is left in
+            # ``cleaned`` so Click surfaces its native "option requires an
+            # argument" error instead of silently swallowing the next token
+            # (``--global-db --json`` would otherwise set the path to "--json").
+            if i + 1 < len(args) and not args[i + 1].startswith("-"):
                 global_db = args[i + 1]
                 i += 1
+            else:
+                cleaned.append(arg)
         elif arg.startswith(_GLOBAL_DB_FLAG + "="):
             # ``--global-db=<path>`` — value is inline.
             global_db = arg[len(_GLOBAL_DB_FLAG) + 1 :]
@@ -70,7 +77,10 @@ def _apply_flags_to_context(
     ctx: click.Context, flags: set[str], global_db: str | None = None
 ) -> None:
     """Merge extracted global options into *ctx.obj* and the process env."""
-    if not flags and global_db is None:
+    # An empty ``--global-db=`` value counts as "not provided" — treat it as
+    # falsy so it never sets a stray empty env var (matched by the root-callback
+    # bridge in cli.__init__).
+    if not flags and not global_db:
         return
     ctx.ensure_object(dict)
     if "--json" in flags:
@@ -79,7 +89,7 @@ def _apply_flags_to_context(
         ctx.obj["verbose"] = True
     if "--quiet" in flags:
         ctx.obj["quiet"] = True
-    if global_db is not None:
+    if global_db:
         # Bridge the value into the env var consulted by ``get_global_db()``.
         # This needs no call-site changes and is isolatable via monkeypatch.
         ctx.obj["global_db"] = global_db

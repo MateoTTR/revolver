@@ -87,8 +87,10 @@ def main(
     # ``--global-db`` is normally captured and bridged into $REVOLVER_GLOBAL_DB
     # by GlobalOptionGroup.parse_args; declaring it here keeps it visible in
     # ``--help`` and applies any value Click parsed directly at the root level.
+    # Truthy guard (mirrors _apply_flags_to_context): an empty ``--global-db=``
+    # value counts as "not provided" and must not set a stray empty env var.
     resolved_global_db = global_db or ctx.obj.get("global_db")
-    if resolved_global_db is not None:
+    if resolved_global_db:
         ctx.obj["global_db"] = resolved_global_db
         os.environ[REVOLVER_GLOBAL_DB_ENV] = resolved_global_db
 

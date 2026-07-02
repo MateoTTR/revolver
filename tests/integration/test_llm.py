@@ -1808,3 +1808,35 @@ def test_global_db_flag_beats_revolver_home(
     finally:
         conn.close()
     assert not (revolver_home / ".revolver" / "revolver.db").exists()
+
+
+@pytest.mark.integration
+def test_global_db_flag_does_not_swallow_following_option(isolated_home: Path) -> None:
+    """A following option is not consumed as the --global-db value.
+
+    ``--global-db --json ...`` must not set the DB path to ``"--json"`` and
+    silently drop ``--json`` (the pre-fix behaviour was exit 0 with a bogus
+    path); the missing value surfaces as a non-zero Click error instead.
+    """
+    result = runner.invoke(app, ["--global-db", "--json", "llm", "list"])
+    assert result.exit_code != 0
+    assert os.environ.get("REVOLVER_GLOBAL_DB") != "--json"
+
+
+@pytest.mark.integration
+def test_global_db_flag_empty_value_is_ignored(isolated_home: Path) -> None:
+    """``--global-db=`` (empty inline value) counts as not provided.
+
+    The command runs against the default home store and leaves no stray empty
+    ``REVOLVER_GLOBAL_DB`` env var behind.
+    """
+    result = _add_remote("--global-db=", name="qux")
+    assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+    assert not os.environ.get("REVOLVER_GLOBAL_DB")
+
+    # Entry landed in the default home store, not a "" path.
+    conn = get_global_db_at(isolated_home / ".revolver" / "revolver.db")
+    try:
+        assert [e.name for e in list_llms(conn)] == ["qux"]
+    finally:
+        conn.close()

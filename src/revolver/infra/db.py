@@ -811,6 +811,12 @@ def get_project_db(path: Path) -> sqlite3.Connection:
 # (rather than threaded through ~17 call sites) so ``get_global_db()`` stays a
 # zero-argument factory and remains trivially isolatable in tests via
 # ``monkeypatch.setenv``.
+#
+# NOTE: this variable is process-global and is written once at the CLI entry
+# point (the ``--global-db`` handler); it is never cleared for the lifetime of
+# the process. That is correct for the one-shot CLI-per-process model, but a
+# long-lived/embedded host of the Typer ``app`` must set/clear it itself (or
+# call :func:`get_global_db_at` directly) to avoid cross-invocation bleed.
 REVOLVER_GLOBAL_DB_ENV = "REVOLVER_GLOBAL_DB"
 
 
