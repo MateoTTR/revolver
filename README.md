@@ -15,6 +15,7 @@ OpenEvolve and ShinkaEvolve provide the core evolutionary loop for LLM-guided co
 | Dataset management | Hardcoded in evaluator | Named, versioned, split (train/eval) |
 | Traceability | Partial checkpoints | Full lineage: problem + dataset + LLM + config → solution |
 | Benchmarking | Single run | Multi-solution comparison on same evaluation dataset |
+| Multi-LLM ensembles | Backend-specific YAML | Unified `--selection` (weighted / adaptive bandit) + `--llm-weight` + per-member `--reasoning-effort`, capability-gated per backend |
 | Run metrics | None | Token usage (prompt/completion/total — no cost reported), compute time |
 | Result export | Raw logs | Structured CSV/JSON with full metadata |
 
@@ -26,12 +27,12 @@ revolver doctor                        # Verify environment dependencies
 revolver setup                         # Install missing Python dependencies
 revolver llm add/update/start/stop/remove  # Register and manage LLMs (local Ollama or remote API)
 revolver llm list/status               # Monitor registered LLMs and GPU usage
-revolver llm ensemble create/add/list/info/remove  # Create and manage multi-model ensembles
+revolver llm ensemble create/add/list/info/remove  # Create and manage multi-model ensembles (per-member --weight/--reasoning-effort)
 revolver problem test                  # Validate evaluator against instances
 revolver problem version create/list/delete  # Create (--backend validates config.yaml), list and delete immutable problem snapshots
 revolver dataset add/update/remove     # Register and manage evaluation datasets
 revolver dataset list/info             # Inspect datasets
-revolver run/run resume                # Launch (--backend openevolve|shinka) or resume runs (resume inherits the parent's backend)
+revolver run/run resume                # Launch (--backend openevolve|shinka), tune ensembles (--selection/--llm-weight); resume inherits the parent's backend
 revolver run status/list/info/population/cleanup/delete  # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
@@ -194,7 +195,7 @@ revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1289+ tests, ~25s; L3 e2e tests are deselected by default — run with -m e2e)
+# Run tests (1439+ tests, ~35s; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
@@ -236,6 +237,7 @@ mypy
 | Sprint 015 | Thinking-model usability, token honesty (cost removed), slow-local-endpoint timeout, shim cleanup | v0.15.0 | Done |
 | Sprint 016 | Tech-debt + UX polish: pricing removal (migration v10), dataset `split=both` (v11), `run info` program counters, Shinka resume clone parity, CI version/tag guard | v0.16.0 | Done |
 | Sprint 016a | Corrective (demo feedback v0.16.0): network-Ollama probe honours `--base-url`/`OLLAMA_HOST`, clean Shinka post-run shutdown, OE local `--parallel` auto-pin, warning-free OE config scaffold, positional `run resume`, bridge token under-count caveat, CI global-DB isolation | v0.16.1 | Done |
+| Sprint 017 | Multi-LLM ensemble validated end-to-end: `--selection {fixed,ucb,ucb1,thompson}`, `--llm-weight`, per-LLM `--reasoning-effort` (capability-gated per backend), B9 no-op `--config-override` warn, correctness slice (OE wrapper numeric guard, teardown, `solution extract --from-checkpoint`), `REVOLVER_HOME`/`--global-db` | v0.17.0 | Done |
 
 ## Documentation
 
