@@ -535,7 +535,7 @@ Plan: [sprint-017.md](../sprints/sprint-017.md). Per [ADR-007 — v0.17 Amendmen
 
 **Progress (session 055):** formalization done (ADR-007 amendment + specs/DES/validation cascade + both reviewers) — committed `fcc79b8`. **Wave 0 (PR #229) + Wave 1 (PR #228 W1a, #232 W1b, #233 W1c) all merged** → the flagship cross-engine comparison (OE-weighted / Shinka-fixed / Shinka-ucb) + the correctness slice are on `develop`.
 
-**Progress (session 056):** **Wave 2 fully merged** — W2a (#235, per-LLM `reasoning_effort`, S17-24..28) + W2b (#237, B9 no-op `--config-override` warn + cross-engine ensemble doc, S17-29/30). Both reviewed (APPROVE, non-blocking suggestions applied). **Remaining: Wave 3 (W3 — S17-31/32/33: OE template `feature_dimensions/bins`, `REVOLVER_HOME`/`--global-db`, full regression sweep) → v0.17.0 release.**
+**Progress (session 056):** **Sprint 017 COMPLETE — v0.17.0 released** (tag `v0.17.0` on `main`, merge commit `03c7f83`). Wave 2 (W2a #235 `reasoning_effort` + W2b #237 B9 warn/cross-engine doc) and Wave 3 (W3 #239 — OE template `feature_dimensions/bins`, `REVOLVER_HOME`/`--global-db`, regression) merged. Pre-release doc cascade run (spec-reviewer 0 FAIL/5 WARN, validation-reviewer 9 FAIL/5 WARN — mechanical Test-ID repoints + `selection_strategies("weighted")→("fixed")`, doc-reviewer 4 FAIL incl. guide `feature_dimensions` index→metric-names + `user-story-e2e` rewrite) — all fixed on `develop` before tag. Full suite 1439 passing. Doc-maintenance follow-ups → #354-357 (S18). **Remaining bookkeeping: session 056 report + cost-tracker.**
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
@@ -569,6 +569,6 @@ Plan: [sprint-017.md](../sprints/sprint-017.md). Per [ADR-007 — v0.17 Amendmen
 | 348 | **L2 tests — `reasoning_effort` projection** (OE per-member, Shinka global-pool, disagreement warning, local-inert warning). (S17-28) | [x] | S17 — PR-W2a (#235) |
 | 349 | **OE ensemble dry-run example + doc section** — cross-engine comparison (OE-weighted vs Shinka-fixed vs Shinka-ucb). (S17-29) | [x] | S17 — PR-W2b (#237) |
 | 350 | **B9 — warn on no-op `--config-override` key** (generalizes the A5 per-sampler routing check to the rest of `--config-override`). (S17-30) | [x] | S17 — PR-W2b (#237) |
-| 351 | **A6/M5 — OE config template: surface `feature_dimensions`/`feature_bins`** (extends the #318 `database.*` realignment). (S17-31) | [ ] | S17 — PR-W3 |
-| 352 | **B6 — finish `REVOLVER_HOME`**: `config.py:68` consistent with `db.py`'s existing resolution; document; optional `--global-db` flag. (S17-32) | [ ] | S17 — PR-W3 |
-| 353 | **Full regression sweep + doc-edit follow-up issue** listing every FR/DES/validation edit from the research doc §4 (FR-RUN-049/050/051, FR-LLM-026, FR-EVL-021, ADR-007 D5/spec-run FR-RUN-046 supersession) for the spec-reviewer/validation-reviewer pass before the v0.17.0 tag. (S17-33) | [ ] | S17 — PR-W3 |
+| 351 | **A6/M5 — OE config template: surface `feature_dimensions`/`feature_bins`** (extends the #318 `database.*` realignment). (S17-31) | [x] | S17 — PR-W3 (#239) |
+| 352 | **B6 — finish `REVOLVER_HOME`**: `config.py:68` consistent with `db.py`'s existing resolution; document; optional `--global-db` flag. (S17-32) | [x] | S17 — PR-W3 (#239) |
+| 353 | **Full regression sweep + doc-edit follow-up issue** listing every FR/DES/validation edit from the research doc §4 (FR-RUN-049/050/051, FR-LLM-026, FR-EVL-021, ADR-007 D5/spec-run FR-RUN-046 supersession) for the spec-reviewer/validation-reviewer pass before the v0.17.0 tag. (S17-33) | [x] | S17 — PR-W3 (#239) |
