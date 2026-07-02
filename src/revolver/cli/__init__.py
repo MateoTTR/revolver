@@ -11,10 +11,13 @@ to the ``GlobalOptionGroup`` custom Click group class.
 
 from __future__ import annotations
 
+import os
+
 import typer
 
 from revolver import __version__
 from revolver.cli._global_options import GlobalOptionGroup
+from revolver.infra.db import REVOLVER_GLOBAL_DB_ENV
 
 # ── Root application ─────────────────────────────────────────────────────────
 
@@ -64,6 +67,15 @@ def main(
         "--quiet",
         help="Suppress non-essential output.",
     ),
+    global_db: str | None = typer.Option(
+        None,
+        "--global-db",
+        metavar="PATH",
+        help=(
+            "Full path to the global DB file, overriding REVOLVER_HOME and the "
+            "default ~/.revolver/revolver.db (power users / CI isolation)."
+        ),
+    ),
 ) -> None:
     """MLOps CLI for LLM-guided evolutionary optimization via OpenEvolve."""
     ctx.ensure_object(dict)
@@ -72,6 +84,13 @@ def main(
     ctx.obj["json"] = json_output or ctx.obj.get("json", False)
     ctx.obj["verbose"] = verbose or ctx.obj.get("verbose", False)
     ctx.obj["quiet"] = quiet or ctx.obj.get("quiet", False)
+    # ``--global-db`` is normally captured and bridged into $REVOLVER_GLOBAL_DB
+    # by GlobalOptionGroup.parse_args; declaring it here keeps it visible in
+    # ``--help`` and applies any value Click parsed directly at the root level.
+    resolved_global_db = global_db or ctx.obj.get("global_db")
+    if resolved_global_db is not None:
+        ctx.obj["global_db"] = resolved_global_db
+        os.environ[REVOLVER_GLOBAL_DB_ENV] = resolved_global_db
 
 
 # ── Command group stubs ──────────────────────────────────────────────────────

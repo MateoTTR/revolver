@@ -1,43 +1,76 @@
 """Custom Typer/Click classes for global option propagation.
 
-Allows ``--json``, ``--verbose``, and ``--quiet`` to be placed at any
-position in the command line:
+Allows ``--json``, ``--verbose``, ``--quiet`` and ``--global-db`` to be placed
+at any position in the command line:
 
 - ``revolver --json llm list``     (root level -- already worked)
 - ``revolver llm --json list``     (group level)
 - ``revolver llm list --json``     (command level -- the fix)
 
-Implements custom ``TyperGroup`` and ``TyperCommand`` subclasses that
-intercept these three flags from the argument list before delegating to
-the normal Click/Typer parsing, storing them in ``ctx.obj``.
+The first three are boolean flags. ``--global-db`` takes a *value* — a full
+path to the global DB file (``--global-db <path>`` or ``--global-db=<path>``) —
+overriding the global DB resolution for power users / CI isolation.
+
+Implements custom ``TyperGroup`` and ``TyperCommand`` subclasses that intercept
+these options from the argument list before delegating to the normal
+Click/Typer parsing, storing the booleans in ``ctx.obj`` and bridging the
+``--global-db`` value into ``$REVOLVER_GLOBAL_DB`` so the zero-argument
+``get_global_db()`` factory (called from ~17 sites without ``ctx.obj``) picks it
+up without any call-site changes.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import click
 from typer.core import TyperCommand, TyperGroup
 
-# The global flags that should be recognised at any level
+from revolver.infra.db import REVOLVER_GLOBAL_DB_ENV
+
+# The boolean global flags that should be recognised at any level.
 _GLOBAL_FLAGS = {"--json", "--verbose", "--quiet"}
 
+# The value-taking global option (full path to the global DB file).
+_GLOBAL_DB_FLAG = "--global-db"
 
-def _extract_global_flags(args: list[str]) -> tuple[list[str], set[str]]:
-    """Remove global flags from *args* and return (cleaned, found)."""
+
+def _extract_global_flags(args: list[str]) -> tuple[list[str], set[str], str | None]:
+    """Remove global options from *args*.
+
+    Returns ``(cleaned, boolean_flags, global_db_value)`` where *cleaned* is the
+    argument list with all global options stripped, *boolean_flags* is the set
+    of boolean flags found, and *global_db_value* is the ``--global-db`` path
+    (last one wins) or ``None``.
+    """
     found: set[str] = set()
+    global_db: str | None = None
     cleaned: list[str] = []
-    for arg in args:
+    i = 0
+    while i < len(args):
+        arg = args[i]
         if arg in _GLOBAL_FLAGS:
             found.add(arg)
+        elif arg == _GLOBAL_DB_FLAG:
+            # ``--global-db <path>`` — consume the following token as the value.
+            if i + 1 < len(args):
+                global_db = args[i + 1]
+                i += 1
+        elif arg.startswith(_GLOBAL_DB_FLAG + "="):
+            # ``--global-db=<path>`` — value is inline.
+            global_db = arg[len(_GLOBAL_DB_FLAG) + 1 :]
         else:
             cleaned.append(arg)
-    return cleaned, found
+        i += 1
+    return cleaned, found, global_db
 
 
-def _apply_flags_to_context(ctx: click.Context, flags: set[str]) -> None:
-    """Merge extracted flags into *ctx.obj*."""
-    if not flags:
+def _apply_flags_to_context(
+    ctx: click.Context, flags: set[str], global_db: str | None = None
+) -> None:
+    """Merge extracted global options into *ctx.obj* and the process env."""
+    if not flags and global_db is None:
         return
     ctx.ensure_object(dict)
     if "--json" in flags:
@@ -46,6 +79,11 @@ def _apply_flags_to_context(ctx: click.Context, flags: set[str]) -> None:
         ctx.obj["verbose"] = True
     if "--quiet" in flags:
         ctx.obj["quiet"] = True
+    if global_db is not None:
+        # Bridge the value into the env var consulted by ``get_global_db()``.
+        # This needs no call-site changes and is isolatable via monkeypatch.
+        ctx.obj["global_db"] = global_db
+        os.environ[REVOLVER_GLOBAL_DB_ENV] = global_db
 
 
 # ``ctx`` is typed as ``Any`` on the ``parse_args`` overrides below: the base
@@ -57,18 +95,18 @@ def _apply_flags_to_context(ctx: click.Context, flags: set[str]) -> None:
 
 
 class GlobalOptionGroup(TyperGroup):
-    """TyperGroup subclass that intercepts global flags."""
+    """TyperGroup subclass that intercepts global options."""
 
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        args, flags = _extract_global_flags(args)
-        _apply_flags_to_context(ctx, flags)
+        args, flags, global_db = _extract_global_flags(args)
+        _apply_flags_to_context(ctx, flags, global_db)
         return super().parse_args(ctx, args)
 
 
 class GlobalOptionCommand(TyperCommand):
-    """TyperCommand subclass that intercepts global flags."""
+    """TyperCommand subclass that intercepts global options."""
 
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        args, flags = _extract_global_flags(args)
-        _apply_flags_to_context(ctx, flags)
+        args, flags, global_db = _extract_global_flags(args)
+        _apply_flags_to_context(ctx, flags, global_db)
         return super().parse_args(ctx, args)

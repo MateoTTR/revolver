@@ -1696,3 +1696,115 @@ def test_llm_list_shows_reasoning_effort(mock_global_db: Path) -> None:
     by_name = {e["name"]: e for e in json.loads(result.stdout)}
     assert by_name["llm-effort"]["reasoning_effort"] == "medium"
     assert by_name["llm-plain"]["reasoning_effort"] is None
+
+
+# ── S17-32(b): --global-db global flag routes the global DB ───────────────────
+
+
+def _add_remote(*extra: str, name: str = "foo") -> object:
+    """Invoke ``llm add`` for a remote (no-network) LLM with *extra* leading args."""
+    return runner.invoke(
+        app,
+        [
+            *extra,
+            "llm",
+            "add",
+            name,
+            "--model",
+            "m",
+            "--source",
+            "remote",
+            "--provider",
+            "anthropic",
+            "--api-key-env",
+            "ANTHROPIC_API_KEY",
+        ],
+    )
+
+
+@pytest.fixture()
+def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path, None, None]:
+    """Point the default global store at a tmp home; clear DB-location env vars.
+
+    Prevents leakage of ``REVOLVER_GLOBAL_DB``/``REVOLVER_HOME`` between tests
+    and keeps the real ``~/.revolver/`` untouched.
+
+    ``--global-db`` writes ``REVOLVER_GLOBAL_DB`` into the *real* ``os.environ``
+    at parse time (the env-var bridge), which ``monkeypatch`` cannot revert
+    because it did not set it. So we snapshot both vars and restore them by hand
+    at teardown, guaranteeing no cross-test leakage.
+    """
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))  # type: ignore[arg-type]
+    saved = {k: os.environ.get(k) for k in ("REVOLVER_HOME", "REVOLVER_GLOBAL_DB")}
+    for k in saved:
+        os.environ.pop(k, None)
+    try:
+        yield home_dir
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+@pytest.mark.integration
+def test_global_db_flag_routes_reads_and_writes(isolated_home: Path, tmp_path: Path) -> None:
+    """--global-db add then list round-trips on the given path; default untouched."""
+    override = tmp_path / "override.db"
+
+    add_res = _add_remote("--global-db", str(override))
+    assert add_res.exit_code == 0, f"output: {_get_all_output(add_res)}"
+
+    # The override path holds the entry.
+    conn = get_global_db_at(override)
+    try:
+        assert [e.name for e in list_llms(conn)] == ["foo"]
+    finally:
+        conn.close()
+
+    # A list on the same override path shows it.
+    list_res = runner.invoke(app, ["--global-db", str(override), "--json", "llm", "list"])
+    assert list_res.exit_code == 0, f"output: {_get_all_output(list_res)}"
+    assert {e["name"] for e in json.loads(list_res.stdout)} == {"foo"}
+
+    # The default home store is untouched (never created).
+    assert not (isolated_home / ".revolver").exists()
+
+
+@pytest.mark.integration
+def test_global_db_flag_equals_form(isolated_home: Path, tmp_path: Path) -> None:
+    """--global-db=<path> (inline value) is honoured too."""
+    override = tmp_path / "eq.db"
+
+    add_res = _add_remote(f"--global-db={override}", name="bar")
+    assert add_res.exit_code == 0, f"output: {_get_all_output(add_res)}"
+
+    conn = get_global_db_at(override)
+    try:
+        assert [e.name for e in list_llms(conn)] == ["bar"]
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_global_db_flag_beats_revolver_home(
+    isolated_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Precedence: --global-db wins over REVOLVER_HOME for DB routing."""
+    revolver_home = tmp_path / "rh"
+    override = tmp_path / "win.db"
+    monkeypatch.setenv("REVOLVER_HOME", str(revolver_home))
+
+    add_res = _add_remote("--global-db", str(override), name="baz")
+    assert add_res.exit_code == 0, f"output: {_get_all_output(add_res)}"
+
+    # Entry landed in the --global-db path, NOT the REVOLVER_HOME store.
+    conn = get_global_db_at(override)
+    try:
+        assert [e.name for e in list_llms(conn)] == ["baz"]
+    finally:
+        conn.close()
+    assert not (revolver_home / ".revolver" / "revolver.db").exists()

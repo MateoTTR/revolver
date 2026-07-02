@@ -805,21 +805,54 @@ def get_project_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def get_global_db() -> sqlite3.Connection:
-    """Open (or create) the global user-level database at ``~/.revolver/revolver.db``.
+# Environment variable that overrides the *full* global DB file path. Set by
+# the ``--global-db <path>`` CLI flag (see ``cli/_global_options.py``); it wins
+# over ``REVOLVER_HOME`` and the user's home directory. Kept as an env-var bridge
+# (rather than threaded through ~17 call sites) so ``get_global_db()`` stays a
+# zero-argument factory and remains trivially isolatable in tests via
+# ``monkeypatch.setenv``.
+REVOLVER_GLOBAL_DB_ENV = "REVOLVER_GLOBAL_DB"
 
-    The base directory is ``$REVOLVER_HOME`` when that env var is set (used e.g.
-    in CI to isolate the global store across parallel runners that share
-    ``$HOME``), otherwise the user's home directory.
+
+def revolver_home_base() -> Path:
+    """Return the base directory for the Revolver global store.
+
+    ``$REVOLVER_HOME`` when set (used e.g. in CI to isolate the global store
+    across parallel runners that share ``$HOME``), otherwise the user's home
+    directory. The ``.revolver/`` subdirectory is appended by callers.
+
+    Shared by :func:`get_global_db` and :func:`revolver.infra.config.load_config`
+    so the global config.yaml and the global DB resolve their base identically.
+    """
+    revolver_home = os.environ.get("REVOLVER_HOME")
+    return Path(revolver_home) if revolver_home else Path.home()
+
+
+def global_db_path() -> Path:
+    """Resolve the global DB file path with the documented precedence.
+
+    Precedence: ``$REVOLVER_GLOBAL_DB`` (the ``--global-db`` flag, a full file
+    path) > ``$REVOLVER_HOME`` (a base directory, ``.revolver/revolver.db``
+    appended) > the user's home directory.
+    """
+    override = os.environ.get(REVOLVER_GLOBAL_DB_ENV)
+    if override:
+        return Path(override)
+    return revolver_home_base() / ".revolver" / "revolver.db"
+
+
+def get_global_db() -> sqlite3.Connection:
+    """Open (or create) the global user-level database.
+
+    Resolution precedence (see :func:`global_db_path`): the ``--global-db``
+    override (``$REVOLVER_GLOBAL_DB``, a full file path) wins, else
+    ``$REVOLVER_HOME`` as a base directory, else ``~/.revolver/revolver.db``.
 
     Returns:
         A configured ``sqlite3.Connection`` with WAL mode and foreign keys enabled.
     """
-    revolver_home = os.environ.get("REVOLVER_HOME")
-    base = Path(revolver_home) if revolver_home else Path.home()
-    global_dir = base / ".revolver"
-    global_dir.mkdir(parents=True, exist_ok=True)
-    db_path = global_dir / "revolver.db"
+    db_path = global_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
     conn.executescript(_GLOBAL_SCHEMA_SQL)
