@@ -101,6 +101,26 @@ revolver llm list
 revolver llm status
 ```
 
+Registered LLMs live in the **global store** at `~/.revolver/` (the
+`config.yaml` and the `revolver.db`). Two knobs relocate it for power users /
+CI isolation:
+
+- **`REVOLVER_HOME`** — a base *directory*; Revolver appends `.revolver/`, so it
+  moves both the global `config.yaml` and the global DB (e.g. isolating parallel
+  CI runners that share `$HOME`).
+- **`--global-db <path>`** — a global CLI flag taking the full *file* path to the
+  global DB, overriding only the DB location (not `config.yaml`). Precedence:
+  `--global-db` > `REVOLVER_HOME` > `~`.
+
+```bash
+# CI isolation: pin the whole global store under a scratch dir.
+REVOLVER_HOME=/tmp/ci-$RUN_ID revolver llm list
+
+# Or route just the global DB to an explicit file.
+revolver --global-db /tmp/ci-$RUN_ID.db llm add foo --provider openai --model gpt-4o-mini
+revolver --global-db /tmp/ci-$RUN_ID.db llm list
+```
+
 ### Test your evaluator
 
 ```bash

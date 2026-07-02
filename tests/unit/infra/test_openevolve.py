@@ -949,3 +949,45 @@ class TestParseValue:
         """Empty JSON object parses correctly."""
         result = _parse_value("{}")
         assert result == {}
+
+
+# ── S17-31: OE config template surfaces feature_dimensions/feature_bins ────────
+
+
+class TestConfigTemplateFeatureKeys:
+    """The scaffold surfaces the MAP-Elites feature keys, still validating clean."""
+
+    def test_template_mentions_feature_keys(self) -> None:
+        """The commented database block advertises feature_dimensions/feature_bins."""
+        from revolver.infra.backends.openevolve import _CONFIG_TEMPLATE
+
+        assert "feature_dimensions" in _CONFIG_TEMPLATE
+        assert "feature_bins" in _CONFIG_TEMPLATE
+
+    def test_template_feature_keys_are_commented_out(self) -> None:
+        """The new keys are commented, so they never reach the YAML parser."""
+        from revolver.infra.backends.openevolve import _CONFIG_TEMPLATE
+
+        loaded = yaml.safe_load(_CONFIG_TEMPLATE)
+        assert isinstance(loaded, dict)
+        # The whole ``database:`` block is commented → absent from the parsed dict.
+        assert "database" not in loaded
+
+    def test_backend_config_template_includes_feature_keys(self) -> None:
+        """The backend's served scaffold carries the surfaced keys."""
+        from revolver.infra.backends.openevolve import OpenEvolveBackend
+
+        template = OpenEvolveBackend().config_template()
+        assert "feature_dimensions" in template
+        assert "feature_bins" in template
+
+    @requires_oe_schema
+    def test_generated_template_validates_clean(self) -> None:
+        """HARD constraint: validate_oe_config() on the scaffold returns []."""
+        from revolver.infra.backends.openevolve import (
+            _CONFIG_TEMPLATE,
+            validate_oe_config,
+        )
+
+        loaded = yaml.safe_load(_CONFIG_TEMPLATE)
+        assert validate_oe_config(loaded) == []

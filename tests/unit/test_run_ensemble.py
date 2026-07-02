@@ -378,6 +378,43 @@ class TestBuildConfigEnsemble:
         assert "models" not in config["llm"]
         assert config["max_iterations"] == 10
 
+    def test_single_llm_default_config_byte_identical(self, tmp_path: Path) -> None:
+        """S17-33 exit criterion: single-LLM (no ensemble, no new flags) OE config
+        is byte-identical to the pre-sprint output.
+
+        This whole-dict pin fails loudly if any future change perturbs the
+        default single-LLM path. Keep it in lockstep with build_config().
+        """
+        llm = _make_llm(
+            name="flash",
+            model="gemini-2.5-flash",
+            base_url="https://api.example.com/v1",
+            api_key_env="FLASH_KEY",
+            temperature=0.8,
+            max_tokens=8192,
+        )
+
+        config = build_config(
+            problem_config=None,
+            llm=llm,
+            iterations=10,
+        )
+
+        assert config == {
+            "max_iterations": 10,
+            "checkpoint_interval": 10,
+            "llm": {
+                "primary_model": "gemini-2.5-flash",
+                "api_base": "https://api.example.com/v1",
+                "api_key_env": "FLASH_KEY",
+                "temperature": 0.8,
+                "max_tokens": 8192,
+            },
+            "evaluator": {
+                "cascade_evaluation": False,
+            },
+        }
+
     def test_llm_weight_override_wins(self, tmp_path: Path) -> None:
         """--llm-weight overrides the registry member weight (S17-22, A1/M3)."""
         conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
