@@ -873,6 +873,20 @@ class TestShinkaBuildConfig:
         with pytest.raises(ValidationError, match="epsilon=abc"):
             ShinkaBackend().build_config(spec)
 
+    def test_selection_kwarg_json_array_fails_fast(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """U1 (S17a-08, review): non-scalar JSON values fail fast too.
+
+        ``epsilon=[1,2]`` parses to a *list* under ``_parse_value`` — no
+        longer a string, but still a launch-time ``TypeError`` for a numeric
+        sampler parameter. The guard rejects anything that is not
+        int/float/bool/None.
+        """
+        spec = _make_spec(tmp_path, selection="ucb", selection_kwargs={"epsilon": [1, 2]})
+        with pytest.raises(ValidationError, match="epsilon="):
+            ShinkaBackend().build_config(spec)
+
     def test_selection_kwarg_typed_values_still_routed(
         self, fake_shinka: None, tmp_path: Path
     ) -> None:
@@ -950,6 +964,27 @@ class TestShinkaBuildConfig:
         # Member-path warning (S17-27/W2a) fires...
         assert "inert for local" in err
         # ...and the config-path warning does not double up.
+        assert "set via config.yaml/--config-override" not in err
+
+    def test_shinka_reasoning_efforts_member_and_override_warns_once(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """U7 double-warn fix (S17a review WARNING): a local member carrying a
+        registry effort COMBINED with a --config-override reasoning_efforts
+        emits exactly ONE inert warning — the member-path one; the config-path
+        check is suppressed for that build."""
+        spec = _make_spec(
+            tmp_path,
+            llm=_make_llm(source="local", reasoning_effort="high"),
+            config_overrides=["evo_config.llm_kwargs.reasoning_efforts=low"],
+        )
+        config = ShinkaBackend().build_config(spec)
+        # The override still wins over the member-projected pool.
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "low"
+        err = capsys.readouterr().err
+        assert err.count("inert") == 1
+        # The single warning is the member-path one, not the config-path one.
+        assert "inert for local" in err
         assert "set via config.yaml/--config-override" not in err
 
 

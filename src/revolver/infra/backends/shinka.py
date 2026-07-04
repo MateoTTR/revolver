@@ -604,18 +604,19 @@ def _route_selection_kwargs(
         contains ``prior_probs`` — that is set separately for ``fixed``.
 
     Raises:
-        ValidationError: When an accepted key carries a residual *string*
-            value (U1/S17a-08 fail-fast). Every accepted sampler parameter is
-            numeric or boolean, so a value that survived
-            :func:`~revolver.core.run._parse_selection_kwargs` coercion as a
-            string is garbage the sampler would ``TypeError`` on at launch —
-            failing here surfaces it at build/--dry-run time instead.
+        ValidationError: When an accepted key carries a non-scalar value
+            (U1/S17a-08 fail-fast). Every accepted sampler parameter is
+            numeric or boolean, so anything that is not int/float/bool/None
+            after :func:`~revolver.core.run._parse_selection_kwargs` coercion
+            (a residual string, a JSON array/object) is garbage the sampler
+            would ``TypeError`` on at launch — failing here surfaces it at
+            build/--dry-run time instead.
     """
     accepted = _SHINKA_SAMPLER_KWARG_KEYS.get(selection, frozenset())
     routed: dict[str, Any] = {}
     for key, value in (selection_kwargs or {}).items():
         if key in accepted:
-            if isinstance(value, str):
+            if value is not None and not isinstance(value, (bool, int, float)):
                 raise ValidationError(
                     f"Invalid --selection-kwarg {key}={value}: the "
                     f"'{selection}' sampler expects a number, boolean or null "
@@ -871,11 +872,21 @@ class ShinkaBackend(ChildProcessReaperMixin):
         _ensure_section(config, "db_config")
         job = _ensure_section(config, "job_config")
 
+        # Members in llm_models / prior_probs order: the ensemble members, or a
+        # synthetic single-member view of the primary LLM (single-LLM path).
+        # Resolved ONCE and threaded through the projections below so the
+        # ordering stays guaranteed-consistent and the registry is not
+        # re-queried per helper (S17a code review).
+        if spec.ensemble is not None:
+            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
+        else:
+            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
+
         # 2. LLM projection (ADR-007 D5 + A2/A5) — single LLM or ensemble bandit.
         #    The single-LLM path (no ensemble) stays a one-member ``fixed`` case
         #    and produces the identical config as before this change (no
         #    ``prior_probs`` / ``llm_dynamic_selection_kwargs`` are emitted for it).
-        self._project_llm_selection(spec, config, evo)
+        self._project_llm_selection(spec, config, evo, members)
 
         # 2/2b. llm_kwargs from the registry entry + CLI --temperature
         llm_kwargs = evo.get("llm_kwargs")
@@ -902,8 +913,10 @@ class ShinkaBackend(ChildProcessReaperMixin):
         # Collapse per-member reasoning_effort into Shinka's single global pool
         # (FACT A: no per-member effort). Disagreements pick the highest level
         # (never under-think) with a warning; local/bridge members warn as inert
-        # (S17-27, ADR-007 A3.2).
-        self._project_reasoning_efforts(spec, llm_kwargs)
+        # (S17-27, ADR-007 A3.2). The returned flag records whether that
+        # local-inert warning fired, so the U7 config-path check below never
+        # emits a second inert warning for the same build.
+        member_path_warned_inert = self._project_reasoning_efforts(llm_kwargs, members)
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
 
@@ -988,8 +1001,15 @@ class ShinkaBackend(ChildProcessReaperMixin):
         # U7 residual (S17a-13): the member-path inert warning (S17-27/W2a)
         # never sees a reasoning_efforts value arriving via config.yaml or
         # --config-override (overrides land after the projection). Warn when
-        # such a value is inert on an all-local/bridge fleet.
-        self._warn_config_path_inert_reasoning_efforts(spec, config, config_sets_reasoning_efforts)
+        # such a value is inert on an all-local/bridge fleet — unless the
+        # member path already warned inert this build (one warning per run).
+        self._warn_config_path_inert_reasoning_efforts(
+            spec,
+            config,
+            members,
+            config_sets_reasoning_efforts=config_sets_reasoning_efforts,
+            member_path_warned_inert=member_path_warned_inert,
+        )
 
         return config
 
@@ -998,12 +1018,15 @@ class ShinkaBackend(ChildProcessReaperMixin):
         spec: BackendRunSpec,
         config: dict[str, Any],
         evo: dict[str, Any],
+        members: list[tuple[EnsembleMember, LLMEntry]],
     ) -> None:
         """Project the LLM(s) + selection strategy into ``evo_config`` (A2/A5).
 
         Sets ``llm_models`` (all ensemble members, or the single primary LLM),
         ``llm_dynamic_selection`` (from ``spec.selection``, default ``fixed``),
         and merges the members' env-var export maps into ``config['llm_env']``.
+        *members* is the ``(member, member_llm)`` list resolved once by
+        ``build_config`` (llm_models / prior_probs order).
 
         Weight / kwarg mapping (verified v017 research §0 FACT B / §1):
 
@@ -1023,13 +1046,6 @@ class ShinkaBackend(ChildProcessReaperMixin):
         (see :func:`_route_selection_kwargs`).
         """
         selection = spec.selection or _SHINKA_DEFAULT_SELECTION
-
-        # Members in llm_models / prior_probs order: the ensemble members, or a
-        # synthetic single-member view of the primary LLM (single-LLM path).
-        if spec.ensemble is not None:
-            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
-        else:
-            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
 
         llm_models: list[str] = []
         llm_env: dict[str, str | None] = {}
@@ -1074,9 +1090,9 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
     @staticmethod
     def _project_reasoning_efforts(
-        spec: BackendRunSpec,
         llm_kwargs: dict[str, Any],
-    ) -> None:
+        members: list[tuple[EnsembleMember, LLMEntry]],
+    ) -> bool:
         """Collapse per-member reasoning_effort into Shinka's single global pool.
 
         FACT A (v017 research §0, ADR-007 A3.2): ShinkaEvolve exposes a single
@@ -1097,14 +1113,14 @@ class ShinkaBackend(ChildProcessReaperMixin):
         Mutates *llm_kwargs* in place (the caller writes it back into
         ``evo['llm_kwargs']``). An explicit ``config.yaml`` /
         ``--config-override`` ``reasoning_efforts`` is preserved: only unset when
-        the setdefault-style guard below sees no existing value.
-        """
-        # Resolve members in the same order as _project_llm_selection.
-        if spec.ensemble is not None:
-            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
-        else:
-            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
+        the setdefault-style guard below sees no existing value. *members* is
+        the ``(member, member_llm)`` list resolved once by ``build_config``.
 
+        Returns:
+            ``True`` when the local-inert warning was emitted — the U7
+            config-path check uses this to avoid a second inert warning for
+            the same build (S17a code review).
+        """
         efforts: list[str] = []
         any_local_with_effort = False
         for member, member_llm in members:
@@ -1121,14 +1137,14 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
         if not efforts:
             # Nothing to project — keep the config byte-identical to pre-S17-27.
-            return
+            return False
 
         # A config.yaml / --config-override value takes precedence: config
         # overrides are applied *after* build_config's llm_kwargs assembly, but
         # a value already present in llm_kwargs came from the problem config.yaml
         # and must win over the registry-derived pool (mirrors max_tokens).
         if "reasoning_efforts" in llm_kwargs:
-            return
+            return False
 
         distinct = set(efforts)
         if len(distinct) > 1:
@@ -1151,12 +1167,16 @@ class ShinkaBackend(ChildProcessReaperMixin):
             )
 
         llm_kwargs["reasoning_efforts"] = [chosen]
+        return any_local_with_effort
 
     @staticmethod
     def _warn_config_path_inert_reasoning_efforts(
         spec: BackendRunSpec,
         config: dict[str, Any],
+        members: list[tuple[EnsembleMember, LLMEntry]],
+        *,
         config_sets_reasoning_efforts: bool,
+        member_path_warned_inert: bool,
     ) -> None:
         """Warn when a config-path ``reasoning_efforts`` is inert (U7/S17a-13).
 
@@ -1166,12 +1186,17 @@ class ShinkaBackend(ChildProcessReaperMixin):
         ``--config-override`` lands *after* it, so neither path warned. Shinka
         classes ``local``/bridge-sourced models ``is_reasoning_model=False``,
         making the pool inert on an all-local fleet — surface that here,
-        post-override, on the *final* built value.
+        post-override, on the *final* built value. *members* is the
+        ``(member, member_llm)`` list resolved once by ``build_config``.
 
         Fires only when ALL of:
 
         - the value came from config.yaml or a ``--config-override`` (a value
           written by :meth:`_project_reasoning_efforts` already warned);
+        - the member path did NOT already emit its local-inert warning this
+          build (*member_path_warned_inert* — e.g. a local member carrying a
+          registry effort combined with a ``--config-override``: one inert
+          warning per run, never two);
         - the final ``evo_config.llm_kwargs.reasoning_efforts`` is
           meaningfully set (not ``None``/``""``/``[]`` — an override may have
           cleared it);
@@ -1179,6 +1204,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
           fleet, or a mixed fleet where the pool takes effect on the remote
           members, warns nothing).
         """
+        if member_path_warned_inert:
+            return
         overrides_set_reasoning_efforts = any(
             override.split("=", 1)[0].strip().split(".")[-1] == "reasoning_efforts"
             for override in (spec.config_overrides or [])
@@ -1191,11 +1218,6 @@ class ShinkaBackend(ChildProcessReaperMixin):
         final = llm_kwargs.get("reasoning_efforts") if isinstance(llm_kwargs, dict) else None
         if final in (None, "", []):
             return
-        # Member LLMs in llm_models order (single-LLM runs are a one-member view).
-        if spec.ensemble is not None:
-            members = _resolve_ensemble_members(spec.ensemble, spec.conn)
-        else:
-            members = [(EnsembleMember(llm_name=spec.llm.name), spec.llm)]
         if not all(member_llm.source == "local" for _member, member_llm in members):
             return
         sys.stderr.write(

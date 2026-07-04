@@ -835,20 +835,22 @@ def build_config(
         sys.stderr.write(msg)
         config["checkpoint_interval"] = effective_iters
 
-    # 5c. U6 phase 1 (S17a-12): a *final* interval equal to (or clamped down
-    # to) the iteration count means the only checkpoint is the completion
-    # one — a killed/interrupted run has nothing to resume from. Warn-only;
+    # 5c. U6 phase 1 (S17a-12): an interval exactly equal to the iteration
+    # count means the only checkpoint is the completion one — a killed or
+    # interrupted run has nothing to resume from. Checked on the PRE-clamp
+    # value so it never stacks on 5b (the strictly-> regime is 5b's: it has
+    # already warned and clamped, incl. the default-template case of OE's
+    # 100 default vs small iteration counts — S17a code review). Warn-only;
     # a smarter default cadence is the v0.18 phase 2 (backlog 364).
-    final_interval = config.get("checkpoint_interval", 100)  # OE default
     if (
         effective_iters is not None
-        and isinstance(final_interval, int)
+        and isinstance(effective_interval, int)
         and isinstance(effective_iters, int)
         and effective_iters > 0
-        and final_interval >= effective_iters
+        and effective_interval == effective_iters
     ):
         sys.stderr.write(
-            f"Warning: checkpoint_interval ({final_interval}) >= iterations "
+            f"Warning: checkpoint_interval ({effective_interval}) == iterations "
             f"({effective_iters}) — no mid-run checkpoint will exist, so a "
             f"killed or interrupted run cannot be resumed. Set a smaller "
             f"checkpoint_interval (e.g. --config-override "

@@ -110,12 +110,13 @@ def test_build_config_checkpoint_interval_ok() -> None:
 def test_checkpoint_interval_ge_iterations_warns(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """U6 phase 1 (S17a-12): final interval >= iterations warns (warn-only).
+    """U6 phase 1 (S17a-12): interval == iterations warns (warn-only).
 
     An interval equal to the iteration count writes only the completion
     checkpoint — a killed run cannot be resumed. The S9a ``>`` guard path
-    (clamp + its own warning) is unchanged; the new warning stacks on top
-    after the clamp because the *final* interval equals the iterations.
+    (clamp + its own warning) is unchanged and owns the strictly-> regime:
+    the 5c warning checks the PRE-clamp value, so the two never stack
+    (S17a code review).
     """
     llm = _make_llm()
 
@@ -144,8 +145,9 @@ def test_checkpoint_interval_ge_iterations_warns(
     assert config["checkpoint_interval"] == 10
     assert "no mid-run checkpoint" not in err
 
-    # interval > iterations → S9a guard clamps (unchanged behaviour) AND the
-    # clamped final value (== iterations) triggers the new warning.
+    # interval > iterations → S9a guard clamps and warns (unchanged); the
+    # new warning does NOT stack on top of the clamp (the strictly-> regime
+    # is 5b's — incl. the default-template case of OE's 100 default).
     config = build_config(
         problem_config=None,
         llm=llm,
@@ -155,7 +157,7 @@ def test_checkpoint_interval_ge_iterations_warns(
     err = capsys.readouterr().err
     assert config["checkpoint_interval"] == 50  # S9a clamp verbatim
     assert "Overriding to checkpoint_interval=50" in err
-    assert "no mid-run checkpoint" in err
+    assert "no mid-run checkpoint" not in err
 
 
 # ── validate_oe_config ────────────────────────────────────────────────────────
