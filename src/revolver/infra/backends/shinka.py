@@ -977,9 +977,23 @@ class ShinkaBackend(ChildProcessReaperMixin):
         #     endpoint, so fanning out parallel proposal jobs starves it.
         #     Pin job_config.max_proposal_jobs=1 unless the user set it
         #     explicitly via --config-override (the override loop below still
-        #     wins for any value they pass).
+        #     wins for any value they pass). The key rides in the job_config
+        #     section for display/override purposes only: in shinka 0.0.7 it
+        #     is NOT a LocalJobConfig field but a ShinkaEvolveRunner
+        #     constructor kwarg (default 6) — ``_run_engine`` pops it out of
+        #     the section and threads it to the runner (R1 / #320 / #253).
+        #     Pin-skip detection requires the exact ``job_config.max_proposal_jobs``
+        #     key — the same full-key convention as the B9 exemption below
+        #     (PR #254 review). A same-named leaf under another section (e.g.
+        #     ``evo_config.max_proposal_jobs=8``) never reaches the runner, so
+        #     it must NOT disable the pin — the pin stays active and the
+        #     misplaced key draws the B9 no-op warning instead. An explicit
+        #     ``job_config.max_proposal_jobs=null`` is an opt-out: it skips
+        #     the pin here, and ``_run_engine``'s ``is not None`` guard then
+        #     omits the constructor kwarg, so the engine default (6,
+        #     CPU/memory-scaled) applies.
         overrides_set_proposal_jobs = any(
-            override.split("=", 1)[0].strip().split(".")[-1] == "max_proposal_jobs"
+            override.split("=", 1)[0].strip() == "job_config.max_proposal_jobs"
             for override in (spec.config_overrides or [])
             if "=" in override
         )
@@ -996,7 +1010,17 @@ class ShinkaBackend(ChildProcessReaperMixin):
             _set_nested(config, key.strip(), _parse_value(value.strip()))
 
         # B9 (S17-30): warn on override keys that land on no Shinka field.
-        self._warn_noop_config_overrides(spec.config_overrides)
+        # ``job_config.max_proposal_jobs`` is exempt from the probe: it is not
+        # a LocalJobConfig field, but it IS honored — ``_run_engine`` routes it
+        # to the ShinkaEvolveRunner constructor (R1 / #320 / #253) — so the
+        # schema-based no-op check would false-flag it as "no effect".
+        self._warn_noop_config_overrides(
+            [
+                override
+                for override in (spec.config_overrides or [])
+                if override.split("=", 1)[0].strip() != "job_config.max_proposal_jobs"
+            ]
+        )
 
         # U7 residual (S17a-13): the member-path inert warning (S17-27/W2a)
         # never sees a reasoning_efforts value arriving via config.yaml or
@@ -1888,6 +1912,18 @@ class ShinkaBackend(ChildProcessReaperMixin):
         evo_section["results_dir"] = str(results_dir)
         db_section = dict(config.get("db_config") or {})
         job_section = dict(config.get("job_config") or {})
+        # R1 (#320/#253): max_proposal_jobs is a ShinkaEvolveRunner
+        # constructor kwarg in shinka 0.0.7 (default 6), NOT a LocalJobConfig
+        # field. Left in the section it would be dropped by
+        # ``_dataclass_kwargs`` with a warning and every run would fan out 6
+        # concurrent proposal streams — silently defeating the local-endpoint
+        # pin (UX-5/S16-21) and explicit overrides. Pop it out of the section
+        # and thread it to the runner; when unset, omit the kwarg so the
+        # engine default (and its CPU/memory scaling) applies.
+        max_proposal_jobs = job_section.pop("max_proposal_jobs", None)
+        runner_kwargs: dict[str, Any] = {}
+        if max_proposal_jobs is not None:
+            runner_kwargs["max_proposal_jobs"] = max_proposal_jobs
 
         # Ensure unbuffered output for real-time progress (S8a-09); this
         # affects the evaluation jobs the engine spawns. Carried inside the
@@ -1916,6 +1952,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                     init_program_str=init_program_str,
                     evaluate_str=evaluate_str,
                     verbose=True,
+                    **runner_kwargs,
                 )
                 runner.run()
         except RevolverError:
