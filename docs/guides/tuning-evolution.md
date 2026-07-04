@@ -1,3 +1,7 @@
+---
+verified-against: v0.17.1
+---
+
 # Tuning Evolution Runs
 
 Practical guide for tuning evolution runs through the Revolver CLI, on both

@@ -4,8 +4,9 @@ name: Doc lint
 # '**.md' and 'docs/**' to keep doc-only pushes cheap, which would let a
 # docs-only PR introduce a broken `revolver` invocation without any check.
 # This workflow covers exactly that ignored path set and runs ONLY the doc
-# command-lint test. Path filters are workflow-trigger-level in GitHub
-# Actions, so this must be a separate workflow rather than a job in ci.yml.
+# checks: the command-lint test plus the freshness-stamp check (S18-23,
+# #355). Path filters are workflow-trigger-level in GitHub Actions, so this
+# must be a separate workflow rather than a job in ci.yml.
 
 on:
   push:
@@ -64,8 +65,10 @@ jobs:
       - name: Install package (dev)
         run: mamba run -p "$CONDA_ENV" python -m pip install -e ".[dev]"
 
-      - name: Run doc command-lint
-        run: mamba run -p "$CONDA_ENV" python -m pytest tests/unit/test_doc_command_lint.py -q
+      - name: Run doc command-lint + freshness check
+        run: >-
+          mamba run -p "$CONDA_ENV" python -m pytest
+          tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py -q
 
       - name: Remove ephemeral conda env
         if: always()
