@@ -255,6 +255,7 @@ mypy
 | Sprint 016 | Tech-debt + UX polish: pricing removal (migration v10), dataset `split=both` (v11), `run info` program counters, Shinka resume clone parity, CI version/tag guard | v0.16.0 | Done |
 | Sprint 016a | Corrective (demo feedback v0.16.0): network-Ollama probe honours `--base-url`/`OLLAMA_HOST`, clean Shinka post-run shutdown, OE local `--parallel` auto-pin, warning-free OE config scaffold, positional `run resume`, bridge token under-count caveat, CI global-DB isolation | v0.16.1 | Done |
 | Sprint 017 | Multi-LLM ensemble validated end-to-end: `--selection {fixed,ucb,ucb1,thompson}`, `--llm-weight`, per-LLM `--reasoning-effort` (capability-gated per backend), B9 no-op `--config-override` warn, correctness slice (OE wrapper numeric guard, teardown, `solution extract --from-checkpoint`), `REVOLVER_HOME`/`--global-db` | v0.17.0 | Done |
+| Sprint 017a | Corrective hotfix (demo feedback v0.17.0): killable eval subprocess (no more leaked eval workers) + BLAS thread caps (`REVOLVER_EVAL_NUM_THREADS`), finalize backstop reap, `--selection-kwarg` value coercion + dry-run fail-fast, OE key-less local ensemble placeholder key, `=`-token CLI hint, snapshot config re-validation at run, checkpoint-interval recoverability warn, dry-run surfacing of resolved bandit kwargs | v0.17.1 | Done |
 
 ## Known Issues
 
