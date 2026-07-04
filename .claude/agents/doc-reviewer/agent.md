@@ -2,7 +2,7 @@
 name: doc-reviewer
 description: Reviews user-facing docs (README, guides, user-story-e2e) for consistency with specs and actual CLI implementation. Use after release, or when README/guides/user-story-e2e are modified. Run AFTER spec-reviewer and validation-reviewer.
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 maxTurns: 40
 ---
 
