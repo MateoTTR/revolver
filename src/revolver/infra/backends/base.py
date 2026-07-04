@@ -221,6 +221,14 @@ class BackendRunSpec:
         conn: Global DB connection, required when *ensemble* is provided
             (member LLM resolution at config-build time).
         timeout_per_instance: Per-instance evaluation timeout in seconds.
+        on_timeout: Timed-out instance policy baked into the generated
+            wrapper (FR-RUN-054): ``"penalize"`` (default — the deliberate
+            v0.18 fitness-landscape flip) counts the instance at
+            *timeout_score* in the metric mean; ``"drop"`` excludes it,
+            restoring the pre-0.18 survivor-mean. Parsed and validated at
+            the shared launch point in ``core.run`` on both backends.
+        timeout_score: Finite penalty score a timed-out instance contributes
+            under ``on_timeout="penalize"`` (FR-RUN-054). Default ``0.0``.
         wrapper_path: Path to the generated wrapper evaluator. Populated
             by the orchestrator from :meth:`EvolutionBackend.generate_wrapper`;
             when ``None`` the backend derives its conventional location.
@@ -241,6 +249,8 @@ class BackendRunSpec:
     llm_weight_overrides: dict[str, float] | None = None
     conn: Any | None = None
     timeout_per_instance: float | None = None
+    on_timeout: str = "penalize"
+    timeout_score: float = 0.0
     wrapper_path: Path | None = None
 
 

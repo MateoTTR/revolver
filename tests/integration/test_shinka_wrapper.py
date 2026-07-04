@@ -82,11 +82,16 @@ def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]
 '''
 
 _EVALUATOR_ONE_TIMEOUT = '''\
-"""Evaluator: the instance named *-timeout.* times out, the rest succeed."""
+"""Evaluator: the instance named *-timeout.* times out, the rest succeed.
+
+The timeout trigger matches the file NAME only — pytest tmp dirs may
+contain "timeout" in the test-derived directory name.
+"""
+import os
 
 
 def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
-    if "timeout" in instance_path:
+    if "timeout" in os.path.basename(instance_path):
         raise TimeoutError("simulated per-instance timeout")
     return {"combined_score": 0.5}
 '''

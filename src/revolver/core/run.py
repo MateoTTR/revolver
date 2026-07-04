@@ -25,6 +25,7 @@ import copy
 from datetime import UTC, datetime
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import shutil
@@ -281,6 +282,57 @@ def _warn_snapshot_config_findings(backend: EvolutionBackend, snapshot_dir: Path
         return
     for finding in findings:
         sys.stderr.write(f"Warning: snapshot config.yaml: {finding}\n")
+
+
+# Supported evaluation.on_timeout policy values (FR-RUN-054).
+_ON_TIMEOUT_VALUES = ("penalize", "drop")
+
+
+def _parse_evaluation_policy(engine_config: dict[str, Any]) -> tuple[str, float]:
+    """Parse + validate ``evaluation.on_timeout`` / ``evaluation.timeout_score``.
+
+    FR-RUN-054 (S18 / U13 #367 iii): ``evaluation.*`` is a validated,
+    Revolver-owned config section — previously the OE backend popped it
+    uninspected and Shinka never inspected its keys, so a typo like
+    ``on_timeout: penalise`` was silent. Called at the shared launch point
+    on BOTH backends, before the ``--dry-run`` early return, so bad values
+    are rejected at run *and* dry-run (exit 1) with no side effect.
+
+    Defaults: ``on_timeout="penalize"`` (the deliberate v0.18
+    fitness-landscape flip — ``drop`` restores the 0.17 survivor-mean) and
+    ``timeout_score=0.0``.
+
+    Args:
+        engine_config: The built engine config dict (``backend.build_config``
+            output — base config.yaml merged with ``--config-override``).
+
+    Returns:
+        The validated ``(on_timeout, timeout_score)`` pair.
+
+    Raises:
+        ValidationError: On an unknown ``on_timeout`` value or a
+            non-finite/non-numeric ``timeout_score``.
+    """
+    eval_cfg = engine_config.get("evaluation")
+    if not isinstance(eval_cfg, dict):
+        eval_cfg = {}
+
+    on_timeout = eval_cfg.get("on_timeout", "penalize")
+    if on_timeout not in _ON_TIMEOUT_VALUES:
+        raise ValidationError(
+            f"Invalid evaluation.on_timeout '{on_timeout}'. "
+            f"Supported: {', '.join(_ON_TIMEOUT_VALUES)}."
+        )
+
+    timeout_score = eval_cfg.get("timeout_score", 0.0)
+    if (
+        isinstance(timeout_score, bool)
+        or not isinstance(timeout_score, (int, float))
+        or not math.isfinite(timeout_score)
+    ):
+        raise ValidationError("evaluation.timeout_score must be a finite number.")
+
+    return on_timeout, float(timeout_score)
 
 
 def _determine_run_status(
@@ -813,6 +865,19 @@ def launch_run(
 
         oe_config = backend.build_config(spec)
 
+        # Parse + validate the evaluation.* policy at the shared launch point
+        # (FR-RUN-054, both backends). Runs BEFORE the --dry-run early return
+        # so a bad value is rejected at run and dry-run alike, with no side
+        # effect (no run dir, no DB record). The wrapper settings themselves
+        # are consumed at wrapper generation below; Revolver config uses the
+        # "evaluation:" section, OE's own "evaluator:" section is honored as
+        # a fallback for timeout_per_instance only.
+        spec.on_timeout, spec.timeout_score = _parse_evaluation_policy(oe_config)
+        eval_cfg = oe_config.get("evaluation", oe_config.get("evaluator", {}))
+        spec.timeout_per_instance = (
+            eval_cfg.get("timeout_per_instance") if isinstance(eval_cfg, dict) else None
+        )
+
         # Single-owner iterations resolution (S14-05, ADR-007 D4): the
         # orchestrator owns the canonical value — CLI flag first, then the
         # backend-neutral reading of the built config (max_iterations on
@@ -863,14 +928,10 @@ def launch_run(
         run_dir = create_run_dir(root, run_id)
         spec.run_dir = run_dir
 
-        # 10. Generate wrapper evaluator (via the backend — ADR-007 D1)
-        # Revolver config uses "evaluation:" section; OE uses "evaluator:".
-        # Check both keys, preferring "evaluation" (user-facing).
-        eval_cfg = oe_config.get("evaluation", oe_config.get("evaluator", {}))
-        timeout_per_instance: float | None = (
-            eval_cfg.get("timeout_per_instance") if isinstance(eval_cfg, dict) else None
-        )
-        spec.timeout_per_instance = timeout_per_instance
+        # 10. Generate wrapper evaluator (via the backend — ADR-007 D1).
+        # The evaluation.* wrapper settings (timeout_per_instance and the
+        # FR-RUN-054 on_timeout/timeout_score policy) were parsed into the
+        # spec at the shared launch point above, before the dry-run return.
         wrapper_path = backend.generate_wrapper(spec)
         spec.wrapper_path = wrapper_path
 

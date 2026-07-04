@@ -281,6 +281,12 @@ job_config:
 # Evaluation settings (Revolver-specific).
 evaluation:
   timeout_per_instance: 30  # seconds
+  # Timed-out instance policy (v0.18): "penalize" counts the instance at
+  # timeout_score in the fitness mean; "drop" excludes it (pre-0.18
+  # survivor-mean). Note: with a negative timeout_score floor, lower
+  # scores are the penalty — mind negative-is-good metrics.
+  on_timeout: penalize
+  timeout_score: 0.0
 """
 
 
@@ -318,6 +324,13 @@ from evaluator import evaluate_instance
 
 # Per-instance timeout in seconds (None = no timeout)
 _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
+
+# Timed-out instance policy baked at generation time (FR-RUN-054):
+# "penalize" (v0.18 default) counts the instance at _TIMEOUT_SCORE in the
+# fitness mean; "drop" excludes it (pre-0.18 survivor-mean). Validated at
+# the launch point; resume inherits this baked policy with the wrapper.
+_ON_TIMEOUT = {on_timeout!r}
+_TIMEOUT_SCORE = {timeout_score!r}
 
 # Coverage bookkeeping (FR-RUN-053): populated by run_experiment(), read by
 # aggregate_metrics(). Both run inside the same process on the
@@ -364,8 +377,10 @@ def run_experiment(program_path, seed=0):
 
     Returns the list of per-instance metric dicts. Instances whose
     evaluation raises are skipped (logged to stderr); a timed-out instance
-    hits a distinct TimeoutError branch (FR-RUN-053) and is recorded on the
-    side-channel. When every instance fails a RuntimeError is raised so the
+    hits a distinct TimeoutError branch (FR-RUN-053) — recorded on the
+    side-channel, then scored per the baked _ON_TIMEOUT policy
+    (FR-RUN-054: penalize -> a _TIMEOUT_SCORE entry, drop -> excluded).
+    When no instance produced an entry a RuntimeError is raised so the
     run is marked incorrect.
     """
     dataset_dir = os.environ["REVOLVER_DATASET_DIR"]
@@ -387,6 +402,12 @@ def run_experiment(program_path, seed=0):
                 file=sys.stderr,
             )
             _log_timeout(inst.name)
+            if _ON_TIMEOUT == "penalize":
+                # FR-RUN-054 (v0.18 default): a timed-out instance
+                # contributes the penalty score to the fitness mean
+                # instead of silently vanishing from it.
+                per_instance.append({{"combined_score": _TIMEOUT_SCORE}})
+            # "drop": fall through — survivor-mean (pre-0.18 behavior).
         except Exception as exc:
             print(
                 "[revolver] evaluation failed for " + inst.name + ": " + str(exc),
@@ -1447,6 +1468,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
             wrapper_name=SHINKA_WRAPPER_FILENAME,
             snapshot_dir=str(spec.snapshot_dir),
             timeout_per_instance=spec.timeout_per_instance,
+            on_timeout=spec.on_timeout,
+            timeout_score=spec.timeout_score,
         )
         output_path.write_text(wrapper_code)
         return output_path

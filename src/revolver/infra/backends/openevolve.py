@@ -1368,6 +1368,13 @@ from evaluator import evaluate_instance
 # Per-instance timeout in seconds (None = no timeout)
 _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
 
+# Timed-out instance policy baked at generation time (FR-RUN-054):
+# "penalize" (v0.18 default) counts the instance at _TIMEOUT_SCORE in the
+# fitness mean; "drop" excludes it (pre-0.18 survivor-mean). Validated at
+# the launch point; resume inherits this baked policy with the wrapper.
+_ON_TIMEOUT = {on_timeout!r}
+_TIMEOUT_SCORE = {timeout_score!r}
+
 
 def _call_evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
     """Call evaluate_instance with optional per-instance timeout guard."""
@@ -1430,6 +1437,12 @@ def evaluate(program_path: str) -> dict[str, float]:
             # instance on the side-channel so it stays visible per instance.
             print(f"[revolver] timeout for {{inst.name}}: {{_te}}", file=sys.stderr)
             _log_timeout(inst.name)
+            if _ON_TIMEOUT == "penalize":
+                # FR-RUN-054 (v0.18 default): a timed-out instance
+                # contributes the penalty score to the fitness mean
+                # instead of silently vanishing from it.
+                all_metrics.append({{"combined_score": _TIMEOUT_SCORE}})
+            # "drop": fall through — survivor-mean (pre-0.18 behavior).
         except Exception as _e:
             print(f"[revolver] evaluation failed for {{inst.name}}: {{_e}}", file=sys.stderr)
 
@@ -1560,6 +1573,8 @@ def generate_wrapper(
     snapshot_dir: Path,
     output_dir: Path,
     timeout_per_instance: float | None = None,
+    on_timeout: str = "penalize",
+    timeout_score: float = 0.0,
 ) -> Path:
     """Generate the wrapper evaluator file for OpenEvolve.
 
@@ -1579,6 +1594,13 @@ def generate_wrapper(
             When set, each ``evaluate_instance()`` call is guarded by a
             ``multiprocessing.Process`` with ``.join(timeout)`` + ``.kill()``.
             Defaults to ``None`` (no timeout).
+        on_timeout: Timed-out instance policy baked into the wrapper
+            (FR-RUN-054): ``"penalize"`` (default, v0.18 fitness-landscape
+            flip) counts the instance at *timeout_score* in the fitness
+            mean; ``"drop"`` excludes it (pre-0.18 survivor-mean).
+            Validated upstream at the shared launch point in ``core.run``.
+        timeout_score: Finite penalty score contributed by a timed-out
+            instance under ``on_timeout="penalize"``. Defaults to ``0.0``.
 
     Returns:
         Path to the generated (or copied) ``_revolver_evaluator.py``.
@@ -1618,6 +1640,8 @@ def generate_wrapper(
         wrapper_code = _WRAPPER_TEMPLATE.format(
             snapshot_dir=str(snapshot_dir),
             timeout_per_instance=timeout_per_instance,
+            on_timeout=on_timeout,
+            timeout_score=timeout_score,
         )
         output_path.write_text(wrapper_code)
         return output_path
@@ -1631,7 +1655,9 @@ def generate_wrapper(
 # ── Project-init config template (S13-13, FR-PRJ-005) ────────────────────────
 # Moved from revolver.core.project (template ownership inverted per ADR-007:
 # the backend serves its own config.yaml scaffold via config_template()).
-# Content must stay byte-identical to the pre-S13 core/project template.
+# Originally byte-identical to the pre-S13 core/project template; reworked in
+# S16a (A6/#318, schema-correct keys) and S18 (U13/#367, evaluation.on_timeout
+# policy). The golden copy lives in tests/test_project_integration.py.
 
 _CONFIG_TEMPLATE = """\
 # OpenEvolve configuration — edit to match your problem.
@@ -1662,6 +1688,12 @@ llm:
 # Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:
   timeout_per_instance: 30  # seconds
+  # Timed-out instance policy (v0.18): "penalize" counts the instance at
+  # timeout_score in the fitness mean; "drop" excludes it (pre-0.18
+  # survivor-mean). Note: with a negative timeout_score floor, lower
+  # scores are the penalty — mind negative-is-good metrics.
+  on_timeout: penalize
+  timeout_score: 0.0
 """
 
 
@@ -1789,6 +1821,8 @@ class OpenEvolveBackend:
             spec.snapshot_dir,
             run_dir,
             timeout_per_instance=spec.timeout_per_instance,
+            on_timeout=spec.on_timeout,
+            timeout_score=spec.timeout_score,
         )
 
     def launch(
