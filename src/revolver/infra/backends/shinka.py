@@ -982,8 +982,18 @@ class ShinkaBackend(ChildProcessReaperMixin):
         #     is NOT a LocalJobConfig field but a ShinkaEvolveRunner
         #     constructor kwarg (default 6) — ``_run_engine`` pops it out of
         #     the section and threads it to the runner (R1 / #320 / #253).
+        #     Pin-skip detection requires the exact ``job_config.max_proposal_jobs``
+        #     key — the same full-key convention as the B9 exemption below
+        #     (PR #254 review). A same-named leaf under another section (e.g.
+        #     ``evo_config.max_proposal_jobs=8``) never reaches the runner, so
+        #     it must NOT disable the pin — the pin stays active and the
+        #     misplaced key draws the B9 no-op warning instead. An explicit
+        #     ``job_config.max_proposal_jobs=null`` is an opt-out: it skips
+        #     the pin here, and ``_run_engine``'s ``is not None`` guard then
+        #     omits the constructor kwarg, so the engine default (6,
+        #     CPU/memory-scaled) applies.
         overrides_set_proposal_jobs = any(
-            override.split("=", 1)[0].strip().split(".")[-1] == "max_proposal_jobs"
+            override.split("=", 1)[0].strip() == "job_config.max_proposal_jobs"
             for override in (spec.config_overrides or [])
             if "=" in override
         )

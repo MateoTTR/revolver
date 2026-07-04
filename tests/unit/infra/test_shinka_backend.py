@@ -859,6 +859,30 @@ class TestShinkaBuildConfig:
         assert config["job_config"]["max_proposal_jobs"] == 3
         assert "max_proposal_jobs" not in capsys.readouterr().err
 
+    def test_misplaced_section_key_keeps_pin_and_warns(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A same-named leaf under another section does not disable the pin.
+
+        PR #254 review: pin-skip detection uses the exact full key
+        ``job_config.max_proposal_jobs`` (same convention as the B9
+        exemption). ``evo_config.max_proposal_jobs=8`` never reaches the
+        runner, so the local auto-pin stays active and the misplaced key
+        draws the B9 no-op warning (EvolutionConfig has no such field —
+        matches the real 0.0.7 schema).
+        """
+        config = ShinkaBackend().build_config(
+            _make_spec(
+                tmp_path,
+                llm=_make_llm(source="local"),
+                config_overrides=["evo_config.max_proposal_jobs=8"],
+            )
+        )
+        assert config["job_config"]["max_proposal_jobs"] == 1
+        err = capsys.readouterr().err
+        assert "evo_config.max_proposal_jobs" in err
+        assert "no effect" in err
+
     def test_resolved_config_surfaces_max_proposal_jobs(
         self, fake_shinka: None, tmp_path: Path
     ) -> None:
@@ -1565,6 +1589,34 @@ class TestMaxProposalJobsThreading:
 
         backend.launch(spec, backend.build_config(spec))
 
+        assert "max_proposal_jobs" not in calls[0]
+
+    def test_explicit_null_opts_out_of_pin(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """job_config.max_proposal_jobs=null on a local LLM = engine default.
+
+        PR #254 review: an explicit ``=null`` is the documented opt-out —
+        it skips the local auto-pin, and ``_run_engine``'s ``is not None``
+        guard omits the constructor kwarg so the engine default (6,
+        CPU/memory-scaled) applies. Dry-run drops the ``None`` entry
+        (``resolved_config`` filters unset values), consistent with the
+        engine receiving no explicit value.
+        """
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(
+            tmp_path,
+            llm=_make_llm(source="local"),
+            config_overrides=["job_config.max_proposal_jobs=null"],
+        )
+        config = backend.build_config(spec)
+        assert config["job_config"]["max_proposal_jobs"] is None
+
+        resolved = backend.resolved_config(config)
+        backend.launch(spec, config)
+
+        assert "max_proposal_jobs" not in resolved.backend_extras
         assert "max_proposal_jobs" not in calls[0]
 
     def test_dry_run_display_still_shows_pin(
