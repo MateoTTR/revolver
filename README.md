@@ -239,6 +239,16 @@ mypy
 | Sprint 016a | Corrective (demo feedback v0.16.0): network-Ollama probe honours `--base-url`/`OLLAMA_HOST`, clean Shinka post-run shutdown, OE local `--parallel` auto-pin, warning-free OE config scaffold, positional `run resume`, bridge token under-count caveat, CI global-DB isolation | v0.16.1 | Done |
 | Sprint 017 | Multi-LLM ensemble validated end-to-end: `--selection {fixed,ucb,ucb1,thompson}`, `--llm-weight`, per-LLM `--reasoning-effort` (capability-gated per backend), B9 no-op `--config-override` warn, correctness slice (OE wrapper numeric guard, teardown, `solution extract --from-checkpoint`), `REVOLVER_HOME`/`--global-db` | v0.17.0 | Done |
 
+## Known Issues
+
+- **Engine `best_score` is a single, possibly optimistic engine evaluation.**
+  Engine-side scoring averages only the dataset instances that complete within
+  the per-instance timeout, and `best_score` is a `max()` over single noisy
+  evaluations — so it can overstate the champion's true quality. Re-score the
+  saved best solution with `revolver eval` (which runs every instance) for
+  reporting; honest timeout/fitness semantics land in v0.18. See the
+  [tuning guide](docs/guides/tuning-oe-config.md#known-issues) for details.
+
 ## Documentation
 
 Detailed documentation lives in `docs/`:
