@@ -169,6 +169,23 @@ revolver benchmark results --id <benchmark-id>
 revolver benchmark export --id <benchmark-id> --format csv --output results.csv
 ```
 
+Every evaluation runs in an isolated subprocess that is **killed at the
+per-instance timeout** (no leaked workers), with BLAS/OpenMP threads capped
+per eval process to avoid core oversubscription:
+
+- **`REVOLVER_EVAL_NUM_THREADS`** — numeric thread cap per eval subprocess
+  (`OMP_NUM_THREADS` family). Defaults to `max(1, cpu_count // 2)`; set `0`
+  to disable the cap. If you already set any cap variable yourself (e.g.
+  `OMP_NUM_THREADS=2`), Revolver injects nothing — you own threading.
+
+```bash
+# Cap each eval subprocess at 4 BLAS/OpenMP threads
+REVOLVER_EVAL_NUM_THREADS=4 revolver eval --solution <solution-id> --dataset eval-set
+
+# Disable the cap (single big-BLAS evaluation on a dedicated machine)
+REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution <solution-id> --dataset eval-set
+```
+
 ## Key Design Decisions
 
 - **CLI-first**: all functionality exposed as composable CLI commands with `--json` output
