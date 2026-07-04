@@ -110,25 +110,28 @@ Solution "sol-20260310-143000" aliased as "claude-small-v1.1"
 
 ### 2.4 `revolver solution extract`
 
-Promote the rank-1 program from a run into a first-class solution. This enables on-demand inspection: the user runs `revolver run info` to see all stored programs with scores, then extracts the best one for evaluation.
+Promote a program from a run into a first-class solution — the **rank-1** program by default, or an arbitrary-ranked/identified population program via `--rank`/`--program-id` on top-N-capable backends (FR-SOL-021). This enables on-demand inspection: the user runs `revolver run info` to see all stored programs with scores, then extracts the one to promote for evaluation.
 
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `--run <run-id>` | string | Yes | Run containing the program to extract |
+| `--rank <N>` | int | No | Rank of the population program to promote (default: 1). Ranks > 1 are gated on the run backend's `capabilities().top_n_extraction` (FR-SOL-021) |
+| `--program-id <id>` | string | No | Promote a specific population program by its backend program ID (ShinkaEvolve `programs.sqlite`). Mutually exclusive with `--rank`; gated on `capabilities().top_n_extraction` (FR-SOL-021) |
 | `--alias <name>` | string | No | User-friendly name for the new solution |
-| `--force` / `-f` | flag | No | Replace an existing extraction for the same `(run_id, rank=1)` instead of erroring |
+| `--force` / `-f` | flag | No | Replace an existing extraction for the same `(run_id, rank)` instead of erroring |
 
 **Behavior**:
 1. Verify the run exists and has status `completed`
-2. Verify a program file `rank-1.py` exists in the run's `programs/` directory
-3. If `--force` is not set: verify no solution already exists for `(run_id, rank=1)` — prevent duplicates
-4. If `--force` is set and a solution already exists for `(run_id, rank=1)`: delete the existing solution and its evaluation data before proceeding
-5. Generate a new solution ID (`sol-YYYYMMDD-HHMMSS`)
-6. Insert a solution DB row referencing `(run_id, rank=1)`
-7. Evaluate the program on the training dataset (same as post-run eval for rank-1) and store results
-8. Set alias if provided
+2. Resolve the target program (default: rank 1). For `--rank <N>` with N > 1 or `--program-id`, resolve the run's backend and check `capabilities().top_n_extraction`: a non-capable backend (OpenEvolve) exits 1 with a clear "not supported on '<backend>'" error (FR-SOL-021)
+3. Verify a program file `rank-<N>.py` exists in the run's `programs/` directory; on a top-N-capable backend (ShinkaEvolve) a missing `rank-<N>.py` is materialized on demand from the backend store (`programs.sqlite`) — retroactively on old runs, with no run-dir layout change
+4. If `--force` is not set: verify no solution already exists for `(run_id, rank)` — prevent duplicates
+5. If `--force` is set and a solution already exists for `(run_id, rank)`: delete the existing solution and its evaluation data before proceeding
+6. Generate a new solution ID (`sol-YYYYMMDD-HHMMSS`)
+7. Insert a solution DB row referencing `(run_id, rank)`
+8. Evaluate the program on the training dataset (same as post-run eval for rank-1) and store results
+9. Set alias if provided
 
 **Output** (human):
 ```
@@ -155,7 +158,7 @@ Solution extracted: sol-20260311-091500
 }
 ```
 
-**Exit codes**: 0 success, 1 if run not found, 1 if rank-1 program not found, 1 if solution already exists for this (run, rank=1) and `--force` not set
+**Exit codes**: 0 success, 1 if run not found, 1 if the requested program not found (or not materializable), 1 if solution already exists for this `(run, rank)` and `--force` not set, 1 if `--rank` > 1 or `--program-id` on a backend without `top_n_extraction`
 
 ### 2.5 `revolver solution delete <id-or-alias>`
 
@@ -310,8 +313,8 @@ Show a unified diff between two solutions' program files.
 | FR-SOL-008 | MUST | Solutions can be referenced by either ID or alias in all commands | — |
 | FR-SOL-009 | SHOULD | `info` shows other solutions from the same run (if any were extracted) | §4.6 |
 | FR-SOL-010 | MUST | Solutions reference their parent run via `run_id`. All lineage data is accessed through the run. | §4.6 |
-| FR-SOL-011 | MUST | `extract` promotes the rank-1 program from a completed run into a solution with post-extraction training eval | — |
-| FR-SOL-012 | MUST | `extract` prevents duplicate solutions for the same `(run_id, rank=1)` unless `--force` is set | — |
+| FR-SOL-011 | MUST | `extract` promotes the rank-1 program from a completed run into a solution with post-extraction training eval **by default**; an arbitrary rank or population program ID is reachable via FR-SOL-021 | — |
+| FR-SOL-012 | MUST | `extract` prevents duplicate solutions for the same `(run_id, rank)` unless `--force` is set (`--force` semantics apply per rank) | — |
 | FR-SOL-013 | MUST | `extract` generates a unique solution ID and inserts a solution DB row | — |
 | FR-SOL-014 | MUST | `delete` removes a solution by ID or alias with interactive confirmation prompt | §4.6 |
 | FR-SOL-015 | MUST | `delete --force` bypasses the interactive confirmation prompt | — |
@@ -320,6 +323,7 @@ Show a unified diff between two solutions' program files.
 | FR-SOL-018 | MUST | `show` displays the source code of a solution's program to stdout; `--json` outputs `{"alias":..., "code":...}` | §4.6 |
 | FR-SOL-019 | MUST | `export` copies a solution's program file to a local path (default `<alias>.py`) | §4.6 |
 | FR-SOL-020 | MUST | `diff` shows a unified diff between two solutions' programs; `--json` returns `{"diff":..., "identical": bool}` | §4.6 |
+| FR-SOL-021 | MUST | `extract --rank <N>` (and `--program-id <id>` where supported) promotes an arbitrary-ranked/identified population program, **gated on the run backend's `capabilities().top_n_extraction`** (the capability exists since ADR-007 — this adds its consumer): ShinkaEvolve reads `programs.sqlite` retroactively (no run-dir layout change) and materializes `programs/rank-<N>.py`; a non-capable backend (OpenEvolve — consciously deferred: checkpoint-granularity limit, and OE ranking must first ride on `combined_score` per FR-RUN-052) exits 1 with a clear "not supported on '<backend>'" error; `(run_id, rank)` uniqueness is enforced; `--rank 1` behaves exactly as today (#299) | — |
 
 ---
 
@@ -332,8 +336,9 @@ Show a unified diff between two solutions' program files.
 | Empty alias string | Error: "Alias cannot be empty" | 1 |
 | `extract` with non-existent run | Error: "Run '<run-id>' not found" | 1 |
 | `extract` with run not completed | Error: "Run '<run-id>' is not completed (status: '<status>')" | 1 |
-| `extract` with missing rank-1 file | Error: "No program found at rank 1 for run '<run-id>'" | 1 |
-| `extract` with already extracted rank (no `--force`) | Error: "Solution already exists for run '<run-id>' rank 1: '<sol-id>'. Use --force to replace." | 1 |
+| `extract` with missing program at the requested rank (absent file and not materializable from the backend store) | Error: "No program found at rank <N> for run '<run-id>'" | 1 |
+| `extract` with already extracted rank (no `--force`) | Error: "Solution already exists for run '<run-id>' rank <N>: '<sol-id>'. Use --force to replace." | 1 |
+| `extract --rank <N>` (N > 1) or `--program-id` on a backend without `top_n_extraction` (OpenEvolve) | Error: "Top-N extraction is not supported on backend '<backend>'." (FR-SOL-021) | 1 |
 | `show` with missing program file | Error: "Program file not found for solution '<id>'" | 1 |
 | `export` with missing program file | Error: "Program file not found for solution '<id>'" | 1 |
 | `diff` with either solution not found | Error: "Solution '<id>' not found" | 1 |

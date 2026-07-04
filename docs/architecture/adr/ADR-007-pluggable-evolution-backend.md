@@ -1,9 +1,10 @@
 # ADR-007 — Pluggable Evolution Backend (OpenEvolve default, ShinkaEvolve optional)
 
 **Date**: 2026-06-11
-**Status**: Accepted (amended 2026-07-01)
+**Status**: Accepted (amended 2026-07-01, 2026-07-05)
 **Deciders**: Mathieu (domain expert), Claude (architecture assistant)
 **Amended**: 2026-07-01 — v0.17 multi-LLM ensemble selection (see the *Amendment* section below; supersedes parts of D4/D5, the "lossy" consequence, and the S15 roadmap line).
+**Amended**: 2026-07-05 — v0.18 top-N extraction: `top_n_extraction` gains its first consumer (see the *Amendment — v0.18* section below; no capability-matrix change).
 
 ---
 
@@ -224,6 +225,27 @@ v0.17 also folds in a front-of-sprint correctness slice (B1 aggregation guard, B
 B7 OE best-of-interrupt recovery) — orthogonal to this ensemble amendment but shipped in the same release.
 The separate **judge ensemble** (`evaluator_models` / `use_llm_feedback`) is a known unexposed gap, **not**
 in v0.17 scope.
+
+## Amendment — v0.18 Top-N Extraction Consumer (2026-07-05)
+
+`capabilities().top_n_extraction` (D1) has carried correct per-backend values since S13 (Shinka
+`True`, OE `False`) but had **zero consumers**. v0.18 adds the consumer (#299, FR-SOL-021):
+`solution extract --rank N` (plus `--program-id <id>` where supported) promotes an
+arbitrary-ranked population program, **gated on the run backend's `top_n_extraction`**; a
+non-capable backend exits 1 with a clear "not supported on `<backend>`" error.
+
+- **ShinkaEvolve — native.** The full population, source code included, lives in
+  `programs.sqlite`; the backend reads it **retroactively** (the existing rank-1 query ordered by
+  `combined_score`, without `LIMIT 1`) and materializes `programs/rank-<N>.py` — no run-dir layout
+  change, works on pre-v0.18 runs.
+- **OpenEvolve — deliberately stays `top_n_extraction=False` in v0.18.** Two reasons:
+  (1) **checkpoint-granularity limit** — only checkpointed populations are recoverable, so OE top-N
+  availability would depend on `checkpoint_interval` alignment (#364); (2) shipping it now would
+  bake the pre-U13 **sum-of-metrics ordering** that #367 replaces with `combined_score`-first
+  ranking (FR-RUN-052) in this same release. **Revisit post-#367** (candidate S19).
+
+This is a consumer addition, not a capability change: D1, the capabilities matrix, and the
+"Top-N extraction returns" consequence stand as written.
 
 ## Alternatives Considered
 

@@ -298,8 +298,8 @@ revolver llm status
 
 # Create an ensemble of multiple LLMs
 revolver llm ensemble create multi-model-v1
-revolver llm ensemble add multi-model-v1 claude-opus --weight 0.7
-revolver llm ensemble add multi-model-v1 gemini-pro --weight 0.3
+revolver llm ensemble add multi-model-v1 --llm claude-opus --weight 0.7
+revolver llm ensemble add multi-model-v1 --llm gemini-pro --weight 0.3
 
 # Use ensemble in a run
 revolver run --version v1.0 --llm multi-model-v1 --dataset train-small
@@ -371,18 +371,16 @@ Once testing passes, the user locks down the problem definition and datasets:
 
 ```
 # Create an immutable problem version
-revolver problem version --tag v1.0 --message "Initial formulation"
+revolver problem version create v1.0 --message "Initial formulation"
 
 # Register a training dataset (creates immutable snapshot)
-revolver dataset add \
-  --name train-small \
+revolver dataset add train-small \
   --split train \
   --path ./data/instances-small/ \
   --compatible-with v1.0
 
 # Register an evaluation dataset
-revolver dataset add \
-  --name eval-benchmark \
+revolver dataset add eval-benchmark \
   --split eval \
   --path ./data/instances-eval/ \
   --compatible-with v1.0
@@ -392,13 +390,13 @@ revolver dataset info train-small
 # → 50 instances, split: train, compatible with: v1.0
 
 # Later, after refining the problem:
-revolver problem version --tag v1.1 --message "Refined objective function"
+revolver problem version create v1.1 --message "Refined objective function"
 
 # Update dataset compatibility (if the data is still valid for v1.1)
 revolver dataset update train-small --add-compatible-with v1.1
 
 # List everything
-revolver problem versions
+revolver problem version list
 revolver dataset list
 ```
 
@@ -451,7 +449,7 @@ revolver eval results --solution claude-small-v1.1
 ```
 # Compare multiple solutions
 revolver benchmark \
-  --solutions claude-small-v1.1 gemma-small-v1.1 claude-large-v1.1 \
+  --solutions claude-small-v1.1,gemma-small-v1.1,claude-large-v1.1 \
   --dataset eval-benchmark
 
 # View benchmark results

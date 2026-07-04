@@ -1,7 +1,7 @@
 # Revolver — End-to-End Tests (Level 3)
 
-**Version**: 0.2 — S17 sync (v0.17 multi-LLM ensemble, ADR-007 Amendment): §3.4 Scenario 4 — Shinka bandit ensemble (2+ members, `--selection ucb`) against the fake server
-**Date**: 2026-07-01
+**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice): §3.5 Scenario 5 — timeout penalize-vs-drop against the fake server
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [User Story E2E](../specs/user-story-e2e.md)
 
@@ -182,6 +182,32 @@ exercised); complements FR-RUN-047/048 from Scenario 3.
 
 **CI suitability**: runs on any runner (no GPU required); non-blocking like Scenario 3.
 
+### 3.5 Scenario 5 — Timeout Penalize-vs-Drop (**planned — S18**, U13 #367)
+
+`tests/e2e/test_timeout_penalize_drop.py` — validates the v0.18 honest-timeout semantics end-to-end
+against the fake LLM server: a real mini-evolution whose dataset contains one instance that **times
+out** in the evaluator (a `time.sleep` beyond a short per-instance timeout), run under both
+`evaluation.on_timeout` policies. The timeout lives in the *evaluator*, not the LLM — the fake
+server responds normally; what is exercised is the generated wrapper's timeout branch, the
+penalize/drop aggregation, and the coverage keys.
+
+**Steps** (mirrors Scenario 1's structure):
+
+| # | Command | Assertion |
+|---|---|---|
+| 1 | `revolver project init ...` + register the fake LLM | Scaffold + LLM ready |
+| 2 | Copy evaluator (1 fast instance + 1 hanging instance) + set a short per-instance timeout | Fixtures in place |
+| 3 | `revolver problem version create --tag v1.0 ...` + `dataset add ... --split train` | Version + 2-instance dataset registered |
+| 4 | `revolver run --version v1.0 --llm fake-llm --dataset ... --iterations 2` (default policy) | Run completes; the timed-out instance contributes `timeout_score` (0.0) to the mean (**penalize**); metrics carry `instances_valid=1`/`instances_total=2`, never summed into the score (FR-RUN-052/053) |
+| 5 | `revolver run ... --config-override evaluation.on_timeout=drop` | Survivor-mean restored (0.17 behavior) — the `drop` score is strictly higher than the `penalize` score on the same dataset |
+| 6 | `revolver run info <run>` | Engine best labeled "engine, single eval" next to the coverage-labeled post-eval mean; JSON output carries both fields (FR-RUN-055) |
+| 7 | (control) same run on a zero-timeout dataset under both policies | Identical scores — the policy is a no-op without timeouts (FR-RUN-054) |
+
+**FRs covered**: FR-RUN-052/053/054/055, FR-EVL-021 (read-path `instances_*` exclusion).
+
+**CI suitability**: runs on any runner (no GPU required); deselected by default like all E2E
+(`addopts = "-m 'not e2e'"`), run explicitly with `pytest -m e2e`.
+
 ---
 
 ## 4. Conventions
@@ -192,7 +218,8 @@ exercised); complements FR-RUN-047/048 from Scenario 3.
   ├── test_alice_jobshop.py         # Scenario 1 (planned)
   ├── test_remote_only.py           # Scenario 2 (planned)
   ├── test_shinka_backend.py        # Scenario 3 (implemented & passing — S14, ADR-007)
-  └── test_shinka_ensemble_bandit.py  # Scenario 4 (planned — S17, ADR-007 Amendment)
+  ├── test_shinka_ensemble_bandit.py  # Scenario 4 (planned — S17, ADR-007 Amendment)
+  └── test_timeout_penalize_drop.py # Scenario 5 (planned — S18, U13 #367)
   ```
 - **Markers**:
   - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`

@@ -1,7 +1,7 @@
 # Revolver — Validation Overview
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-13
+**Version**: 0.2 — Test ID conventions (§8.1): canonical `integration/` prefix for L2 IDs, the historic top-level-file exception, and the marker-vs-level rule (S18)
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Architecture](../architecture/architecture.md)
 
@@ -280,6 +280,34 @@ tests/
     ├── test_alice_jobshop.py
     └── test_remote_only.py
 ```
+
+### 8.1 Test ID Conventions
+
+The validation documents ([val-integration-tests.md](val-integration-tests.md), the
+[traceability matrix](traceability-matrix.md)) reference tests by an ID of the form
+`<path-under-tests/>::<test_name>` — e.g. `integration/test_llm::test_llm_add_remote` or
+`unit/core/test_problem::test_warns_missing_combined_score`.
+
+- **Canonical L2 home**: new integration suites live in `tests/integration/test_<command>.py`
+  and their IDs carry the `integration/` prefix.
+- **Top-level exception (historic)**: several L2 suites predate the `tests/integration/` layout
+  and live in top-level `tests/test_*.py` files (e.g. `test_project_integration.py`,
+  `test_core_run.py`, `test_run_delete.py`, `test_db_migration_v*.py`, `test_run_population.py`).
+  Their IDs are referenced without a prefix — still relative to `tests/`. Tests added to one of
+  these existing top-level suites keep the file's unprefixed form (e.g. the S18
+  `test_run_population::test_oe_display_prefers_combined_score`). A **new** top-level file is
+  admissible only when its CI marker must diverge from the directory convention (e.g. the S18
+  `test_doc_command_lint`, a `unit`-marked lint suite — see the next bullet); otherwise new L2
+  suites go under `tests/integration/`.
+- **Marker vs. level**: the documentary level (L1/L2/L3) classifies a test's *scope*; the pytest
+  marker (`unit` / `integration` / …, §6.2) drives *CI selection*. The two usually coincide but
+  may deliberately differ — e.g. the #354 doc command-lint
+  (`test_doc_command_lint::test_doc_command_lint_resolves_cli_tree`, S18) is tracked as an L2
+  scenario (it exercises the real Typer CLI tree against the whole docs corpus) but runs under
+  the `unit` marker so it executes in the blocking CI selection (sprint-018 S18-21). Where marker
+  and level differ, the validation docs say so on the row. Note that historic top-level suites
+  without any marker fall outside a marker-filtered CI selection and run via a plain
+  `pytest tests/`.
 
 **Running tests**:
 

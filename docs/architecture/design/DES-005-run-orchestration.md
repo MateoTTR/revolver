@@ -1,7 +1,7 @@
 # DES-005 — `revolver run` — Run Orchestration
 
-**Version**: 0.8.0 — v0.17 multi-LLM ensemble selection + B2/B7 correctness (§4.2/§4.4/§4.6/§7.2/§8/§11/§14.1, ADR-007 Amendment A1–A5)
-**Date**: 2026-07-01
+**Version**: 0.9.0 — v0.18 eval-honesty semantic slice + top-N promotion (U13/U11/U4/U8/U6p2 + reap hardening: §2.1/§2.3/§2.5/§3.2/§4.1–4.6/§4.8/§7/§7.3/§8/§10/§11/§14.1; FR-RUN-052..057, FR-PRB-016, FR-SOL-021, FR-EVL-021 amended)
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
 
@@ -47,8 +47,10 @@ Launch an OpenEvolve evolution run.
 CLI (cli/run.py)
   │ Parse: --version, --llm, --dataset, --iterations, --alias,
   │        --config-override, --temperature, --parallel, --rewrite-mode,
-  │        --selection, --selection-kwarg, --llm-weight,
+  │        --selection, --selection-kwarg, --llm-weight, --backend,
   │        --dry-run
+  │        (--backend defaults to a None sentinel, NOT "openevolve" —
+  │         absence must stay distinguishable from an explicit value; U4)
   │ Validate: all required options provided
   │        (--selection/--selection-kwarg/--llm-weight are neutral ensemble
   │         levers mapped per backend, §4.2; capability-checked at build time —
@@ -58,6 +60,14 @@ Core (core/run.py) → launch_run()
   │ 1. Resolve project root                        ──► Infra: store.find_project_root()
   │ 2. Load problem version                        ──► Infra: db.get_problem_version(tag)
   │    Verify snapshot integrity                    ──► Infra: hashing.verify_snapshot()
+  │ 2b. Resolve backend (U4 — FR-RUN-047 as amended)
+  │     Order: explicit --backend > the version's stored backend
+  │     (FR-PRB-016, problem_versions.backend — DES-003 / DES-001 v14)
+  │     > default "openevolve". The version row is loaded BEFORE
+  │     get_backend() so its stored backend is available; an explicit
+  │     --backend that differs from the version's stored backend WARNS
+  │     on stderr (never errors). --dry-run resolves identically;
+  │     resume still inherits the parent run's backend.
   │ 3. Resolve LLM                                 ──► Infra: db.get_llm(name) [global DB]
   │    If local: check loaded                       ──► Infra: ollama.is_loaded(model)
   │    If remote: check API key env var is set
@@ -74,6 +84,10 @@ Core (core/run.py) → launch_run()
   │    .revolver/runs/<id>/
   │    .revolver/runs/<id>/programs/
   │ 9. Generate wrapper evaluator (into run dir)    ──► Core: run.generate_wrapper()
+  │    The evaluation.on_timeout / evaluation.timeout_score policy
+  │    (FR-RUN-054) is parsed + VALIDATED at this shared launch point on
+  │    BOTH backends (bad value → exit 1, also at --dry-run) and baked
+  │    into the wrapper via BackendRunSpec (§3.2)
   │ 10. Prepare environment variables               (ADR-006)
   │     REVOLVER_DATASET_DIR, REVOLVER_INSTANCE_LOG, REVOLVER_EVAL_LOG
   │     (paths point to .revolver/runs/<id>/)
@@ -91,6 +105,14 @@ Core (core/run.py) → launch_run()
   │     - If evaluation passes with combined_score == 0.0 → warning on stderr,
   │       proceed (some programs legitimately score zero initially)
   │     - If evaluation passes with score > 0 → log score on stderr, proceed
+  │ 12b. Seed-metric validation (U8 — FR-RUN-056)   ──► Backend: validate_seed_metrics()
+  │     Right after the pre-flight (both launch and resume): fail fast —
+  │     before iteration 0 — when a metric named in
+  │     database.feature_dimensions is absent or non-numeric in the seed's
+  │     pre-flight metrics; the error names the missing dimension and the
+  │     available metrics. Builtins complexity/diversity/combined_score are
+  │     allowlisted (computed inside OpenEvolve). Shinka: no-op. Skipped
+  │     when pre-flight itself is skipped (empty dataset). See §4.4.
   │ 13. Start token-counting proxy (§4.7, DD-14)   ──► Infra: token_proxy.start()
   │     (OpenEvolve backend only — Shinka has no proxy)
   │     Rewrite llm.base_url → proxy local URL
@@ -168,10 +190,14 @@ Core (core/run.py) → resume_run()
   │ 9. Create NEW run with resumed_from: <run_id>   ──► generate_run_id()
   │ 10. Create new run directory                    ──► Infra: store.create_run_dir(new_id)
   │ 11. Copy wrapper from parent run (DD-09)        ──► Infra: store
-  │     (wrapper reused, not regenerated)
+  │     (wrapper reused, not regenerated — the resumed run inherits the
+  │      parent wrapper's baked evaluation.on_timeout policy, FR-RUN-054)
   │ 12. Copy parent checkpoint into new run dir     ──► Infra: store
   │ 13. Reconstruct environment and OpenEvolve config
   │     (same as original run, from parent metadata)
+  │ 13b. Pre-flight evaluation + seed-metric validation (as §2.1 steps 12/12b)
+  │     validate_seed_metrics() fires on resume too (FR-RUN-056); skipped
+  │     when pre-flight is skipped (empty dataset)
   │ 14. Write run lock file                         ──► Infra: store.write_run_lock(new_id)
   │ 15. Launch OpenEvolve with checkpoint           ──► Infra: openevolve.run(checkpoint=...)
   │ 16. Monitor progress                            ──► callback to CLI for display
@@ -224,13 +250,28 @@ Core (core/run.py) → get_run_info()
   │    (programs with ranks and scores for display;
   │     programs_extracted = len(programs))
   │ 3b. Read backend store total + run best          ──► Backend: total_programs (None on OE),
-  │    (programs_in_db + rank-1 score fallback)            run_best_score for "(from run)" fallback
+  │    (programs_in_db + rank-1 score fallback)            run_best_score for the labeled fallback
+  │ 3c. Read post-run training-eval aggregate        ──► Infra: db (eval_metadata/eval_instances,
+  │    (mean + instances_valid/instances_total             written via core.eval — FR-RUN-019, §7)
+  │     coverage — FR-RUN-053)
   │ 4. Query resume chain (CTE recursive)           ──► Infra: db.get_resume_chain(run_id)
-  │ 5. Return RunInfo (solutions + programs + programs_extracted + total_programs + run_best_score)
+  │ 5. Return RunInfo (solutions + programs + programs_extracted + total_programs + run_best_score
+  │    + post_eval_score / post_eval_instances_valid / post_eval_instances_total — FR-RUN-055)
   ▼
 Infra
   └── db: query runs + solutions tables
 ```
+
+> **Honest dual-score display (S18 / U11 — FR-RUN-055).** `run info` renders the engine best
+> labeled **"engine, single eval"** (a max over single, survivorship-prone evaluations) NEXT TO
+> the post-run training-eval mean labeled with its **coverage**
+> (`instances_valid/instances_total`, FR-RUN-053). The #306 display-time fallback (rank-1
+> solution score ← `run_best_score`, display-only — not a DB write) carries the same
+> "engine, single eval" label, so the inflated engine number never renders bare. JSON output
+> carries both fields (§8 `RunInfo`). The residual **two timeout semantics** — engine fitness
+> *penalizes* timeouts (FR-RUN-054, evolution pressure) while post-eval reports honest
+> coverage-labeled means (reporting) — is **by design**: the labels carry the burden
+> (triage-feedback-v017 §3).
 
 ---
 
@@ -266,6 +307,11 @@ from pathlib import Path
 sys.path.insert(0, "{snapshot_dir}")
 from evaluator import evaluate_instance
 
+# Baked at generation time from evaluation.on_timeout / evaluation.timeout_score
+# (FR-RUN-054; validated at the launch point, inherited on resume via DD-09)
+ON_TIMEOUT = "{on_timeout}"        # "penalize" (default) | "drop"
+TIMEOUT_SCORE = {timeout_score}    # finite float, default 0.0
+
 
 def evaluate(program_path: str) -> dict[str, float]:
     instance_path = os.environ.get("REVOLVER_INSTANCE_PATH")
@@ -281,31 +327,51 @@ def evaluate(program_path: str) -> dict[str, float]:
         if not p.name.startswith(".")
     )
 
-    all_metrics = []
+    all_metrics = []       # entries feeding the mean (incl. penalty entries)
+    valid = 0              # instances that genuinely returned metrics
     for inst in instances:
         try:
+            # Per-instance timeout enforced by the template's runner
             metrics = evaluate_instance(program_path, str(inst))
             all_metrics.append(metrics)
+            valid += 1
             _log_instance(inst.name, metrics)
+        except TimeoutError:
+            # Distinct timeout branch on BOTH backends (FR-RUN-053):
+            # record the timed-out instance on the side-channel, then
+            # apply the baked policy (FR-RUN-054).
+            _log_timeout(inst.name)
+            if ON_TIMEOUT == "penalize":     # default — v0.18 flip
+                all_metrics.append({"combined_score": TIMEOUT_SCORE})
+            # "drop": fall through — survivor-mean (0.17 behavior)
         except Exception:
             pass  # Skip failed instances during training
 
     if not all_metrics:
-        return {"combined_score": 0.0}
+        return {
+            "combined_score": 0.0,
+            "instances_valid": 0.0,
+            "instances_total": float(len(instances)),
+        }
 
     combined = statistics.mean(m["combined_score"] for m in all_metrics)
     result = {"combined_score": combined}
 
-    # Include other metrics as aggregated means
+    # Include other metrics as aggregated means. The reserved `instances_`
+    # coverage prefix is NEVER averaged (FR-RUN-053; read-path counterpart:
+    # FR-EVL-021 as amended, DES-006 §4.3).
     all_keys = set()
     for m in all_metrics:
         all_keys.update(m.keys())
     for key in sorted(all_keys):
-        if key != "combined_score":
+        if key != "combined_score" and not key.startswith("instances_"):
             vals = [m[key] for m in all_metrics if key in m]
             if vals:
                 result[key] = statistics.mean(vals)
 
+    # Coverage keys: metadata, not fitness (FR-RUN-053)
+    result["instances_valid"] = float(valid)
+    result["instances_total"] = float(len(instances))
     return result
 
 
@@ -330,7 +396,41 @@ def _log_instance(instance_id: str, metrics: dict[str, float]) -> None:
         conn.close()
     except Exception:
         pass  # Side-channel is best-effort
+
+
+def _log_timeout(instance_id: str) -> None:
+    """Record a timed-out instance on the side-channel (FR-RUN-053).
+
+    Same best-effort SQLite channel as _log_instance, with a timeout
+    status marker — timed-out instances stay visible even under
+    on_timeout=drop.
+    """
+    ...
 ```
+
+**Timeout policy and coverage keys (S18 / U13 — FR-RUN-053/054):**
+
+- **`evaluation.on_timeout: penalize | drop` + `evaluation.timeout_score` (FR-RUN-054).** Parsed
+  and **validated** at the shared launch point in `core/run.py` on BOTH backends (an invalid
+  `on_timeout` value or a non-finite `timeout_score` → exit 1 at run *and* `--dry-run`), carried
+  on `BackendRunSpec` (`on_timeout`, `timeout_score` — §4.1) and baked as constants into the
+  generated wrapper. `evaluation.*` is a **validated, Revolver-owned config section** (previously
+  the OE backend popped the whole section uninspected and Shinka never inspected its keys — typos
+  were silent). **Default `penalize`** — a deliberate fitness-landscape change, release-noted: a
+  timed-out instance contributes `timeout_score` (finite, default `0.0`) to the mean instead of
+  being silently dropped. `drop` restores the 0.17 survivor-mean. On a run with **zero timeouts**
+  the two policies produce identical scores. `resume` inherits the parent wrapper's **baked**
+  policy (DD-09, §2.3 step 11).
+- **Coverage keys (FR-RUN-053).** Both wrapper templates emit `instances_valid` /
+  `instances_total`; the `instances_` metric prefix is **reserved** and excluded from the wrapper
+  mean here and from read-time aggregation (FR-EVL-021 as amended — DES-006 §4.3 owns the
+  read/eval-path aggregation; DES-006's "Numeric-only aggregation guard (B1)" blockquote delegates
+  the wrapper mean loop to this section). Timed-out instances are additionally recorded on the
+  side-channel, so coverage is auditable per instance.
+- **Shinka wrapper parity.** The ShinkaEvolve subprocess wrapper (`_shinka_evaluator.py`,
+  DES-006 §1.3) mirrors the same aggregation contract: it gains a **distinct `TimeoutError`
+  branch** (previously a single catch-all exception branch — sprint-018 fact 6), the same
+  coverage keys, and the same baked timeout policy.
 
 ### 3.3 Generation Logic
 
@@ -372,7 +472,7 @@ Detection order (D-005-a):
 | Capability | `evaluate_instance()` (wrapper) | `evaluate()` (legacy) |
 |---|---|---|
 | User writes | Single-instance logic only | Full dual-mode evaluator (both aggregated and single-instance) |
-| Aggregation strategy | Fixed: `mean(combined_score)` | User-controlled (min, max, weighted, etc.) |
+| Aggregation strategy | Fixed: `mean(combined_score)` under the `evaluation.on_timeout` policy (FR-RUN-054); `instances_*` coverage keys excluded (FR-RUN-053) | User-controlled (min, max, weighted, etc.); no baked timeout policy or coverage keys |
 | Training per-instance side-channel | Supported (wrapper logs each instance) | Not available (evaluator is a black box to Revolver) |
 | Post-run eval (FR-RUN-019) | Full per-instance results | Full per-instance results (same as wrapper) |
 | `revolver eval` / `benchmark` | Full per-instance results | Full per-instance results (same as wrapper) |
@@ -407,8 +507,12 @@ surface — config build, wrapper generation, launch, resume, live progress, pop
 collection — through the `EvolutionBackend` protocol (`infra/backends/base.py`). Two adapters
 implement that protocol: `OpenEvolveBackend` (`infra/backends/openevolve.py`, default) and
 `ShinkaBackend` (`infra/backends/shinka.py`, opt-in `revolver[shinka]`). The `--backend
-{openevolve,shinka}` flag selects one per run (default `openevolve`); the choice is persisted on the
-run and inherited by `resume` (**FR-RUN-047**).
+{openevolve,shinka}` flag selects one per run; since S18 (U4) the effective backend resolves
+**explicit `--backend` > the problem version's stored backend (FR-PRB-016) > default
+`openevolve`** — the CLI flag and `RunConfig.backend` default to a **`None` sentinel** so absence
+stays distinguishable from an explicit `openevolve`, and an explicit flag that differs from the
+version's stored backend warns on stderr (never errors). The choice is persisted on the
+run and inherited by `resume` (**FR-RUN-047** as amended).
 
 This section describes the protocol tiers and how each adapter implements them. The unit shared
 across both backends is **tokens** ([ADR-007 D2](../adr/ADR-007-pluggable-evolution-backend.md#d2--tokencost-tracking-token-primary-on-both-backends)):
@@ -426,13 +530,15 @@ generated wrapper's name — `_revolver_evaluator.py` / `_shinka_evaluator.py`).
 
 The methods group into tiers. Two engine-neutral data carriers cross the boundary:
 `BackendRunSpec` (the run to launch/resume — snapshot dir, LLM, run dir, resolved iterations, CLI
-overrides, ensemble, …) and `BackendRunResult` (`best_score`, `best_program`, `output_dir`).
+overrides, ensemble, timeout policy `on_timeout`/`timeout_score` (FR-RUN-054), …) and
+`BackendRunResult` (`best_score`, `best_program`, `output_dir`).
 
 | Tier | Protocol method(s) | Purpose |
 |---|---|---|
 | **Availability / capabilities** | `is_available()`, `capabilities()` | Install probe (`doctor`/`setup`) and the honest capability matrix (§4.6) |
 | **Config build** | `config_template()`, `validate_config()`, `build_config()`, `resolved_config()` | Scaffold (`project init`), warn on unknown keys (`problem version create`), merge the runtime config, project it to the neutral dry-run view |
 | **Wrapper generation** | `generate_wrapper()` | Emit the per-backend evaluator bridging the user's `evaluate_instance()` to the engine's evaluator contract |
+| **Seed-metric validation** | `validate_seed_metrics()` | Post-pre-flight fail-fast: metrics declared in `database.feature_dimensions` must be present and numeric in the seed's pre-flight metrics (§4.4, FR-RUN-056; OE-enforced, Shinka no-op) |
 | **Launch / resume** | `launch()`, `resume()` | Run a fresh evolution, or continue from a parent run (backend-defined resume semantics) |
 | **Live progress** | `read_progress()` | Cheap `(iterations_done, best_score)` poll for `run status` (active path) |
 | **Population / counts** | `parse_population()`, `count_valid()`, `count_evolved_children()` | Ranked population for `run population`; valid-program and evolved-children counts |
@@ -496,6 +602,14 @@ served by `project init`.
   local endpoints (e.g. the claude-ollama-bridge at 50–530 s/call) into a retry storm and a proxy
   `BrokenPipeError`. Remote APIs keep OpenEvolve's default. A `config.yaml` `llm.timeout` or
   `--config-override llm.timeout=…` still wins (`setdefault` + overrides applied last).
+- **Default checkpoint cadence (U6 phase 2, S18 — FR-RUN-057).** When `checkpoint_interval` is
+  **unset** (absent from both the problem `config.yaml` and `--config-override`), `build_config()`
+  sets the effective interval to `max(1, min(100, iterations // 10))` so a killed ≤100-iteration
+  run has a mid-run checkpoint to resume from (previously the engine default of 100 meant zero
+  mid-run checkpoints for the whole default regime). An **explicit** value is never overridden,
+  and the S17a-12 phase-1 warning (`interval ≥ iterations` → "a killed run cannot be resumed")
+  keeps firing only on an explicit equality. OpenEvolve-only — Shinka has no
+  `checkpoint_interval`. Release-noted default-path change (sprint-018 exit criterion 10).
 - `resolved_config()` maps `max_iterations` → iterations, `database.num_islands` → num_islands,
   `llm.temperature` → temperature, and pushes OE-exclusive keys (`checkpoint_interval`,
   `feature_dimensions`, `feature_bins`, `parallel_evaluations`, `diff_based_evolution`,
@@ -599,6 +713,19 @@ contract rather than silently defaulting. `on_progress` may be ignored (live pro
 The orchestrator owns the fail-fast resume precheck *before* inserting the run record; the adapters'
 parent-state checks are a defensive fallback, not a parallel implementation.
 
+**Seed-metric validation hook (U8, S18 — FR-RUN-056).** `validate_seed_metrics()` is a new
+protocol method the orchestrator calls **right after the existing pre-flight evaluation, on both
+launch and resume** (§2.1 step 12b / §2.3 step 13b). **OpenEvolve**: fails fast — before
+iteration 0 — when a metric named in `database.feature_dimensions` (read from the resolved
+config) is **absent or non-numeric** in the seed's pre-flight `InstanceTestResult.metrics`; the
+error names the missing dimension and the available metrics. The builtins
+`complexity`/`diversity`/`combined_score` are **allowlisted** — they are computed inside
+OpenEvolve and legitimately absent from evaluator output. **ShinkaEvolve**: no-op (its only
+metric contract is `combined_score`). The hook is skipped whenever the pre-flight itself is
+skipped (empty dataset). Rationale: without it, a missing feature metric only crashes at the
+engine's seed-add — after config build, run insert, and wrapper generation (triage U8: the
+friction is lateness, not opacity).
+
 **Post-run teardown, both backends (B2 — symmetric to #224).** `launch()`/`resume()` wrap the engine
 call in `try/finally` so the runner always tears down its child processes and executors, even when
 the engine raises — preventing the post-run busy-loop/hang. The two child-reaping helpers
@@ -608,6 +735,18 @@ Shinka-only). Each adapter adds a backend-specific `_shutdown_runner()`: `getatt
 the controller's executor(s), `shutdown(wait=False)` wrapped in `contextlib.suppress(Exception)` —
 **never `wait=True`** (that reintroduces the #159 `ProcessPoolExecutor.shutdown(wait=True)` hang).
 The run result is persisted **before** teardown runs, so reaping/shutdown cannot truncate it.
+
+**Reap hardening (S18, carry-over #359 — recursive descendants + `killpg`).** The base-mixin reap
+previously enumerated **direct** children only and killed per-PID — a grandchild spawned by an
+evaluator (or surviving Shinka's single-PID wrapper kill) could outlive teardown. S18 hardens
+`ChildProcessReaperMixin` in `infra/backends/base.py`: `_current_child_pids()` enumerates
+descendants **recursively** (walking `/proc/<pid>/task/*/children`), and `_reap_run_children()`
+reaps each survivor's whole **process group** via `os.getpgid` + the S17a `evaluator_runner.py`
+pgid helpers (`_reap_process_group`: SIGTERM → 3 s grace → SIGKILL, single-PID fallback when
+`getpgid`/`killpg` fails), which also guards PID reuse. No import cycle: `evaluator_runner`
+imports only `models.problem`. This backstop closes the Shinka single-PID wrapper-kill
+grandchildren caveat (triage §1). The run-level reap lives **here**; §7's teardown note covers
+the separate per-instance eval primitive (0.17.1).
 
 ### 4.5 Live Progress, Population, and Counts Tier
 
@@ -622,6 +761,15 @@ unproductive-run guard. All are error-tolerant — the engine may be mid-write.
   `cell_indices` + `island` from `metadata.json`; **Shinka** reads `programs.sqlite` rows and carries
   **no** `cell_indices`/`island` (no MAP-Elites grid — callers must not assume them), aliasing
   `iteration_found` to `generation`.
+  - **Score preference (S18 / U13 i — FR-RUN-052).** The OE display/ranking readers
+    (`parse_population`, `read_checkpoint_best_score`) prefer a numeric `combined_score` over the
+    previous sum-of-numeric-metrics; the sum remains only as the fallback when no
+    `combined_score` exists, and a metrics dict lacking it never crashes the reader.
+    Display/fallback-only: the solution-DB `best_score` written at run end was already
+    `combined_score`-based (`recover_best_from_checkpoint` / `_extract_best_score`) — the sum
+    leaked only via `run status` / `run population` display and the #306 fallback. Landing this
+    **before** the FR-RUN-053 coverage keys guarantees `instances_*` are never summed into a
+    displayed score.
 - `count_valid(run_dir) -> int | None` — **OE** counts entries in the checkpoint `database.json`;
   **Shinka** counts `programs` rows with `correct = 1`.
 - `count_evolved_children(run_dir) -> int | None` — **OE** returns `None` (the checkpoint does not
@@ -644,7 +792,7 @@ reproducibility caveat (NFR-024, [ADR-007 D3](../adr/ADR-007-pluggable-evolution
 | `ensemble_model` | `"weighted"` | `"bandit"` | Multi-LLM selection semantics |
 | `selection_strategies` | `("fixed",)` | `("fixed","ucb","ucb1","thompson")` | Accepted `--selection` values (ADR-007 A4); OE's static weighted sampler is exposed under the neutral `fixed` value — `ensemble_model` above is the separate sampler-semantics axis. `--selection` outside this tuple is rejected |
 | `per_member_reasoning_effort` | `True` | `False` | Whether `--reasoning-effort` is honored per ensemble member (OE) or collapses to a single global pool with map-with-warn (Shinka — FACT A) |
-| `top_n_extraction` | `False` | `True` | Reliable top-N program extraction |
+| `top_n_extraction` | `False` | `True` | Arbitrary-rank/program promotion via `solution extract --rank N` / `--program-id` (FR-SOL-021 — the capability existed since ADR-007 with zero consumers; S18 adds the consumer, §7.3). OE stays `False` (consciously deferred): checkpoint-granularity-limited (full population only at checkpoint boundaries — ties to FR-RUN-057) and an S18 implementation would have baked the pre-FR-RUN-052 sum ordering. A non-capable backend exits 1 with a clear "not supported on `<backend>`" error |
 
 ### 4.7 OpenEvolve Token Proxy (DD-14)
 
@@ -703,11 +851,17 @@ FR-RUN-042 numbering gap is cleared here.
 | FR-RUN-038 | **Covered** | Deleting a run removes its run directory (`.revolver/runs/<id>/`, incl. the backend's `default_output_subdir`). Backend-agnostic. |
 | FR-RUN-039 | **Covered** | `run delete --json` without `--force` errors (NFR-003 non-interactive safety). Backend-agnostic. |
 | FR-RUN-042 | **N/A (numbering gap)** | No requirement is defined at FR-RUN-042 — the spec list jumps FR-RUN-041 → FR-RUN-043 (a known gap carried since S13, see sprint-013 §Carry-over). Recorded here so the cross-reference resolves; no behavior is owed, so coverage is not applicable. |
-| FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume` (§4.1–§4.6, §14.1). |
+| FR-RUN-047 | **Covered** | `--backend {openevolve,shinka}` selection, persisted on the run and inherited by `resume`; S18 (U4) resolution order **explicit `--backend` > version-stored backend (FR-PRB-016) > default `openevolve`** via the `None` sentinel, mismatch warn on stderr (§2.1 step 2b, §4 intro, §8, §14.1). |
 | FR-RUN-048 | **Covered** | Backend capability map-with-warn (§4.2 Shinka `--parallel`/ensemble warnings, §4.6 `capabilities()`). |
 | FR-RUN-049 | **Covered** | `--selection {fixed,ucb,ucb1,thompson}` neutral ensemble lever, mapped per backend; OE rejects non-`fixed` `--selection` via `capabilities().selection_strategies == ("fixed",)` (§2.1, §4.2, §4.6, §14.1; ADR-007 A2/A4). |
 | FR-RUN-050 | **Covered** | `--llm-weight model=w` per-run weight override; honored on OE and Shinka-`fixed`, warned+ignored under Shinka adaptive modes (§4.2; ADR-007 A1/M3). |
 | FR-RUN-051 | **Covered** | `solution extract --from-checkpoint` recovers the best program of an interrupted/failed OE run from the latest checkpoint via `recover_best_from_checkpoint()` (§7.2, B7). |
+| FR-RUN-052 | **Covered** | Score display/ranking prefers a numeric `combined_score` over the sum-of-numeric-metrics in `parse_population` / `read_checkpoint_best_score` (`run status` / `run population` / checkpoint best-score fallback); sum only as fallback; no crash on a metrics dict lacking it. Display/fallback-only (§4.5, U13 i). |
+| FR-RUN-053 | **Covered** | Wrapper coverage keys `instances_valid`/`instances_total` + timeout side-channel on both backends; reserved `instances_` prefix excluded from every mean (read-path counterpart FR-EVL-021 as amended, DES-006 §4.3); distinct Shinka `TimeoutError` branch (§3.2, U13 ii). |
+| FR-RUN-054 | **Covered** | `evaluation.on_timeout: penalize\|drop` (default `penalize`) + finite `evaluation.timeout_score` (default 0.0), parsed + validated at the shared launch point on both backends (bad value → exit 1 at run/dry-run), baked into the wrapper, inherited on resume (§2.1 step 9, §3.2, U13 iii). |
+| FR-RUN-055 | **Covered** | `run info` dual-score display: engine best labeled "engine, single eval" next to the coverage-labeled post-eval mean; #306 fallback labeled the same way, never bare; JSON carries both fields (§2.5, §7, §8 `RunInfo`, U11 B). |
+| FR-RUN-056 | **Covered** | `validate_seed_metrics()` post-pre-flight fail-fast on launch and resume; builtins `complexity`/`diversity`/`combined_score` allowlisted; Shinka no-op; skipped with pre-flight on empty dataset (§2.1 step 12b, §2.3 step 13b, §4.1, §4.4, U8). |
+| FR-RUN-057 | **Covered** | Default checkpoint cadence `max(1, min(100, iterations//10))` when `checkpoint_interval` is unset; explicit values never overridden; S17a-12 warn fires only on explicit equality (§4.2, U6 phase 2). |
 
 ---
 
@@ -788,7 +942,7 @@ launch_run()  → write .revolver/runs/locks/<run_id>.lock
 
 ## 7. Post-Run Training Evaluation (FR-RUN-019/020)
 
-After OpenEvolve completes, Revolver evaluates the **rank-1 program** (the auto-created solution) on all training instances to produce per-instance results accessible via `revolver eval results` (DD-12).
+After the engine completes, Revolver evaluates the **rank-1 program** (the auto-created solution) on all training instances to produce per-instance results accessible via `revolver eval results` (DD-12).
 
 ```python
 def _post_run_evaluation(
@@ -796,6 +950,7 @@ def _post_run_evaluation(
     run_id: str,
     solution_id: str,
     snapshot_dir: Path,
+    dataset_name: str,
     dataset_path: Path,
     program_path: Path,
 ) -> None:
@@ -805,10 +960,31 @@ def _post_run_evaluation(
     Results are stored in eval_metadata/eval_instances with the training
     dataset, making them accessible via:
       revolver eval results --solution <id> --dataset <train-dataset>
+    Warn-only: a failed post-run eval never fails the run.
     """
 ```
 
-This step is **synchronous** — it runs after OpenEvolve completes but before the run is marked as finished.
+> **S18 / U11 commit A — the docstring becomes true (Task-86 residue, FR-RUN-019/020).** Until
+> v0.17 the implementation diverged from this design: an interim `_run_post_eval` shortcut ran
+> the instances with a **hardcoded `timeout_s=300`** and **stored nothing** (stderr-only output),
+> so the FR-RUN-020 promise ("accessible via `revolver eval results`") was not literally met.
+> S18 replaces it with the real `core.eval.evaluate_solution()` path on **both** call sites
+> (`launch_run` and `resume_run`):
+>
+> - Results are **persisted** to `eval_metadata`/`eval_instances` (DES-001 §3.7–3.8) — no longer
+>   a stderr-only path; `run info` reads the aggregate back for the dual-score display
+>   (FR-RUN-055, §2.5), including the FR-RUN-053 coverage (`instances_valid`/`instances_total`).
+> - `config.dataset_name` is **threaded through** (previously only `dataset_path` reached the
+>   helper), so the eval rows reference the registered training dataset.
+> - The per-instance timeout comes from the **eval path** (the hardcoded 300 s is gone).
+> - Failure remains **warn-only** — a failed or missing post-run eval never fails the run.
+> - **DB-contention guard**: `launch_run` still holds its open project connection when the eval
+>   path opens its own — the orchestrator commits `proj_conn` before the call (plus WAL /
+>   `busy_timeout`) so the write cannot contend with the still-open launch connection.
+> - `evaluate_solution()` raises when an eval already exists for `(solution, dataset)` — the
+>   post-run call passes `force=True` / performs the has-existing-eval check.
+
+This step is **synchronous** — it runs after the engine completes but before the run is marked as finished.
 
 **Eval subprocess teardown (v0.17.1, task 358 / U12+U14).** Each per-instance
 evaluation funnels through `infra/evaluator_runner.run_instance()`, which runs
@@ -875,6 +1051,31 @@ for `interrupted`/`failed` runs, dispatched through a **backend-neutral** protoc
 **Default behavior is unchanged**: without `--from-checkpoint`, `solution extract` still rejects an
 interrupted run (the pre-v0.17 contract). Only the explicit flag path recovers from the checkpoint.
 
+### 7.3 Top-N / arbitrary-rank promotion: `solution extract --rank N` / `--program-id` (S18, FR-SOL-021)
+
+`solution extract` regains an arbitrary-rank path (removed in tasks 197/198; the extract-on-demand
+model of DD-07 kept the DB shape ready throughout — `core.extract_solution` accepts an arbitrary
+rank and the `UNIQUE(run_id, rank)` constraint was never dropped). The CLI resolves the run's
+persisted backend and gates on `capabilities().top_n_extraction` (§4.6) — the capability has
+existed since ADR-007 with **zero consumers**; S18 adds the consumer (FR-SOL-021 in
+spec-solution.md; FR-SOL-011/012 generalized from rank-1-only):
+
+- **ShinkaEvolve (`top_n_extraction = True`)** — a new `ShinkaBackend.extract_ranked_program(
+  run_dir, rank | program_id)` reads the full population from `programs.sqlite` (the existing
+  best-program `ORDER BY combined_score DESC` query, without `LIMIT 1`) and materializes the
+  requested program to `programs/rank-<N>.py` through the same recovery flow `extract_solution`
+  already uses (§7.2 pattern). Works **retroactively** on old runs — the population DB is the run
+  artifact; no run-dir layout change. `--program-id <id>` promotes an arbitrary population
+  program by engine ID.
+- **OpenEvolve (`top_n_extraction = False`, consciously deferred)** — exits 1 with a clear
+  "not supported on openevolve" error. Deferral rationale: the checkpoint exposes the full
+  population only at checkpoint boundaries (a granularity limit — mitigated but not removed by
+  the FR-RUN-057 cadence default), and an S18 implementation would have baked the
+  pre-FR-RUN-052 sum-of-metrics ordering. Revisit post-U13 (sprint-018 carry-over).
+- `--rank 1` behaves exactly as today (the auto-created rank-1 solution is unchanged);
+  `(run_id, rank)` uniqueness is enforced; extraction-time training eval applies as for any
+  extracted solution (DD-07/DD-12, §7.1 on-demand extraction).
+
 ---
 
 ## 8. Pydantic Data Models
@@ -885,10 +1086,15 @@ from datetime import datetime
 from pathlib import Path
 
 class RunConfig(BaseModel):
-    """Configuration for an OpenEvolve run."""
+    """Configuration for an evolution run."""
     problem_version: str
     llm_name: str
     dataset_name: str
+    backend: str | None = None         # None sentinel = "not specified" (U4, S18): resolution
+                                       # order explicit --backend > version-stored backend
+                                       # (FR-PRB-016) > default "openevolve" (FR-RUN-047 as
+                                       # amended). A hard "openevolve" default would make
+                                       # explicit-vs-default indistinguishable (sprint-018 fact 5)
     iterations: int | None = None
     alias: str | None = None
     config_overrides: list[str] = []
@@ -1010,7 +1216,12 @@ class RunInfo(BaseModel):
     programs: list["ProgramEntry"] = []     # All stored programs (for run info display)
     programs_extracted: int = 0             # Files materialized to programs/ (== len(programs)) — UX-4 / S16
     total_programs: int | None = None       # Total in backend store (all rows in Shinka's programs.sqlite; None on OE) — surfaced as programs_in_db
-    run_best_score: float | None = None     # Engine's run best; fallback for the rank-1 solution score when its own is missing ("(from run)") — UX-4 / S16
+    run_best_score: float | None = None     # Engine's run best; fallback for the rank-1 solution score when its own is missing — UX-4 / S16, #306. Rendered ONLY under the "engine, single eval" label (FR-RUN-055): a max over single, survivorship-prone evals, never shown bare
+    # Honest dual-score display (S18 / U11 — FR-RUN-055): populated from the persisted post-run
+    # training eval (FR-RUN-019 via core.eval, §7) and rendered next to run_best_score
+    post_eval_score: float | None = None            # Post-run training-eval mean (honest, multi-instance)
+    post_eval_instances_valid: int | None = None    # FR-RUN-053 coverage label: instances in the mean
+    post_eval_instances_total: int | None = None    # FR-RUN-053 coverage label: total training instances
     resume_chain: list[str] = []            # Ordered list of ancestor run IDs
 
 class ProgressInfo(BaseModel):
@@ -1114,10 +1325,15 @@ def _post_run_evaluation(
     run_id: str,
     solution_id: str,
     snapshot_dir: Path,
+    dataset_name: str,
     dataset_path: Path,
     program_path: Path,
 ) -> None:
-    """Evaluate rank-1 program on training instances after run."""
+    """Evaluate rank-1 program on training instances after run.
+    S18 / U11: routes through core.eval.evaluate_solution() — persists
+    eval_metadata/eval_instances, uses the eval path's timeout, stays
+    warn-only, and guards DB contention (commit proj_conn before the
+    call). See §7."""
 
 def generate_run_id() -> str:
     """Generate run-YYYYMMDD-HHMMSS from current timestamp."""
@@ -1149,6 +1365,7 @@ def run_default(
     selection: str | None = typer.Option(None, "--selection", help="Ensemble selection strategy: fixed | ucb | ucb1 | thompson (capability-checked per backend; OE accepts weighted/fixed only, ADR-007 A2/A4)"),
     selection_kwarg: list[str] | None = typer.Option(None, "--selection-kwarg", help="Repeatable k=v routed to the selected sampler (e.g. cost_aware_coef=0.3 for ucb/ucb1; A5)"),
     llm_weight: list[str] | None = typer.Option(None, "--llm-weight", help="Repeatable model=w per-run weight override (OE + Shinka-fixed; warned/ignored under Shinka adaptive modes; M3)"),
+    backend: str | None = typer.Option(None, "--backend", help="Evolution backend: openevolve | shinka. None sentinel — resolves explicit > version-stored backend (FR-PRB-016) > openevolve; a mismatch with the version's stored backend warns on stderr (U4, FR-RUN-047 as amended)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate inputs and show config without launching"),
 ): ...
 
@@ -1288,6 +1505,10 @@ FR-RUN-019 requires evaluating the best program on all training instances after 
 - **Queryability**: results are accessible via `revolver eval results --solution <id> --dataset <train>`
 - **No code duplication**: the evaluation loop is implemented once
 
+> **S18 / U11 note**: this DD was aspirational until v0.18 — the shipped code used an interim
+> `_run_post_eval` shortcut (hardcoded 300 s timeout, results not persisted). S18 closes the
+> Task-86 residue and makes the reuse real (§7, FR-RUN-019/020).
+
 ### DD-04: OpenEvolve controller class, not `run_evolution()`
 
 Per POC #12 S7, the high-level `run_evolution()` function does not support checkpoint resume. The `OpenEvolve` controller class provides:
@@ -1336,6 +1557,11 @@ The previous design (v0.2 DD-07) auto-created N solution rows when `--top-n > 1`
 - Post-run training evaluation (FR-RUN-019) runs on **rank-1 only** (DD-12 revised).
 - `revolver run resume` operates on the **run** (which contains the full checkpoint with the entire population). It does not resume a specific solution.
 - The `--alias` option (if provided) is set on the rank-1 solution.
+
+> **S18 capability gate (FR-SOL-021)**: the on-demand promotion path is gated on the run
+> backend's `capabilities().top_n_extraction` — Shinka-native (reads `programs.sqlite`
+> retroactively, plus `--program-id`), OpenEvolve consciously deferred with a clear
+> "not supported" error. See §7.3.
 
 ### DD-08: `--dry-run` validates without launching (D-005-g)
 
@@ -1454,7 +1680,7 @@ parsing / token collection through the `EvolutionBackend` interface:
 
 | Concern | Backend-mediated behavior |
 |---|---|
-| **Backend selection** | `--backend {openevolve,shinka}` (default `openevolve`); stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047) |
+| **Backend selection** | `--backend {openevolve,shinka}`; S18 (U4) resolution order **explicit `--backend` > version-stored backend (FR-PRB-016, DES-001 v14 / DES-003) > default `openevolve`** via the CLI/`RunConfig` `None` sentinel; an explicit-vs-version mismatch warns on stderr (never errors); `--dry-run` resolves identically; stored in the run record and manifest (`runs.backend`, DB migration — see DES-001); `resume` inherits the parent run's backend (FR-RUN-047 as amended) |
 | **Resume semantics** | Backend-defined (FR-RUN-024), parent never mutated: OpenEvolve copies the parent checkpoint and passes `checkpoint_path`; ShinkaEvolve **clones** the parent `results_dir` (its SQLite DB is the resume state) into the new run dir and continues on the clone (clone-resume parity — S16 / TD-3). A `resume_precheck` hook validates the parent before any record is created |
 | **Resolved config** | OE-shaped `ResolvedOEConfig` is replaced by the neutral `ResolvedConfig` + `backend_extras` dict (ADR-007 D4); the dry-run renderer iterates neutral fields plus a generic extras loop |
 | **Ensemble selection** | Neutral levers `--selection` / `--selection-kwarg` / `--llm-weight` + the registry `reasoning_effort` field, mapped per backend (ADR-007 A1/A2, §4.2). **OE** (`ensemble_model="weighted"`): weighted-random sampler; `--selection` non-weighted → rejected; `--llm-weight` honored; per-member `reasoning_effort` honored. **Shinka** (`ensemble_model="bandit"`): `--selection` → `llm_dynamic_selection` (`fixed`/`ucb`/`ucb1`/`thompson`); weights → `FixedSampler.prior_probs` **fixed-only** (adaptive modes start uniform, weights warned+ignored — FACT B); `--selection-kwarg` branched per sampler (`cost_aware_coef` ucb-only, default 0 — A5); `reasoning_efforts` a single global pool with highest-effort-wins on disagreement + warn (FACT A) |
@@ -1484,7 +1710,7 @@ engine-agnostic (#267 §1.4).
 | Dependency | Direction | Details |
 |---|---|---|
 | DES-001 | DES-005 → DES-001 | Uses `runs` (§3.5) and `solutions` (§3.6) tables |
-| DES-003 | DES-005 → DES-003 | Loads problem version snapshot, verifies integrity |
+| DES-003 | DES-005 → DES-003 | Loads problem version snapshot, verifies integrity; reads the version-stored backend for the U4 resolution order (FR-PRB-016) |
 | DES-004 | DES-005 → DES-004 | Loads dataset, verifies integrity, resolves path |
 | DES-006 | DES-005 → DES-006 | Post-run evaluation reuses `core.eval.evaluate_solution()` |
 
