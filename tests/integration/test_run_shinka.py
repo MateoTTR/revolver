@@ -46,6 +46,7 @@ from typer.testing import CliRunner
 pytest.importorskip("shinka.database", reason="shinka-evolve not installed")
 
 from revolver.cli import app
+from revolver.core.exceptions import ValidationError
 from revolver.core.project import init_project
 from revolver.core.run import get_run_info
 from revolver.infra.backends.base import BackendRunSpec
@@ -900,6 +901,9 @@ def test_shinka_adaptive_ignores_weights_warns(
     assert "prior_probs" not in kwargs
     warning = capsys.readouterr().err
     assert "ignored" in warning and selection in warning
+    # U9 doc part (S17a-16): the warning carries the short-run guidance.
+    assert "prefer --selection fixed" in warning
+    assert "no per-arm prior" in warning
 
 
 @pytest.mark.integration
@@ -1012,3 +1016,49 @@ def test_shinka_fixed_uniform_ensemble_prior_probs(tmp_path: Path, global_db_pat
     evo = ShinkaBackend().build_config(spec)["evo_config"]
     prior = evo["llm_dynamic_selection_kwargs"]["prior_probs"]
     assert prior == pytest.approx([0.5, 0.5])
+
+
+# ── (g) S17a PR-C papercuts: U1 fail-fast + U10 dry-run surfacing ─────────────
+# Install-gated twins of the unit tests in tests/unit/infra/
+# test_shinka_backend.py (which run on the no-shinka env via fake modules).
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_ucb_residual_string_kwarg_fails_fast(
+    tmp_path: Path, global_db_path: Path
+) -> None:
+    """U1 (S17a-08): a residual string on an accepted ucb kwarg raises at
+    build_config time — i.e. at --dry-run, before any engine launch."""
+    members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        selection="ucb",
+        selection_kwargs={"epsilon": "abc"},
+    )
+    with pytest.raises(ValidationError, match="epsilon=abc"):
+        ShinkaBackend().build_config(spec)
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_resolved_config_surfaces_selection_kwargs(
+    tmp_path: Path, global_db_path: Path
+) -> None:
+    """U10 (S17a-14): a build→resolve round trip surfaces prior_probs in
+    backend_extras and zips member weights into llm_models entries."""
+    members = [
+        EnsembleMember(llm_name="m-a", weight=0.7),
+        EnsembleMember(llm_name="m-b", weight=0.3),
+    ]
+    spec = _ensemble_spec(tmp_path, global_db_path, members, selection="fixed")
+
+    backend = ShinkaBackend()
+    resolved = backend.resolved_config(backend.build_config(spec))
+
+    kwargs = resolved.backend_extras["llm_dynamic_selection_kwargs"]
+    assert kwargs["prior_probs"] == pytest.approx([0.7, 0.3])
+    assert resolved.llm_models is not None
+    assert [entry["weight"] for entry in resolved.llm_models] == pytest.approx([0.7, 0.3])

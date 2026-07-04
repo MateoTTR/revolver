@@ -858,6 +858,102 @@ class TestShinkaBuildConfig:
         resolved = backend.resolved_config(config)
         assert resolved.backend_extras["max_proposal_jobs"] == 1
 
+    def test_selection_kwarg_residual_string_fails_fast(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """U1 (S17a-08): a residual string on an accepted sampler key raises.
+
+        ``epsilon=abc`` survives the CLI-side ``_parse_value`` coercion as a
+        string; every accepted sampler parameter is numeric/boolean, so the
+        routing raises ``ValidationError`` at build_config time — which runs
+        before the ``--dry-run`` early return, so garbage fails at dry-run
+        instead of as an engine ``TypeError`` at launch.
+        """
+        spec = _make_spec(tmp_path, selection="ucb", selection_kwargs={"epsilon": "abc"})
+        with pytest.raises(ValidationError, match="epsilon=abc"):
+            ShinkaBackend().build_config(spec)
+
+    def test_selection_kwarg_typed_values_still_routed(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """Typed (coerced) kwargs pass the U1 fail-fast and reach the config."""
+        spec = _make_spec(
+            tmp_path,
+            selection="ucb",
+            selection_kwargs={"epsilon": 0.4, "adaptive_scale": False},
+        )
+        config = ShinkaBackend().build_config(spec)
+        kwargs = config["evo_config"]["llm_dynamic_selection_kwargs"]
+        assert kwargs["epsilon"] == 0.4
+        assert kwargs["adaptive_scale"] is False
+        # M4 do-not-regress: cost_aware_coef still injected as float 0.0.
+        assert kwargs["cost_aware_coef"] == 0.0
+
+    def test_shinka_reasoning_efforts_config_path_inert_warns(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """U7 residual (S17a-13): --config-override reasoning_efforts on an
+        all-local fleet warns inert (the member-path warning cannot see it)."""
+        spec = _make_spec(
+            tmp_path,
+            llm=_make_llm(source="local"),
+            config_overrides=["evo_config.llm_kwargs.reasoning_efforts=high"],
+        )
+        config = ShinkaBackend().build_config(spec)
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "high"
+        err = capsys.readouterr().err
+        assert "reasoning_efforts is set via config.yaml/--config-override" in err
+        assert "inert" in err
+
+    def test_shinka_reasoning_efforts_config_yaml_path_inert_warns(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """U7 residual: a config.yaml llm_kwargs.reasoning_efforts on an
+        all-local fleet warns inert too (the projection defers to it silently)."""
+        spec = _make_spec(tmp_path, llm=_make_llm(source="local"))
+        (spec.snapshot_dir / "config.yaml").write_text(
+            "evo_config:\n  llm_kwargs:\n    reasoning_efforts: low\n"
+        )
+        config = ShinkaBackend().build_config(spec)
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "low"
+        assert "inert" in capsys.readouterr().err
+
+    def test_shinka_reasoning_efforts_config_path_remote_fleet_silent(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """U7 residual: the same override on a reasoning-capable remote fleet
+        warns nothing (the pool takes effect there)."""
+        llm = _make_llm(
+            name="remote-llm",
+            source="remote",
+            provider="openai",
+            base_url=None,
+            api_key_env="OPENAI_API_KEY",
+        )
+        spec = _make_spec(
+            tmp_path,
+            llm=llm,
+            config_overrides=["evo_config.llm_kwargs.reasoning_efforts=high"],
+        )
+        config = ShinkaBackend().build_config(spec)
+        assert config["evo_config"]["llm_kwargs"]["reasoning_efforts"] == "high"
+        assert "inert" not in capsys.readouterr().err
+
+    def test_shinka_reasoning_efforts_no_config_path_no_extra_warning(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """U7 residual: a registry-derived (member-path) effort on a local
+        fleet warns exactly once — via the member path, not the U7 check."""
+        spec = _make_spec(
+            tmp_path, llm=_make_llm(source="local", reasoning_effort="high")
+        )
+        ShinkaBackend().build_config(spec)
+        err = capsys.readouterr().err
+        # Member-path warning (S17-27/W2a) fires...
+        assert "inert for local" in err
+        # ...and the config-path warning does not double up.
+        assert "set via config.yaml/--config-override" not in err
+
 
 # ── resolved_config (S14-08) ─────────────────────────────────────────────────
 
@@ -933,6 +1029,61 @@ class TestShinkaResolvedConfig:
             {"evo_config": {"llm_kwargs": {"reasoning_efforts": ""}}}
         )
         assert "reasoning_efforts" not in resolved.backend_extras
+
+    def test_shinka_dry_run_surfaces_selection_kwargs(self) -> None:
+        """U10 (S17a-14): llm_dynamic_selection_kwargs reaches backend_extras
+        and prior_probs is zipped into llm_models entries as weights."""
+        resolved = ShinkaBackend().resolved_config(
+            {
+                "evo_config": {
+                    "llm_models": ["local/m-a", "local/m-b"],
+                    "llm_dynamic_selection": "fixed",
+                    "llm_dynamic_selection_kwargs": {"prior_probs": [0.8, 0.2]},
+                }
+            }
+        )
+        assert resolved.backend_extras["llm_dynamic_selection_kwargs"] == {
+            "prior_probs": [0.8, 0.2]
+        }
+        assert resolved.llm_models == [
+            {"name": "local/m-a", "weight": 0.8},
+            {"name": "local/m-b", "weight": 0.2},
+        ]
+
+    def test_shinka_dry_run_surfaces_cost_aware_coef(self, fake_shinka: None, tmp_path: Path) -> None:
+        """U10: the M4-injected cost_aware_coef is visible via a build→resolve
+        round trip on ucb (no launch needed to validate kwargs)."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path, selection="ucb"))
+        resolved = backend.resolved_config(config)
+        kwargs = resolved.backend_extras["llm_dynamic_selection_kwargs"]
+        assert kwargs["cost_aware_coef"] == 0.0
+
+    def test_shinka_dry_run_prior_probs_length_mismatch_not_zipped(self) -> None:
+        """U10 guard: a prior_probs vector of the wrong length is surfaced in
+        backend_extras but NOT zipped into the member entries."""
+        resolved = ShinkaBackend().resolved_config(
+            {
+                "evo_config": {
+                    "llm_models": ["local/m-a", "local/m-b"],
+                    "llm_dynamic_selection_kwargs": {"prior_probs": [1.0]},
+                }
+            }
+        )
+        assert resolved.llm_models == [{"name": "local/m-a"}, {"name": "local/m-b"}]
+        assert resolved.backend_extras["llm_dynamic_selection_kwargs"] == {
+            "prior_probs": [1.0]
+        }
+
+    def test_shinka_single_llm_dry_run_unchanged(self, fake_shinka: None, tmp_path: Path) -> None:
+        """U10 regression pin: a plain single-LLM build has no
+        llm_dynamic_selection_kwargs in backend_extras and no member weights."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path))
+        resolved = backend.resolved_config(config)
+        assert "llm_dynamic_selection_kwargs" not in resolved.backend_extras
+        assert resolved.llm_models is not None
+        assert all("weight" not in entry for entry in resolved.llm_models)
 
 
 # ── generate_wrapper (S14-09, R4) ─────────────────────────────────────────────

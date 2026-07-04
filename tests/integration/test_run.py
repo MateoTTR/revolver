@@ -396,6 +396,107 @@ def test_run_dry_run(project_with_prereqs: dict[str, Path]) -> None:
         conn.close()
 
 
+# ── Test 3b: snapshot config re-validation at run entry (U5, S17a-11) ───────
+
+
+@pytest.mark.integration
+def test_run_revalidates_snapshot_config_warns(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """U5 (S17a-11): snapshot config.yaml re-validated warn-only at run entry.
+
+    The shared fixture config (``config_simple.yaml``) carries dead OE keys
+    (``iterations``, top-level ``population_size``), so every v1.0 leg —
+    ``--dry-run``, a real (mocked) launch, and a resume — must warn on
+    stderr and still proceed. A clean snapshot config warns nothing.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # (a) --dry-run warns (re-validation runs before build_config, which is
+    # itself before the dry-run early return).
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" in output
+    assert "population_size" in output
+
+    # (b) A real (mocked) launch warns too — and proceeds (warn-only).
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" in output
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    # (c) Resume warns as well (same snapshot dir re-validated).
+    checkpoint_dir = (
+        root / REVOLVER_DIR / "runs" / parent_run_id / "oe-output" / "checkpoints" / "checkpoint_5"
+    )
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    resume_run_id, resume_sol_id = _next_ids()
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch(
+            "revolver.infra.backends.openevolve.OpenEvolveRunner",
+            MagicMock(return_value=_make_mock_runner()),
+        ),
+        patch("revolver.core.run.TokenCountingProxy", MagicMock(return_value=_make_mock_proxy())),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+    ):
+        result = runner.invoke(
+            app, ["run", "resume", parent_run_id], catch_exceptions=False
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" in output
+
+    # (d) A clean snapshot config warns nothing.
+    (root / "config.yaml").write_text("max_iterations: 20\n", encoding="utf-8")
+    from revolver.core.problem import create_version
+
+    create_version(tag="v2.0", message="clean config", project_root=root)
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v2.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--dry-run",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" not in output
+
+
 # ── Selection strategy validation + --llm-weight on OpenEvolve (S17) ────────
 
 

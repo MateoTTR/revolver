@@ -106,6 +106,58 @@ def test_build_config_checkpoint_interval_ok() -> None:
     assert config["checkpoint_interval"] == 10
 
 
+@pytest.mark.integration
+def test_checkpoint_interval_ge_iterations_warns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """U6 phase 1 (S17a-12): final interval >= iterations warns (warn-only).
+
+    An interval equal to the iteration count writes only the completion
+    checkpoint — a killed run cannot be resumed. The S9a ``>`` guard path
+    (clamp + its own warning) is unchanged; the new warning stacks on top
+    after the clamp because the *final* interval equals the iterations.
+    """
+    llm = _make_llm()
+
+    # interval == iterations → new warning fires; S9a guard (strict >) stays
+    # silent and the value is NOT clamped.
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=50"],
+    )
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 50
+    assert "no mid-run checkpoint" in err
+    assert "cannot be resumed" in err
+    assert "Overriding to checkpoint_interval" not in err  # S9a guard silent
+
+    # interval < iterations → silent.
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=10"],
+    )
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 10
+    assert "no mid-run checkpoint" not in err
+
+    # interval > iterations → S9a guard clamps (unchanged behaviour) AND the
+    # clamped final value (== iterations) triggers the new warning.
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=60"],
+    )
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 50  # S9a clamp verbatim
+    assert "Overriding to checkpoint_interval=50" in err
+    assert "no mid-run checkpoint" in err
+
+
 # ── validate_oe_config ────────────────────────────────────────────────────────
 
 

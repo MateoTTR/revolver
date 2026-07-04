@@ -3215,8 +3215,23 @@ class TestParseSelectionKwargs:
         assert _parse_selection_kwargs(["cost_aware_coef=0.0"]) == {"cost_aware_coef": 0.0}
         assert _parse_selection_kwargs(["a=1", "b=two"]) == {"a": 1, "b": "two"}
 
+    def test_selection_kwarg_value_coercion(self) -> None:
+        """U1 (S17a-08): values are coerced to typed scalars, not strings."""
+        assert _parse_selection_kwargs(["cost_aware_coef=0.3"]) == {"cost_aware_coef": 0.3}
+        parsed = _parse_selection_kwargs(["adaptive_scale=false"])
+        assert parsed is not None
+        # The pre-U1 bug: the string "false" is truthy → silent bool inversion.
+        assert parsed["adaptive_scale"] is False
+        parsed = _parse_selection_kwargs(["auto_decay=null"])
+        assert parsed is not None
+        assert parsed["auto_decay"] is None
+        parsed = _parse_selection_kwargs(["adaptive_scale=true"])
+        assert parsed is not None
+        assert parsed["adaptive_scale"] is True
+
     def test_value_with_equals_kept_verbatim(self) -> None:
-        # Only the first '=' splits key from value.
+        # Only the first '=' splits key from value ("a=b" is no scalar → stays
+        # a string under the U1 _parse_value coercion).
         assert _parse_selection_kwargs(["k=a=b"]) == {"k": "a=b"}
 
     def test_strips_surrounding_whitespace(self) -> None:
