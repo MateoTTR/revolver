@@ -3342,3 +3342,163 @@ def test_launch_run_completed_message_after_teardown(
         if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
+
+
+# ── FR-RUN-053: wrapper coverage keys + timeout side-channel (S18 / U13 ii) ──
+
+_EVALUATOR_TIMEOUT_MIX = '''\
+"""Evaluator: one instance times out, the others return metrics.
+
+The reserved "instances_user_key" metric probes the FR-RUN-053 rule that
+the "instances_" prefix is never averaged into the aggregate.
+"""
+
+
+def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
+    if "timeout" in instance_path:
+        raise TimeoutError("simulated per-instance timeout")
+    return {"combined_score": 0.5, "quality": 0.4, "instances_user_key": 9.0}
+'''
+
+# Driver that imports a generated OE wrapper by path and prints the
+# aggregated evaluate() result as JSON (subprocess isolation keeps the
+# wrapper's `from evaluator import ...` out of this process's sys.modules).
+_OE_WRAPPER_DRIVER = """\
+import importlib.util
+import json
+import sys
+
+spec = importlib.util.spec_from_file_location("_wrapper_under_test", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(mod.evaluate(sys.argv[2])))
+"""
+
+
+def _make_timeout_mix_project(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Snapshot + dataset (2 valid instances, 1 timing out) + program file."""
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "evaluator.py").write_text(_EVALUATOR_TIMEOUT_MIX, encoding="utf-8")
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "inst-01.json").write_text("{}", encoding="utf-8")
+    (dataset / "inst-02-timeout.json").write_text("{}", encoding="utf-8")
+    (dataset / "inst-03.json").write_text("{}", encoding="utf-8")
+    program = tmp_path / "program.py"
+    program.write_text("def solve():\n    return 0\n", encoding="utf-8")
+    return snapshot, dataset, program
+
+
+def _assert_coverage_contract(metrics: dict[str, object], log_db: Path) -> None:
+    """Shared FR-RUN-053 assertions for both backends' wrapper output."""
+    # Coverage keys are emitted as metadata...
+    assert metrics["instances_valid"] == pytest.approx(2.0)
+    assert metrics["instances_total"] == pytest.approx(3.0)
+    # ...and never summed/averaged into the score: combined_score stays the
+    # survivor mean of the two valid instances, and the user's reserved-prefix
+    # metric is excluded from aggregation entirely.
+    assert metrics["combined_score"] == pytest.approx(0.5)
+    assert metrics["quality"] == pytest.approx(0.4)
+    assert "instances_user_key" not in metrics
+    # The timed-out instance is recorded on the side-channel (timeout marker
+    # row), distinguishable from ordinary failures.
+    conn = sqlite3.connect(log_db)
+    try:
+        rows = conn.execute(
+            "SELECT instance_id, value FROM instance_log WHERE metric = 'instances_timeout'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("inst-02-timeout.json", 1.0)]
+
+
+@pytest.mark.integration
+def test_wrapper_coverage_keys_not_in_score(tmp_path: Path) -> None:
+    """Both wrapper templates emit coverage keys that never inflate the score.
+
+    FR-RUN-053 / FR-EVL-021 (S18 / U13 #367 commit ii): over a mixed
+    valid/timed-out dataset, the generated wrapper on BOTH backends emits
+    ``instances_valid``/``instances_total`` alongside the aggregated metrics,
+    excludes the reserved ``instances_`` prefix from the metric mean, and
+    records the timed-out instance on the ``REVOLVER_INSTANCE_LOG``
+    side-channel. The Shinka wrapper runs via its standalone fallback here,
+    so this covers the no-shinka CI env; the run_shinka_eval path is covered
+    by ``test_shinka_wrapper_timeout_branch`` (L2-Shinka).
+    """
+    import os
+    import subprocess
+    import sys
+
+    from revolver.infra.backends.openevolve import generate_wrapper as oe_generate_wrapper
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+
+    # ── OpenEvolve wrapper (module contract: evaluate(program_path)) ────────
+    oe_run_dir = tmp_path / "run-oe"
+    oe_run_dir.mkdir()
+    oe_wrapper = oe_generate_wrapper(snapshot, oe_run_dir)
+    driver = tmp_path / "driver.py"
+    driver.write_text(_OE_WRAPPER_DRIVER, encoding="utf-8")
+    oe_log_db = tmp_path / "instance_log_oe.db"
+    env = {k: v for k, v in os.environ.items() if k not in ("REVOLVER_INSTANCE_PATH",)}
+    env["REVOLVER_DATASET_DIR"] = str(dataset)
+    env["REVOLVER_INSTANCE_LOG"] = str(oe_log_db)
+
+    proc = subprocess.run(
+        [sys.executable, str(driver), str(oe_wrapper), str(program)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    oe_metrics = json.loads(proc.stdout)
+    _assert_coverage_contract(oe_metrics, oe_log_db)
+    assert "timeout for inst-02-timeout.json" in proc.stderr
+
+    # ── ShinkaEvolve wrapper (CLI contract: --program_path/--results_dir) ───
+    from revolver.infra.backends.base import BackendRunSpec
+    from revolver.infra.backends.shinka import ShinkaBackend
+    from revolver.models.llm import LLMEntry
+
+    shinka_run_dir = tmp_path / "run-shinka"
+    shinka_run_dir.mkdir()
+    spec = BackendRunSpec(
+        snapshot_dir=snapshot,
+        llm=LLMEntry(
+            name="test-llm",
+            source="local",
+            model="test-model",
+            base_url="http://localhost:11434/v1",
+            api_key_env=None,
+            registered_at=datetime.now(UTC),
+        ),
+        run_dir=shinka_run_dir,
+    )
+    shinka_wrapper = ShinkaBackend().generate_wrapper(spec)
+    results_dir = tmp_path / "results"
+    shinka_log_db = tmp_path / "instance_log_shinka.db"
+    env["REVOLVER_INSTANCE_LOG"] = str(shinka_log_db)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(shinka_wrapper),
+            "--program_path",
+            str(program),
+            "--results_dir",
+            str(results_dir),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    shinka_metrics = json.loads((results_dir / "metrics.json").read_text(encoding="utf-8"))
+    _assert_coverage_contract(shinka_metrics, shinka_log_db)
+    correct = json.loads((results_dir / "correct.json").read_text(encoding="utf-8"))
+    assert correct["correct"] is True

@@ -307,6 +307,7 @@ to --results_dir.
 import argparse
 import json
 import os
+import sqlite3
 import statistics
 import sys
 from pathlib import Path
@@ -317,6 +318,11 @@ from evaluator import evaluate_instance
 
 # Per-instance timeout in seconds (None = no timeout)
 _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
+
+# Coverage bookkeeping (FR-RUN-053): populated by run_experiment(), read by
+# aggregate_metrics(). Both run inside the same process on the
+# run_shinka_eval path and on the standalone fallback alike.
+_COVERAGE = {{"instances_valid": 0.0, "instances_total": 0.0}}
 
 
 def _call_evaluate_instance(program_path, instance_path):
@@ -357,8 +363,10 @@ def run_experiment(program_path, seed=0):
     """Evaluate *program_path* on every dataset instance (one Shinka run).
 
     Returns the list of per-instance metric dicts. Instances whose
-    evaluation raises are skipped (logged to stderr); when every instance
-    fails a RuntimeError is raised so the run is marked incorrect.
+    evaluation raises are skipped (logged to stderr); a timed-out instance
+    hits a distinct TimeoutError branch (FR-RUN-053) and is recorded on the
+    side-channel. When every instance fails a RuntimeError is raised so the
+    run is marked incorrect.
     """
     dataset_dir = os.environ["REVOLVER_DATASET_DIR"]
     instances = sorted(
@@ -366,14 +374,26 @@ def run_experiment(program_path, seed=0):
         if not p.name.startswith(".") and p.is_file()
     )
     per_instance = []
+    valid = 0  # instances that genuinely returned metrics (FR-RUN-053)
     for inst in instances:
         try:
             per_instance.append(_call_evaluate_instance(program_path, str(inst)))
+            valid += 1
+        except TimeoutError as exc:
+            # Distinct timeout branch (FR-RUN-053): timeouts are recorded on
+            # the side-channel, distinguishable from ordinary failures.
+            print(
+                "[revolver] timeout for " + inst.name + ": " + str(exc),
+                file=sys.stderr,
+            )
+            _log_timeout(inst.name)
         except Exception as exc:
             print(
                 "[revolver] evaluation failed for " + inst.name + ": " + str(exc),
                 file=sys.stderr,
             )
+    _COVERAGE["instances_valid"] = float(valid)
+    _COVERAGE["instances_total"] = float(len(instances))
     if not per_instance:
         raise RuntimeError("all instance evaluations failed")
     return per_instance
@@ -384,6 +404,10 @@ def aggregate_metrics(results):
 
     *results* is the run_shinka_eval results list (one entry per run);
     each entry is the per-instance metrics list from run_experiment().
+
+    The reserved "instances_" coverage prefix is NEVER averaged into the
+    metrics (FR-RUN-053); the coverage keys are appended as metadata from
+    the run_experiment() bookkeeping instead.
     """
     all_metrics = [m for run_result in results for m in run_result]
     aggregated = {{}}
@@ -392,6 +416,8 @@ def aggregate_metrics(results):
         if isinstance(m, dict):
             keys.update(m.keys())
     for key in sorted(keys):
+        if key.startswith("instances_"):
+            continue  # reserved coverage prefix — metadata, never averaged
         values = [
             m[key]
             for m in all_metrics
@@ -405,6 +431,9 @@ def aggregate_metrics(results):
     # to exist; validate_result() independently marks the run incorrect when
     # the user metrics lacked it, so this default never masks a failure.
     aggregated.setdefault("combined_score", 0.0)
+    # Coverage keys: metadata, not fitness (FR-RUN-053).
+    aggregated["instances_valid"] = _COVERAGE["instances_valid"]
+    aggregated["instances_total"] = _COVERAGE["instances_total"]
     return aggregated
 
 
@@ -419,6 +448,34 @@ def validate_result(per_instance):
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             return False, "missing numeric 'combined_score' in instance metrics"
     return True, None
+
+
+def _log_timeout(instance_id):
+    """Record a timed-out instance on the SQLite side-channel (FR-RUN-053).
+
+    Best-effort channel keyed by $REVOLVER_INSTANCE_LOG (same table shape as
+    the OpenEvolve wrapper), with a status marker row (metric
+    "instances_timeout", value 1.0 — reserved "instances_" prefix, never
+    aggregated) so timed-out instances stay visible per instance.
+    """
+    log_path = os.environ.get("REVOLVER_INSTANCE_LOG")
+    if not log_path:
+        return
+    try:
+        conn = sqlite3.connect(log_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS instance_log "
+            "(instance_id TEXT, metric TEXT, value REAL, pid INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
+            (instance_id, "instances_timeout", 1.0, os.getpid()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Side-channel is best-effort
 
 
 def _save_results(results_dir, metrics, correct, error):

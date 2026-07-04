@@ -1418,18 +1418,27 @@ def evaluate(program_path: str) -> dict[str, float]:
     )
 
     all_metrics: list[dict[str, float]] = []
+    valid = 0  # instances that genuinely returned metrics (FR-RUN-053)
     for inst in instances:
         try:
             metrics = _call_evaluate_instance(program_path, str(inst))
             all_metrics.append(metrics)
+            valid += 1
             _log_instance(inst.name, metrics)
         except TimeoutError as _te:
+            # Distinct timeout branch (FR-RUN-053): record the timed-out
+            # instance on the side-channel so it stays visible per instance.
             print(f"[revolver] timeout for {{inst.name}}: {{_te}}", file=sys.stderr)
+            _log_timeout(inst.name)
         except Exception as _e:
             print(f"[revolver] evaluation failed for {{inst.name}}: {{_e}}", file=sys.stderr)
 
     if not all_metrics:
-        return {{"combined_score": 0.0}}
+        return {{
+            "combined_score": 0.0,
+            "instances_valid": 0.0,
+            "instances_total": float(len(instances)),
+        }}
 
     # Numeric guard (B1 / FR-EVL-021): a user evaluate_instance may emit
     # non-numeric fields (e.g. {{"error": "boom"}}) alongside numeric metrics.
@@ -1447,15 +1456,20 @@ def evaluate(program_path: str) -> dict[str, float]:
     result: dict[str, float] = {{"combined_score": combined}}
 
     # Include other metrics as aggregated means, dropping non-numeric values.
+    # The reserved "instances_" coverage prefix is NEVER averaged into the
+    # metrics (FR-RUN-053; read-path counterpart: FR-EVL-021 as amended).
     all_keys: set[str] = set()
     for m in all_metrics:
         all_keys.update(m.keys())
     for key in sorted(all_keys):
-        if key != "combined_score":
+        if key != "combined_score" and not key.startswith("instances_"):
             vals = [m[key] for m in all_metrics if key in m and _is_number(m[key])]
             if vals:
                 result[key] = statistics.mean(vals)
 
+    # Coverage keys: metadata, not fitness (FR-RUN-053).
+    result["instances_valid"] = float(valid)
+    result["instances_total"] = float(len(instances))
     return result
 
 
@@ -1476,6 +1490,34 @@ def _log_instance(instance_id: str, metrics: dict[str, float]) -> None:
                 "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
                 (instance_id, metric, value, os.getpid()),
             )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Side-channel is best-effort
+
+
+def _log_timeout(instance_id: str) -> None:
+    """Record a timed-out instance on the SQLite side-channel (FR-RUN-053).
+
+    Same best-effort channel as _log_instance, with a status marker row
+    (metric "instances_timeout", value 1.0 — reserved "instances_" prefix,
+    never aggregated) so timed-out instances stay visible per instance
+    regardless of how the fitness mean treats them.
+    """
+    log_path = os.environ.get("REVOLVER_INSTANCE_LOG")
+    if not log_path:
+        return
+    try:
+        conn = sqlite3.connect(log_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS instance_log "
+            "(instance_id TEXT, metric TEXT, value REAL, pid INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
+            (instance_id, "instances_timeout", 1.0, os.getpid()),
+        )
         conn.commit()
         conn.close()
     except Exception:
