@@ -49,6 +49,7 @@ from revolver.infra.backends import get_backend
 from revolver.infra.backends.base import (
     BackendRunResult,
     BackendRunSpec,
+    ChildProcessReaperMixin,
     EvolutionBackend,
 )
 from revolver.infra.backends.openevolve import (
@@ -67,6 +68,10 @@ from revolver.infra.backends.openevolve import (
     # re-exports only.
     EVALUATOR_FILENAME,
     WRAPPER_FILENAME as WRAPPER_FILENAME,
+    # Backend-neutral scalar coercion shared with the CLI lever parsers
+    # (U1/S17a-08); the shinka adapter imports it the same way. Promotion
+    # to a shared module is deferred (v0.18).
+    _parse_value,
     count_valid_programs as count_valid_programs,
     find_latest_checkpoint,
     generate_wrapper as generate_wrapper,
@@ -140,9 +145,12 @@ DEFAULT_ITERATIONS = 10
 def _parse_selection_kwargs(raw: list[str] | None) -> dict[str, Any] | None:
     """Parse ``--selection-kwarg key=value`` strings into a dict (A5).
 
-    Values are kept as *strings* here; the backend routes them into the
-    selected sampler's constructor and coerces per-parameter. ``None`` in →
-    ``None`` out (no kwargs supplied).
+    Values are coerced to typed scalars here via :func:`_parse_value`
+    (bool/int/float/null/JSON, string fallback) — the samplers' constructors
+    receive them verbatim, so an un-coerced ``"0.3"`` would ``TypeError`` at
+    launch and ``bool("false")`` would silently invert (U1/S17a-08). The
+    backend then routes them per selected sampler and fail-fasts any residual
+    string on an accepted key. ``None`` in → ``None`` out (no kwargs supplied).
 
     Raises:
         ValidationError: If any entry is missing ``=`` or has an empty key.
@@ -157,7 +165,7 @@ def _parse_selection_kwargs(raw: list[str] | None) -> dict[str, Any] | None:
         key = key.strip()
         if not key:
             raise ValidationError(f"Invalid --selection-kwarg '{item}': empty key.")
-        parsed[key] = value.strip()
+        parsed[key] = _parse_value(value.strip())
     return parsed
 
 
@@ -244,6 +252,35 @@ def _validate_llm_weight_overrides(spec: BackendRunSpec) -> None:
             f"--llm-weight names unknown ensemble member(s): {', '.join(unknown)}. "
             f"Ensemble '{spec.ensemble.name}' members: {valid}."
         )
+
+
+def _warn_snapshot_config_findings(backend: EvolutionBackend, snapshot_dir: Path) -> None:
+    """Re-validate the problem-version snapshot ``config.yaml``, warn-only (U5).
+
+    ``problem version create`` has validated the config since S9a, but that
+    warning is one-shot: nothing re-checks the snapshot at run time, so a dead
+    key committed despite the create-time warning (or validated against a
+    different backend) is silently ignored by every subsequent run. This is
+    the config-file analogue of the B9 ``--config-override`` no-op warn
+    (S17a-11) and runs at ``run``/``--dry-run``/``resume`` entry.
+
+    Warn-only by design: findings go to stderr and the run proceeds. Skips
+    silently when the backend engine is unavailable (mirrors the create-time
+    gating) or when validation itself fails — re-validation must never block
+    a launch.
+    """
+    config_path = snapshot_dir / "config.yaml"
+    if not config_path.exists():
+        return
+    try:
+        available, _hint = backend.is_available()
+        if not available:
+            return
+        findings = backend.validate_config(config_path)
+    except Exception:  # best-effort re-validation — never blocks a launch
+        return
+    for finding in findings:
+        sys.stderr.write(f"Warning: snapshot config.yaml: {finding}\n")
 
 
 def _determine_run_status(
@@ -587,6 +624,51 @@ def _handle_post_run_failure(
         remove_run_lock(root, run_id)
 
 
+# ── Finalize backstop (U12 residual, S17a-06 / #359) ─────────────────────────
+
+
+def _snapshot_child_pids() -> set[int]:
+    """Never-raising snapshot of the current direct-children PIDs.
+
+    Taken right before the engine launch/resume so the finalize backstop
+    (:func:`_finalize_backstop_reap`) can diff against it: every direct
+    child that appeared since the snapshot is reaped. An empty snapshot
+    (also the failure fallback) is therefore NOT a no-op — it makes the
+    backstop treat every direct child still alive at reap time as a
+    survivor. That is exactly right in the normal case (the process has no
+    pre-existing direct children at finalization; the token proxy is a
+    thread, already stopped by then), and it errs on the side of reaping.
+    """
+    try:
+        return ChildProcessReaperMixin._current_child_pids()
+    except Exception:
+        return set()
+
+
+def _finalize_backstop_reap(pre_run_children: set[int]) -> None:
+    """Never-raising direct-children reap at run finalization (U12 / #359).
+
+    Belt to PR-A's braces: ``run_instance`` kills its own child at the
+    per-instance deadline, and each backend's ``launch()``-``finally`` reap
+    covers the engine phase — but that reap runs **before**
+    ``_post_run_evaluation``, so a child leaked through post-run eval (or
+    one that outlived the per-instance kill) would still be alive when the
+    lock is removed and the CLI prints "Run completed". Called between the
+    post-run-eval block and ``remove_run_lock`` in both ``launch_run`` and
+    ``resume_run``, it reaps any direct child that appeared since the
+    pre-launch snapshot.
+
+    Reuses the :class:`ChildProcessReaperMixin` helpers verbatim
+    (recursive-descendant/killpg hardening is deferred to v0.18). Never
+    raises: teardown must not fail a completed run.
+    """
+    try:
+        ChildProcessReaperMixin()._reap_run_children(pre_run_children)
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            sys.stderr.write(f"Warning: finalize child-process reap failed: {exc}\n")
+
+
 # ── launch_run (DES-005 §2.1) ────────────────────────────────────────────────
 
 
@@ -724,6 +806,10 @@ def launch_run(
         _validate_selection(spec, backend)
         # Reject --llm-weight keys that name no ensemble member (both backends).
         _validate_llm_weight_overrides(spec)
+
+        # U5 (S17a-11): re-validate the snapshot config.yaml at run entry
+        # (before build_config, so --dry-run is covered too). Warn-only.
+        _warn_snapshot_config_findings(backend, snapshot_dir)
 
         oe_config = backend.build_config(spec)
 
@@ -919,6 +1005,11 @@ def launch_run(
                         f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
                     )
 
+                # Snapshot direct children for the finalize backstop
+                # (S17a-06 / #359): anything that appears from here on and
+                # survives post-run eval is reaped before lock removal.
+                pre_run_children = _snapshot_child_pids()
+
                 # Launch the engine with the resolved config (secrets
                 # resolved at runtime) through the backend (ADR-007 D1).
                 run_output = backend.launch(spec, oe_config_resolved)
@@ -1037,6 +1128,11 @@ def launch_run(
                 programs=programs,
             ).model_dump(mode="json")
             write_run_manifest(root, run_id, manifest_data)
+
+            # Finalize backstop (U12 / #359): reap any direct child that
+            # outlived the engine-phase reap or post-run eval BEFORE the
+            # lock is removed and the CLI can print "Run completed".
+            _finalize_backstop_reap(pre_run_children)
 
             # Remove lock file
             remove_run_lock(root, run_id)
@@ -1470,6 +1566,10 @@ def resume_run(
         # Reject --llm-weight keys that name no ensemble member (both backends).
         _validate_llm_weight_overrides(spec)
 
+        # U5 (S17a-11): re-validate the snapshot config.yaml at resume entry
+        # (warn-only, mirrors the launch/--dry-run path).
+        _warn_snapshot_config_findings(backend, snapshot_dir)
+
         oe_config = backend.build_config(spec)
 
         # Build LLM snapshot for traceability (S11-08)
@@ -1590,6 +1690,10 @@ def resume_run(
                     sys.stderr.write(
                         f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
                     )
+
+                # Snapshot direct children for the finalize backstop
+                # (S17a-06 / #359), mirroring launch_run.
+                pre_run_children = _snapshot_child_pids()
 
                 # Resume the engine from the staged checkpoint through
                 # the backend (ADR-007 D1; spec.iterations already
@@ -1713,6 +1817,11 @@ def resume_run(
                 programs=programs,
             ).model_dump(mode="json")
             write_run_manifest(root, new_run_id, manifest_data)
+
+            # Finalize backstop (U12 / #359): reap any direct child that
+            # outlived the engine-phase reap or post-run eval BEFORE the
+            # lock is removed and the CLI can print "Resumed run completed".
+            _finalize_backstop_reap(pre_run_children)
 
             remove_run_lock(root, new_run_id)
 

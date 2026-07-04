@@ -193,6 +193,48 @@ revolver run --llm codestral-local --iterations 50 --parallel 1
 
 ---
 
+## Evaluation thread caps (`REVOLVER_EVAL_NUM_THREADS`)
+
+Revolver's own evaluation paths — post-run training eval, `revolver eval`,
+`benchmark`, `problem test`, and the run pre-flight — each run the evaluator
+in an isolated subprocess. Since v0.17.1 that subprocess is **killed at the
+per-instance timeout** (SIGTERM to its process group, then SIGKILL after a
+3 s grace — no leaked workers), and receives a **numeric thread cap** so a
+single evaluation cannot oversubscribe every core with BLAS/OpenMP threads
+(the classic symptom: a program evolved under ShinkaEvolve's capped
+evolution-phase evals then *times out* in the uncapped post-run eval).
+
+The cap injects the standard variable family (`OMP_NUM_THREADS`,
+`OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `NUMEXPR_NUM_THREADS`,
+`VECLIB_MAXIMUM_THREADS`, `BLIS_NUM_THREADS`, `GOTO_NUM_THREADS`, …) plus
+`OMP_DYNAMIC=FALSE`, `MKL_DYNAMIC=FALSE`, `OMP_WAIT_POLICY=PASSIVE`.
+
+Resolution order:
+
+1. **User env wins**: if *any* cap variable is already set in your
+   environment (e.g. `OMP_NUM_THREADS=2`), Revolver injects **nothing**.
+2. **`REVOLVER_EVAL_NUM_THREADS=N`** caps each eval subprocess at `N`
+   threads; **`0` disables the cap** (escape hatch for a legitimate single
+   big-BLAS evaluation on a dedicated machine).
+3. **Default**: `max(1, cpu_count // 2)`.
+
+One stderr line announces the applied cap per process:
+`[revolver] numeric thread cap per eval process: N (REVOLVER_EVAL_NUM_THREADS=0 to disable)`.
+
+```bash
+# Cap each eval subprocess at 4 threads
+REVOLVER_EVAL_NUM_THREADS=4 revolver eval --solution my-sol --dataset eval-set
+
+# Uncapped (dedicated machine, one heavy numeric eval at a time)
+REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution my-sol --dataset eval-set
+```
+
+> Note: this cap applies to **Revolver's eval subprocesses**. During the
+> evolution phase, each backend manages its own evaluation workers
+> (ShinkaEvolve's scheduler injects an equivalent cap family itself).
+
+---
+
 ## Temperature tuning
 
 Temperature controls the randomness of the LLM's output. Lower values produce
@@ -880,7 +922,13 @@ run); ShinkaEvolve accepts `fixed | ucb | ucb1 | thompson`. Omitting
    starts uniform and learns arm weights from observed rewards, so your
    configured weights (registry weights **or** `--llm-weight` overrides)
    are deliberately **ignored with a warning** — they are not silently
-   applied. Use `fixed` when you want to pin the sampling mixture.
+   applied. The shinka samplers expose **no per-arm prior**, so the bandit
+   cannot be warm-started from your weights either. This matters most on
+   **short runs (tens of generations)**: the bandit has too few
+   observations to converge away from uniform, so prefer
+   `--selection fixed` there — it is the only mode that actually applies
+   your weights. Reserve the adaptive modes for longer runs, and use
+   `fixed` whenever you want to pin the sampling mixture.
 
 2. **Per-member `reasoning_effort` is OpenEvolve-only.** On OpenEvolve
    each `llm.models[]` entry carries its own `reasoning_effort`, so a
@@ -901,6 +949,36 @@ run); ShinkaEvolve accepts `fixed | ucb | ucb1 | thompson`. Omitting
 > `--config-override key=value` whose key matches no field in the resolved
 > backend's config schema is a no-op and is **warned** rather than silently
 > accepted (spec §4.5).
+
+---
+
+## Known issues
+
+### Engine `best_score` is a single, possibly optimistic evaluation
+
+The `best_score` reported by the evolution engines (and displayed by
+`revolver run info`) is the maximum over *single* engine-side evaluations
+of each candidate program. Two effects can inflate it:
+
+- **Evaluation noise** — `max()` over noisy single evaluations picks the
+  lucky ones.
+- **Timeout survivorship** — the engine-side evaluation averages over the
+  dataset instances that *completed* within the per-instance timeout;
+  instances that time out or fail are dropped from the mean, so a program
+  that only finishes its easy instances can score higher than one
+  evaluated on all of them.
+
+Until fitness accounts for timeouts (planned for v0.18), treat the engine
+`best_score` as an evolution-pressure signal, not a reportable result:
+**re-score the saved best solution with `revolver eval` (which runs every
+instance) and report that number.**
+
+### Bandit selection cannot be warm-started (shinka)
+
+The shinka samplers (`ucb`/`ucb1`/`thompson`) expose no per-arm prior, so
+ensemble weights cannot seed the bandit — it always starts uniform (see
+the ensemble asymmetries above). Follow the in-run warning: for short
+runs, prefer `--selection fixed` to apply weights.
 
 ---
 

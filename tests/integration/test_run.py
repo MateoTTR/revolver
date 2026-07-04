@@ -396,6 +396,170 @@ def test_run_dry_run(project_with_prereqs: dict[str, Path]) -> None:
         conn.close()
 
 
+# ── Test 3b: snapshot config re-validation at run entry (U5, S17a-11) ───────
+
+
+# The U5 re-validation is exercised with the backend's is_available /
+# validate_config patched: the CI main test job has NO openevolve install,
+# where the availability gate (correctly) skips re-validation — so the real
+# validate_oe_config leg lives in tests/integration/test_run_oe.py (the
+# OE-installed CI step) and THIS test asserts Revolver's warning plumbing
+# (emission at run/--dry-run/resume, warn-only, availability gate)
+# deterministically on any env.
+_U5_IS_AVAILABLE = "revolver.infra.backends.openevolve.OpenEvolveBackend.is_available"
+_U5_VALIDATE = "revolver.infra.backends.openevolve.OpenEvolveBackend.validate_config"
+_U5_FINDINGS = [
+    "Unknown OE config key 'population_size' at top level. "
+    "Did you mean 'database.population_size'?"
+]
+
+
+@pytest.mark.integration
+def test_run_revalidates_snapshot_config_warns(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """U5 (S17a-11): snapshot config.yaml re-validated warn-only at run entry.
+
+    Backend validation is stubbed (see the module comment above) so every
+    leg is deterministic without an openevolve install: findings warn on
+    stderr at ``--dry-run``, launch, and resume — and the run proceeds; zero
+    findings stay silent; an unavailable backend skips validation entirely.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # (a) --dry-run warns (re-validation runs before build_config, which is
+    # itself before the dry-run early return).
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert mock_validate.called  # the warning came from the stub, not a real import
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" in output
+    assert "population_size" in output
+
+    # (b) A real (mocked) launch warns too — and proceeds (warn-only). The
+    # --json payload still parses from stdout: the warning is stderr-only.
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "--json",
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert mock_validate.called
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" in output
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    # (c) Resume warns as well (same snapshot dir re-validated).
+    checkpoint_dir = (
+        root / REVOLVER_DIR / "runs" / parent_run_id / "oe-output" / "checkpoints" / "checkpoint_5"
+    )
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    resume_run_id, resume_sol_id = _next_ids()
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch(
+            "revolver.infra.backends.openevolve.OpenEvolveRunner",
+            MagicMock(return_value=_make_mock_runner()),
+        ),
+        patch("revolver.core.run.TokenCountingProxy", MagicMock(return_value=_make_mock_proxy())),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = runner.invoke(app, ["run", "resume", parent_run_id], catch_exceptions=False)
+    assert mock_validate.called
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" in output
+
+    # (d) A clean snapshot config (zero findings) warns nothing — the
+    # availability gate was passed, so silence means "no findings".
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=[]) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert mock_validate.called
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" not in output
+
+    # (e) Unavailable backend → re-validation is skipped silently (the CI
+    # no-openevolve behaviour, encoded explicitly).
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(False, "install hint")),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert not mock_validate.called  # gated off before validation
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" not in output
+
+
 # ── Selection strategy validation + --llm-weight on OpenEvolve (S17) ────────
 
 
@@ -3076,3 +3240,105 @@ def test_run_dry_run_backend_surfaced(project_with_prereqs: dict[str, Path]) -> 
     rc = data["resolved_config"]
     assert rc["backend"] == "openevolve"
     assert isinstance(rc["backend_extras"], dict)
+
+
+# ── S17a-06: "completed" messaging only after teardown (U12 residual, #359) ──
+
+
+@pytest.mark.integration
+def test_launch_run_completed_message_after_teardown(
+    project_with_prereqs: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Run completed" is emitted only after the finalize backstop reaped a
+    child leaked through post-run eval: at lock-removal time the leaked
+    child is already terminated, and the CLI message (printed after
+    launch_run returns) therefore always follows teardown.
+    """
+    import signal
+    import subprocess
+    import sys
+
+    import revolver.core.run as core_run_module
+    import revolver.infra.backends.base as backends_base
+
+    # Keep the zombie-wait loop in _reap_run_children fast (the SIGTERMed
+    # direct child of pytest stays a zombie until poll()ed).
+    monkeypatch.setattr(backends_base, "_CHILD_REAP_GRACE_SECONDS", 0.3)
+
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    leaked: dict[str, subprocess.Popen[bytes]] = {}
+    order: dict[str, bool] = {}
+    probes: dict[str, str] = {}
+
+    def _leaking_post_eval(**kwargs: object) -> None:
+        """Simulate post-run eval leaking one direct child (U12)."""
+        leaked["proc"] = subprocess.Popen(["sleep", "60"])
+
+    real_remove_run_lock = core_run_module.remove_run_lock
+
+    def _captured_cli_text() -> str:
+        """Read the CLI output captured so far by CliRunner's streams."""
+        chunks: list[str] = []
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+                buffer = getattr(stream, "buffer", None)
+                if buffer is not None and hasattr(buffer, "getvalue"):
+                    chunks.append(buffer.getvalue().decode("utf-8", errors="replace"))
+            except Exception:  # probe only — never fail the run from here
+                continue
+        return "".join(chunks)
+
+    def _recording_remove_run_lock(root_arg: Path, run_id_arg: str) -> None:
+        order["leaked_dead_at_lock_removal"] = leaked["proc"].poll() is not None
+        # Direct ordering probe (PR #245 review): the completed message
+        # must NOT have been emitted yet at lock-removal time.
+        probes["output_at_lock_removal"] = _captured_cli_text()
+        real_remove_run_lock(root_arg, run_id_arg)
+
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    run_id, sol_id = _next_ids()
+
+    try:
+        with (
+            patch("pathlib.Path.cwd", return_value=root),
+            patch(
+                "revolver.core.run.get_global_db",
+                side_effect=lambda: get_global_db_at(global_db_path),
+            ),
+            patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+            patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+            patch("revolver.core.run._post_run_evaluation", side_effect=_leaking_post_eval),
+            patch("revolver.core.run.remove_run_lock", side_effect=_recording_remove_run_lock),
+            patch("revolver.core.run.generate_run_id", return_value=run_id),
+            patch("revolver.core.run.generate_solution_id", return_value=sol_id),
+            patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=10),
+        ):
+            result = runner.invoke(
+                app,
+                ["run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+                catch_exceptions=False,
+            )
+
+        output = _get_all_output(result)
+        assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+        # The completed message was emitted...
+        assert "Run completed" in output
+        # ...but only after teardown: at lock-removal time the leaked child
+        # was already dead AND the message was not yet in the captured
+        # output (direct ordering assertion — PR #245 review). The probe is
+        # proven live by a message that does precede lock removal.
+        assert order["leaked_dead_at_lock_removal"] is True
+        assert "Running post-run evaluation" in probes["output_at_lock_removal"]
+        assert "Run completed" not in probes["output_at_lock_removal"]
+        assert leaked["proc"].poll() in (-signal.SIGTERM, -signal.SIGKILL)
+    finally:
+        proc = leaked.get("proc")
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)

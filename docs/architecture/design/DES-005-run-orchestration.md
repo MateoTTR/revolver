@@ -810,6 +810,28 @@ def _post_run_evaluation(
 
 This step is **synchronous** — it runs after OpenEvolve completes but before the run is marked as finished.
 
+**Eval subprocess teardown (v0.17.1, task 358 / U12+U14).** Each per-instance
+evaluation funnels through `infra/evaluator_runner.run_instance()`, which runs
+the evaluator in a **spawn-context** `multiprocessing.Process` in its own
+session (`os.setsid()`):
+
+- **Kill-on-timeout**: at the per-instance deadline the parent sends SIGTERM
+  to the child's process group, waits a 3 s grace, then SIGKILL (single-PID
+  `terminate()`/`kill()` fallback when `getpgid`/`killpg` fails). No eval
+  worker survives the call — this replaces the previous
+  `ProcessPoolExecutor` timeout, which *abandoned* a still-running worker
+  (one leaked grinder per timed-out instance).
+- **Thread caps**: the child receives the BLAS/OpenMP thread-cap env family
+  before importing the evaluator, controlled by `REVOLVER_EVAL_NUM_THREADS`
+  (`0` = uncapped; default `max(1, cpu_count // 2)`; nothing injected when
+  the user already set any cap variable). This prevents the core
+  oversubscription that produced false per-instance timeouts.
+- The legacy global `evaluate()` aggregation (DES-006 §"legacy mode") runs
+  through the same killable primitive.
+
+The `InstanceTestResult` contract (statuses `pass`/`fail`/`timeout`, the
+timeout message, error strings) is unchanged.
+
 ### 7.1 Error Handling: `oe_completed` Flag and `completed_with_errors` (F3)
 
 Post-processing (program collection, solution creation, training eval) can fail even after OpenEvolve completes successfully. To distinguish this from an OpenEvolve failure, `launch_run()` uses an `oe_completed` flag:

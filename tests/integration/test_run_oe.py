@@ -378,3 +378,39 @@ class TestOpenEvolveRunnerInitController:
 
         assert runner._controller is not None
         assert runner._controller.config.llm.api_base == "http://localhost:11434/v1"
+
+
+@pytest.mark.integration
+@pytest.mark.openevolve
+def test_warn_snapshot_config_findings_real_validation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """U5 (S17a-11), real-OE leg: the run-entry re-validation helper warns on
+    a genuinely dead OE key through the real ``validate_oe_config`` (dacite +
+    OEConfig). The env-independent plumbing legs (dry-run/launch/resume,
+    warn-only, availability gate) live in ``tests/integration/test_run.py``
+    with the backend stubbed — this twin runs only where openevolve is
+    installed and pins the real validation wiring.
+    """
+    from revolver.core.run import _warn_snapshot_config_findings
+    from revolver.infra.backends.openevolve import OpenEvolveBackend
+
+    snapshot_dir = tmp_path / "snapshot"
+    snapshot_dir.mkdir()
+    # config_simple.yaml carries dead OE keys (iterations, population_size).
+    shutil.copy(FIXTURES / "config_simple.yaml", snapshot_dir / "config.yaml")
+
+    _warn_snapshot_config_findings(OpenEvolveBackend(), snapshot_dir)
+
+    err = capsys.readouterr().err
+    assert "snapshot config.yaml" in err
+    assert "population_size" in err
+
+    # A clean config warns nothing through the same real path.
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    (clean_dir / "config.yaml").write_text("max_iterations: 20\n", encoding="utf-8")
+
+    _warn_snapshot_config_findings(OpenEvolveBackend(), clean_dir)
+
+    assert capsys.readouterr().err == ""

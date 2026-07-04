@@ -648,3 +648,84 @@ def test_results_shows_user_aggregates(eval_project: dict[str, object]) -> None:
     assert result2.exit_code == 0, f"Exit code {result2.exit_code}: {output}"
     # Should display user aggregates section
     assert "user aggregates" in output.lower() or "weighted_avg" in output.lower()
+
+
+# ── S17a-03: legacy global aggregation through the killable primitive ────────
+
+
+def test_global_eval_worker_module_level_killable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The legacy global evaluate() aggregation runs through the killable
+    spawn primitive: the worker is module-level (picklable under spawn),
+    user_aggregates are returned unchanged, and a hung aggregation is
+    killed at the deadline instead of leaking a worker (S17a-03, task 358).
+    """
+    import os
+    import pickle
+    import time as time_module
+
+    from revolver.core.eval import _global_eval_worker, _run_legacy_global_aggregation
+
+    # 1. Module-level and picklable under spawn (pickled by reference).
+    assert pickle.loads(pickle.dumps(_global_eval_worker)) is _global_eval_worker
+
+    dataset_dir = tmp_path / "dataset"
+    dataset_dir.mkdir()
+    (dataset_dir / "instance_001.json").write_text("{}")
+    program = tmp_path / "program.py"
+    program.write_text("# program\n")
+
+    # 2. user_aggregates unchanged: evaluate() sees REVOLVER_DATASET_DIR
+    #    (and no REVOLVER_INSTANCE_PATH) and its aggregates pass through.
+    agg_eval = tmp_path / "agg_eval.py"
+    agg_eval.write_text(
+        "import os\n"
+        "def evaluate(program_path):\n"
+        "    return {\n"
+        "        'weighted_avg': 0.9,\n"
+        "        'dataset_seen': 1.0 if os.environ.get('REVOLVER_DATASET_DIR') else 0.0,\n"
+        "        'instance_leak': 1.0 if os.environ.get('REVOLVER_INSTANCE_PATH') else 0.0,\n"
+        "    }\n"
+    )
+    aggregates = _run_legacy_global_aggregation(
+        evaluator_path=agg_eval,
+        program_path=program,
+        dataset_dir=dataset_dir,
+        timeout_s=60,
+    )
+    assert aggregates == {"weighted_avg": 0.9, "dataset_seen": 1.0, "instance_leak": 0.0}
+
+    # 3. Kill-on-timeout: a hung aggregation warns, returns None, and the
+    #    worker process does not survive the call.
+    hung_eval = tmp_path / "hung_eval.py"
+    hung_eval.write_text(
+        "import json\n"
+        "import os\n"
+        "import time\n"
+        "def evaluate(program_path):\n"
+        "    probe = os.path.join(os.environ['REVOLVER_DATASET_DIR'], 'worker.pid')\n"
+        "    with open(probe, 'w') as fh:\n"
+        "        json.dump({'child': os.getpid()}, fh)\n"
+        "    time.sleep(120)\n"
+        "    return {'combined_score': 0.0}\n"
+    )
+    hung_result = _run_legacy_global_aggregation(
+        evaluator_path=hung_eval,
+        program_path=program,
+        dataset_dir=dataset_dir,
+        timeout_s=4,
+    )
+    assert hung_result is None
+    assert "Warning: legacy global aggregation timed out" in capsys.readouterr().err
+
+    child_pid = json.loads((dataset_dir / "worker.pid").read_text())["child"]
+    deadline = time_module.monotonic() + 10.0
+    while time_module.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time_module.sleep(0.1)
+    else:
+        pytest.fail(f"legacy aggregation worker (pid={child_pid}) survived the timeout kill")

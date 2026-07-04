@@ -475,7 +475,9 @@ def _build_ensemble_llm_config(
 
     - ``LLMEntry.model`` → ``models[].name`` (NOT ``model``)
     - ``LLMEntry.base_url`` → ``models[].api_base`` (NOT ``base_url``)
-    - ``LLMEntry.api_key_env`` → ``models[].api_key`` as ``${ENV_NAME}``
+    - ``LLMEntry.api_key_env`` → ``models[].api_key`` as ``${ENV_NAME}``;
+      a key-less ``source == "local"`` member gets the ``"ollama"``
+      placeholder instead (U2/S17a-09 — mirrors the single-LLM path)
     - ``EnsembleMember.weight`` → ``models[].weight``
     - ``EnsembleMember.temperature`` → ``models[].temperature`` (optional)
     - ``EnsembleMember.max_tokens`` → ``models[].max_tokens`` (optional)
@@ -524,6 +526,12 @@ def _build_ensemble_llm_config(
 
         if member_llm.api_key_env:
             entry["api_key"] = f"${{{member_llm.api_key_env}}}"
+        elif member_llm.source == "local":
+            # Key-less local member: the OpenAI SDK requires an api_key, and
+            # leaving it unset both crashes at init AND silently forwards an
+            # ambient OPENAI_API_KEY to the local endpoint. Inject the same
+            # "ollama" placeholder as the single-LLM path (#115) — U2/S17a-09.
+            entry["api_key"] = "ollama"
 
         # Per-member overrides take precedence over LLM registry defaults
         effective_temperature = (
@@ -826,6 +834,29 @@ def build_config(
         )
         sys.stderr.write(msg)
         config["checkpoint_interval"] = effective_iters
+
+    # 5c. U6 phase 1 (S17a-12): an interval exactly equal to the iteration
+    # count means the only checkpoint is the completion one — a killed or
+    # interrupted run has nothing to resume from. Checked on the PRE-clamp
+    # value so it never stacks on 5b (the strictly-> regime is 5b's: it has
+    # already warned and clamped, incl. the default-template case of OE's
+    # 100 default vs small iteration counts — S17a code review). Warn-only;
+    # a smarter default cadence is the v0.18 phase 2 (backlog 364).
+    if (
+        effective_iters is not None
+        and isinstance(effective_interval, int)
+        and isinstance(effective_iters, int)
+        and effective_iters > 0
+        and effective_interval == effective_iters
+    ):
+        sys.stderr.write(
+            f"Warning: checkpoint_interval ({effective_interval}) == iterations "
+            f"({effective_iters}) — no mid-run checkpoint will exist, so a "
+            f"killed or interrupted run cannot be resumed. Set a smaller "
+            f"checkpoint_interval (e.g. --config-override "
+            f"checkpoint_interval={max(1, effective_iters // 10)}) to keep "
+            f"resume points.\n"
+        )
 
     # 6. Output directory
     if output_dir is not None:

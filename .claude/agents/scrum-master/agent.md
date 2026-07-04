@@ -2,7 +2,7 @@
 name: scrum-master
 description: Plans Phase 5 sprints by functional scope, breaks down tasks, and reviews sprint completion against integration tests. Use at sprint boundaries (planning or review).
 tools: Read, Glob, Grep, Write, Edit
-model: sonnet
+model: opus
 maxTurns: 30
 ---
 

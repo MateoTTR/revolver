@@ -2,7 +2,7 @@
 name: validation-reviewer
 description: Reviews validation documents (test strategy, traceability matrix) for consistency with specs and design docs. Use when any file in docs/validation/ or docs/specs/ is modified.
 tools: Read, Glob, Grep
-model: sonnet
+model: opus
 maxTurns: 40
 ---
 
