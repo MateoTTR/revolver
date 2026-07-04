@@ -69,7 +69,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | code-reviewer | [.claude/agents/code-reviewer/agent.md](.claude/agents/code-reviewer/agent.md) | Auto after `gh pr create` (PostToolUse hook) |
 | spec-reviewer | [.claude/agents/spec-reviewer/agent.md](.claude/agents/spec-reviewer/agent.md) | When spec/DES/ADR files are modified |
 | validation-reviewer | [.claude/agents/validation-reviewer/agent.md](.claude/agents/validation-reviewer/agent.md) | When validation docs or specs change |
-| doc-reviewer | [.claude/agents/doc-reviewer/agent.md](.claude/agents/doc-reviewer/agent.md) | After release, or when README/guides/user-story-e2e change. Run AFTER spec-reviewer and validation-reviewer |
+| doc-reviewer | [.claude/agents/doc-reviewer/agent.md](.claude/agents/doc-reviewer/agent.md) | After release, when README/guides/user-story-e2e change, or when CLI source (`src/revolver/cli/*.py`) changes (#354 trigger inversion). Run AFTER spec-reviewer and validation-reviewer |
 | scrum-master | [.claude/agents/scrum-master/agent.md](.claude/agents/scrum-master/agent.md) | At sprint planning/review boundaries |
 
 ### Sprint Planning
