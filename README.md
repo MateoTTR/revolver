@@ -265,7 +265,7 @@ mypy
   evaluations — so it can overstate the champion's true quality. Re-score the
   saved best solution with `revolver eval` (which runs every instance) for
   reporting; honest timeout/fitness semantics land in v0.18. See the
-  [tuning guide](docs/guides/tuning-oe-config.md#known-issues) for details.
+  [tuning guide](docs/guides/tuning-evolution.md#known-issues) for details.
 
 ## Documentation
 

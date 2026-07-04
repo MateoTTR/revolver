@@ -278,7 +278,7 @@ Run started: v1.0 + (E) flash-pro (2 members) + train-small [shinka/ucb]
 > single global reasoning pool, so disagreeing member efforts collapse to the
 > highest level (never under-think) with a warning. If per-member effort
 > matters, keep the run on OpenEvolve. See the
-> [cross-engine ensemble section](../guides/tuning-oe-config.md#cross-engine-ensemble-the-same-ensemble-on-three-selection-strategies)
+> [cross-engine ensemble section](../guides/tuning-evolution.md#cross-engine-ensemble-the-same-ensemble-on-three-selection-strategies)
 > of the tuning guide for the full asymmetry.
 
 The capability gate fires **before** the run launches, so an unsupported

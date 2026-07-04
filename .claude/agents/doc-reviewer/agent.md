@@ -35,7 +35,7 @@ Assume specs are already consistent when this agent runs.
 |---|---|
 | `README.md` | Current version, feature list, CLI examples, test count, install instructions |
 | `docs/guides/initial-program-structure.md` | Valid CLI syntax, correct flag names, accurate workflow descriptions |
-| `docs/guides/tuning-oe-config.md` | Valid CLI flags, correct config key names, accurate parameter descriptions |
+| `docs/guides/tuning-evolution.md` | Valid CLI flags, correct config key names, accurate parameter descriptions (both backends) |
 | `docs/specs/user-story-e2e.md` | Accurate CLI syntax matching actual Typer command signatures |
 
 ### Document discovery
