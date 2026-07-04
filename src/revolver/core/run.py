@@ -49,6 +49,7 @@ from revolver.infra.backends import get_backend
 from revolver.infra.backends.base import (
     BackendRunResult,
     BackendRunSpec,
+    ChildProcessReaperMixin,
     EvolutionBackend,
 )
 from revolver.infra.backends.openevolve import (
@@ -623,6 +624,47 @@ def _handle_post_run_failure(
         remove_run_lock(root, run_id)
 
 
+# ── Finalize backstop (U12 residual, S17a-06 / #359) ─────────────────────────
+
+
+def _snapshot_child_pids() -> set[int]:
+    """Never-raising snapshot of the current direct-children PIDs.
+
+    Taken right before the engine launch/resume so the finalize backstop
+    (:func:`_finalize_backstop_reap`) can diff against it. Returns an empty
+    set on any failure — the backstop then degrades to a no-op rather than
+    failing the run.
+    """
+    try:
+        return ChildProcessReaperMixin._current_child_pids()
+    except Exception:
+        return set()
+
+
+def _finalize_backstop_reap(pre_run_children: set[int]) -> None:
+    """Never-raising direct-children reap at run finalization (U12 / #359).
+
+    Belt to PR-A's braces: ``run_instance`` kills its own child at the
+    per-instance deadline, and each backend's ``launch()``-``finally`` reap
+    covers the engine phase — but that reap runs **before**
+    ``_post_run_evaluation``, so a child leaked through post-run eval (or
+    one that outlived the per-instance kill) would still be alive when the
+    lock is removed and the CLI prints "Run completed". Called between the
+    post-run-eval block and ``remove_run_lock`` in both ``launch_run`` and
+    ``resume_run``, it reaps any direct child that appeared since the
+    pre-launch snapshot.
+
+    Reuses the :class:`ChildProcessReaperMixin` helpers verbatim
+    (recursive-descendant/killpg hardening is deferred to v0.18). Never
+    raises: teardown must not fail a completed run.
+    """
+    try:
+        ChildProcessReaperMixin()._reap_run_children(pre_run_children)
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            sys.stderr.write(f"Warning: finalize child-process reap failed: {exc}\n")
+
+
 # ── launch_run (DES-005 §2.1) ────────────────────────────────────────────────
 
 
@@ -959,6 +1001,11 @@ def launch_run(
                         f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
                     )
 
+                # Snapshot direct children for the finalize backstop
+                # (S17a-06 / #359): anything that appears from here on and
+                # survives post-run eval is reaped before lock removal.
+                pre_run_children = _snapshot_child_pids()
+
                 # Launch the engine with the resolved config (secrets
                 # resolved at runtime) through the backend (ADR-007 D1).
                 run_output = backend.launch(spec, oe_config_resolved)
@@ -1077,6 +1124,11 @@ def launch_run(
                 programs=programs,
             ).model_dump(mode="json")
             write_run_manifest(root, run_id, manifest_data)
+
+            # Finalize backstop (U12 / #359): reap any direct child that
+            # outlived the engine-phase reap or post-run eval BEFORE the
+            # lock is removed and the CLI can print "Run completed".
+            _finalize_backstop_reap(pre_run_children)
 
             # Remove lock file
             remove_run_lock(root, run_id)
@@ -1635,6 +1687,10 @@ def resume_run(
                         f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
                     )
 
+                # Snapshot direct children for the finalize backstop
+                # (S17a-06 / #359), mirroring launch_run.
+                pre_run_children = _snapshot_child_pids()
+
                 # Resume the engine from the staged checkpoint through
                 # the backend (ADR-007 D1; spec.iterations already
                 # carries the parent-run fallback per FR-RUN-024).
@@ -1757,6 +1813,11 @@ def resume_run(
                 programs=programs,
             ).model_dump(mode="json")
             write_run_manifest(root, new_run_id, manifest_data)
+
+            # Finalize backstop (U12 / #359): reap any direct child that
+            # outlived the engine-phase reap or post-run eval BEFORE the
+            # lock is removed and the CLI can print "Resumed run completed".
+            _finalize_backstop_reap(pre_run_children)
 
             remove_run_lock(root, new_run_id)
 
