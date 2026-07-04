@@ -3279,3 +3279,300 @@ class TestParseLlmWeightOverrides:
     def test_negative_weight_raises(self) -> None:
         with pytest.raises(ValidationError, match="non-negative"):
             _parse_llm_weight_overrides(["m=-0.1"])
+
+
+# ── S17a-06: finalize backstop (U12 residual, #359) ──────────────────────────
+
+
+@pytest.mark.unit
+def test_launch_run_finalize_backstop_reaps_before_lock(
+    project_with_prereqs: dict, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A direct child leaked through post-run eval is reaped BEFORE
+    remove_run_lock; the reap never raises (a simulated reap error still
+    finalizes the run cleanly); the run result in the DB is intact.
+    """
+    import signal
+    import subprocess
+
+    import revolver.core.run as core_run_module
+    import revolver.infra.backends.base as backends_base
+    from revolver.infra.backends.base import ChildProcessReaperMixin
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    # Keep the zombie-wait loop in _reap_run_children fast: a SIGTERMed
+    # direct child of pytest stays a zombie until poll()ed, so the grace
+    # loop always runs to its deadline in this test.
+    monkeypatch.setattr(backends_base, "_CHILD_REAP_GRACE_SECONDS", 0.3)
+
+    root = project_with_prereqs["root"]
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    mock_run_output = RunOutput(best_score=0.95, best_program="p", output_dir=None)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    leaked: dict[str, subprocess.Popen[bytes]] = {}
+    order: dict[str, bool] = {}
+
+    def _leaking_post_eval(**kwargs: object) -> None:
+        """Simulate post-run eval leaking one direct child (U12)."""
+        leaked["proc"] = subprocess.Popen(["sleep", "60"])
+
+    real_remove_run_lock = core_run_module.remove_run_lock
+
+    def _recording_remove_run_lock(root_arg: Path, run_id_arg: str) -> None:
+        # Ordering probe: at lock-removal time the leaked child must
+        # already be terminated (poll() reaps and returns the signal).
+        order["leaked_dead_at_lock_removal"] = leaked["proc"].poll() is not None
+        real_remove_run_lock(root_arg, run_id_arg)
+
+    try:
+        # ── Phase 1: leaked child is reaped before remove_run_lock ──────
+        with (
+            patch("revolver.core.run.get_global_db", return_value=MagicMock()),
+            patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
+            patch("revolver.core.run.get_llm", return_value=llm),
+            patch("revolver.core.run.verify_dataset_integrity", return_value=good_integrity),
+            patch(
+                "revolver.core.run.resolve_dataset_path",
+                return_value=project_with_prereqs["dataset_dir"],
+            ),
+            patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
+            patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+            patch("revolver.core.run._post_run_evaluation", side_effect=_leaking_post_eval),
+            patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+            patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
+            patch("revolver.core.run.remove_run_lock", side_effect=_recording_remove_run_lock),
+            patch("revolver.core.run.generate_run_id", return_value="run-20260704-900001"),
+            patch("revolver.core.run.generate_solution_id", return_value="sol-20260704-900001"),
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.start.return_value = "http://127.0.0.1:9999"
+            mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=1, completion_tokens=1)
+            mock_proxy_cls.return_value = mock_proxy
+            mock_runner = MagicMock()
+            mock_runner.run.return_value = mock_run_output
+            mock_oe_cls.return_value = mock_runner
+
+            config = RunConfig(
+                problem_version="v1.0",
+                llm_name="test-llm",
+                dataset_name="train-small",
+                iterations=5,
+            )
+            result = launch_run(config, project_root=root)
+
+        # The leaked child was terminated (SIGTERM, SIGKILL fallback)...
+        assert leaked["proc"].poll() in (-signal.SIGTERM, -signal.SIGKILL)
+        # ...and it was already dead when remove_run_lock was called.
+        assert order["leaked_dead_at_lock_removal"] is True
+
+        # Lock actually removed; run result in the DB intact.
+        lock_file = root / REVOLVER_DIR / "runs" / "locks" / f"{result.run_id}.lock"
+        assert not lock_file.exists()
+        db_path = root / REVOLVER_DIR / "revolver.db"
+        conn = get_project_db(db_path)
+        try:
+            run_row = get_run(conn, result.run_id)
+            assert run_row is not None
+            assert run_row["status"] == "completed"
+            sol = conn.execute(
+                "SELECT id FROM solutions WHERE run_id = ?", (result.run_id,)
+            ).fetchall()
+            assert len(sol) == 1
+        finally:
+            conn.close()
+
+        # ── Phase 2: a reap error never fails the run ────────────────────
+        with (
+            patch("revolver.core.run.get_global_db", return_value=MagicMock()),
+            patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
+            patch("revolver.core.run.get_llm", return_value=llm),
+            patch("revolver.core.run.verify_dataset_integrity", return_value=good_integrity),
+            patch(
+                "revolver.core.run.resolve_dataset_path",
+                return_value=project_with_prereqs["dataset_dir"],
+            ),
+            patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
+            patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+            patch("revolver.core.run._post_run_evaluation"),
+            patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+            patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
+            patch("revolver.core.run.generate_run_id", return_value="run-20260704-900002"),
+            patch("revolver.core.run.generate_solution_id", return_value="sol-20260704-900002"),
+            patch.object(
+                ChildProcessReaperMixin,
+                "_reap_run_children",
+                side_effect=RuntimeError("simulated reap failure"),
+            ),
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.start.return_value = "http://127.0.0.1:9999"
+            mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=1, completion_tokens=1)
+            mock_proxy_cls.return_value = mock_proxy
+            mock_runner = MagicMock()
+            mock_runner.run.return_value = mock_run_output
+            mock_oe_cls.return_value = mock_runner
+
+            config2 = RunConfig(
+                problem_version="v1.0",
+                llm_name="test-llm",
+                dataset_name="train-small",
+                iterations=5,
+            )
+            result2 = launch_run(config2, project_root=root)
+
+        # The run finalized cleanly despite the reap error: warn-only.
+        assert result2.run_id == "run-20260704-900002"
+        assert "finalize child-process reap failed" in capsys.readouterr().err
+        lock_file2 = root / REVOLVER_DIR / "runs" / "locks" / f"{result2.run_id}.lock"
+        assert not lock_file2.exists()
+        db_path = root / REVOLVER_DIR / "revolver.db"
+        conn = get_project_db(db_path)
+        try:
+            run_row2 = get_run(conn, result2.run_id)
+            assert run_row2 is not None
+            assert run_row2["status"] == "completed"
+        finally:
+            conn.close()
+    finally:
+        # Never leave the sleep child behind, even on assertion failure.
+        proc = leaked.get("proc")
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+@pytest.mark.unit
+def test_resume_run_finalize_backstop_reaps_before_lock(
+    project_with_prereqs: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resume-path analogue of the launch backstop test (PR #245 review):
+    a direct child leaked through post-run eval on the resume path is
+    reaped BEFORE remove_run_lock, and the resumed run's DB record is
+    intact.
+    """
+    import signal
+    import subprocess
+
+    import revolver.core.run as core_run_module
+    import revolver.infra.backends.base as backends_base
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    monkeypatch.setattr(backends_base, "_CHILD_REAP_GRACE_SECONDS", 0.3)
+
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    # Parent run to resume from.
+    parent_id = "run-20260704-910000"
+    parent_run_dir = create_run_dir(root, parent_id)
+    (parent_run_dir / "_revolver_evaluator.py").write_text("# wrapper\n")
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True)
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=parent_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+    finally:
+        conn.close()
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    leaked: dict[str, subprocess.Popen[bytes]] = {}
+    order: dict[str, bool] = {}
+
+    def _leaking_post_eval(**kwargs: object) -> None:
+        """Simulate post-run eval leaking one direct child (U12)."""
+        leaked["proc"] = subprocess.Popen(["sleep", "60"])
+
+    real_remove_run_lock = core_run_module.remove_run_lock
+
+    def _recording_remove_run_lock(root_arg: Path, run_id_arg: str) -> None:
+        order["leaked_dead_at_lock_removal"] = leaked["proc"].poll() is not None
+        real_remove_run_lock(root_arg, run_id_arg)
+
+    try:
+        with (
+            patch("revolver.core.run.get_global_db", return_value=MagicMock()),
+            patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
+            patch("revolver.core.run.get_llm", return_value=llm),
+            patch(
+                "revolver.core.run.resolve_dataset_path",
+                return_value=project_with_prereqs["dataset_dir"],
+            ),
+            patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
+            patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+            patch("revolver.core.run._post_run_evaluation", side_effect=_leaking_post_eval),
+            patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+            patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
+            patch("revolver.core.run.remove_run_lock", side_effect=_recording_remove_run_lock),
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.start.return_value = "http://127.0.0.1:9999"
+            mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=1, completion_tokens=1)
+            mock_proxy_cls.return_value = mock_proxy
+            mock_runner = MagicMock()
+            mock_runner.run.return_value = RunOutput(best_score=0.98, output_dir=None)
+            mock_oe_cls.return_value = mock_runner
+
+            result = resume_run(parent_id, project_root=root)
+
+        # The leaked child was terminated, and it was already dead when
+        # remove_run_lock was called on the resumed run.
+        assert leaked["proc"].poll() in (-signal.SIGTERM, -signal.SIGKILL)
+        assert order["leaked_dead_at_lock_removal"] is True
+
+        # Lock removed; resumed-run DB record intact.
+        lock_file = root / REVOLVER_DIR / "runs" / "locks" / f"{result.run_id}.lock"
+        assert not lock_file.exists()
+        conn = get_project_db(db_path)
+        try:
+            run_row = get_run(conn, result.run_id)
+            assert run_row is not None
+            assert run_row["status"] == "completed"
+            assert run_row["resumed_from"] == parent_id
+        finally:
+            conn.close()
+    finally:
+        proc = leaked.get("proc")
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)

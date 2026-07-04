@@ -3240,3 +3240,105 @@ def test_run_dry_run_backend_surfaced(project_with_prereqs: dict[str, Path]) -> 
     rc = data["resolved_config"]
     assert rc["backend"] == "openevolve"
     assert isinstance(rc["backend_extras"], dict)
+
+
+# ── S17a-06: "completed" messaging only after teardown (U12 residual, #359) ──
+
+
+@pytest.mark.integration
+def test_launch_run_completed_message_after_teardown(
+    project_with_prereqs: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Run completed" is emitted only after the finalize backstop reaped a
+    child leaked through post-run eval: at lock-removal time the leaked
+    child is already terminated, and the CLI message (printed after
+    launch_run returns) therefore always follows teardown.
+    """
+    import signal
+    import subprocess
+    import sys
+
+    import revolver.core.run as core_run_module
+    import revolver.infra.backends.base as backends_base
+
+    # Keep the zombie-wait loop in _reap_run_children fast (the SIGTERMed
+    # direct child of pytest stays a zombie until poll()ed).
+    monkeypatch.setattr(backends_base, "_CHILD_REAP_GRACE_SECONDS", 0.3)
+
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    leaked: dict[str, subprocess.Popen[bytes]] = {}
+    order: dict[str, bool] = {}
+    probes: dict[str, str] = {}
+
+    def _leaking_post_eval(**kwargs: object) -> None:
+        """Simulate post-run eval leaking one direct child (U12)."""
+        leaked["proc"] = subprocess.Popen(["sleep", "60"])
+
+    real_remove_run_lock = core_run_module.remove_run_lock
+
+    def _captured_cli_text() -> str:
+        """Read the CLI output captured so far by CliRunner's streams."""
+        chunks: list[str] = []
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+                buffer = getattr(stream, "buffer", None)
+                if buffer is not None and hasattr(buffer, "getvalue"):
+                    chunks.append(buffer.getvalue().decode("utf-8", errors="replace"))
+            except Exception:  # probe only — never fail the run from here
+                continue
+        return "".join(chunks)
+
+    def _recording_remove_run_lock(root_arg: Path, run_id_arg: str) -> None:
+        order["leaked_dead_at_lock_removal"] = leaked["proc"].poll() is not None
+        # Direct ordering probe (PR #245 review): the completed message
+        # must NOT have been emitted yet at lock-removal time.
+        probes["output_at_lock_removal"] = _captured_cli_text()
+        real_remove_run_lock(root_arg, run_id_arg)
+
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    run_id, sol_id = _next_ids()
+
+    try:
+        with (
+            patch("pathlib.Path.cwd", return_value=root),
+            patch(
+                "revolver.core.run.get_global_db",
+                side_effect=lambda: get_global_db_at(global_db_path),
+            ),
+            patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+            patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+            patch("revolver.core.run._post_run_evaluation", side_effect=_leaking_post_eval),
+            patch("revolver.core.run.remove_run_lock", side_effect=_recording_remove_run_lock),
+            patch("revolver.core.run.generate_run_id", return_value=run_id),
+            patch("revolver.core.run.generate_solution_id", return_value=sol_id),
+            patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=10),
+        ):
+            result = runner.invoke(
+                app,
+                ["run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+                catch_exceptions=False,
+            )
+
+        output = _get_all_output(result)
+        assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+        # The completed message was emitted...
+        assert "Run completed" in output
+        # ...but only after teardown: at lock-removal time the leaked child
+        # was already dead AND the message was not yet in the captured
+        # output (direct ordering assertion — PR #245 review). The probe is
+        # proven live by a message that does precede lock removal.
+        assert order["leaked_dead_at_lock_removal"] is True
+        assert "Running post-run evaluation" in probes["output_at_lock_removal"]
+        assert "Run completed" not in probes["output_at_lock_removal"]
+        assert leaked["proc"].poll() in (-signal.SIGTERM, -signal.SIGKILL)
+    finally:
+        proc = leaked.get("proc")
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
