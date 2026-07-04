@@ -38,7 +38,7 @@ from revolver.infra.db import (
     insert_eval_metadata,
     update_eval_metadata,
 )
-from revolver.infra.evaluator_runner import run_instance
+from revolver.infra.evaluator_runner import run_instance, run_killable_worker
 from revolver.infra.store import (
     PROBLEM_DIR,
     REVOLVER_DIR,
@@ -187,6 +187,33 @@ def _detect_evaluator_mode(evaluator_path: Path) -> str:
     )
 
 
+def _global_eval_worker(
+    eval_path_str: str,
+    prog_path_str: str,
+    dataset_dir_str: str,
+) -> dict[str, float]:
+    """Worker for the legacy global aggregation call, run in a subprocess.
+
+    Module-level (not nested) so it stays picklable under the spawn start
+    method used by the killable eval primitive (S17a-03, task 358).
+    """
+    import importlib.util
+    import os
+
+    os.environ["REVOLVER_DATASET_DIR"] = dataset_dir_str
+    os.environ.pop("REVOLVER_INSTANCE_PATH", None)
+    os.environ.pop("REVOLVER_INSTANCE_ID", None)
+
+    spec = importlib.util.spec_from_file_location("evaluator", eval_path_str)
+    if spec is None or spec.loader is None:
+        msg = f"Cannot load evaluator from {eval_path_str}"
+        raise RuntimeError(msg)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    result: dict[str, float] = mod.evaluate(prog_path_str)
+    return result
+
+
 def _run_legacy_global_aggregation(
     evaluator_path: Path,
     program_path: Path,
@@ -197,7 +224,8 @@ def _run_legacy_global_aggregation(
 
     Calls evaluate() with REVOLVER_DATASET_DIR set and REVOLVER_INSTANCE_PATH
     NOT set. This allows the evaluator to compute custom aggregates across the
-    entire dataset.
+    entire dataset. Runs through the same killable spawn-context primitive as
+    per-instance evaluation: on timeout the child is killed, not abandoned.
 
     Args:
         evaluator_path: Path to the evaluator file.
@@ -208,48 +236,22 @@ def _run_legacy_global_aggregation(
     Returns:
         Dict of aggregate metrics, or ``None`` on failure.
     """
-    from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
-    import importlib.util
-    import os
-
-    def _global_eval_worker(
-        eval_path_str: str,
-        prog_path_str: str,
-        dataset_dir_str: str,
-    ) -> dict[str, float]:
-        """Worker for global aggregation call in subprocess."""
-        os.environ["REVOLVER_DATASET_DIR"] = dataset_dir_str
-        os.environ.pop("REVOLVER_INSTANCE_PATH", None)
-        os.environ.pop("REVOLVER_INSTANCE_ID", None)
-
-        spec = importlib.util.spec_from_file_location("evaluator", eval_path_str)
-        if spec is None or spec.loader is None:
-            msg = f"Cannot load evaluator from {eval_path_str}"
-            raise RuntimeError(msg)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        result: dict[str, float] = mod.evaluate(prog_path_str)
-        return result
-
-    executor = ProcessPoolExecutor(max_workers=1)
-    try:
-        future = executor.submit(
-            _global_eval_worker,
+    outcome = run_killable_worker(
+        _global_eval_worker,
+        (
             str(evaluator_path),
             str(program_path),
             str(dataset_dir.resolve()),
-        )
-        result = future.result(timeout=timeout_s)
-        return result
-    except FuturesTimeoutError:
-        future.cancel()
+        ),
+        timeout_s=float(timeout_s),
+    )
+    if outcome.status == "ok":
+        return outcome.metrics
+    if outcome.status == "timeout":
         sys.stderr.write("Warning: legacy global aggregation timed out\n")
         return None
-    except Exception as exc:
-        sys.stderr.write(f"Warning: legacy global aggregation failed: {exc}\n")
-        return None
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    sys.stderr.write(f"Warning: legacy global aggregation failed: {outcome.error}\n")
+    return None
 
 
 def has_existing_eval(
