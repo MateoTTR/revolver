@@ -989,9 +989,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
         # never sees a reasoning_efforts value arriving via config.yaml or
         # --config-override (overrides land after the projection). Warn when
         # such a value is inert on an all-local/bridge fleet.
-        self._warn_config_path_inert_reasoning_efforts(
-            spec, config, config_sets_reasoning_efforts
-        )
+        self._warn_config_path_inert_reasoning_efforts(spec, config, config_sets_reasoning_efforts)
 
         return config
 
@@ -1237,7 +1235,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
             llm_models = [{"name": model} for model in raw_models]
             # U10 (S17a-14): zip the fixed-sampler prior_probs into the member
             # entries as weights so the generic dry-run renderer shows
-            # "model×weight" (mirrors the OE ensemble display). Guarded on
+            # "model x weight" (mirrors the OE ensemble display). Guarded on
             # matching lengths; a single-LLM run has no prior_probs and its
             # dry-run output stays unchanged.
             priors = (

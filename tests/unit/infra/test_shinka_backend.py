@@ -944,9 +944,7 @@ class TestShinkaBuildConfig:
     ) -> None:
         """U7 residual: a registry-derived (member-path) effort on a local
         fleet warns exactly once — via the member path, not the U7 check."""
-        spec = _make_spec(
-            tmp_path, llm=_make_llm(source="local", reasoning_effort="high")
-        )
+        spec = _make_spec(tmp_path, llm=_make_llm(source="local", reasoning_effort="high"))
         ShinkaBackend().build_config(spec)
         err = capsys.readouterr().err
         # Member-path warning (S17-27/W2a) fires...
@@ -1050,7 +1048,9 @@ class TestShinkaResolvedConfig:
             {"name": "local/m-b", "weight": 0.2},
         ]
 
-    def test_shinka_dry_run_surfaces_cost_aware_coef(self, fake_shinka: None, tmp_path: Path) -> None:
+    def test_shinka_dry_run_surfaces_cost_aware_coef(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
         """U10: the M4-injected cost_aware_coef is visible via a build→resolve
         round trip on ucb (no launch needed to validate kwargs)."""
         backend = ShinkaBackend()
@@ -1071,9 +1071,7 @@ class TestShinkaResolvedConfig:
             }
         )
         assert resolved.llm_models == [{"name": "local/m-a"}, {"name": "local/m-b"}]
-        assert resolved.backend_extras["llm_dynamic_selection_kwargs"] == {
-            "prior_probs": [1.0]
-        }
+        assert resolved.backend_extras["llm_dynamic_selection_kwargs"] == {"prior_probs": [1.0]}
 
     def test_shinka_single_llm_dry_run_unchanged(self, fake_shinka: None, tmp_path: Path) -> None:
         """U10 regression pin: a plain single-LLM build has no

@@ -276,7 +276,7 @@ def _warn_snapshot_config_findings(backend: EvolutionBackend, snapshot_dir: Path
         if not available:
             return
         findings = backend.validate_config(config_path)
-    except Exception:  # noqa: BLE001 — best-effort re-validation, never blocks
+    except Exception:  # best-effort re-validation — never blocks a launch
         return
     for finding in findings:
         sys.stderr.write(f"Warning: snapshot config.yaml: {finding}\n")

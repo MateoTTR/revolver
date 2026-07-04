@@ -160,9 +160,10 @@ class GlobalOptionGroup(TyperGroup):
                         names.append(opt)
         return names
 
-    def resolve_command(
-        self, ctx: Any, args: list[str]
-    ) -> tuple[str | None, click.Command | None, list[str]]:
+    # The middle element is typed ``Any`` for the same reason as ``ctx``: the
+    # supertype returns Typer's *vendored* Click ``Command``, a distinct class
+    # from the public ``click.Command`` that varies across Typer releases.
+    def resolve_command(self, ctx: Any, args: list[str]) -> tuple[str | None, Any, list[str]]:
         try:
             return super().resolve_command(ctx, args)
         except _USAGE_ERROR_TYPES as exc:

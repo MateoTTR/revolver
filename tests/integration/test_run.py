@@ -466,9 +466,7 @@ def test_run_revalidates_snapshot_config_warns(
         patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
         patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
     ):
-        result = runner.invoke(
-            app, ["run", "resume", parent_run_id], catch_exceptions=False
-        )
+        result = runner.invoke(app, ["run", "resume", parent_run_id], catch_exceptions=False)
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
     assert "snapshot config.yaml" in output

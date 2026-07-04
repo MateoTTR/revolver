@@ -1025,9 +1025,7 @@ def test_shinka_fixed_uniform_ensemble_prior_probs(tmp_path: Path, global_db_pat
 
 @pytest.mark.integration
 @pytest.mark.shinkaevolve
-def test_shinka_ucb_residual_string_kwarg_fails_fast(
-    tmp_path: Path, global_db_path: Path
-) -> None:
+def test_shinka_ucb_residual_string_kwarg_fails_fast(tmp_path: Path, global_db_path: Path) -> None:
     """U1 (S17a-08): a residual string on an accepted ucb kwarg raises at
     build_config time — i.e. at --dry-run, before any engine launch."""
     members = [EnsembleMember(llm_name="m-a"), EnsembleMember(llm_name="m-b")]
