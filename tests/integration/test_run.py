@@ -3257,6 +3257,7 @@ def test_launch_run_completed_message_after_teardown(
     """
     import signal
     import subprocess
+    import sys
 
     import revolver.core.run as core_run_module
     import revolver.infra.backends.base as backends_base
@@ -3270,6 +3271,7 @@ def test_launch_run_completed_message_after_teardown(
 
     leaked: dict[str, subprocess.Popen[bytes]] = {}
     order: dict[str, bool] = {}
+    probes: dict[str, str] = {}
 
     def _leaking_post_eval(**kwargs: object) -> None:
         """Simulate post-run eval leaking one direct child (U12)."""
@@ -3277,8 +3279,24 @@ def test_launch_run_completed_message_after_teardown(
 
     real_remove_run_lock = core_run_module.remove_run_lock
 
+    def _captured_cli_text() -> str:
+        """Read the CLI output captured so far by CliRunner's streams."""
+        chunks: list[str] = []
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+                buffer = getattr(stream, "buffer", None)
+                if buffer is not None and hasattr(buffer, "getvalue"):
+                    chunks.append(buffer.getvalue().decode("utf-8", errors="replace"))
+            except Exception:  # probe only — never fail the run from here
+                continue
+        return "".join(chunks)
+
     def _recording_remove_run_lock(root_arg: Path, run_id_arg: str) -> None:
         order["leaked_dead_at_lock_removal"] = leaked["proc"].poll() is not None
+        # Direct ordering probe (PR #245 review): the completed message
+        # must NOT have been emitted yet at lock-removal time.
+        probes["output_at_lock_removal"] = _captured_cli_text()
         real_remove_run_lock(root_arg, run_id_arg)
 
     mock_runner_cls = MagicMock(return_value=_make_mock_runner())
@@ -3311,10 +3329,13 @@ def test_launch_run_completed_message_after_teardown(
 
         # The completed message was emitted...
         assert "Run completed" in output
-        # ...but only after teardown: the leaked child was already dead at
-        # lock-removal time (which itself precedes the CLI message — the
-        # message is printed only after launch_run returns).
+        # ...but only after teardown: at lock-removal time the leaked child
+        # was already dead AND the message was not yet in the captured
+        # output (direct ordering assertion — PR #245 review). The probe is
+        # proven live by a message that does precede lock removal.
         assert order["leaked_dead_at_lock_removal"] is True
+        assert "Running post-run evaluation" in probes["output_at_lock_removal"]
+        assert "Run completed" not in probes["output_at_lock_removal"]
         assert leaked["proc"].poll() in (-signal.SIGTERM, -signal.SIGKILL)
     finally:
         proc = leaked.get("proc")

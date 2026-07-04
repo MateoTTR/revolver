@@ -631,9 +631,13 @@ def _snapshot_child_pids() -> set[int]:
     """Never-raising snapshot of the current direct-children PIDs.
 
     Taken right before the engine launch/resume so the finalize backstop
-    (:func:`_finalize_backstop_reap`) can diff against it. Returns an empty
-    set on any failure — the backstop then degrades to a no-op rather than
-    failing the run.
+    (:func:`_finalize_backstop_reap`) can diff against it: every direct
+    child that appeared since the snapshot is reaped. An empty snapshot
+    (also the failure fallback) is therefore NOT a no-op — it makes the
+    backstop treat every direct child still alive at reap time as a
+    survivor. That is exactly right in the normal case (the process has no
+    pre-existing direct children at finalization; the token proxy is a
+    thread, already stopped by then), and it errs on the side of reaping.
     """
     try:
         return ChildProcessReaperMixin._current_child_pids()
