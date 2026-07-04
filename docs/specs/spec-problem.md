@@ -74,17 +74,23 @@ Summary: 48 passed, 2 failed, mean time: 1.1s, max time: 4.2s
 
 **Exit codes**: 0 all passed, 1 if any instance failed
 
-### 2.2 `revolver problem version`
+### 2.2 `revolver problem version create`
 
 Create an immutable snapshot of the current problem definition.
+
+**Arguments**:
+
+| Argument | Required | Description |
+|---|---|---|
+| `TAG` | Yes | Version tag (e.g., `v1.0`, `v2.1`) — primary positional argument |
 
 **Options**:
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `--tag <version>` | string | Yes | Version tag (e.g., `v1.0`, `v2.1`) |
+| `--tag <version>` | string | No | **Deprecated** fallback alias for the positional `TAG`, kept for backward compatibility (UX-2 / S16-17). The positional argument wins when both are supplied. A tag is required via one of the two forms; providing neither is an error (exit 1). |
 | `--message <text>` | string | No | Description of what changed. Default: `""` |
-| `--backend <name>` | string | No | Evolution backend that validates `config.yaml` before snapshotting (`openevolve` or `shinka`, default `openevolve` — ADR-007). Validation degrades gracefully when the backend package is not installed; unknown names fail fast (exit 1) before snapshot creation. |
+| `--backend <name>` | string | No | Evolution backend that validates `config.yaml` before snapshotting (`openevolve` or `shinka`, default `openevolve` — ADR-007) **and is persisted on the version record** as the version-default backend for `revolver run` (FR-PRB-016, FR-RUN-047). Validation degrades gracefully when the backend package is not installed; unknown names fail fast (exit 1) before snapshot creation. |
 
 **Behavior**:
 1. Copy `initial_program.py`, `evaluator.py`, `config.yaml`, and `problem.md` (if present) to `.revolver/problem/<tag>/`
@@ -115,29 +121,30 @@ Problem version "v1.0" created
   "hash": "sha256:a1b2c3d4...",
   "files": ["initial_program.py", "evaluator.py", "config.yaml", "problem.md"],
   "message": "Initial formulation",
+  "backend": "openevolve",
   "created_at": "2026-03-10T14:30:00Z"
 }
 ```
 
 **Exit codes**: 0 success, 1 if tag already exists, 1 if required files missing
 
-### 2.3 `revolver problem versions`
+### 2.3 `revolver problem version list`
 
 List all problem versions.
 
 **Output** (human):
 ```
-Tag    Hash (short)  Date                 Message
-v1.0   a1b2c3d4      2026-03-10 14:30     Initial formulation
-v1.1   e5f6g7h8      2026-03-11 09:15     Refined objective function
+Tag    Hash (short)  Backend     Date                 Message
+v1.0   a1b2c3d4      openevolve  2026-03-10 14:30     Initial formulation
+v1.1   e5f6g7h8      shinka      2026-03-11 09:15     Refined objective function
 ```
 
 **Output** (JSON):
 ```json
 {
   "versions": [
-    {"tag": "v1.0", "hash": "sha256:a1b2c3d4...", "created_at": "2026-03-10T14:30:00Z", "message": "Initial formulation"},
-    {"tag": "v1.1", "hash": "sha256:e5f6g7h8...", "created_at": "2026-03-11T09:15:00Z", "message": "Refined objective function"}
+    {"tag": "v1.0", "hash": "sha256:a1b2c3d4...", "backend": "openevolve", "created_at": "2026-03-10T14:30:00Z", "message": "Initial formulation"},
+    {"tag": "v1.1", "hash": "sha256:e5f6g7h8...", "backend": "shinka", "created_at": "2026-03-11T09:15:00Z", "message": "Refined objective function"}
   ]
 }
 ```
@@ -155,16 +162,17 @@ v1.1   e5f6g7h8      2026-03-11 09:15     Refined objective function
 | FR-PRB-003 | MUST | `test` catches evaluator exceptions and displays them without crashing Revolver | §5.3 |
 | FR-PRB-004 | MUST | `test` enforces a per-instance timeout (default 300s) | §5.3 |
 | FR-PRB-005 | MUST | `test` validates the evaluator returns a `dict[str, float]` with a `combined_score` key | §4.5 |
-| FR-PRB-006 | MUST | `version` creates an immutable copy of initial_program.py, evaluator.py, config.yaml in `.revolver/problem/<tag>/` | §7.1 |
-| FR-PRB-007 | MUST | `version` computes and stores a SHA-256 hash of the snapshot | §7.1 |
-| FR-PRB-008 | MUST | `version` refuses to overwrite an existing tag | §7.1 |
-| FR-PRB-009 | MUST | `version` creates a `manifest.yaml` with hash, timestamp, message, file list | §7.1 |
-| FR-PRB-010 | MUST | `version` fails if any of the required files (initial_program.py, evaluator.py, config.yaml) are missing. `problem.md` is **not** required. | — |
+| FR-PRB-006 | MUST | `version create` creates an immutable copy of initial_program.py, evaluator.py, config.yaml in `.revolver/problem/<tag>/` | §7.1 |
+| FR-PRB-007 | MUST | `version create` computes and stores a SHA-256 hash of the snapshot | §7.1 |
+| FR-PRB-008 | MUST | `version create` refuses to overwrite an existing tag | §7.1 |
+| FR-PRB-009 | MUST | `version create` creates a `manifest.yaml` with hash, timestamp, message, file list | §7.1 |
+| FR-PRB-010 | MUST | `version create` fails if any of the required files (initial_program.py, evaluator.py, config.yaml) are missing. `problem.md` is **not** required. | — |
 | FR-PRB-011 | SHOULD | `test --verbose` shows full stdout/stderr and stack traces | §5.3 |
 | FR-PRB-012 | SHOULD | `test` displays a progress bar when testing a dataset with many instances | — |
 | FR-PRB-013 | MAY | `test` warns if `combined_score` is not in the returned dict (non-blocking warning) | §4.5 |
-| FR-PRB-014 | SHOULD | `version` includes `problem.md` in the snapshot if it exists in the project root | §4.2 |
+| FR-PRB-014 | SHOULD | `version create` includes `problem.md` in the snapshot if it exists in the project root | §4.2 |
 | FR-PRB-015 | SHOULD | `problem.md` content is injected into the OpenEvolve system prompt during `revolver run` (see DES-005) | §4.2 |
+| FR-PRB-016 | MUST | `version create` **persists the `--backend` value on the version record** (project-DB schema v14, `problem_versions.backend`; legacy rows default `openevolve` — see DES-001/DES-003). The stored backend is the **version-default backend** for `revolver run`: a run omitting `--backend` resolves to it, and an explicit mismatch warns (FR-RUN-047 resolution order — U4/#369) | §7.1 |
 
 ---
 
@@ -179,8 +187,9 @@ v1.1   e5f6g7h8      2026-03-11 09:15     Refined objective function
 | Evaluator does not define `evaluate()` function | Error: "Evaluator must define an `evaluate(program_path)` function" | 1 |
 | Evaluator returns non-dict or non-float values | Error: "Evaluator must return dict[str, float], got: <type>" | 1 |
 | Instance evaluation timeout | Mark instance as failed with "Timeout after Xs" | — |
-| `version` with tag that already exists | Error: "Version '<tag>' already exists" | 1 |
-| `version` with missing files | Error: "Missing required file: <filename>" | 1 |
+| `version create` without a tag (neither positional `TAG` nor deprecated `--tag`) | Error: "A version tag is required..." | 1 |
+| `version create` with tag that already exists | Error: "Version '<tag>' already exists" | 1 |
+| `version create` with missing files | Error: "Missing required file: <filename>" | 1 |
 | Not in a Revolver project (no `.revolver/`) | Error: "Not a Revolver project. Run `revolver project init` first." | 1 |
 
 ---

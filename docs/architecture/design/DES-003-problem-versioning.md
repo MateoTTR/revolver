@@ -1,7 +1,7 @@
 # DES-003 — `revolver problem` — Testing & Versioning
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-11
+**Version**: 0.2 — U4 backend persistence on problem versions (migration v14 — §2.2.2, §3, §4.3, DD-08; S18 / #369, FR-PRB-016); command surface aligned to the shipped CLI: `version create <TAG>` (positional; `--tag` deprecated — UX-2 / S16-17) + `version list` sub-commands (§1, §2.2, §2.3, §6, §8.2, §10)
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [spec-problem.md](../../specs/spec-problem.md), [Architecture](../architecture.md) §4, [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.1
 
@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This document details the design of the `revolver problem` commands: `test`, `version`, and `versions`. These commands handle problem validation (evaluator testing against instances) and immutable snapshotting (creating versioned copies of the problem definition).
+This document details the design of the `revolver problem` commands: `test`, `version create`, and `version list` (the `version` sub-app also exposes `version delete`). These commands handle problem validation (evaluator testing against instances) and immutable snapshotting (creating versioned copies of the problem definition).
 
 ### 1.1 Problem Structure
 
@@ -22,7 +22,7 @@ A Revolver problem is composed of the following files in the project root:
 | `config.yaml` | OpenEvolve configuration (iterations, LLM params, etc.) | Yes |
 | `problem.md` | Free-form problem description injected into OpenEvolve system prompt | No |
 
-These files are **mutable** — the user edits them freely. `revolver problem version` creates an **immutable snapshot** at a point in time.
+These files are **mutable** — the user edits them freely. `revolver problem version create` creates an **immutable snapshot** at a point in time.
 
 ---
 
@@ -91,19 +91,24 @@ def _test_instance(
 
 **Why subprocess, not thread?** The evaluator is user-provided arbitrary Python code. A thread cannot be forcefully killed on timeout (only daemon threads die at process exit). A subprocess can be terminated cleanly.
 
-### 2.2 `revolver problem version`
+### 2.2 `revolver problem version create`
 
 Creates an immutable snapshot of the current problem definition.
 
 ```
 CLI (cli/problem.py)
-  │ Parse: --tag, --message
+  │ Parse: TAG (positional; deprecated --tag fallback — positional wins), --message, --backend
   ▼
 Core (core/problem.py) → create_version()
   │ 1. Resolve project root                       ──► Infra: store.find_project_root()
   │ 2. Check required files exist:
   │    initial_program.py, evaluator.py, config.yaml (required)
   │    problem.md (optional — checked but not required)
+  │ 2b. Validate config.yaml against the selected backend (--backend,
+  │    default openevolve — ADR-007): unknown backend name fails fast
+  │    (exit 1) before snapshot creation; validation degrades gracefully
+  │    when the backend package is not installed. The value is then
+  │    PERSISTED on the version row (§2.2.2 — v0.18, was validation-only)
   │ 3. Check tag uniqueness                        ──► Infra: db.get_problem_version(tag)
   │ 4. Create snapshot directory:
   │    .revolver/problem/<tag>/
@@ -115,7 +120,7 @@ Core (core/problem.py) → create_version()
   │ 8. Compute snapshot hash:
   │    SHA-256 of sorted(file_name + ":" + file_hash)
   │ 9. Write manifest.yaml (also read-only)        ──► Infra: store.write_manifest()
-  │ 10. Insert into SQLite                         ──► Infra: db.insert_problem_version()
+  │ 10. Insert into SQLite (incl. backend — v14)   ──► Infra: db.insert_problem_version()
   │ 11. Return ProblemVersion
   ▼
 Infra
@@ -148,7 +153,29 @@ This ensures:
 - Adding/removing/renaming a file → different hash
 - Deterministic (sorted order eliminates filesystem ordering differences)
 
-### 2.3 `revolver problem versions`
+#### 2.2.2 Backend Persistence (U4 — migration v14, v0.18)
+
+Since ADR-007 the `--backend` option selects which evolution backend validates `config.yaml`
+before snapshotting (step 2b). Through v0.17 the value was then **discarded** — validation-only,
+persisted nowhere. As of v0.18 (S18 / #369, FR-PRB-016) the value is **persisted on the version
+row**: `problem_versions.backend` (`TEXT NOT NULL DEFAULT 'openevolve'`, project-DB migration v14
+— [DES-001 §3.1 / §5.13](DES-001-sqlite-data-model.md)). Legacy (pre-v14) version rows are
+backfilled to `'openevolve'` by the column default.
+
+**Consumption — version-default backend for `revolver run`** (FR-RUN-047 as amended,
+[DES-005 §2.1](DES-005-run-orchestration.md)): the stored backend is the default used when
+launching a run on that version, with resolution order **explicit `--backend` > version backend >
+default `openevolve`**. Omitting `--backend` at run time defers to the version (the run side
+models flag absence with a `None` sentinel so an explicit `openevolve` is distinguishable from
+"not given"); an explicit run-time backend that **differs** from the version's stored backend
+**warns on stderr, never errors** — the stored value is a default, not a constraint. `--dry-run`
+resolves identically; `run resume` still inherits the **parent run's** backend, not the version's.
+
+**Metadata only, not snapshot content** (DD-08): the backend is stored solely in the SQLite row.
+It is not copied into the snapshot directory, not listed in `manifest.yaml`, and not factored into
+the snapshot hash (§2.2.1) — the hash contract is unchanged for pre- and post-v14 versions.
+
+### 2.3 `revolver problem version list`
 
 Lists all problem versions. Pure database query.
 
@@ -161,7 +188,7 @@ Core (core/problem.py) → list_versions()
   │ 2. Return list[ProblemVersion]
   ▼
 Infra (infra/db.py)
-  SELECT tag, hash, message, created_at
+  SELECT tag, hash, message, backend, created_at
   FROM problem_versions
   ORDER BY created_at ASC;
 ```
@@ -188,6 +215,7 @@ class ProblemVersion(BaseModel):
     tag: str                   # "v1.0"
     hash: str                  # snapshot hash
     message: str = ""
+    backend: str = "openevolve"  # backend validated against + run default (v14, FR-PRB-016, §2.2.2)
     created_at: datetime
     files: list[FileSnapshot] = []  # populated when reading manifest
 
@@ -261,13 +289,13 @@ Files are listed in sorted order (matching the hash algorithm). `problem.md` app
 Uses the `problem_versions` table from [DES-001 §3.1](DES-001-sqlite-data-model.md):
 
 ```sql
-INSERT INTO problem_versions (tag, hash, message, created_at)
-VALUES (:tag, :hash, :message, :created_at);
+INSERT INTO problem_versions (tag, hash, message, backend, created_at)
+VALUES (:tag, :hash, :message, :backend, :created_at);
 ```
 
 The manifest YAML and the SQLite row store complementary data:
-- **SQLite**: queryable metadata (tag, hash, created_at, message) for `versions` listing
-- **YAML manifest**: file-level detail (per-file hashes) for integrity verification
+- **SQLite**: queryable metadata (tag, hash, created_at, message, backend — v14, §2.2.2) for the `version list` listing and run-time backend resolution
+- **YAML manifest**: file-level detail (per-file hashes) for integrity verification — the backend is deliberately absent here (DD-08)
 
 ---
 
@@ -288,8 +316,14 @@ def test_problem(
 def create_version(
     tag: str,
     message: str = "",
+    backend: str = "openevolve",
 ) -> ProblemVersion:
-    """Create immutable snapshot of current problem definition."""
+    """Create immutable snapshot of current problem definition.
+
+    `backend` names the evolution backend that validates config.yaml (ADR-007)
+    and is persisted on the version row as the version-default backend for
+    `revolver run` (v14, FR-PRB-016 — §2.2.2). Previously validation-only.
+    """
 
 def list_versions() -> list[ProblemVersion]:
     """List all problem versions, ordered by creation date."""
@@ -307,6 +341,8 @@ import typer
 from pathlib import Path
 
 app = typer.Typer(name="problem", help="Test and version problem definitions")
+version_app = typer.Typer(help="Problem version management (create, list, delete).")
+app.add_typer(version_app, name="version")
 
 @app.command()
 def test(
@@ -318,15 +354,27 @@ def test(
     verbose: bool = typer.Option(False, "--verbose", help="Show full traces"),
 ): ...
 
-@app.command()
-def version(
-    tag: str = typer.Option(..., "--tag", help="Version tag (e.g., v1.0)"),
+@version_app.command("create")
+def version_create(
+    tag: str | None = typer.Argument(None, metavar="TAG", help="Version tag (e.g., v1.0)"),
+    tag_option: str | None = typer.Option(
+        None, "--tag",
+        help="Deprecated alias for the positional TAG (UX-2 / S16-17); positional wins when both are given",
+    ),
     message: str = typer.Option("", "--message", "-m", help="Version description"),
+    backend: str = typer.Option(
+        "openevolve", "--backend",
+        help="Backend that validates config.yaml; persisted as the version-default backend for runs (v14, §2.2.2)",
+    ),
 ): ...
 
-@app.command()
-def versions(): ...
+@version_app.command("list")
+def version_list(): ...
 ```
+
+Tag resolution in `version_create`: `tag = positional TAG or --tag` — the positional wins when both
+are supplied; when neither is given the command exits 1 with "A version tag is required..."
+(spec-problem §2.2, §4).
 
 ---
 
@@ -395,7 +443,7 @@ User           CLI              Core                    EvalLoader     Subproces
  │◄─ results ──│◄── TestResult ─│                        │              │
 ```
 
-### 8.2 `revolver problem version --tag v1.0 -m "Initial formulation"`
+### 8.2 `revolver problem version create v1.0 -m "Initial formulation"`
 
 ```
 User           CLI              Core             Store       Hashing        DB
@@ -434,7 +482,7 @@ Trade-off: subprocess spawn overhead (~50-100ms per instance). Acceptable for ev
 
 The manifest YAML is the source of truth for file-level details. SQLite stores only the queryable metadata. This keeps:
 - **Manifest**: human-inspectable, self-contained (one can understand a version without DB access)
-- **SQLite**: fast queries for `versions` listing (no need to parse N manifest files)
+- **SQLite**: fast queries for the `version list` listing (no need to parse N manifest files)
 
 ### DD-03: Deterministic snapshot hash
 
@@ -474,6 +522,28 @@ An optional `problem.md` file in the project root provides a free-form markdown 
 - **Injected into system prompt**: During `revolver run`, if the problem version snapshot contains `problem.md`, its content is injected into OpenEvolve's `prompt.system_message` configuration (see [DES-005](DES-005-run-orchestration.md) §4.4). If absent, the default OpenEvolve system prompt is left unchanged.
 - **Motivation**: POC #13 identified that without a problem description, the LLM only receives code and metric names, which limits solution quality. Providing structured domain knowledge via the system prompt significantly improves the quality of generated solutions.
 
+### DD-08: Backend persisted as version metadata, not snapshot content (U4, v0.18)
+
+The `--backend` value is stored only in the SQLite `problem_versions.backend` column (v14) — it is
+**not** copied into the snapshot directory, **not** listed in `manifest.yaml`, and **not** factored
+into the snapshot hash (§2.2.1, §2.2.2). Rationale:
+
+- **The backend is routing metadata, not problem definition**: the same immutable files (program,
+  evaluator, config) constitute the same problem regardless of which engine evolves it. Keeping the
+  backend out of the hash preserves the content-addressable contract (DD-03): identical files →
+  identical hash, before and after v14.
+- **Default, not constraint**: the stored backend seeds `revolver run`'s resolution order
+  (explicit `--backend` > version backend > `openevolve`); an explicit mismatch at run time warns
+  on stderr but never errors. Baking it into the immutable snapshot would wrongly suggest the
+  version is unusable on the other backend.
+- **No manifest format change**: pre-v14 manifests remain valid as-is; integrity verification
+  (DD-05) is untouched.
+
+Alternative considered — recording the backend in `manifest.yaml` (excluded from the hash): rejected
+because the manifest is the human-inspectable **integrity** artifact (DD-02); a mutable-by-meaning
+default value does not belong next to per-file hashes, and the SQLite row is already the queryable
+home for version metadata.
+
 ---
 
 ## 10. Architecture Impact
@@ -488,12 +558,12 @@ An optional `problem.md` file in the project root provides a free-form markdown 
 
 | Module | Change |
 |---|---|
-| `core/problem.py` | Implement `test_problem()`, `create_version()`, `list_versions()`, `get_version()` |
-| `cli/problem.py` | Implement 3 Typer commands (`test`, `version`, `versions`) |
-| `models/problem.py` | Define `ProblemVersion`, `FileSnapshot`, `InstanceTestResult`, `TestResult` |
+| `core/problem.py` | Implement `test_problem()`, `create_version()`, `list_versions()`, `get_version()`; S18: persist the `--backend` value instead of discarding it after validation (§2.2.2) |
+| `cli/problem.py` | Implement the Typer commands: `test` + the `version` sub-app (`create`, `list`, `delete`) |
+| `models/problem.py` | Define `ProblemVersion` (+ `backend` field, v14), `FileSnapshot`, `InstanceTestResult`, `TestResult` |
 | `infra/store.py` | Add `find_project_root()`, `write_manifest()`, snapshot directory creation |
 | `infra/hashing.py` | Add `file_hash()`, `compute_snapshot_hash()` |
-| `infra/db.py` | Add `insert_problem_version()`, `get_problem_version()`, `list_problem_versions()` |
+| `infra/db.py` | Add `insert_problem_version()`, `get_problem_version()`, `list_problem_versions()`; S18: carry `backend` through the 4 CRUD copies (insert/get/get_by_hash/list) + migration v14 (DES-001 §5.13) |
 
 ---
 

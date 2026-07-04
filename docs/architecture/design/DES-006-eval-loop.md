@@ -1,7 +1,7 @@
 # DES-006 — `revolver eval` — Evaluation Loop
 
-**Version**: 0.4 — B1 numeric-only aggregation guard (§1.3, §4.3)
-**Date**: 2026-07-01
+**Version**: 0.5 — S18 eval honesty (U13/U11): reserved `instances_*` coverage keys excluded from aggregation (§1.3, §4.3, FR-EVL-021), post-run eval persists via `evaluate_solution()` (§1.2, FR-RUN-019/020)
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [spec-eval.md](../../specs/spec-eval.md), [Architecture](../architecture.md) §4/§6.2, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.6–3.8 (solutions, eval_metadata, eval_instances), [DES-003](DES-003-problem-versioning.md) §2.1.1, [DES-005](DES-005-run-orchestration.md) §7
 
@@ -29,6 +29,20 @@ This document details the design of the `revolver eval` commands: the default co
 
 The evaluation loop is also used by `revolver run` for post-run training evaluation (FR-RUN-019, [DES-005](DES-005-run-orchestration.md) §7). The core function `evaluate_solution()` is designed to be called from both `revolver eval` (CLI entry point) and `core.run._post_run_evaluation()` (internal).
 
+> **Post-run eval persistence (U11, v0.18 — S18 / #368).** As of v0.18 the post-run path **actually
+> flows through** `evaluate_solution()` (FR-RUN-019/020), closing the Task-86 residue in which
+> `core.run._run_post_eval` re-implemented the loop with a hardcoded 300 s timeout and stored
+> nothing (stderr-only). Consequences on the eval side, which owns the persistence contract:
+> post-run training results are written to `eval_metadata`/`eval_instances` exactly like a manual
+> `revolver eval` (single storage contract — immediately visible via `revolver eval results` and
+> reusable by `benchmark` skip-re-eval, §7.3), and the per-instance timeout comes from the eval
+> path's `timeout_s`, not a hardcoded constant. The existing-eval check (§5) applies to the
+> internal caller too — `core.run` passes `force=True` (or checks for an existing eval first) so a
+> resume-then-re-eval never dead-ends on the D-006-a confirmation. Failure remains **warn-only** on
+> the run side, and the caller must guard against DB contention before the call (commit the
+> still-open launch connection; WAL + `busy_timeout` cover the rest) since `launch_run` still holds
+> its project-DB connection. Launch-side flow and error handling: DES-005 §7.
+
 ### 1.3 Backend independence and per-backend training wrappers (ADR-007)
 
 `revolver eval` is **engine-neutral**: it runs the evaluator from the immutable problem version
@@ -55,6 +69,22 @@ silent-bug risk of the backend initiative (impact R4) — its contract tests are
 > `isinstance(x, (int, float)) and not isinstance(x, bool)` is shared across the Shinka wrapper, the
 > OpenEvolve wrapper, and the read-time `compute_aggregates()` — B1 lives in the generated wrapper
 > too, not only in the read path.
+
+> **Reserved `instances_*` coverage keys + timeout policy (U13, v0.18 — S18 / #367).** Both
+> generated wrapper templates emit `instances_valid`/`instances_total` coverage keys and record
+> timed-out instances on a side-channel; the wrapper-side design (template changes, mean-loop
+> exclusion, the `evaluation.on_timeout: penalize|drop` + `timeout_score` policy, the distinct
+> Shinka `TimeoutError` branch) lives in **DES-005 §3.2** (FR-RUN-053/054) and is not duplicated
+> here. What DES-006 owns is the **read/eval-path counterpart**: the `instances_` metric prefix is
+> **reserved**, and any `instances_*` key is excluded from every aggregation Revolver performs —
+> the wrapper mean loops (DES-005 §3.2) and the read-time `compute_aggregates()` (§4.3,
+> FR-EVL-021 as amended). Coverage is metadata, never averaged into a score. `revolver eval`'s
+> own timeout semantics are **unchanged**: an eval-loop timeout still records `status='timeout'`
+> (`value` NULL) and is excluded from aggregates as before — the penalize policy applies to
+> training-time fitness only. After v0.18 there are deliberately **two timeout semantics** (triage
+> §3 residual): engine fitness *penalizes* timeouts (evolution pressure), post-run/manual eval
+> reports honest coverage-labeled means (reporting) — the `run info` labels carry the burden
+> (FR-RUN-055, DES-005 §2.5).
 
 ---
 
@@ -306,6 +336,12 @@ def compute_aggregates(
     A key whose values are all non-numeric contributes no aggregate row; the
     empty-instance set is handled cleanly (returns {}).
 
+    Reserved-prefix guard (U13, v0.18): metric keys with the reserved
+    `instances_` prefix (wrapper coverage metadata, FR-RUN-053 — e.g.
+    `instances_valid`/`instances_total`) are excluded from aggregation
+    entirely. Coverage counts are metadata, never averaged into a score
+    (FR-EVL-021 as amended; §1.3).
+
     Returns dict mapping metric_name → MetricAggregate.
     """
     solved = [i for i in instances if i.status == "solved"]
@@ -319,6 +355,9 @@ def compute_aggregates(
 
     aggregates = {}
     for key in sorted(all_keys):
+        # Reserved coverage keys (U13): metadata, never aggregated (FR-EVL-021).
+        if key.startswith("instances_"):
+            continue
         # Skip non-numeric metric values (B1): guard on each value, not just presence.
         values = [
             inst.metrics[key]
@@ -814,7 +853,7 @@ This is consistent with spec-benchmark FR-BEN-004 ("per-metric aggregate statist
 | DES-001 | DES-006 → DES-001 | Uses `eval_metadata` + `eval_instances` tables (schema defined in DES-001 v0.2 §3.7–3.8) |
 | DES-003 | DES-006 ↔ DES-003 | Shares evaluator subprocess pattern; uses evaluator_loader |
 | DES-004 | DES-006 → DES-004 | Uses `resolve_dataset_path()` and `verify_dataset_integrity()` |
-| DES-005 | DES-005 → DES-006 | Post-run evaluation calls `evaluate_solution()` |
+| DES-005 | DES-005 → DES-006 | Post-run evaluation calls `evaluate_solution()` — persisting since v0.18 (U11, FR-RUN-019/020; previously a non-persisting `_run_post_eval` reimplementation, see §1.2) |
 
 ---
 

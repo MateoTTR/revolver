@@ -1,7 +1,7 @@
 # Revolver — Integration Tests (Level 2)
 
-**Version**: 0.2 — S17 sync (v0.17 multi-LLM ensemble, ADR-007 Amendment): §2.12 L2-Shinka bandit ensemble + selection validation, §2.13 migration v12/v13, §2.14 B1/B2/B7 regression; `--reasoning-effort` / `--llm-weight` / `--selection` scenarios
-**Date**: 2026-07-01
+**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018): §2.16 semantic-slice block (U13/U11/U4/U8/U6 phase 2), §2.17 migration v14, §2.18 top-N + reap hardening + doc lint; per-command rows in §2.3/§2.5/§2.6/§2.7
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [Specifications](../specs/specifications.md)
 
@@ -55,6 +55,22 @@ axes, and the B9 `--config-override` no-op warning), plus the OE-side selection-
 B1/B2/B7 correctness-slice regression tests. The generated-wrapper aggregation exec test
 (`test_mixed_numeric_and_non_numeric_metrics_no_crash`, L1 unit in `tests/unit/core/test_run_wrapper.py`)
 is new — no existing test previously exercised the OE wrapper aggregation.
+
+**S18 additions (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018)**: §2.16 adds the
+semantic-slice block — U13 honest timeout semantics (the `combined_score` display guard, wrapper
+`instances_valid`/`instances_total` coverage keys + timeout side-channel on both backends, and
+`evaluation.on_timeout: penalize|drop` + `timeout_score` with the release-noted default flip to
+`penalize`), U11 honest best-score display (post-run eval persisted via `core.eval.evaluate_solution`,
+dual-score `run info` labels), U4 backend-on-version resolution (with the mismatch warning), U8
+`validate_seed_metrics` pre-flight fail-fast, and U6 phase-2 default checkpoint cadence. §2.17 adds
+the migration-v14 test (`problem_versions.backend`); §2.18 adds the top-N extraction gate
+(`solution extract --rank`/`--program-id` on `capabilities().top_n_extraction`, Shinka-native / OE
+consciously deferred), the #359 reap-hardening grandchild test, and the #354 doc command-lint.
+**16 new planned L2 test IDs** on a **1471-passing baseline** (post-017a); all S18 rows enter as
+**Planned**. Per-command scenario rows land in §2.3 (problem), §2.5 (run), §2.6 (eval), and §2.7
+(solution). (§2.11 remains a pre-existing numbering gap — not filled; the S18 blocks append after
+§2.15 without renumbering.) Test-ID form, the `integration/` prefix rule, the top-level-file
+exception, and the marker-vs-level rule are defined in [validation.md §8.1](validation.md).
 
 ---
 
@@ -129,11 +145,12 @@ is new — no existing test previously exercised the OE wrapper aggregation.
 | `problem test` | Evaluator raises exception | Exit code 4, error displayed, Revolver does not crash | FR-PRB-003 |
 | `problem test` | Instance exceeds timeout | Timeout reported per instance | FR-PRB-004 |
 | `problem test --verbose` | Valid evaluator | Full stdout/stderr and stack traces | FR-PRB-011 |
-| `problem version` | Create v1.0 from valid files | Snapshot dir, manifest.yaml, DB entry, SHA-256 hash | FR-PRB-006, 007, 009 |
-| `problem version` | `problem.md` exists | Included in snapshot | FR-PRB-014 |
-| `problem version` | Missing `evaluator.py` | Exit code 1, clear error | FR-PRB-010 |
-| `problem version` | Duplicate tag | Exit code 1 | FR-PRB-008 |
-| `problem versions` | After 2 versions | Both listed chronologically | — |
+| `problem version create` | Create v1.0 from valid files (positional `TAG`; deprecated `--tag` still resolves) | Snapshot dir, manifest.yaml, DB entry, SHA-256 hash | FR-PRB-006, 007, 009 |
+| `problem version create` | `problem.md` exists | Included in snapshot | FR-PRB-014 |
+| `problem version create` | Missing `evaluator.py` | Exit code 1, clear error | FR-PRB-010 |
+| `problem version create` | Duplicate tag | Exit code 1 | FR-PRB-008 |
+| `problem version list` | After 2 versions | Both listed chronologically | — |
+| `problem version create --backend shinka` | Backend persisted on the version record (migration v14, `problem_versions.backend`; legacy rows default `openevolve`) | Stored backend becomes the version-default backend for `revolver run` (FR-RUN-047 as amended) | FR-PRB-016 |
 
 ### 2.4 `revolver dataset`
 
@@ -182,6 +199,15 @@ is new — no existing test previously exercised the OE wrapper aggregation.
 | `run --parallel 4` | Parallel evaluations injected into OE config | OE config contains num_parallel=4 | FR-RUN-041 |
 | `run` (internal) | Post-processing failure | Status set to `completed_with_errors`, `run-error.log` written | FR-RUN-043, 032 |
 | `run` (internal) | OE failure (regression) | Status set to `failed` | FR-RUN-031 |
+| `run status` / `run population` | Metrics dict carrying `combined_score` plus other numerics | Display/ranking prefers numeric `combined_score` over the sum-of-numeric-metrics; sum is the fallback only without `combined_score`; no crash when absent | FR-RUN-052 |
+| `run` | One instance times out (default policy) | Timed-out instance contributes `timeout_score` (default 0.0) to the mean (**penalize**); wrapper emits `instances_valid`/`instances_total`, never summed into the score; timeout recorded on the side-channel | FR-RUN-053, 054 |
+| `run --config-override evaluation.on_timeout=drop` | Timed-out instance under `drop` | Survivor-mean restored (0.17 behavior); zero-timeout runs produce identical scores under both policies | FR-RUN-054 |
+| `run` / `run --dry-run` | `evaluation.on_timeout=bogus` or non-finite `timeout_score` | Rejected at run/dry-run, exit code 1 (`evaluation.*` is a validated Revolver-owned section) | FR-RUN-054 |
+| `run` | Post-run eval on train set (S18 path) | Results persisted via `core.eval.evaluate_solution` into `eval_metadata`/`eval_instances` (no longer stderr-only); no DB contention with the open launch connection; failure stays warn-only; hardcoded 300 s timeout gone | FR-RUN-019, 020 |
+| `run info` | Completed run with post-eval | Engine best labeled "engine, single eval" next to the coverage-labeled post-eval mean; #306 fallback labeled (never renders bare); JSON output carries both fields | FR-RUN-055 |
+| `run` (no `--backend`) | Version created with `--backend shinka` | Resolution order explicit `--backend` > version's stored backend > default `openevolve` (`None` sentinel); an explicit mismatch **warns** on stderr, never errors; `--dry-run` resolves identically; resume inherits the parent backend | FR-RUN-047, FR-PRB-016 |
+| `run` (pre-flight) | Seed lacks a declared non-builtin `feature_dimensions` metric | `validate_seed_metrics` fails fast **before iteration 0** (launch + resume), naming the missing dim + available metrics; builtins `complexity`/`diversity`/`combined_score` allowed; Shinka no-op; skipped when pre-flight is skipped | FR-RUN-056 |
+| `run` | `checkpoint_interval` unset, ≤100 iterations (OE) | Effective interval defaults to `max(1, min(100, iterations//10))` — a killed short run has a mid-run checkpoint; an explicit value is never overridden | FR-RUN-057 |
 
 ### 2.6 `revolver eval`
 
@@ -200,6 +226,7 @@ is new — no existing test previously exercised the OE wrapper aggregation.
 | `eval` | Evaluator with only `evaluate_instance()` | Per-instance function called correctly | FR-EVL-001, 002 |
 | `eval` | Evaluator with only `evaluate()` (legacy) | Legacy global function called correctly | FR-EVL-019 |
 | `eval` | Evaluator with both functions | Warning emitted, `evaluate()` used (legacy mode) | FR-EVL-019 |
+| `eval results` | Metrics include reserved `instances_*` coverage keys | Coverage keys excluded from read-time aggregation (`compute_aggregates`) — coverage is metadata, never averaged into a score | FR-EVL-021, FR-RUN-053 |
 
 ### 2.7 `revolver solution`
 
@@ -233,6 +260,9 @@ is new — no existing test previously exercised the OE wrapper aggregation.
 | `solution diff` | Unified diff between two different solutions | Diff output on stdout | FR-SOL-020 |
 | `solution diff` | Empty diff, exit 0 for identical solutions | No output, exit code 0 | FR-SOL-020 |
 | `solution diff --json` | JSON with diff text and identical flag | Valid JSON with diff and identical fields | FR-SOL-020 |
+| `solution extract --rank 2` | Shinka run (top-N-capable) | 2nd-best program read from `programs.sqlite` (retroactive, no run-dir layout change), materialized as `programs/rank-2.py`, promoted; `(run_id, rank)` uniqueness enforced | FR-SOL-021, FR-SOL-011/012 |
+| `solution extract --program-id <id>` | Shinka run | Arbitrary population program promoted by id | FR-SOL-021 |
+| `solution extract --rank 2` | OpenEvolve run (`top_n_extraction=False`) | Exit code 1, clear "not supported on `<backend>`" error (OE consciously deferred) | FR-SOL-021 |
 
 ### 2.8 `revolver benchmark`
 
@@ -351,6 +381,47 @@ Mirror the `unit/test_db_migration_v10` / `v11` structure. Simple additive `ALTE
 | Any state-modifying command | Confirmation summary displayed | NFR-006 |
 | Progress on long commands | Progress indicator on stderr | NFR-005 |
 | `revolver` (root) | Subcommand structure accessible | NFR-007 |
+
+### 2.16 S18 Semantic Slice — Eval Honesty (U13 / U11 / U4 / U8 / U6 phase 2)
+
+New scenarios for the v0.18 semantic slice ([sprint-018.md](../sprints/sprint-018.md) §Integration
+Tests; triage §3 strict order U13 → U11 → U4 → U8 → U6 phase 2). All **Planned**; they must pass at
+sprint end on the **1471-passing baseline** (post-017a). The Shinka-gated rows auto-skip via the
+existing `pytest.importorskip` / marker gating.
+
+| Test | Scenario | Validates | FRs |
+|---|---|---|---|
+| `test_oe_display_prefers_combined_score` | `run population` / live `run status` on metrics with `combined_score` + other numerics (lands in the existing top-level `tests/test_run_population.py` suite — validation.md §8.1 top-level exception) | `parse_population`/`read_checkpoint_best_score` rank by `combined_score`, not sum-of-metrics; sum fallback only without `combined_score`; no crash when absent | FR-RUN-052 |
+| `test_wrapper_coverage_keys_not_in_score` | Generated wrapper over a mixed valid/timed-out dataset (both backends) | `instances_valid`/`instances_total` emitted; the reserved `instances_` prefix is excluded from the metric mean — coverage never inflates the score | FR-RUN-053, FR-EVL-021 |
+| `test_shinka_wrapper_timeout_branch` | Shinka wrapper instance timeout (L2-Shinka) | The new **distinct `TimeoutError` branch** (previously one catch-all) fires and records the timeout on the side-channel | FR-RUN-053 |
+| `test_on_timeout_penalize_vs_drop` | Same run with a timed-out instance under both policies | Default **penalize** writes `timeout_score` (0.0) into the mean; `evaluation.on_timeout=drop` restores the 0.17 survivor-mean; zero-timeout runs identical under both | FR-RUN-054 |
+| `test_evaluation_on_timeout_validation` | `evaluation.on_timeout=bogus` / non-finite `timeout_score` | Rejected at run **and** dry-run (exit 1) — `evaluation.*` is a validated Revolver-owned config section | FR-RUN-054 |
+| `test_post_run_eval_persists_via_evaluate_solution` | Completed run with a train dataset | Post-run eval routed through `core.eval.evaluate_solution`; `eval_metadata`/`eval_instances` written (no longer stderr-only); no DB-contention error vs the open launch connection; warn-only preserved; hardcoded 300 s timeout gone | FR-RUN-019, FR-RUN-020 |
+| `test_run_info_honest_score_labels` | `run info` on a run with a post-eval | Engine best labeled "engine, single eval" next to the coverage-labeled post-eval mean; the #306 fallback is labeled (never renders bare); JSON carries both fields | FR-RUN-055 |
+| `test_run_backend_resolution_order_and_mismatch_warn` | `version create --backend shinka`, then `run` with/without `--backend` | Persisted backend resolved when the flag is omitted; explicit flag wins; explicit mismatch **warns** on stderr (never errors); `--dry-run` identical | FR-RUN-047, FR-PRB-016 |
+| `test_validate_seed_metrics_missing_dim_fails` | Seed missing a declared non-builtin `feature_dimensions` metric | Pre-flight hook aborts **before iteration 0** (launch + resume), naming the missing dim + the available metrics | FR-RUN-056 |
+| `test_validate_seed_metrics_builtins_and_shinka_noop` | Declared builtin dim / Shinka backend | `complexity`/`diversity`/`combined_score` allowlisted (computed inside OpenEvolve); the Shinka hook is a no-op | FR-RUN-056 |
+| `test_checkpoint_cadence_default_when_unset` | Unset vs explicit `checkpoint_interval` (OE) | Default `max(1, min(100, iterations//10))` when unset (mid-run checkpoint exists on a ≤100-iter run); explicit value untouched; S17a-12 warn fires only on explicit equality | FR-RUN-057 |
+
+### 2.17 DB Migration v14 (S18)
+
+Mirror §2.13 / the `unit/test_db_migration_v13` structure. One column per migration
+(`problem_versions.backend TEXT NOT NULL DEFAULT 'openevolve'`, project DB only — mirrors the
+`runs.backend` v9 shape); the global DB **no-ops-and-bumps** (table-presence guard, v10/v12/v13
+pattern); lands after the current head v13. Planned.
+
+| Test | Scenario | Validates | FRs |
+|---|---|---|---|
+| `test_db_migration_v14_problem_versions_backend` | Fresh + v13→v14 project DB; global DB | `problem_versions.backend` column present; existing version rows preserved defaulting `'openevolve'`; global DB no-ops-and-bumps; `CURRENT_SCHEMA_VERSION = 14` | FR-PRB-016, NFR-013 |
+
+### 2.18 Top-N Extraction, Reap Hardening & Doc Lint (S18)
+
+| Test | Scenario | Validates | FRs |
+|---|---|---|---|
+| `test_solution_extract_rank_n_shinka` | `solution extract --rank 2` / `--program-id <id>` on a Shinka run | 2nd-best program read from `programs.sqlite` (retroactive on old runs, no run-dir layout change), materialized as `programs/rank-2.py`, promoted; `(run_id, rank)` uniqueness; `--rank 1` behaves exactly as today | FR-SOL-021, FR-SOL-011/012 |
+| `test_solution_extract_rank_unsupported_oe` | `--rank 2` on an OE run | `capabilities().top_n_extraction == False` → exit 1 with a clear "not supported on `<backend>`" message (OE consciously deferred) | FR-SOL-021 |
+| `test_reaper_grandchild_killpg` | Mocked run leaking a **grandchild** process (new suite `tests/integration/test_base_reaper.py`, next to the 017a backstops — ID `integration/test_base_reaper::test_reaper_grandchild_killpg`) | Recursive-descendant enumeration + `killpg` in `ChildProcessReaperMixin` reap it (not just direct children); single-PID fallback; the 017a backstop tests (`test_openevolve_shutdown.py`/`test_shinka_shutdown.py`) unaffected | — (#359 reap hardening) |
+| `test_doc_command_lint_resolves_cli_tree` | Docs corpus with fenced `revolver` invocations (L2 by scope; runs under the `unit` CI marker in the blocking selection, sprint-018 S18-21 — validation.md §8.1 marker-vs-level rule) | Every **line-initial** fenced invocation resolves in the Typer CLI tree (untagged fences parsed); a renamed/removed flag is caught; deprecated `problem version create --tag` denylisted (no false positive); inline-prose backtick mentions out of scope | — (#354 doc anti-rot) |
 
 ---
 

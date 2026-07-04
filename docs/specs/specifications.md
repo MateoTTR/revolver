@@ -180,7 +180,7 @@ Configuration is resolved in this order (last wins):
 
 Common run levers that exist in more than one evolution backend (under different native names) are exposed as **neutral, first-class CLI flags**, each mapped per backend by Revolver — for example `--iterations`, `--temperature`, `--parallel`, `--selection`, `--llm-weight`, and per-LLM `--reasoning-effort` (ADR-007 D4, Amendment A1). These flags are the supported, discoverable, capability-checked path: an unsupported combination is rejected or warned via the backend's `capabilities()`, never silently ignored.
 
-`--config-override key=value` is the **reserved escape hatch** for backend-exclusive *structural* keys that have no neutral equivalent (OE `feature_dimensions`, Shinka `archive_size`, …). It is **not** the normal path for a common lever, and it cannot address list/array members (so per-member weight or reasoning-effort is reachable only through the dedicated flags, not `--config-override`). When a `--config-override` key does not match any field the selected backend's config schema recognizes, Revolver **warns** on the no-op key instead of silently accepting it (backlog B9).
+`--config-override key=value` is the **reserved escape hatch** for backend-exclusive *structural* keys that have no neutral equivalent (OE `feature_dimensions`, Shinka `archive_size`, …). It is **not** the normal path for a common lever, and it cannot address list/array members (so per-member weight or reasoning-effort is reachable only through the dedicated flags, not `--config-override`). When a `--config-override` key does not match any field the selected backend's config schema recognizes, Revolver **warns** on the no-op key instead of silently accepting it (backlog B9). By exception, `evaluation.*` is a **Revolver-owned** config section whose keys and values are **validated**: an invalid `evaluation.on_timeout` or a non-finite `evaluation.timeout_score` is **rejected** at run/dry-run (exit 1) — stronger than the B9 warn-on-no-op-key rule for backend keys (FR-RUN-054).
 
 ---
 
@@ -190,7 +190,7 @@ Common run levers that exist in more than one evolution backend (under different
 |---|---|---|---|
 | [spec-project.md](spec-project.md) | `revolver project init` | §4.1, §5.2 | Project creation and initialization |
 | [spec-llm.md](spec-llm.md) | `revolver llm {add,start,stop,status,list,remove,update}`, `revolver llm ensemble {create,add,list,info,remove}` | §4.8, §5.1 | LLM registration, lifecycle, monitoring, ensembles |
-| [spec-problem.md](spec-problem.md) | `revolver problem {test,version,versions}` | §4.2, §5.3, §5.4, §7.1 | Problem testing and versioning |
+| [spec-problem.md](spec-problem.md) | `revolver problem test`, `revolver problem version {create,list}` | §4.2, §5.3, §5.4, §7.1 | Problem testing and versioning (`version create` takes a positional `TAG`; `--tag` is a deprecated alias) |
 | [spec-dataset.md](spec-dataset.md) | `revolver dataset {add,update,remove,list,info}` | §4.3, §4.4, §5.4, §7.2 | Dataset registration, integrity, compatibility |
 | [spec-run.md](spec-run.md) | `revolver run {<default>,status,resume,list,info,delete}` | §4.6, §5.5 | Evolution-backend orchestration (OpenEvolve default, ShinkaEvolve optional), solution generation |
 | [spec-eval.md](spec-eval.md) | `revolver eval {<default>,results}` | §5.6 | Single solution evaluation |

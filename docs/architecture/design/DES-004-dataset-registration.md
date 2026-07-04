@@ -225,7 +225,7 @@ The global hash changes if any instance is modified, added, or removed. It enabl
 | `dataset add` | All instances + global | `infra/hashing.py` |
 | `dataset info --verify` | All instances + global (recomputed, compared) | `infra/hashing.py` |
 | `run` / `eval` / `benchmark` (pre-check) | Global only (quick integrity check) | `infra/hashing.py` |
-| `problem version` | Problem files + snapshot | `infra/hashing.py` |
+| `problem version create` | Problem files + snapshot | `infra/hashing.py` |
 
 The `infra/hashing.py` module is shared across all these operations (single implementation).
 

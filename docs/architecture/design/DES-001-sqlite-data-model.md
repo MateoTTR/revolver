@@ -1,7 +1,7 @@
 # DES-001 — SQLite Data Model
 
-**Version**: 0.8 — migrations through v13: v12 llms.reasoning_effort, v13 ensemble_members.reasoning_effort (Sprint 017, ADR-007 Amendment A3.2); v11 head prior (runs.backend v9, drop llms pricing v10, widen datasets.split v11)
-**Date**: 2026-07-01
+**Version**: 0.9 — migration v14: `problem_versions.backend` (Sprint 018, U4 / #369, FR-PRB-016); v13 head prior (v12 llms.reasoning_effort, v13 ensemble_members.reasoning_effort — Sprint 017, ADR-007 Amendment A3.2)
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
@@ -98,13 +98,18 @@ Both databases use **WAL mode** (NFR-016) for concurrent read access.
 
 ### 3.1 `problem_versions`
 
-Immutable snapshots of problem definitions. Files stored in `.revolver/problem/<tag>/`.
+Immutable snapshots of problem definitions. Files stored in `.revolver/problem/<tag>/`. The
+`backend` column (migration v14) records the evolution backend the version was validated against
+at create time and serves as the **version-default backend** for `revolver run` — resolution order
+explicit `--backend` > version backend > `openevolve` (FR-PRB-016, [DES-003 §2.2.2](DES-003-problem-versioning.md));
+it is DB metadata only, absent from `manifest.yaml` and the snapshot hash (DES-003 DD-08).
 
 ```sql
 CREATE TABLE problem_versions (
     tag             TEXT PRIMARY KEY,       -- "v1.0", "v1.1"
     hash            TEXT NOT NULL UNIQUE,   -- SHA-256 of snapshot contents
     message         TEXT DEFAULT '',        -- user description
+    backend         TEXT NOT NULL DEFAULT 'openevolve', -- version-default evolution backend (migration v14, FR-PRB-016)
     created_at      TEXT NOT NULL           -- ISO 8601
 );
 ```
@@ -568,6 +573,25 @@ The `ALTER TABLE` is executed with error suppression. Existing member rows are p
 lives only in the global DB; on the project DB the migration is a no-op that just records the version
 bump.
 
+### 5.13 Migration: v13 → v14 (Sprint 018)
+
+Schema version 14 adds the `backend` column to the `problem_versions` table (project DB) so a
+problem version persists the evolution backend it was validated against — the version-default
+backend consumed by `revolver run`'s resolution order (U4 / #369, FR-PRB-016,
+[DES-003 §2.2.2](DES-003-problem-versioning.md)). A simple additive column — no table recreation
+needed (mirrors the v9 `runs.backend` shape; one column per migration, per the v12/v13 discipline):
+
+```sql
+ALTER TABLE problem_versions ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve';
+UPDATE schema_version SET version = 14, applied_at = datetime('now');
+```
+
+The `ALTER TABLE` is executed with error suppression (SQLite does not support
+`ADD COLUMN IF NOT EXISTS`). All pre-v14 versions were validated against OpenEvolve (or created
+before `--backend` existed), so the default backfills existing rows correctly — same rationale as
+v9. The `problem_versions` table lives only in the project DB; on the global DB the migration is a
+no-op that just records the version bump (guard on table presence, as in v10/v12/v13).
+
 ---
 
 ## 6. Key Queries
@@ -723,11 +747,12 @@ MIGRATIONS = {
     11: "widen_datasets_split_check.sql",       # Widen datasets.split CHECK to include 'both' (Sprint 016, UX-3) — §5.10
     12: "add_llms_reasoning_effort.sql",        # Add reasoning_effort to llms (Sprint 017, ADR-007 A3.2) — §5.11
     13: "add_ensemble_members_reasoning_effort.sql",  # Add reasoning_effort to ensemble_members (Sprint 017) — §5.12
+    14: "add_problem_versions_backend.sql",     # Add backend to problem_versions (Sprint 018, U4/#369) — §5.13
 }
 ```
 
-> **CURRENT_SCHEMA_VERSION = 13** after Sprint 017 (v11 head prior to this sprint; v12 and v13 added
-> here, one column per migration). Entries 9–11 (§5.8–§5.10) are listed here for completeness — the
+> **CURRENT_SCHEMA_VERSION = 14** after Sprint 018 (v13 head prior to this sprint; v14 added here,
+> one column per migration). Entries 9–11 (§5.8–§5.10) are listed here for completeness — the
 > narrative sections were added ahead of this dict.
 
 ---
