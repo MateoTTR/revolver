@@ -300,20 +300,25 @@ This is a **hotfix**, not a normal sprint release. Follow the Hotfix Process:
 
 ## Sprint Review
 
-_Filled at sprint end._
+_Session 058 (2026-07-04). All 3 PRs merged: #242 (PR-A), #243 (PR-C), #245 (PR-B) — merge order A → C → B as planned, PR-B rebased on post-C develop with zero conflicts._
 
 ### Tests passing
-- X / 17 new integration tests passing (L2); demo acceptance (gen142 re-score) X/10 instances; Shinka smoke non-regression pass/fail.
+- **20 / 17 planned** new automated tests (L1+L2) merged and green (PR-A 8 + PR-B 3 + PR-C 9 — extra: invalid-env-value cap case, U7 combo warn-once, U1 JSON-array fail-fast); full suite **1471 passed, 4 skipped** on develop after the last merge; `ruff`/`mypy` clean; CI green on all 3 PRs (one CI-only failure caught and fixed en route: the U5 test initially depended on a real openevolve install, absent from the CI main job → mocked `is_available`/`validate_config` + an install-gated twin in `test_run_oe.py`).
+- Code reviews: 0 CRITICAL across the three PRs (PR-A: 1 W + 3 S; PR-B: 0 W + 3 S; PR-C: 1 W + 3 S — all findings addressed and re-pushed before ready).
+- **Demo acceptance (gen142 re-score) PASSED**: `revolver eval --solution beam3-champ-sonnetheavy --dataset beamforming-eval` → **10/10 solved in 810.5 s** (was 0/10 + manual `kill -9`), per-instance `time_s` 7.9–245 s (all < 300 s timeout), cap line `numeric thread cap per eval process: 8` printed, **zero surviving eval workers** after completion. `combined_score` mean **3.29** — reproduces the reporter's thread-capped held-out reference (3.2918, +0.971) without any manual env workaround.
+- **Shinka smoke (do-not-regress gate)**: not run as a live run — the claude-ollama-bridge was down at release time. Compensating coverage: the 49 install-gated Shinka tests re-run against real shinka 0.0.7 (`shinka-spike` env) during PR-C, M1/M3/M4 projection + lock tests in the suite, and the U1/U3/U9/U10 dry-run validations below exercised the real Shinka `build_config` path end-to-end. Live non-regression deferred to the next revolver-demos run on 0.17.1.
 
 ### Demo-able features
-- [ ] gen142 champion re-scored via `revolver eval` → ~10/10 in 7–116 s (was 0/10, no grinder survivors)
-- [ ] `--backend shinka` smoke run: M1/M3/M4/lock all still work (do-not-regress)
-- [ ] `REVOLVER_EVAL_NUM_THREADS` caps eval BLAS threads; pre-set `OMP_NUM_THREADS` respected
-- [ ] `--selection-kwarg adaptive_scale=false` → `False`; garbage kwarg fails at `--dry-run`
-- [ ] Key-less local OE ensemble member no longer crashes at init; no ambient key forwarded
-- [ ] `run … --dry-run` surfaces `prior_probs`/`cost_aware_coef`
-- [ ] `revolver run foo=bar` → targeted repeatable-option hint
+- [x] gen142 champion re-scored via `revolver eval` → **10/10** in 7.9–245 s (was 0/10; no grinder survivors)
+- [~] `--backend shinka` smoke run — deferred (bridge down); covered by real-shinka test suite + dry-run validation
+- [x] `REVOLVER_EVAL_NUM_THREADS` caps eval BLAS threads (default `cpu//2`=8 announced on stderr); pre-set `OMP_NUM_THREADS` respected
+- [x] `--selection-kwarg` coercion: `exploration_coef=0.7`/`auto_decay=0.98` → floats at dry-run; `auto_decay=banana` → clear `ValidationError` at `--dry-run`, exit 1
+- [x] Key-less local OE ensemble member no longer crashes at init; no ambient key forwarded (L2-tested)
+- [x] `run … --dry-run` surfaces `llm_dynamic_selection_kwargs` incl. the M4-injected `cost_aware_coef: 0.0`
+- [x] `revolver run db_config.num_islands=4` → targeted hint naming the repeatable options (`--config-override`, `--selection-kwarg`, `--llm-weight`)
+- [x] FACT-B warning now carries the U9 short-run guidance ("prefer `--selection fixed`; no per-arm prior")
 
 ### Carry-over
-- v0.18 semantic slice: U13 (367), U11 (368), U4 (369), U8 (370), U6 phase-2 (364), `base.py` reap hardening
-- S18+ / upstream: U9 per-arm bandit prior (371)
+- v0.18 semantic slice: U13 (367), U11 (368), U4 (369), U8 (370), U6 phase-2 (364 part), `base.py` recursive/killpg reap hardening
+- S18+ / upstream: U9 per-arm bandit prior (371 part)
+- Live Shinka smoke on 0.17.1 → next revolver-demos session
