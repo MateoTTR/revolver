@@ -193,6 +193,48 @@ revolver run --llm codestral-local --iterations 50 --parallel 1
 
 ---
 
+## Evaluation thread caps (`REVOLVER_EVAL_NUM_THREADS`)
+
+Revolver's own evaluation paths — post-run training eval, `revolver eval`,
+`benchmark`, `problem test`, and the run pre-flight — each run the evaluator
+in an isolated subprocess. Since v0.17.1 that subprocess is **killed at the
+per-instance timeout** (SIGTERM to its process group, then SIGKILL after a
+3 s grace — no leaked workers), and receives a **numeric thread cap** so a
+single evaluation cannot oversubscribe every core with BLAS/OpenMP threads
+(the classic symptom: a program evolved under ShinkaEvolve's capped
+evolution-phase evals then *times out* in the uncapped post-run eval).
+
+The cap injects the standard variable family (`OMP_NUM_THREADS`,
+`OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `NUMEXPR_NUM_THREADS`,
+`VECLIB_MAXIMUM_THREADS`, `BLIS_NUM_THREADS`, `GOTO_NUM_THREADS`, …) plus
+`OMP_DYNAMIC=FALSE`, `MKL_DYNAMIC=FALSE`, `OMP_WAIT_POLICY=PASSIVE`.
+
+Resolution order:
+
+1. **User env wins**: if *any* cap variable is already set in your
+   environment (e.g. `OMP_NUM_THREADS=2`), Revolver injects **nothing**.
+2. **`REVOLVER_EVAL_NUM_THREADS=N`** caps each eval subprocess at `N`
+   threads; **`0` disables the cap** (escape hatch for a legitimate single
+   big-BLAS evaluation on a dedicated machine).
+3. **Default**: `max(1, cpu_count // 2)`.
+
+One stderr line announces the applied cap per process:
+`[revolver] numeric thread cap per eval process: N (REVOLVER_EVAL_NUM_THREADS=0 to disable)`.
+
+```bash
+# Cap each eval subprocess at 4 threads
+REVOLVER_EVAL_NUM_THREADS=4 revolver eval --solution my-sol --dataset eval-set
+
+# Uncapped (dedicated machine, one heavy numeric eval at a time)
+REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution my-sol --dataset eval-set
+```
+
+> Note: this cap applies to **Revolver's eval subprocesses**. During the
+> evolution phase, each backend manages its own evaluation workers
+> (ShinkaEvolve's scheduler injects an equivalent cap family itself).
+
+---
+
 ## Temperature tuning
 
 Temperature controls the randomness of the LLM's output. Lower values produce

@@ -304,7 +304,7 @@ Deleted run "run-20260310-143000"
 | FR-RUN-008 | MUST | Store all top-ranked programs as `rank-N.py` files in the run directory (from backend output). Create **one** solution DB row for the best program (rank-1), referencing (`run_id`, `rank=1`). Additional programs can be promoted to solutions via `revolver solution extract`. | §4.6 |
 | FR-RUN-009 | MUST | Record full lineage in `RunManifest` in the run directory: problem version, dataset, LLM, config, timestamp, iterations, generation time | §4.6 |
 | FR-RUN-010 | MUST | Store metrics (best scores per iteration) in SQLite | §4.6 |
-| FR-RUN-019 | MUST | On completion, evaluate the rank-1 program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`) | §4.6 |
+| FR-RUN-019 | MUST | On completion, evaluate the rank-1 program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`). Each per-instance eval subprocess is killed at its timeout (no leaked workers) and runs under the `REVOLVER_EVAL_NUM_THREADS` thread cap (DES-005 §7, v0.17.1). | §4.6 |
 | FR-RUN-020 | MUST | Training results are accessible via `revolver eval results --solution <id> --dataset <train-dataset>` | — |
 | FR-RUN-011 | MUST | Store the backend resume state in the run directory for resume capability (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir) | §4.6, §5.5 |
 | FR-RUN-012 | MUST | Support `--alias` for user-friendly solution naming | §4.6 |
