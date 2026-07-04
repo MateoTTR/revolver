@@ -139,7 +139,10 @@ def validate_invocation(tokens: list[str], root: Any = None) -> str | None:
     Grammar notes:
 
     - option values are skipped (``--llm NAME`` / ``--llm=NAME``), never
-      validated;
+      validated — except that a value token which is itself a *known option*
+      of the current command reports a missing-value error
+      (``--llm --version v1.0`` elides the LLM name) rather than being
+      silently swallowed; unknown dash tokens (``-1``) still count as values;
     - a positional token descends into a matching subcommand while no plain
       positional has been consumed yet; ``a/b/c`` shorthand (README feature
       lists) is accepted when **every** part is a subcommand (descends into
@@ -156,11 +159,19 @@ def validate_invocation(tokens: list[str], root: Any = None) -> str | None:
     path: tuple[str, ...] = ()
     positionals = 0
     descending = True
-    skip_value = False
+    pending_option: str | None = None
 
     for token in tokens[1:]:
-        if skip_value:
-            skip_value = False
+        if pending_option is not None:
+            expecting = pending_option
+            pending_option = None
+            if token.startswith("-") and token != "-":
+                name = token.split("=", 1)[0]
+                if name in option_table(command, path):
+                    return (
+                        f"option '{expecting}' for '{_format_path(path)}' expects "
+                        f"a value but is followed by option '{name}'"
+                    )
             continue
         if token.startswith("-") and token != "-":
             name = token.split("=", 1)[0]
@@ -168,7 +179,7 @@ def validate_invocation(tokens: list[str], root: Any = None) -> str | None:
             if name not in options:
                 return f"unknown option '{name}' for '{_format_path(path)}'"
             if options[name] and "=" not in token:
-                skip_value = True
+                pending_option = name
             continue
 
         subs = subcommands(command)

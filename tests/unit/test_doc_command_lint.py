@@ -19,7 +19,16 @@ Line grammar (deliberately narrow):
 - trailing ``\\`` continuations are joined (PS2 ``> `` prompts stripped);
 - ``# ...`` comments and everything after an unquoted shell operator
   (``|``, ``&&``, ``>``, ``;`` ...) are ignored;
-- ``<placeholder>`` tokens count as opaque values.
+- ``<placeholder>`` tokens count as opaque values;
+- prose guard: a line whose first token after ``revolver`` is neither a
+  top-level command nor an option, that carries **no** flag-like token at
+  all, AND that ends with sentence punctuation is treated as prose inside a
+  fence (``revolver is a tool for evolving code.``) and skipped. All three
+  conditions are required, so a renamed top-level group still fails: with a
+  flag (``revolver problms test --instance x``) or without trailing
+  punctuation (``revolver problms``) the line is linted. Trade-off: flagless
+  prose that also lacks sentence punctuation, or prose starting with a real
+  command name, is still flagged — none exists in the corpus today.
 """
 
 from __future__ import annotations
@@ -145,6 +154,29 @@ def tokenize_invocation(command: str) -> list[str] | None:
     return tokens
 
 
+_PROSE_PUNCTUATION = (".", "?", "!", ":", ";", ",")
+
+
+def is_prose_line(command: str, tokens: list[str], root: object) -> bool:
+    """Cheap guard for prose sentences starting with the word ``revolver``.
+
+    See the module docstring: skips only when the first token neither starts
+    with ``-`` nor resolves as a top-level command (slash families included),
+    no token is flag-like, and the raw line ends with sentence punctuation.
+    """
+    if len(tokens) < 2:
+        return False
+    first = tokens[1]
+    if first.startswith("-"):
+        return False
+    top_level = _tree.subcommands(root)
+    if all(part in top_level for part in first.split("/")):
+        return False
+    if any(token.startswith("-") for token in tokens[1:]):
+        return False
+    return command.rstrip().endswith(_PROSE_PUNCTUATION)
+
+
 # ── Corpus scan ───────────────────────────────────────────────────────────────
 
 
@@ -160,7 +192,7 @@ def lint_text(text: str, root: object = None) -> list[tuple[int, str, str]]:
     findings: list[tuple[int, str, str]] = []
     for lineno, command in extract_invocations(text):
         tokens = tokenize_invocation(command)
-        if not tokens:
+        if not tokens or is_prose_line(command, tokens, root):
             continue
         error = _tree.validate_invocation(tokens, root)
         if error is not None:
@@ -275,6 +307,21 @@ class TestExtractionGrammar:
             "eval-set",
         ]
 
+    def test_prose_sentence_in_fence_is_skipped(self) -> None:
+        text = "```\nrevolver is a tool for evolving code.\n```\n"
+        assert lint_text(text) == []
+
+    def test_prose_guard_preserves_renamed_group_failures(self) -> None:
+        # No trailing sentence punctuation -> still linted (renamed group).
+        flagless = lint_text("```\nrevolver problms\n```\n")
+        assert len(flagless) == 1 and "problms" in flagless[0][2]
+        # Flag-like token present -> still linted even with punctuation.
+        with_flag = lint_text("```\nrevolver problms test --instance x.\n```\n")
+        assert len(with_flag) == 1 and "problms" in with_flag[0][2]
+        # First token is a real top-level command -> guard never applies.
+        real_group = lint_text("```\nrevolver problem versions.\n```\n")
+        assert len(real_group) == 1 and "versions" in real_group[0][2]
+
     def test_embedded_markdown_fence_is_one_outer_block(self) -> None:
         text = "````markdown\n```bash\nrevolver llm list\n```\n````\n\n```\nrevolver doctor\n```\n"
         commands = [cmd for _, cmd in extract_invocations(text)]
@@ -382,6 +429,16 @@ class TestInvocationValidation:
         assert _tree.validate_invocation(["revolver", "run/run", "resume"]) is None
         error = _tree.validate_invocation(["revolver", "llm", "add/updat/start"])
         assert error is not None
+
+    def test_option_value_elided_before_another_flag_is_caught(self) -> None:
+        # `--llm` swallows its value; a following *known* option means the
+        # value was elided (`--llm --version v1.0`).
+        error = _tree.validate_invocation(shlex.split("revolver run --llm --version v1.0"))
+        assert error is not None and "--llm" in error and "--version" in error
+
+    def test_dash_value_not_matching_an_option_is_still_a_value(self) -> None:
+        # Unknown dash tokens (negative numbers, odd literals) stay values.
+        assert _tree.validate_invocation(shlex.split("revolver run --iterations -1")) is None
 
     def test_missing_required_argument_is_tolerated(self) -> None:
         # Docs may elide required arguments (`revolver llm start` prose-style).
