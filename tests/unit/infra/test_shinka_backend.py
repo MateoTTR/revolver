@@ -131,17 +131,18 @@ class _FakeDatabaseConfig:
 
 @dataclasses.dataclass
 class _FakeLocalJobConfig:
-    """Field-name stand-in for shinka.launch.LocalJobConfig (subset)."""
+    """Field-name stand-in for shinka.launch.LocalJobConfig (subset).
+
+    Deliberately has NO ``max_proposal_jobs`` field, matching the real
+    shinka 0.0.7 schema (verified by introspection — spike #320 §4): the
+    value is a ``ShinkaEvolveRunner`` constructor kwarg, popped out of the
+    job section and threaded to the runner by ``_run_engine`` (R1 / #253).
+    """
 
     eval_program_path: str | None = "evaluate.py"
     extra_cmd_args: dict[str, Any] = dataclasses.field(default_factory=dict)
     time: str | None = None
     conda_env: str | None = None
-    # Revolver's local-endpoint pin (UX-5/S16-21) writes this field, and it is
-    # a real LocalJobConfig field — the stand-in must include it so the B9
-    # no-op-override check (S17-30) does not flag ``job_config.max_proposal_jobs``
-    # as unknown against an incomplete fake schema.
-    max_proposal_jobs: int | None = None
 
 
 @pytest.fixture
@@ -838,8 +839,16 @@ class TestShinkaBuildConfig:
         config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=llm))
         assert "max_proposal_jobs" not in config.get("job_config", {})
 
-    def test_max_proposal_jobs_override_wins(self, fake_shinka: None, tmp_path: Path) -> None:
-        """An explicit --config-override overrides the local auto-pin (UX-5)."""
+    def test_max_proposal_jobs_override_wins(
+        self, fake_shinka: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An explicit --config-override overrides the local auto-pin (UX-5).
+
+        Also guards the B9 exemption (R1/#253): the key is not a
+        LocalJobConfig field, yet it IS honored (routed to the runner
+        constructor by ``_run_engine``), so the no-op-override probe must
+        stay silent for it.
+        """
         config = ShinkaBackend().build_config(
             _make_spec(
                 tmp_path,
@@ -848,6 +857,7 @@ class TestShinkaBuildConfig:
             )
         )
         assert config["job_config"]["max_proposal_jobs"] == 3
+        assert "max_proposal_jobs" not in capsys.readouterr().err
 
     def test_resolved_config_surfaces_max_proposal_jobs(
         self, fake_shinka: None, tmp_path: Path
@@ -1480,6 +1490,97 @@ class TestShinkaLaunch:
         spec = _make_spec(tmp_path, run_dir=None)
         with pytest.raises(ValidationError):
             ShinkaBackend().launch(spec, {})
+
+
+class TestMaxProposalJobsThreading:
+    """R1 (#320/#253): max_proposal_jobs reaches the runner constructor.
+
+    In shinka 0.0.7 ``max_proposal_jobs`` is a ``ShinkaEvolveRunner``
+    constructor kwarg (default 6), not a ``LocalJobConfig`` field —
+    ``_run_engine`` must pop it out of the job section and pass it to the
+    constructor, otherwise the local-endpoint pin (UX-5/S16-21) and explicit
+    overrides are silently dropped and every run fans out 6 concurrent
+    proposal streams (spike #320 §4).
+    """
+
+    def test_local_pin_reaches_runner_ctor(
+        self,
+        fake_shinka: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The local-endpoint auto-pin (=1) is passed to the constructor."""
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, llm=_make_llm(source="local"))
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert calls[0]["max_proposal_jobs"] == 1
+        # The key was popped BEFORE the LocalJobConfig projection: the
+        # _dataclass_kwargs unknown-key drop-warning must not fire for it.
+        assert "max_proposal_jobs" not in capsys.readouterr().err
+
+    def test_explicit_override_reaches_runner_ctor(
+        self,
+        fake_shinka: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An explicit job_config.max_proposal_jobs override wins end-to-end."""
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(
+            tmp_path,
+            llm=_make_llm(source="local"),
+            config_overrides=["job_config.max_proposal_jobs=2"],
+        )
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert calls[0]["max_proposal_jobs"] == 2
+        # Neither the B9 no-op-override warning (build time) nor the
+        # _dataclass_kwargs drop-warning (run time) fires for this key.
+        assert "max_proposal_jobs" not in capsys.readouterr().err
+
+    def test_default_omits_ctor_kwarg(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No pin, no override: the kwarg is omitted (engine default 6)."""
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(
+            tmp_path,
+            llm=_make_llm(
+                name="remote-llm",
+                source="remote",
+                provider="anthropic",
+                model="claude-x",
+                base_url="https://api.anthropic.com/v1",
+                api_key_env="MY_ANTHROPIC_KEY",
+            ),
+        )
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert "max_proposal_jobs" not in calls[0]
+
+    def test_dry_run_display_still_shows_pin(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """resolved_config() keeps surfacing the value the engine receives."""
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, llm=_make_llm(source="local"))
+        config = backend.build_config(spec)
+
+        resolved = backend.resolved_config(config)
+        backend.launch(spec, config)
+
+        assert resolved.backend_extras["max_proposal_jobs"] == 1
+        assert calls[0]["max_proposal_jobs"] == 1
 
 
 class TestShinkaResume:
