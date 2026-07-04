@@ -50,6 +50,7 @@ wait it out (fully-stalled worst case is ~60 h per proposal, see analysis).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import http.server
 import json
 import os
@@ -255,14 +256,25 @@ def drive(args: argparse.Namespace) -> int:
 
         evidence: dict[str, object] = {}
         if child.poll() is None:
-            # Dump all thread stacks of the wedged child.
+            # Dump all thread stacks of the wedged child. NOTE: faulthandler
+            # shows OS-thread frames only — a *parked coroutine* (the wedged
+            # `await llm.query(...)`) is NOT on any thread stack, so these
+            # frame greps are EXPECTED to be false during the wedge (the main
+            # thread shows the idle asyncio selector instead). The await
+            # point is established by the engine log frozen at "==> QUERYING"
+            # plus the stalled connection(s); these keys only record whether
+            # the dump happened to catch an LLM/httpx frame mid-execution.
             os.kill(child.pid, signal.SIGUSR1)
             time.sleep(3)
             stack_dump = child_err.read_text(encoding="utf-8", errors="replace")
-            evidence["blocked_in_llm_query"] = bool(
+            evidence["stack_dump_note"] = (
+                "faulthandler sees OS threads only; a parked coroutine "
+                "leaves the frame greps below false — see driver comment"
+            )
+            evidence["stack_dump_caught_llm_frame"] = bool(
                 re.search(r"query_local_openai_async|shinka/llm", stack_dump)
             )
-            evidence["blocked_in_httpx_read"] = bool(
+            evidence["stack_dump_caught_httpx_frame"] = bool(
                 re.search(r"httpx|httpcore|anyio", stack_dump)
             )
 
@@ -306,9 +318,11 @@ def drive(args: argparse.Namespace) -> int:
         server.shutdown()
         if child.poll() is None:
             print(f"[driver] killing child process group {child.pid}")
-            with __import__("contextlib").suppress(ProcessLookupError):
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(os.getpgid(child.pid), signal.SIGKILL)
-            child.wait(timeout=10)
+            # Never let the cleanup wait mask the driver's return code.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                child.wait(timeout=10)
 
 
 def main() -> int:
