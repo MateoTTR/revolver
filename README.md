@@ -212,7 +212,7 @@ REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution <solution-id> --dataset eva
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1439+ tests, ~35s; L3 e2e tests are deselected by default — run with -m e2e)
+# Run tests (1471+ tests, ~35s; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
