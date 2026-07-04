@@ -50,21 +50,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # in files owned by another in-flight Sprint 018 PR, so this PR must not edit
 # them. Burn each entry down in the owning PR and remove it here.
 #
-# docs/guides/tuning-oe-config.md is restructured by PR-9 (#356, S18-25);
-# `--source local` is an `llm add` flag, not a `run` flag — the two examples
-# below illustrate the local-endpoint auto-pin with an invalid invocation.
-KNOWN_ROT: frozenset[tuple[str, str]] = frozenset(
-    {
-        (
-            "docs/guides/tuning-oe-config.md",
-            "revolver run --llm codestral-local --source local",
-        ),
-        (
-            "docs/guides/tuning-oe-config.md",
-            "revolver run --llm codestral-local --source local --parallel 3",
-        ),
-    }
-)
+# Empty since PR-9 (#356) fixed the two `run --source local` invocations in
+# the restructured tuning guide (docs/guides/tuning-evolution.md).
+KNOWN_ROT: frozenset[tuple[str, str]] = frozenset()
 
 # ── Fenced-block extraction ──────────────────────────────────────────────────
 

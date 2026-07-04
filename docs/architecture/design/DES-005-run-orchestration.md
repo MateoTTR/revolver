@@ -669,7 +669,7 @@ served by `project init`.
 > **`--source local` concurrency on Shinka (UX-5, planned S16).** `ShinkaBackend.build_config()`
 > additionally pins `job_config.max_proposal_jobs = 1` for a `source == "local"` LLM unless the user
 > overrides it — a serialized subscription/single-GPU endpoint cannot honor Shinka's default
-> fan-out. The OpenEvolve equivalent is `--parallel 1`. See [tuning-oe-config.md](../../guides/tuning-oe-config.md).
+> fan-out. The OpenEvolve equivalent is `--parallel 1`. See [tuning-evolution.md](../../guides/tuning-evolution.md).
 
 ### 4.3 Wrapper Generation Tier
 
