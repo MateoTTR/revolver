@@ -67,6 +67,10 @@ from revolver.infra.backends.openevolve import (
     # re-exports only.
     EVALUATOR_FILENAME,
     WRAPPER_FILENAME as WRAPPER_FILENAME,
+    # Backend-neutral scalar coercion shared with the CLI lever parsers
+    # (U1/S17a-08); the shinka adapter imports it the same way. Promotion
+    # to a shared module is deferred (v0.18).
+    _parse_value,
     count_valid_programs as count_valid_programs,
     find_latest_checkpoint,
     generate_wrapper as generate_wrapper,
@@ -140,9 +144,12 @@ DEFAULT_ITERATIONS = 10
 def _parse_selection_kwargs(raw: list[str] | None) -> dict[str, Any] | None:
     """Parse ``--selection-kwarg key=value`` strings into a dict (A5).
 
-    Values are kept as *strings* here; the backend routes them into the
-    selected sampler's constructor and coerces per-parameter. ``None`` in →
-    ``None`` out (no kwargs supplied).
+    Values are coerced to typed scalars here via :func:`_parse_value`
+    (bool/int/float/null/JSON, string fallback) — the samplers' constructors
+    receive them verbatim, so an un-coerced ``"0.3"`` would ``TypeError`` at
+    launch and ``bool("false")`` would silently invert (U1/S17a-08). The
+    backend then routes them per selected sampler and fail-fasts any residual
+    string on an accepted key. ``None`` in → ``None`` out (no kwargs supplied).
 
     Raises:
         ValidationError: If any entry is missing ``=`` or has an empty key.
@@ -157,7 +164,7 @@ def _parse_selection_kwargs(raw: list[str] | None) -> dict[str, Any] | None:
         key = key.strip()
         if not key:
             raise ValidationError(f"Invalid --selection-kwarg '{item}': empty key.")
-        parsed[key] = value.strip()
+        parsed[key] = _parse_value(value.strip())
     return parsed
 
 
@@ -244,6 +251,35 @@ def _validate_llm_weight_overrides(spec: BackendRunSpec) -> None:
             f"--llm-weight names unknown ensemble member(s): {', '.join(unknown)}. "
             f"Ensemble '{spec.ensemble.name}' members: {valid}."
         )
+
+
+def _warn_snapshot_config_findings(backend: EvolutionBackend, snapshot_dir: Path) -> None:
+    """Re-validate the problem-version snapshot ``config.yaml``, warn-only (U5).
+
+    ``problem version create`` has validated the config since S9a, but that
+    warning is one-shot: nothing re-checks the snapshot at run time, so a dead
+    key committed despite the create-time warning (or validated against a
+    different backend) is silently ignored by every subsequent run. This is
+    the config-file analogue of the B9 ``--config-override`` no-op warn
+    (S17a-11) and runs at ``run``/``--dry-run``/``resume`` entry.
+
+    Warn-only by design: findings go to stderr and the run proceeds. Skips
+    silently when the backend engine is unavailable (mirrors the create-time
+    gating) or when validation itself fails — re-validation must never block
+    a launch.
+    """
+    config_path = snapshot_dir / "config.yaml"
+    if not config_path.exists():
+        return
+    try:
+        available, _hint = backend.is_available()
+        if not available:
+            return
+        findings = backend.validate_config(config_path)
+    except Exception:  # noqa: BLE001 — best-effort re-validation, never blocks
+        return
+    for finding in findings:
+        sys.stderr.write(f"Warning: snapshot config.yaml: {finding}\n")
 
 
 def _determine_run_status(
@@ -724,6 +760,10 @@ def launch_run(
         _validate_selection(spec, backend)
         # Reject --llm-weight keys that name no ensemble member (both backends).
         _validate_llm_weight_overrides(spec)
+
+        # U5 (S17a-11): re-validate the snapshot config.yaml at run entry
+        # (before build_config, so --dry-run is covered too). Warn-only.
+        _warn_snapshot_config_findings(backend, snapshot_dir)
 
         oe_config = backend.build_config(spec)
 
@@ -1469,6 +1509,10 @@ def resume_run(
         _validate_selection(spec, backend)
         # Reject --llm-weight keys that name no ensemble member (both backends).
         _validate_llm_weight_overrides(spec)
+
+        # U5 (S17a-11): re-validate the snapshot config.yaml at resume entry
+        # (warn-only, mirrors the launch/--dry-run path).
+        _warn_snapshot_config_findings(backend, snapshot_dir)
 
         oe_config = backend.build_config(spec)
 

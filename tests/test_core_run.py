@@ -3210,8 +3210,10 @@ class TestParseSelectionKwargs:
         assert _parse_selection_kwargs([]) is None
 
     def test_valid_single_and_multiple(self) -> None:
-        assert _parse_selection_kwargs(["cost_aware_coef=0.0"]) == {"cost_aware_coef": "0.0"}
-        assert _parse_selection_kwargs(["a=1", "b=two"]) == {"a": "1", "b": "two"}
+        # U1 (S17a-08): values are coerced to typed scalars at parse time;
+        # a non-scalar token like "two" stays a string (backend fail-fasts it).
+        assert _parse_selection_kwargs(["cost_aware_coef=0.0"]) == {"cost_aware_coef": 0.0}
+        assert _parse_selection_kwargs(["a=1", "b=two"]) == {"a": 1, "b": "two"}
 
     def test_value_with_equals_kept_verbatim(self) -> None:
         # Only the first '=' splits key from value.
