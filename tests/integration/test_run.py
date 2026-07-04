@@ -399,47 +399,82 @@ def test_run_dry_run(project_with_prereqs: dict[str, Path]) -> None:
 # ── Test 3b: snapshot config re-validation at run entry (U5, S17a-11) ───────
 
 
+# The U5 re-validation is exercised with the backend's is_available /
+# validate_config patched: the CI main test job has NO openevolve install,
+# where the availability gate (correctly) skips re-validation — so the real
+# validate_oe_config leg lives in tests/integration/test_run_oe.py (the
+# OE-installed CI step) and THIS test asserts Revolver's warning plumbing
+# (emission at run/--dry-run/resume, warn-only, availability gate)
+# deterministically on any env.
+_U5_IS_AVAILABLE = "revolver.infra.backends.openevolve.OpenEvolveBackend.is_available"
+_U5_VALIDATE = "revolver.infra.backends.openevolve.OpenEvolveBackend.validate_config"
+_U5_FINDINGS = [
+    "Unknown OE config key 'population_size' at top level. "
+    "Did you mean 'database.population_size'?"
+]
+
+
 @pytest.mark.integration
 def test_run_revalidates_snapshot_config_warns(
     project_with_prereqs: dict[str, Path],
 ) -> None:
     """U5 (S17a-11): snapshot config.yaml re-validated warn-only at run entry.
 
-    The shared fixture config (``config_simple.yaml``) carries dead OE keys
-    (``iterations``, top-level ``population_size``), so every v1.0 leg —
-    ``--dry-run``, a real (mocked) launch, and a resume — must warn on
-    stderr and still proceed. A clean snapshot config warns nothing.
+    Backend validation is stubbed (see the module comment above) so every
+    leg is deterministic without an openevolve install: findings warn on
+    stderr at ``--dry-run``, launch, and resume — and the run proceeds; zero
+    findings stay silent; an unavailable backend skips validation entirely.
     """
     root = project_with_prereqs["root"]
     global_db_path = project_with_prereqs["global_db_path"]
 
     # (a) --dry-run warns (re-validation runs before build_config, which is
     # itself before the dry-run early return).
-    result = _invoke_with_mocks(
-        [
-            "run",
-            "--version",
-            "v1.0",
-            "--llm",
-            "test-llm",
-            "--dataset",
-            "train-small",
-            "--dry-run",
-        ],
-        cwd=root,
-        global_db_path=global_db_path,
-    )
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert mock_validate.called  # the warning came from the stub, not a real import
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
     assert "snapshot config.yaml" in output
     assert "population_size" in output
 
-    # (b) A real (mocked) launch warns too — and proceeds (warn-only).
-    result = _invoke_with_mocks(
-        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
-        cwd=root,
-        global_db_path=global_db_path,
-    )
+    # (b) A real (mocked) launch warns too — and proceeds (warn-only). The
+    # --json payload still parses from stdout: the warning is stderr-only.
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "--json",
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert mock_validate.called
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
     assert "snapshot config.yaml" in output
@@ -465,31 +500,61 @@ def test_run_revalidates_snapshot_config_warns(
         patch("revolver.core.run._post_run_evaluation"),
         patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
         patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
     ):
         result = runner.invoke(app, ["run", "resume", parent_run_id], catch_exceptions=False)
+    assert mock_validate.called
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
     assert "snapshot config.yaml" in output
 
-    # (d) A clean snapshot config warns nothing.
-    (root / "config.yaml").write_text("max_iterations: 20\n", encoding="utf-8")
-    from revolver.core.problem import create_version
+    # (d) A clean snapshot config (zero findings) warns nothing — the
+    # availability gate was passed, so silence means "no findings".
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(True, None)),
+        patch(_U5_VALIDATE, return_value=[]) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert mock_validate.called
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "snapshot config.yaml" not in output
 
-    create_version(tag="v2.0", message="clean config", project_root=root)
-    result = _invoke_with_mocks(
-        [
-            "run",
-            "--version",
-            "v2.0",
-            "--llm",
-            "test-llm",
-            "--dataset",
-            "train-small",
-            "--dry-run",
-        ],
-        cwd=root,
-        global_db_path=global_db_path,
-    )
+    # (e) Unavailable backend → re-validation is skipped silently (the CI
+    # no-openevolve behaviour, encoded explicitly).
+    with (
+        patch(_U5_IS_AVAILABLE, return_value=(False, "install hint")),
+        patch(_U5_VALIDATE, return_value=_U5_FINDINGS) as mock_validate,
+    ):
+        result = _invoke_with_mocks(
+            [
+                "run",
+                "--version",
+                "v1.0",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            cwd=root,
+            global_db_path=global_db_path,
+        )
+    assert not mock_validate.called  # gated off before validation
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
     assert "snapshot config.yaml" not in output
