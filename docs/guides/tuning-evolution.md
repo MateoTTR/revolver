@@ -641,11 +641,11 @@ Pin concurrency to 1:
   evaluator.parallel_evaluations=N` always wins over the auto-pin:
 
   ```bash
-  # Auto-pinned to 1 (no --parallel needed):
-  revolver run --llm codestral-local --source local
+  # LLM registered with --source local → auto-pinned to 1 (no --parallel needed):
+  revolver run --llm codestral-local
 
   # Force concurrency on a local endpoint that can take it (warns, honoured):
-  revolver run --llm codestral-local --source local --parallel 3
+  revolver run --llm codestral-local --parallel 3
   ```
 
   A `--dry-run` shows the resolved `parallel_evaluations` value. See also
