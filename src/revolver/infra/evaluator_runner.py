@@ -69,6 +69,7 @@ THREADS_ENV_VAR = "REVOLVER_EVAL_NUM_THREADS"
 _POLL_INTERVAL_S = 0.1
 _TERM_GRACE_S = 3.0
 _DRAIN_GRACE_S = 1.0
+_STRAGGLER_GRACE_S = 0.5
 
 # One announce line per parent process (not per instance).
 _cap_announced = False
@@ -77,9 +78,16 @@ _cap_announced = False
 def _resolve_thread_cap(numeric_threads: int | None) -> int | None:
     """Resolve the numeric thread cap to apply to eval subprocesses.
 
-    Precedence: explicit ``numeric_threads`` argument >
-    ``REVOLVER_EVAL_NUM_THREADS`` environment variable (``0`` = uncapped,
-    invalid = warn and ignore) > default ``max(1, os.cpu_count() // 2)``.
+    Precedence among Revolver-managed sources: explicit ``numeric_threads``
+    argument > ``REVOLVER_EVAL_NUM_THREADS`` environment variable (``0`` =
+    uncapped, invalid = warn and ignore) > default
+    ``max(1, os.cpu_count() // 2)``.
+
+    Note: :func:`_build_thread_cap_env` gates this function entirely — when
+    ANY cap/policy variable is already set in the parent environment,
+    nothing is injected and this resolution never runs, **including for an
+    explicit** ``numeric_threads`` **argument**: user-env presence wins
+    over everything, the user owns threading (issue #240 rule).
 
     Args:
         numeric_threads: Explicit cap from the caller, or ``None``.
@@ -255,27 +263,37 @@ class WorkerOutcome:
     elapsed_s: float = 0.0
 
 
-def _signal_child(process: BaseProcess, sig: signal.Signals) -> None:
-    """Signal the child's process group, falling back to the single PID.
+def _own_pgid(process: BaseProcess) -> int | None:
+    """Return the child's process-group id if it leads its own group.
 
-    The process group is signalled only when the child established its own
+    The group id is returned only when the child established its own
     session (``getpgid(pid) == pid``): if ``os.setsid()`` had not run yet
     (e.g. the deadline fired during spawn bootstrap), the child still
     shares the parent's process group and ``killpg`` would signal the
-    parent too. Any ``getpgid``/``killpg`` failure falls back to a
-    single-PID ``terminate()``/``kill()``.
+    parent too. Returns ``None`` on any ``getpgid`` failure.
+
+    Note: ``getpgid``/``killpg`` carry an inherent TOCTOU / PID-reuse
+    window; hardening is deferred to v0.18 (docs/sprints/sprint-017a.md).
     """
     pid = process.pid
     if pid is None:
-        return
-
-    pgid: int | None
+        return None
     try:
         pgid = os.getpgid(pid)
     except (AttributeError, OSError):
-        pgid = None
+        return None
+    return pgid if pgid == pid else None
 
-    if pgid is not None and pgid == pid:
+
+def _signal_child(process: BaseProcess, sig: signal.Signals) -> None:
+    """Signal the child's process group, falling back to the single PID.
+
+    Falls back to a single-PID ``terminate()``/``kill()`` when the child
+    does not lead its own group (see :func:`_own_pgid`) or ``killpg``
+    fails.
+    """
+    pgid = _own_pgid(process)
+    if pgid is not None:
         try:
             os.killpg(pgid, sig)
             return
@@ -283,10 +301,10 @@ def _signal_child(process: BaseProcess, sig: signal.Signals) -> None:
             pass
 
     with contextlib.suppress(OSError, ValueError):
-        if sig == signal.SIGKILL:
-            process.kill()
-        else:
+        if sig == signal.SIGTERM:
             process.terminate()
+        else:
+            process.kill()
 
 
 def _kill_child(process: BaseProcess) -> None:
@@ -299,8 +317,28 @@ def _kill_child(process: BaseProcess) -> None:
     _signal_child(process, signal.SIGTERM)
     process.join(timeout=_TERM_GRACE_S)
     if process.is_alive():
-        _signal_child(process, signal.SIGKILL)
+        # SIGKILL is undefined on non-POSIX platforms; degrade to SIGTERM
+        # (process.terminate() is a hard TerminateProcess there anyway).
+        _signal_child(process, getattr(signal, "SIGKILL", signal.SIGTERM))
         process.join(timeout=_TERM_GRACE_S)
+
+
+def _reap_process_group(pgid: int) -> None:
+    """Best-effort SIGTERM → grace → SIGKILL sweep of a process group.
+
+    Called after the direct child has been reaped: any process still in
+    the group is a straggler the evaluator backgrounded (grandchild). A
+    ``ProcessLookupError`` on the first signal means the group is already
+    empty — the common case — and returns without sleeping.
+    """
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (AttributeError, OSError):
+        return
+    # At least one straggler was signalled: short grace, then hard kill.
+    time.sleep(_STRAGGLER_GRACE_S)
+    with contextlib.suppress(AttributeError, OSError):
+        os.killpg(pgid, getattr(signal, "SIGKILL", signal.SIGTERM))
 
 
 def run_killable_worker(
@@ -359,14 +397,24 @@ def run_killable_worker(
 
         elapsed = time.monotonic() - start
 
+        # Capture the group id now: once the child is joined (reaped),
+        # getpgid(pid) no longer works, but stragglers keep the group alive.
+        pgid = _own_pgid(process)
+
         if timed_out:
             _kill_child(process)
+            if pgid is not None:
+                # Sweep grandchildren that survived the group SIGTERM.
+                _reap_process_group(pgid)
             return WorkerOutcome(status="timeout", elapsed_s=elapsed)
 
-        # Child finished (or crashed): reap it; kill any straggler.
+        # Child finished (or crashed): reap it, then group-reap stragglers —
+        # a *passing* eval must not leak a backgrounded grandchild either.
         process.join(timeout=_TERM_GRACE_S)
         if process.is_alive():
             _kill_child(process)
+        if pgid is not None:
+            _reap_process_group(pgid)
 
         if payload is None:
             exitcode = process.exitcode

@@ -108,6 +108,20 @@ def evaluate(program_path):
     return {"combined_score": 0.0}
 """
 
+#: Evaluator that backgrounds a grandchild, then returns successfully.
+_PASSING_EVALUATOR_WITH_GRANDCHILD = """\
+import json
+import os
+import subprocess
+
+def evaluate(program_path):
+    grandchild = subprocess.Popen(["sleep", "120"])
+    probe = os.environ["REVOLVER_INSTANCE_PATH"] + ".pids"
+    with open(probe, "w") as fh:
+        json.dump({"grandchild": grandchild.pid}, fh)
+    return {"combined_score": 1.0}
+"""
+
 
 class TestRunInstance:
     """Tests for run_instance()."""
@@ -280,6 +294,28 @@ class TestKillOnTimeout:
         pids = json.loads((tmp_path / "instance.json.pids").read_text())
         _assert_pid_dead(pids["child"], "evaluator child")
         _assert_pid_dead(pids["grandchild"], "evaluator grandchild")
+
+    def test_run_instance_reaps_grandchild_on_success(self, tmp_path: Path) -> None:
+        """A grandchild backgrounded by a *passing* evaluator is group-reaped
+        after the result is returned: a clean eval must not leak either
+        (PR #242 review, comment 3523719357)."""
+        passing_eval = tmp_path / "passing_eval.py"
+        passing_eval.write_text(_PASSING_EVALUATOR_WITH_GRANDCHILD)
+        instance = tmp_path / "instance.json"
+        instance.write_text("{}")
+
+        result = run_instance(
+            evaluator_path=passing_eval,
+            program_path=FIXTURES / "initial_program_simple.py",
+            instance_path=instance,
+            timeout_s=30.0,
+        )
+
+        assert result.status == "pass"
+        assert result.metrics == {"combined_score": 1.0}
+
+        pids = json.loads((tmp_path / "instance.json.pids").read_text())
+        _assert_pid_dead(pids["grandchild"], "backgrounded grandchild of a passing eval")
 
     def test_run_instance_single_pid_fallback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
