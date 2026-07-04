@@ -216,6 +216,55 @@ class TestBuildConfigEnsemble:
         assert "primary_model" not in config["llm"]
         conn.close()
 
+    def test_oe_ensemble_local_member_placeholder_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """U2 (S17a-09): a key-less local member gets api_key="ollama".
+
+        Mirrors the single-LLM path (#115): the OpenAI SDK requires an
+        api_key, so a key-less local ensemble member crashed at engine init;
+        worse, a None api_key made the SDK fall back to an ambient
+        OPENAI_API_KEY — silently forwarded to the local endpoint. Remote
+        (api_key_env-carrying) members are unchanged.
+        """
+        import copy
+
+        from revolver.infra.backends.openevolve import resolve_api_keys
+
+        conn = _setup_global_db(tmp_path)
+        local = _make_llm(
+            name="local-m",
+            model="llama3",
+            source="local",
+            base_url="http://localhost:11434/v1",
+            # no api_key_env — the key-less local case
+        )
+        remote = _make_llm(name="remote-m", model="gpt-4o", api_key_env="OPENAI_API_KEY")
+        _register_llm(conn, local)
+        _register_llm(conn, remote)
+        ensemble = EnsembleEntry(
+            name="mixed",
+            members=[
+                EnsembleMember(llm_name="local-m", weight=0.5),
+                EnsembleMember(llm_name="remote-m", weight=0.5),
+            ],
+            created_at=datetime.now(UTC),
+        )
+
+        config = build_config(problem_config=None, llm=local, ensemble=ensemble, conn=conn)
+
+        models = config["llm"]["models"]
+        assert models[0]["api_key"] == "ollama"  # placeholder, no init crash
+        assert models[1]["api_key"] == "${OPENAI_API_KEY}"  # remote unchanged
+
+        # Bonus U2 effect: an ambient OPENAI_API_KEY is NOT forwarded to the
+        # local member — the placeholder survives api-key resolution verbatim.
+        monkeypatch.setenv("OPENAI_API_KEY", "ambient-secret")
+        resolved = resolve_api_keys(copy.deepcopy(config))
+        assert resolved["llm"]["models"][0]["api_key"] == "ollama"
+        assert resolved["llm"]["models"][1]["api_key"] == "ambient-secret"
+        conn.close()
+
     def test_ensemble_per_member_temperature(self, tmp_path: Path) -> None:
         """Per-member temperature override is applied correctly."""
         conn, primary_llm, ensemble = self._make_ensemble_setup(tmp_path)
