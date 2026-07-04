@@ -29,6 +29,19 @@ from typer.core import TyperCommand, TyperGroup
 
 from revolver.infra.db import REVOLVER_GLOBAL_DB_ENV
 
+# Typer ≥0.16 vendors Click as ``typer._click``: the exceptions its command
+# resolution raises are *distinct classes* from the public ``click`` package's.
+# Catch both so the U3 hint (below) works regardless of which Click is in play.
+try:  # pragma: no cover - presence depends on the installed Typer release
+    from typer import _click as _typer_click
+
+    _USAGE_ERROR_TYPES: tuple[type[Exception], ...] = (
+        click.exceptions.UsageError,
+        _typer_click.exceptions.UsageError,
+    )
+except ImportError:  # pragma: no cover - older Typer without vendored Click
+    _USAGE_ERROR_TYPES = (click.exceptions.UsageError,)
+
 # The boolean global flags that should be recognised at any level.
 _GLOBAL_FLAGS = {"--json", "--verbose", "--quiet"}
 
@@ -105,12 +118,75 @@ def _apply_flags_to_context(
 
 
 class GlobalOptionGroup(TyperGroup):
-    """TyperGroup subclass that intercepts global options."""
+    """TyperGroup subclass that intercepts global options.
+
+    Also owns the ``key=value``-token subcommand hint (U3/S17a-10): a stray
+    value of a repeatable option (``revolver run foo=bar`` instead of
+    ``revolver run --config-override foo=bar``) is otherwise resolved as a
+    subcommand and dies with a misleading "No such command 'foo=bar'".
+    :meth:`resolve_command` composes with ``super()`` so Typer's
+    did-you-mean suggestion for genuine subcommand typos is preserved.
+    """
 
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         args, flags, global_db = _extract_global_flags(args)
         _apply_flags_to_context(ctx, flags, global_db)
         return super().parse_args(ctx, args)
+
+    def _repeatable_kv_option_names(self) -> list[str]:
+        """Collect repeatable option names reachable from this group.
+
+        Scans the group's own (callback) parameters plus one level of
+        subcommands for ``multiple=True`` options — the ``key=value``-style
+        repeatable levers (``--config-override``, ``--selection-kwarg``,
+        ``--llm-weight``, …) are all declared that way. Used only to *name*
+        likely candidates in the U3 hint; order follows declaration order.
+        Duck-typed on ``param_type_name``/``multiple`` rather than
+        ``isinstance`` because Typer's vendored Click classes are distinct
+        from the public ``click`` ones.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        commands: list[Any] = [self, *self.commands.values()]
+        for command in commands:
+            for param in command.params:
+                if getattr(param, "param_type_name", "") != "option":
+                    continue
+                if not getattr(param, "multiple", False):
+                    continue
+                for opt in getattr(param, "opts", []):
+                    if opt.startswith("--") and opt not in seen:
+                        seen.add(opt)
+                        names.append(opt)
+        return names
+
+    def resolve_command(
+        self, ctx: Any, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except _USAGE_ERROR_TYPES as exc:
+            token = str(args[0]) if args else ""
+            # A would-be subcommand token containing '=' (and not an option)
+            # is almost certainly a stray repeatable-option value (U3):
+            # ``revolver run foo=bar`` instead of
+            # ``revolver run --config-override foo=bar``.
+            if "=" in token and not token.startswith("-"):
+                options = self._repeatable_kv_option_names()
+                example = options[0] if options else "--config-override"
+                hint = (
+                    f" Hint: '{token}' looks like a key=value option value, "
+                    f"not a subcommand. Repeatable options take one key=value "
+                    f"per flag, e.g. {example} {token}."
+                )
+                if options:
+                    hint += f" (Repeatable options here: {', '.join(options)}.)"
+                message = getattr(exc, "message", None)
+                if isinstance(message, str) and message:
+                    exc.message = f"{message.rstrip()}{hint}"  # type: ignore[attr-defined]
+                else:
+                    exc.message = hint.strip()  # type: ignore[attr-defined]
+            raise
 
 
 class GlobalOptionCommand(TyperCommand):
