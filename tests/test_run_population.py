@@ -199,7 +199,8 @@ class TestParsePopulation:
         assert len(result) == 1
         prog = result[0]
         assert prog["id"] == "prog1"
-        assert prog["score"] == pytest.approx(1.75)  # 0.95 + 0.8
+        # FR-RUN-052: combined_score preferred over the sum (was 1.75 pre-S18)
+        assert prog["score"] == pytest.approx(0.95)
         assert prog["generation"] == 3
         assert prog["iteration_found"] == 5
         assert prog["rank"] == 1
@@ -209,7 +210,11 @@ class TestParsePopulation:
         assert prog["island"] is None
 
     def test_multiple_programs_sorted_by_score(self, tmp_path: Path) -> None:
-        """Programs are sorted by combined score descending."""
+        """Programs are sorted by combined score descending.
+
+        Bare ``score`` fixtures (no ``combined_score``) exercise the
+        FR-RUN-052 sum fallback path.
+        """
         programs_dir = tmp_path / "programs"
         programs_dir.mkdir()
 
@@ -250,7 +255,10 @@ class TestParsePopulation:
         assert result[0]["id"] == "good"
 
     def test_boolean_metrics_excluded_from_score(self, tmp_path: Path) -> None:
-        """Boolean values in metrics are not summed into the score."""
+        """Boolean values in metrics are not summed into the score.
+
+        Bare ``score`` fixture: FR-RUN-052 sum fallback path.
+        """
         programs_dir = tmp_path / "programs"
         programs_dir.mkdir()
         prog_json = _make_program_json(
@@ -271,6 +279,51 @@ class TestParsePopulation:
 
         result = parse_population(tmp_path)
         assert result[0]["id"] == "prog_x"
+
+
+# ── L2: FR-RUN-052 display guard (S18 / U13 #367 i) ──────────────────────────
+
+
+def test_oe_display_prefers_combined_score(tmp_path: Path) -> None:
+    """Display/ranking prefers a numeric combined_score over the metric sum.
+
+    FR-RUN-052 (S18 / U13 #367 commit i): ``run population`` / live
+    ``run status`` display and the checkpoint best-score fallback must rank
+    by ``combined_score`` when present — the sum-of-numeric-metrics inflates
+    the displayed score whenever auxiliary metrics exist. The sum remains
+    the fallback only when no numeric ``combined_score`` exists, and a
+    metrics dict lacking it never crashes.
+    """
+    programs_dir = tmp_path / "programs"
+    programs_dir.mkdir()
+    fixtures: dict[str, dict[str, object]] = {
+        # combined_score + auxiliary metrics: sum (8.9) would inflate; 0.9 wins.
+        "honest": {"combined_score": 0.9, "instances_valid": 3.0, "instances_total": 5.0},
+        # Sum ordering (10.5) disagrees with combined_score ordering (0.5).
+        "inflated": {"combined_score": 0.5, "extra_metric": 10.0},
+        # No combined_score: sum fallback (0.7), no crash.
+        "no_combined": {"accuracy": 0.3, "throughput": 0.4},
+        # Non-numeric combined_score (bool): excluded, sum fallback (0.2).
+        "bad_combined": {"combined_score": True, "accuracy": 0.2},
+    }
+    for pid, metrics in fixtures.items():
+        (programs_dir / f"{pid}.json").write_text(
+            _make_program_json(pid, metrics=metrics), encoding="utf-8"
+        )
+
+    result = parse_population(tmp_path)
+
+    by_id = {p["id"]: p for p in result}
+    assert by_id["honest"]["score"] == pytest.approx(0.9)
+    assert by_id["inflated"]["score"] == pytest.approx(0.5)
+    assert by_id["no_combined"]["score"] == pytest.approx(0.7)
+    assert by_id["bad_combined"]["score"] == pytest.approx(0.2)
+    # Ranking follows combined_score, not the (inflating) sum.
+    assert [p["id"] for p in result] == ["honest", "no_combined", "inflated", "bad_combined"]
+
+    # Checkpoint best-score fallback path (read_checkpoint_best_score).
+    (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "inflated"}))
+    assert read_checkpoint_best_score(tmp_path) == pytest.approx(0.5)
 
 
 # ── L1: parse_population() cell-index tests ───────────────────────────────────
@@ -597,8 +650,8 @@ class TestReadCheckpointBestScore:
         (tmp_path / "programs").mkdir()
         assert read_checkpoint_best_score(tmp_path) is None
 
-    def test_sums_all_numeric_metrics(self, tmp_path: Path) -> None:
-        """Sums all numeric metrics including combined_score (consistent with parse_population)."""
+    def test_prefers_combined_score_over_sum(self, tmp_path: Path) -> None:
+        """Prefers combined_score over the metric sum (FR-RUN-052, was 43.45 pre-S18)."""
         (tmp_path / "metadata.json").write_text(json.dumps({"best_program_id": "prog-001"}))
         programs_dir = tmp_path / "programs"
         programs_dir.mkdir()
@@ -610,7 +663,7 @@ class TestReadCheckpointBestScore:
 
         result = read_checkpoint_best_score(tmp_path)
 
-        assert result == pytest.approx(43.45)
+        assert result == pytest.approx(42.5)
 
     def test_sum_of_numeric_metrics_no_combined(self, tmp_path: Path) -> None:
         """Sums numeric metrics when no combined_score key is present."""

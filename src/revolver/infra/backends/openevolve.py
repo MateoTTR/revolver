@@ -1090,12 +1090,42 @@ def _build_cell_reverse_map(
     return reverse
 
 
+def _display_score_from_metrics(metrics: dict[str, Any]) -> float | None:
+    """Extract the display/ranking score from an OE metrics dict (FR-RUN-052).
+
+    Prefers a numeric ``combined_score`` over the sum-of-numeric-metrics:
+    the sum inflates the displayed score whenever auxiliary numeric metrics
+    exist alongside ``combined_score`` (U13/#367 display guard). The sum is
+    the fallback only when no numeric ``combined_score`` is present
+    (population ranking still needs a number), and a metrics dict with no
+    numeric values at all yields ``None`` — never a crash.
+
+    Booleans are excluded everywhere (``bool`` is an ``int`` subclass).
+
+    Args:
+        metrics: The program's metrics dict from an OE checkpoint.
+
+    Returns:
+        The score to display/rank by, or ``None`` if no numeric value exists.
+    """
+    combined = metrics.get("combined_score")
+    if isinstance(combined, (int, float)) and not isinstance(combined, bool):
+        return float(combined)
+    numeric_vals = [
+        v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+    ]
+    if numeric_vals:
+        return float(sum(numeric_vals))
+    return None
+
+
 def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
     """Parse OE checkpoint programs into a ranked population list.
 
     Scans ``checkpoint_dir/programs/*.json``, loads each program,
-    extracts key fields and computes combined_score (sum of numeric
-    metric values, matching OpenEvolve's ``_safe_sum_metrics`` convention).
+    extracts key fields and computes the display score via
+    :func:`_display_score_from_metrics` — a numeric ``combined_score``
+    when present, else the sum of numeric metric values (FR-RUN-052).
 
     Also reads ``metadata.json`` to resolve MAP-Elites cell indices
     and island assignments for each program.
@@ -1120,13 +1150,9 @@ def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
         try:
             data = _json.loads(prog_file.read_text(encoding="utf-8"))
             metrics = data.get("metrics", {})
-            # Combined score = sum of numeric metric values (OE convention)
-            numeric_vals = [
-                v
-                for v in metrics.values()
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
-            ]
-            combined_score = sum(numeric_vals) if numeric_vals else 0.0
+            # Display guard (FR-RUN-052): prefer combined_score over the sum.
+            score = _display_score_from_metrics(metrics)
+            combined_score = score if score is not None else 0.0
 
             prog_id = data.get("id", prog_file.stem)
             cell_info = cell_map.get(prog_id, {})
@@ -1161,8 +1187,9 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
     corresponding program file from ``programs/{id}.json`` and extracts
     the score.
 
-    Score extraction mirrors :func:`parse_population`: sums all numeric
-    metric values.
+    Score extraction mirrors :func:`parse_population` (FR-RUN-052):
+    prefers a numeric ``combined_score``, falling back to the sum of
+    numeric metric values only when no ``combined_score`` exists.
 
     All file operations are read-only and error-tolerant — the checkpoint
     may be mid-write by a concurrent OpenEvolve process.
@@ -1193,14 +1220,9 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
         if not isinstance(metrics, dict):
             return None
 
-        # Sum of all numeric metric values (consistent with parse_population)
-        numeric_vals = [
-            v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
-        ]
-        if numeric_vals:
-            return float(sum(numeric_vals))
-
-        return None
+        # Display guard (FR-RUN-052, consistent with parse_population):
+        # prefer combined_score, fall back to the numeric-metric sum.
+        return _display_score_from_metrics(metrics)
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
