@@ -60,7 +60,12 @@ class RunConfig(BaseModel):
         parallel: Number of parallel evaluations for OpenEvolve.
         rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
             ``diff_based_evolution=false`` and ``max_code_length=50000``.
-        backend: Evolution backend name (ADR-007). Defaults to ``"openevolve"``.
+        backend: Evolution backend name (ADR-007). ``None`` sentinel =
+            "not specified" (U4 / S18): the effective backend resolves
+            ``explicit --backend > version-stored backend (FR-PRB-016) >
+            default 'openevolve'`` in ``launch_run`` — the sentinel keeps
+            an explicit ``"openevolve"`` distinguishable from flag absence
+            (FR-RUN-047 as amended).
         selection: Ensemble selection strategy (``--selection``; ADR-007
             Amendment A2). ``None`` = backend default. Accepted values are
             capability-gated per backend (OpenEvolve: ``weighted`` only;
@@ -82,7 +87,7 @@ class RunConfig(BaseModel):
     temperature: float | None = None
     parallel: int | None = None
     rewrite_mode: bool = False
-    backend: str = "openevolve"
+    backend: str | None = None
     selection: str | None = None
     selection_kwargs: list[str] | None = None
     llm_weight_overrides: list[str] | None = None

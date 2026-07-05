@@ -3421,6 +3421,178 @@ def test_run_dry_run_backend_surfaced(project_with_prereqs: dict[str, Path]) -> 
     assert isinstance(rc["backend_extras"], dict)
 
 
+# ── U4 (S18-09/10): version-stored backend resolution (FR-PRB-016) ──────────
+
+
+def _make_fake_resolution_backend(name: str) -> MagicMock:
+    """Fake EvolutionBackend for resolution-order tests (dry-run path only).
+
+    Substituted at the ``core.run.get_backend`` seam so the resolution
+    order is observable without either engine installed (the CI main job
+    has neither openevolve nor shinka).
+    """
+    from revolver.models.run import ResolvedConfig
+
+    fake = MagicMock()
+    fake.name = name
+    fake.is_available.return_value = (False, None)  # U5 re-validation skips
+    fake.build_config.return_value = {}
+    fake.resolved_config.return_value = ResolvedConfig(backend=name, iterations=7)
+    return fake
+
+
+@pytest.mark.integration
+def test_run_backend_resolution_order_and_mismatch_warn(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """U4 resolution order + mismatch warning (S18-09/10, FR-RUN-047 amended).
+
+    - ``version create v2 --backend shinka`` persists ``'shinka'`` on the
+      version row (FR-PRB-016, migration v14).
+    - ``run v2`` with no ``--backend`` resolves Shinka FROM THE VERSION
+      (observed at the ``get_backend`` seam), without any warning.
+    - ``run v2 --backend openevolve`` runs OpenEvolve (explicit wins) WITH
+      a mismatch warning on stderr.
+    - A version row with no stored backend (legacy pre-v14 shape) still
+      defaults to ``'openevolve'``.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    db_path = root / REVOLVER_DIR / "revolver.db"
+
+    # ── version create v2 --backend shinka persists 'shinka' ────────────
+    # Change the problem content so v2 does not collide with v1.0's hash.
+    program = root / "initial_program.py"
+    program.write_text(program.read_text() + "\n# v2 tweak\n", encoding="utf-8")
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["problem", "version", "create", "v2", "--backend", "shinka"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0, _get_all_output(result)
+
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT backend FROM problem_versions WHERE tag = ?", ("v2",)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "shinka"
+    finally:
+        conn.close()
+
+    # ── run v2 (no --backend) resolves Shinka from the version ──────────
+    fake_shinka = _make_fake_resolution_backend("shinka")
+    get_backend_recorder = MagicMock(side_effect=lambda name: fake_shinka)
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.core.run.get_backend", get_backend_recorder),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "run",
+                "--version",
+                "v2",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            catch_exceptions=False,
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    get_backend_recorder.assert_called_once_with("shinka")
+    data = _parse_json_output(result)
+    assert data["resolved_config"]["backend"] == "shinka"
+    # Deferring to the version is not a mismatch — no warning.
+    assert "Warning: version" not in output
+
+    # ── run v2 --backend openevolve: explicit wins, mismatch warns ──────
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v2",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "openevolve",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert (
+        "Warning: version 'v2' stores backend 'shinka' but --backend "
+        "'openevolve' was given. Proceeding with 'openevolve'." in output
+    )
+
+    # The explicit choice is what gets persisted on the run record
+    # (dry-runs insert nothing, so this is the project's only run row).
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute("SELECT backend FROM runs").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "openevolve"
+    finally:
+        conn.close()
+
+    # ── a version with no stored backend still defaults to openevolve ───
+    # Raw insert omitting the backend column = the legacy pre-v14 row shape
+    # after migration (the column default backfills 'openevolve').
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO problem_versions (tag, hash, message, created_at) VALUES (?, ?, ?, ?)",
+            ("v0-legacy", "sha256:legacy0", "", "2026-01-01T00:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    fake_oe = _make_fake_resolution_backend("openevolve")
+    get_backend_recorder = MagicMock(side_effect=lambda name: fake_oe)
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.core.run.get_backend", get_backend_recorder),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "run",
+                "--version",
+                "v0-legacy",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            catch_exceptions=False,
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    get_backend_recorder.assert_called_once_with("openevolve")
+    assert "Warning: version" not in output
+
+
 # ── S17a-06: "completed" messaging only after teardown (U12 residual, #359) ──
 
 

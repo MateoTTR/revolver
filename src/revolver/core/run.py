@@ -742,8 +742,12 @@ def launch_run(
     Orchestrates the entire run lifecycle per DES-005 section 2.1:
     validate inputs, generate wrapper, build the engine config, launch,
     collect results, create solution, write manifest. Engine-specific
-    steps are mediated by the backend selected via ``config.backend``
-    (ADR-007, FR-RUN-047).
+    steps are mediated by the resolved backend (ADR-007, FR-RUN-047 as
+    amended): explicit ``config.backend`` > the problem version's stored
+    backend (FR-PRB-016) > default ``'openevolve'``. ``config.backend``
+    is a ``None`` sentinel when ``--backend`` was not given; an explicit
+    value that differs from the version's stored backend warns on stderr
+    and wins (U4 / S18). ``--dry-run`` resolves identically.
 
     Args:
         config: Run configuration with problem version, LLM, dataset,
@@ -755,7 +759,7 @@ def launch_run(
         A :class:`RunResult` with run ID, solution, programs, and token usage.
 
     Raises:
-        ValidationError: If ``config.backend`` is not a registered
+        ValidationError: If the resolved backend name is not a registered
             backend (exit code 1).
         BackendUnavailableError: If the selected backend is not
             installed (exit code 3).
@@ -763,9 +767,6 @@ def launch_run(
         IntegrityError: On dataset integrity mismatch (exit code 2).
         ExternalError: On evolution engine failure (exit code 4).
     """
-    # 0. Resolve the evolution backend (ADR-007 D1; unknown name → exit 1)
-    backend: EvolutionBackend = get_backend(config.backend)
-
     # 1. Resolve project root
     root = _resolve_project_root(project_root)
     db_path = root / REVOLVER_DIR / "revolver.db"
@@ -773,10 +774,27 @@ def launch_run(
     proj_conn = get_project_db(db_path)
     global_conn = get_global_db()
     try:
-        # 2. Validate problem version exists
+        # 2. Validate problem version exists. Loaded BEFORE backend
+        # resolution so the version-stored backend is available (U4 / S18).
         pv = get_problem_version(proj_conn, config.problem_version)
         if pv is None:
             raise RevolverError(f"Problem version '{config.problem_version}' not found.")
+
+        # 2b. Resolve the evolution backend (ADR-007 D1; unknown name →
+        # exit 1). Resolution order: explicit --backend > version-stored
+        # backend (FR-PRB-016) > default 'openevolve' — config.backend is
+        # None when --backend was not given (FR-RUN-047 as amended,
+        # DES-005 §2.1 step 2b, DES-003 §2.2.2).
+        backend_name = config.backend or pv.backend or DEFAULT_BACKEND
+        backend: EvolutionBackend = get_backend(backend_name)
+        if config.backend is not None and config.backend != pv.backend:
+            # Explicit mismatch: warn (never error) and honor the explicit
+            # choice — the stored value is a default, not a constraint.
+            sys.stderr.write(
+                f"Warning: version '{config.problem_version}' stores backend "
+                f"'{pv.backend}' but --backend '{config.backend}' was given. "
+                f"Proceeding with '{config.backend}'.\n"
+            )
 
         # 3. Resolve LLM or ensemble (global DB) — S11-08
         llm_or_ensemble = resolve_llm_or_ensemble(config.llm_name, global_conn)

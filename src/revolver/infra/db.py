@@ -29,7 +29,7 @@ from revolver.models.problem import ProblemVersion
 from revolver.models.solution import Solution
 
 # Current schema version — bump when adding migrations.
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 # ── Project DB schema ────────────────────────────────────────────────────────
 
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS problem_versions (
     tag             TEXT PRIMARY KEY,
     hash            TEXT NOT NULL UNIQUE,
     message         TEXT DEFAULT '',
+    backend         TEXT NOT NULL DEFAULT 'openevolve',
     created_at      TEXT NOT NULL
 );
 
@@ -485,6 +486,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current < 13:
         _migrate_v12_to_v13(conn)
 
+    # Migration v14: Add backend column to problem_versions (project).
+    if current < 14:
+        _migrate_v13_to_v14(conn)
+
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """Migration v6->v7: Add 'failed' to the runs.status CHECK constraint.
@@ -794,6 +799,43 @@ def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
+    """Migration v13->v14: Add backend TEXT column to problem_versions (project DB).
+
+    Persists the evolution backend a problem version was validated against
+    at create time — the version-default backend consumed by ``revolver run``'s
+    resolution order ``explicit --backend > version backend > 'openevolve'``
+    (Sprint 018 U4 / #369, FR-PRB-016, DES-001 §3.1/§5.13, DES-003 §2.2.2).
+    A simple additive column with error suppression — no table recreation
+    (mirrors the v9 ``runs.backend`` shape; one column per migration, per the
+    v12/v13 discipline). All pre-v14 versions were validated against
+    OpenEvolve (or created before ``--backend`` existed), so the column
+    default backfills them correctly.
+
+    The ``problem_versions`` table lives only in the project DB. The global
+    DB has no such table, so the migration is a no-op there and only the
+    schema version is bumped.
+    """
+    # Guard: only project databases have the problem_versions table.
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='problem_versions'"
+    )
+    if cursor.fetchone() is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(
+                "ALTER TABLE problem_versions "
+                "ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve'"
+            )
+        conn.commit()
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
+        (14, now),
+    )
+    conn.commit()
+
+
 def get_project_db(path: Path) -> sqlite3.Connection:
     """Open (or create) the project SQLite database.
 
@@ -910,11 +952,13 @@ def insert_problem_version(conn: sqlite3.Connection, version: ProblemVersion) ->
     """
     try:
         conn.execute(
-            "INSERT INTO problem_versions (tag, hash, message, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO problem_versions (tag, hash, message, backend, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
             (
                 version.tag,
                 version.hash,
                 version.message,
+                version.backend,
                 version.created_at.isoformat(),
             ),
         )
@@ -934,7 +978,7 @@ def get_problem_version(conn: sqlite3.Connection, tag: str) -> ProblemVersion | 
         The :class:`ProblemVersion` if found, otherwise ``None``.
     """
     cursor = conn.execute(
-        "SELECT tag, hash, message, created_at FROM problem_versions WHERE tag = ?",
+        "SELECT tag, hash, message, backend, created_at FROM problem_versions WHERE tag = ?",
         (tag,),
     )
     row = cursor.fetchone()
@@ -944,7 +988,8 @@ def get_problem_version(conn: sqlite3.Connection, tag: str) -> ProblemVersion | 
         tag=row[0],
         hash=row[1],
         message=row[2] or "",
-        created_at=datetime.fromisoformat(row[3]),
+        backend=row[3] or "openevolve",
+        created_at=datetime.fromisoformat(row[4]),
     )
 
 
@@ -961,7 +1006,7 @@ def get_problem_version_by_hash(
         The :class:`ProblemVersion` if found, otherwise ``None``.
     """
     cursor = conn.execute(
-        "SELECT tag, hash, message, created_at FROM problem_versions WHERE hash = ?",
+        "SELECT tag, hash, message, backend, created_at FROM problem_versions WHERE hash = ?",
         (content_hash,),
     )
     row = cursor.fetchone()
@@ -971,7 +1016,8 @@ def get_problem_version_by_hash(
         tag=row[0],
         hash=row[1],
         message=row[2] or "",
-        created_at=datetime.fromisoformat(row[3]),
+        backend=row[3] or "openevolve",
+        created_at=datetime.fromisoformat(row[4]),
     )
 
 
@@ -985,14 +1031,16 @@ def list_problem_versions(conn: sqlite3.Connection) -> list[ProblemVersion]:
         A list of :class:`ProblemVersion` instances, oldest first.
     """
     cursor = conn.execute(
-        "SELECT tag, hash, message, created_at FROM problem_versions ORDER BY created_at ASC"
+        "SELECT tag, hash, message, backend, created_at "
+        "FROM problem_versions ORDER BY created_at ASC"
     )
     return [
         ProblemVersion(
             tag=row[0],
             hash=row[1],
             message=row[2] or "",
-            created_at=datetime.fromisoformat(row[3]),
+            backend=row[3] or "openevolve",
+            created_at=datetime.fromisoformat(row[4]),
         )
         for row in cursor.fetchall()
     ]
