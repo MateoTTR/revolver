@@ -1,7 +1,7 @@
 # Revolver — Validation Overview
 
-**Version**: 0.1 — Initial draft
-**Date**: 2026-03-13
+**Version**: 0.2 — Test ID conventions (§8.1): canonical `integration/` prefix for L2 IDs, the historic top-level-file exception, and the marker-vs-level rule (S18)
+**Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Architecture](../architecture/architecture.md)
 
@@ -220,13 +220,17 @@ Key fixtures defined in `tests/conftest.py`:
 ### 6.4 CI Pipeline
 
 ```
-push / PR:
+push / PR — ci.yml (code paths; `**.md` and `docs/**` are path-ignored):
   ├── ruff check + ruff format --check
   ├── mypy --strict
-  ├── pytest tests/unit/ --cov --cov-fail-under=80
-  ├── pytest tests/integration/ -m integration
-  ├── pip install openevolve && pytest tests/integration/test_run_oe.py  (non-blocking)
-  └── pip install "revolver[shinka]" && pytest tests/integration/test_shinka_wrapper.py tests/integration/test_shinka_db.py tests/integration/test_run_shinka.py  (non-blocking)
+  ├── pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"  (Python 3.12 + 3.14 matrix)
+  └── pip install "openevolve>=0.2.26" && pytest tests/integration/test_run_oe.py  (3.12 only, non-blocking)
+
+push / PR — doc-lint.yml (markdown/docs paths: `**.md`, `docs/**` — exactly the set ci.yml ignores):
+  └── pytest tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py  (#354 command-lint + #355 freshness stamps, blocking)
+
+tag push (v*) — ci.yml version-check:
+  └── tag == pyproject.toml version == src/revolver/__init__.py __version__
 
 nightly (standard runner):
   └── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
@@ -235,7 +239,9 @@ manual (self-hosted + GPU):
   └── pytest tests/e2e/ -m e2e_gpu  (Ollama + real model)
 ```
 
-**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge. L2-OE, L2-Shinka and E2E failures are reported but do not block.
+**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge; the doc-lint workflow is blocking on docs-only changes. L2-OE and E2E failures are reported but do not block.
+
+**No Shinka job in CI**: ci.yml runs **no** ShinkaEvolve step — the main test job's `-m "unit or integration"` selection runs without the `[shinka]` extra installed (Shinka-gated modules auto-skip via `pytest.importorskip`), and only the OpenEvolve contract tests get a dedicated non-blocking step. The L2-Shinka contract suites are selected by the `-m shinkaevolve` marker (6+ modules — no longer the historic 3-file list) and run manually in a shinka-enabled environment (e.g. before a release); adding a Shinka-env CI step remains aspirational.
 
 **Draft PRs**: lint and test jobs are skipped for draft PRs to save CI minutes.
 
@@ -280,6 +286,34 @@ tests/
     ├── test_alice_jobshop.py
     └── test_remote_only.py
 ```
+
+### 8.1 Test ID Conventions
+
+The validation documents ([val-integration-tests.md](val-integration-tests.md), the
+[traceability matrix](traceability-matrix.md)) reference tests by an ID of the form
+`<path-under-tests/>::<test_name>` — e.g. `integration/test_llm::test_llm_add_remote` or
+`unit/core/test_problem::test_warns_missing_combined_score`.
+
+- **Canonical L2 home**: new integration suites live in `tests/integration/test_<command>.py`
+  and their IDs carry the `integration/` prefix.
+- **Top-level exception (historic)**: several L2 suites predate the `tests/integration/` layout
+  and live in top-level `tests/test_*.py` files (e.g. `test_project_integration.py`,
+  `test_core_run.py`, `test_run_delete.py`, `test_db_migration_v*.py`, `test_run_population.py`).
+  Their IDs are referenced without a prefix — still relative to `tests/`. Tests added to one of
+  these existing top-level suites keep the file's unprefixed form (e.g. the S18
+  `test_run_population::test_oe_display_prefers_combined_score`). A **new** top-level file is
+  admissible only when its CI marker must diverge from the directory convention (e.g. the S18
+  `test_doc_command_lint`, a `unit`-marked lint suite — see the next bullet); otherwise new L2
+  suites go under `tests/integration/`.
+- **Marker vs. level**: the documentary level (L1/L2/L3) classifies a test's *scope*; the pytest
+  marker (`unit` / `integration` / …, §6.2) drives *CI selection*. The two usually coincide but
+  may deliberately differ — e.g. the #354 doc command-lint
+  (`test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, S18) is tracked as an L2
+  scenario (it exercises the real Typer CLI tree against the whole docs corpus) but runs under
+  the `unit` marker so it executes in the blocking CI selection (sprint-018 S18-21). Where marker
+  and level differ, the validation docs say so on the row. Note that historic top-level suites
+  without any marker fall outside a marker-filtered CI selection and run via a plain
+  `pytest tests/`.
 
 **Running tests**:
 

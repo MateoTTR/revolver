@@ -300,7 +300,7 @@ This is a **hotfix**, not a normal sprint release. Follow the Hotfix Process:
 
 ## Sprint Review
 
-_Session 058 (2026-07-04). All 3 PRs merged: #242 (PR-A), #243 (PR-C), #245 (PR-B) — merge order A → C → B as planned, PR-B rebased on post-C develop with zero conflicts._
+_Session 057 (2026-07-04). All 3 PRs merged: #242 (PR-A), #243 (PR-C), #245 (PR-B) — merge order A → C → B as planned, PR-B rebased on post-C develop with zero conflicts._
 
 ### Tests passing
 - **20 / 17 planned** new automated tests (L1+L2) merged and green (PR-A 8 + PR-B 3 + PR-C 9 — extra: invalid-env-value cap case, U7 combo warn-once, U1 JSON-array fail-fast); full suite **1471 passed, 4 skipped** on develop after the last merge; `ruff`/`mypy` clean; CI green on all 3 PRs (one CI-only failure caught and fixed en route: the U5 test initially depended on a real openevolve install, absent from the CI main job → mocked `is_available`/`validate_config` + an install-gated twin in `test_run_oe.py`).

@@ -546,13 +546,20 @@ class TestBackendField:
 
     @pytest.mark.unit
     def test_run_config_backend_default(self) -> None:
-        """RunConfig defaults backend to 'openevolve'."""
+        """RunConfig defaults backend to the None sentinel (U4 / S18).
+
+        ``None`` means "--backend not given": launch_run resolves
+        explicit --backend > version-stored backend > 'openevolve'
+        (FR-RUN-047 as amended, FR-PRB-016). A hard 'openevolve'
+        default here would make an explicit choice indistinguishable
+        from flag absence.
+        """
         config = RunConfig(
             problem_version="v1.0",
             llm_name="test-llm",
             dataset_name="train",
         )
-        assert config.backend == "openevolve"
+        assert config.backend is None
 
     @pytest.mark.unit
     def test_run_manifest_backend_default(self) -> None:

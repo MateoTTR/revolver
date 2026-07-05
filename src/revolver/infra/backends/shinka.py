@@ -38,7 +38,7 @@ DES-006 §1.3, FR-RUN-047/048, sprint-014 S14-07..13.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
 import json
@@ -65,6 +65,7 @@ from revolver.infra.backends.base import (
     BackendUnavailableError,
     ChildProcessReaperMixin,
     ProgressInfo,
+    RankedProgram,
     RecoveredProgram,
 )
 from revolver.infra.backends.openevolve import (
@@ -100,7 +101,8 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # Number of ranked programs materialized into <results_dir>/best/ after a
 # run. Mirrors OpenEvolve's output (a single best/best_program.py) so the
 # orchestrator's program collection behaves identically across backends;
-# top-N extraction (capabilities().top_n_extraction) is an S15 extension.
+# top-N extraction beyond rank 1 is served on demand by
+# extract_ranked_program (S18 / #299), not by widening this count.
 _BEST_PROGRAMS_COUNT = 1
 
 # Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
@@ -210,8 +212,11 @@ _PROVIDER_ENV_VARS: dict[str, str] = {
 # tolerated by validate_config() and ignored by the engine projection:
 # - evaluation: wrapper settings (timeout_per_instance);
 # - output_dir: injected by the orchestrator (DES-005 §14.1);
-# - llm_env: env-var export map produced by build_config() (D5).
-_REVOLVER_SECTIONS = frozenset({"evaluation", "output_dir", "llm_env"})
+# - llm_env: env-var export map produced by build_config() (D5);
+# - llm_timeout: resolved per-request LLM timeout (R2 / #320 / #260) —
+#   applied by ``_run_engine`` via set/restore of the module global
+#   ``shinka.llm.client.TIMEOUT`` (see :func:`_llm_request_timeout`).
+_REVOLVER_SECTIONS = frozenset({"evaluation", "output_dir", "llm_env", "llm_timeout"})
 
 # Shinka config sections and their backing dataclass import paths.
 _SECTION_DATACLASSES: dict[str, tuple[str, str]] = {
@@ -281,6 +286,12 @@ job_config:
 # Evaluation settings (Revolver-specific).
 evaluation:
   timeout_per_instance: 30  # seconds
+  # Timed-out instance policy (v0.18): "penalize" counts the instance at
+  # timeout_score in the fitness mean; "drop" excludes it (pre-0.18
+  # survivor-mean). Note: with a negative timeout_score floor, lower
+  # scores are the penalty — mind negative-is-good metrics.
+  on_timeout: penalize
+  timeout_score: 0.0
 """
 
 
@@ -307,6 +318,7 @@ to --results_dir.
 import argparse
 import json
 import os
+import sqlite3
 import statistics
 import sys
 from pathlib import Path
@@ -317,6 +329,13 @@ from evaluator import evaluate_instance
 
 # Per-instance timeout in seconds (None = no timeout)
 _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
+
+# Timed-out instance policy baked at generation time (FR-RUN-054):
+# "penalize" (v0.18 default) counts the instance at _TIMEOUT_SCORE in the
+# fitness mean; "drop" excludes it (pre-0.18 survivor-mean). Validated at
+# the launch point; resume inherits this baked policy with the wrapper.
+_ON_TIMEOUT = {on_timeout!r}
+_TIMEOUT_SCORE = {timeout_score!r}
 
 
 def _call_evaluate_instance(program_path, instance_path):
@@ -357,8 +376,12 @@ def run_experiment(program_path, seed=0):
     """Evaluate *program_path* on every dataset instance (one Shinka run).
 
     Returns the list of per-instance metric dicts. Instances whose
-    evaluation raises are skipped (logged to stderr); when every instance
-    fails a RuntimeError is raised so the run is marked incorrect.
+    evaluation raises are skipped (logged to stderr); a timed-out instance
+    hits a distinct TimeoutError branch (FR-RUN-053) — recorded on the
+    side-channel, then scored per the baked _ON_TIMEOUT policy
+    (FR-RUN-054: penalize -> a _TIMEOUT_SCORE entry, drop -> excluded).
+    When no instance produced an entry a RuntimeError is raised so the
+    run is marked incorrect.
     """
     dataset_dir = os.environ["REVOLVER_DATASET_DIR"]
     instances = sorted(
@@ -366,9 +389,25 @@ def run_experiment(program_path, seed=0):
         if not p.name.startswith(".") and p.is_file()
     )
     per_instance = []
+    valid = 0  # instances that genuinely returned metrics (FR-RUN-053)
     for inst in instances:
         try:
             per_instance.append(_call_evaluate_instance(program_path, str(inst)))
+            valid += 1
+        except TimeoutError as exc:
+            # Distinct timeout branch (FR-RUN-053): timeouts are recorded on
+            # the side-channel, distinguishable from ordinary failures.
+            print(
+                "[revolver] timeout for " + inst.name + ": " + str(exc),
+                file=sys.stderr,
+            )
+            _log_timeout(inst.name)
+            if _ON_TIMEOUT == "penalize":
+                # FR-RUN-054 (v0.18 default): a timed-out instance
+                # contributes the penalty score to the fitness mean
+                # instead of silently vanishing from it.
+                per_instance.append({{"combined_score": _TIMEOUT_SCORE}})
+            # "drop": fall through — survivor-mean (pre-0.18 behavior).
         except Exception as exc:
             print(
                 "[revolver] evaluation failed for " + inst.name + ": " + str(exc),
@@ -376,6 +415,16 @@ def run_experiment(program_path, seed=0):
             )
     if not per_instance:
         raise RuntimeError("all instance evaluations failed")
+    # Coverage bookkeeping (FR-RUN-053): stamped onto every per-instance
+    # entry so it travels WITH the results. run_shinka_eval may execute
+    # run_experiment() in a ProcessPoolExecutor worker (run_workers > 1)
+    # where a module-global would never reach the parent's
+    # aggregate_metrics(); the stamped entries cross the pickle boundary.
+    # The reserved "instances_" prefix keeps the stamps out of the mean.
+    for m in per_instance:
+        if isinstance(m, dict):
+            m["instances_valid"] = float(valid)
+            m["instances_total"] = float(len(instances))
     return per_instance
 
 
@@ -384,6 +433,10 @@ def aggregate_metrics(results):
 
     *results* is the run_shinka_eval results list (one entry per run);
     each entry is the per-instance metrics list from run_experiment().
+
+    The reserved "instances_" coverage prefix is NEVER averaged into the
+    metrics (FR-RUN-053); the coverage keys are read back from the
+    per-instance entries stamped by run_experiment() instead.
     """
     all_metrics = [m for run_result in results for m in run_result]
     aggregated = {{}}
@@ -392,6 +445,8 @@ def aggregate_metrics(results):
         if isinstance(m, dict):
             keys.update(m.keys())
     for key in sorted(keys):
+        if key.startswith("instances_"):
+            continue  # reserved coverage prefix — metadata, never averaged
         values = [
             m[key]
             for m in all_metrics
@@ -405,6 +460,18 @@ def aggregate_metrics(results):
     # to exist; validate_result() independently marks the run incorrect when
     # the user metrics lacked it, so this default never masks a failure.
     aggregated.setdefault("combined_score", 0.0)
+    # Coverage keys: metadata, not fitness (FR-RUN-053) — read back from the
+    # stamped per-instance entries so the values survive a process boundary
+    # (see run_experiment). Every entry within a run carries identical
+    # stamps; across runs the last one wins (same dataset every run).
+    instances_valid = 0.0
+    instances_total = 0.0
+    for m in all_metrics:
+        if isinstance(m, dict) and "instances_total" in m:
+            instances_valid = float(m.get("instances_valid", 0.0))
+            instances_total = float(m["instances_total"])
+    aggregated["instances_valid"] = instances_valid
+    aggregated["instances_total"] = instances_total
     return aggregated
 
 
@@ -419,6 +486,34 @@ def validate_result(per_instance):
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             return False, "missing numeric 'combined_score' in instance metrics"
     return True, None
+
+
+def _log_timeout(instance_id):
+    """Record a timed-out instance on the SQLite side-channel (FR-RUN-053).
+
+    Best-effort channel keyed by $REVOLVER_INSTANCE_LOG (same table shape as
+    the OpenEvolve wrapper), with a status marker row (metric
+    "instances_timeout", value 1.0 — reserved "instances_" prefix, never
+    aggregated) so timed-out instances stay visible per instance.
+    """
+    log_path = os.environ.get("REVOLVER_INSTANCE_LOG")
+    if not log_path:
+        return
+    try:
+        conn = sqlite3.connect(log_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS instance_log "
+            "(instance_id TEXT, metric TEXT, value REAL, pid INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
+            (instance_id, "instances_timeout", 1.0, os.getpid()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Side-channel is best-effort
 
 
 def _save_results(results_dir, metrics, correct, error):
@@ -652,6 +747,67 @@ def _as_number(value: Any) -> float:
     return 0.0
 
 
+@contextlib.contextmanager
+def _llm_request_timeout(timeout: Any) -> Iterator[None]:
+    """Set/restore ``shinka.llm.client.TIMEOUT`` around an engine run (R2/#260).
+
+    shinka 0.0.7 hard-codes the LLM request timeout
+    (``shinka/llm/constants.py``: ``TIMEOUT = 1200``) with no config or env
+    override, and its four-layer retry stack multiplies a stalled endpoint
+    into an hours-long wedge (spike #320,
+    ``docs/analysis/spike-320-qwen15-deadlock.md`` §3). ``shinka/llm/client.py``
+    reads the module global **at call time** (clients are constructed per
+    query), so setting it before the run applies to every LLM request of the
+    run — empirically verified by the spike's fast-mode repro, which patches
+    exactly this seam (§2 Run 2, §5 R2). The previous value is always restored
+    on exit (success or raise): the mutation must never outlive the run.
+
+    *timeout* is the resolved Revolver-owned ``llm_timeout`` config value from
+    ``build_config`` (registry ``timeout_s``; ensembles: max over the members
+    that set it). ``None`` (nothing set) leaves the engine default (1200 s)
+    untouched. An invalid value or an unexpected shinka layout degrades to a
+    stderr warning — a tuning lever must never crash the run.
+
+    Honest limit (documented in ``docs/guides/tuning-evolution.md``): this
+    caps the **per-attempt** stall only; shinka bakes its backoff budget
+    (``max_time=6000``) at import time, so the total worst case across the
+    retry stack stays hours-long until upstream exposes the retry budget (R3).
+    """
+    if timeout is None:
+        yield
+        return
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        sys.stderr.write(
+            f"Warning: ignoring invalid llm_timeout value {timeout!r} for the "
+            f"shinka backend (expected a positive number of seconds); the "
+            f"engine default request timeout applies.\n"
+        )
+        yield
+        return
+    try:
+        import shinka.llm.client as shinka_llm_client  # type: ignore[import-not-found,import-untyped,unused-ignore]
+    except Exception:
+        # A client module that imports-but-raises must degrade to the
+        # warning below, never crash the run (the lever is best-effort).
+        shinka_llm_client = None
+    if shinka_llm_client is None or not hasattr(shinka_llm_client, "TIMEOUT"):
+        sys.stderr.write(
+            "Warning: could not apply llm_timeout on the shinka backend: "
+            "shinka.llm.client.TIMEOUT not found (unexpected shinka layout); "
+            "the engine default request timeout applies.\n"
+        )
+        yield
+        return
+    saved = shinka_llm_client.TIMEOUT
+    shinka_llm_client.TIMEOUT = timeout
+    try:
+        yield
+    finally:
+        # Never leave the module global mutated past the run: other code in
+        # this process (or a subsequent run) must see the pristine module.
+        shinka_llm_client.TIMEOUT = saved
+
+
 class ShinkaBackend(ChildProcessReaperMixin):
     """``EvolutionBackend`` adapter for ShinkaEvolve (ADR-007, Sprint 014)."""
 
@@ -772,8 +928,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
         two segments are probed so a deeper key under a dict-valued field
         (``evo_config.llm_kwargs.max_tokens``) is not mistaken for a no-op.
         Revolver-owned sections (:data:`_REVOLVER_SECTIONS`:
-        ``evaluation``/``output_dir``/``llm_env``) are tolerated by
-        ``validate_config`` and never warn. Degrades to silence when shinka is
+        ``evaluation``/``output_dir``/``llm_env``/``llm_timeout``) are
+        tolerated by ``validate_config`` and never warn. Degrades to silence when shinka is
         not installed (``validate_config`` returns ``[]``).
 
         This intentionally overlaps ``_dataclass_kwargs`` for the
@@ -920,6 +1076,26 @@ class ShinkaBackend(ChildProcessReaperMixin):
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
 
+        # 2c. LLM request timeout (R2 / #320 / #260): the neutral per-LLM
+        #     registry field ``timeout_s`` (``revolver llm add/update
+        #     --timeout``) has no Shinka config seam — shinka 0.0.7 hard-codes
+        #     the client timeout (``shinka/llm/constants.py``: TIMEOUT=1200).
+        #     Resolve the effective value into the Revolver-owned top-level
+        #     ``llm_timeout`` key; ``_run_engine`` set/restores
+        #     ``shinka.llm.client.TIMEOUT`` around the run (see
+        #     :func:`_llm_request_timeout`). Ensembles resolve to the MAX over
+        #     the members that set ``timeout_s`` (conservative — never
+        #     truncate the slowest member). When nothing sets it, the key
+        #     stays absent and the engine default is left untouched. A
+        #     ``--config-override llm_timeout=…`` (step 5) still wins.
+        member_timeouts = [
+            member_llm.timeout_s
+            for _member, member_llm in members
+            if member_llm.timeout_s is not None
+        ]
+        if member_timeouts:
+            config["llm_timeout"] = max(member_timeouts)
+
         # --parallel has no neutral Shinka mapping in S14 (eval job pools
         # are engine-tier concerns) — warn instead of silently ignoring
         # (ADR-007 D4 map-with-warn).
@@ -977,9 +1153,23 @@ class ShinkaBackend(ChildProcessReaperMixin):
         #     endpoint, so fanning out parallel proposal jobs starves it.
         #     Pin job_config.max_proposal_jobs=1 unless the user set it
         #     explicitly via --config-override (the override loop below still
-        #     wins for any value they pass).
+        #     wins for any value they pass). The key rides in the job_config
+        #     section for display/override purposes only: in shinka 0.0.7 it
+        #     is NOT a LocalJobConfig field but a ShinkaEvolveRunner
+        #     constructor kwarg (default 6) — ``_run_engine`` pops it out of
+        #     the section and threads it to the runner (R1 / #320 / #253).
+        #     Pin-skip detection requires the exact ``job_config.max_proposal_jobs``
+        #     key — the same full-key convention as the B9 exemption below
+        #     (PR #254 review). A same-named leaf under another section (e.g.
+        #     ``evo_config.max_proposal_jobs=8``) never reaches the runner, so
+        #     it must NOT disable the pin — the pin stays active and the
+        #     misplaced key draws the B9 no-op warning instead. An explicit
+        #     ``job_config.max_proposal_jobs=null`` is an opt-out: it skips
+        #     the pin here, and ``_run_engine``'s ``is not None`` guard then
+        #     omits the constructor kwarg, so the engine default (6,
+        #     CPU/memory-scaled) applies.
         overrides_set_proposal_jobs = any(
-            override.split("=", 1)[0].strip().split(".")[-1] == "max_proposal_jobs"
+            override.split("=", 1)[0].strip() == "job_config.max_proposal_jobs"
             for override in (spec.config_overrides or [])
             if "=" in override
         )
@@ -996,7 +1186,17 @@ class ShinkaBackend(ChildProcessReaperMixin):
             _set_nested(config, key.strip(), _parse_value(value.strip()))
 
         # B9 (S17-30): warn on override keys that land on no Shinka field.
-        self._warn_noop_config_overrides(spec.config_overrides)
+        # ``job_config.max_proposal_jobs`` is exempt from the probe: it is not
+        # a LocalJobConfig field, but it IS honored — ``_run_engine`` routes it
+        # to the ShinkaEvolveRunner constructor (R1 / #320 / #253) — so the
+        # schema-based no-op check would false-flag it as "no effect".
+        self._warn_noop_config_overrides(
+            [
+                override
+                for override in (spec.config_overrides or [])
+                if override.split("=", 1)[0].strip() != "job_config.max_proposal_jobs"
+            ]
+        )
 
         # U7 residual (S17a-13): the member-path inert warning (S17-27/W2a)
         # never sees a reasoning_efforts value arriving via config.yaml or
@@ -1308,6 +1508,10 @@ class ShinkaBackend(ChildProcessReaperMixin):
             ("parent_selection_strategy", db.get("parent_selection_strategy")),
             ("migration_interval", db.get("migration_interval")),
             ("max_proposal_jobs", job.get("max_proposal_jobs")),
+            # R2 (#320/#260): the resolved per-request LLM timeout the engine
+            # run will apply via shinka.llm.client.TIMEOUT — surfaced so
+            # --dry-run is honest about it (absent = engine default 1200 s).
+            ("llm_timeout", config.get("llm_timeout")),
             ("results_dir", evo.get("results_dir")),
         ):
             if value is not None:
@@ -1366,9 +1570,25 @@ class ShinkaBackend(ChildProcessReaperMixin):
             wrapper_name=SHINKA_WRAPPER_FILENAME,
             snapshot_dir=str(spec.snapshot_dir),
             timeout_per_instance=spec.timeout_per_instance,
+            on_timeout=spec.on_timeout,
+            timeout_score=spec.timeout_score,
         )
         output_path.write_text(wrapper_code)
         return output_path
+
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """No-op seed-metric validation (U8 / FR-RUN-056).
+
+        ShinkaEvolve's only metric contract is ``combined_score`` — the
+        wrapper always synthesizes it — so there is no per-dimension
+        requirement to enforce against the seed's pre-flight metrics
+        (the ``database.feature_dimensions`` check is OpenEvolve-only).
+        """
+        return None
 
     # ── Engine tier — S14-10..13 ──────────────────────────────────────────────
 
@@ -1455,6 +1675,100 @@ class ShinkaBackend(ChildProcessReaperMixin):
             "ShinkaEvolve has no filesystem checkpoint to recover from "
             "(interrupted-run state lives in programs.sqlite). "
             "Best-of-checkpoint recovery is an OpenEvolve capability."
+        )
+
+    def extract_ranked_program(
+        self,
+        run_dir: Path,
+        rank: int | None = None,
+        program_id: str | None = None,
+    ) -> RankedProgram:
+        """Read the rank-N (or id-addressed) program from ``programs.sqlite``.
+
+        Top-N promotion is Shinka-native (FR-SOL-021, #299,
+        ``top_n_extraction=True``): the full population — source code
+        included — lives in ``programs.sqlite``, so this is the rank-1
+        materialization query (:meth:`_materialize_best_programs`:
+        ``combined_score DESC``, ties broken by insertion timestamp then id)
+        without its ``LIMIT``. Programs with a SQL ``NULL``
+        ``combined_score`` (failed evaluations) are excluded — the
+        resulting ranks match what ``run population`` displays for scored
+        programs. Read-only: the caller materializes
+        ``programs/rank-<N>.py`` after validation, so the path works
+        retroactively on old run dirs with no layout change.
+
+        Args:
+            run_dir: The run directory (``programs.sqlite`` is read from
+                ``<run_dir>/shinka-output/``).
+            rank: 1-based rank in the scored population. Exactly one of
+                *rank*/*program_id* is required.
+            program_id: Program id, resolved to its rank in the same
+                ordering.
+
+        Returns:
+            The addressed :class:`RankedProgram` (id, code, resolved rank,
+            ``combined_score``).
+
+        Raises:
+            ValidationError: Neither or both of *rank*/*program_id* given;
+                no readable ``programs.sqlite``; the rank exceeds the
+                scored population; or the program id is unknown or has no
+                ``combined_score`` (failed evaluation).
+        """
+        if (rank is None) == (program_id is None):
+            raise ValidationError(
+                "Exactly one of rank/program_id is required for ranked extraction."
+            )
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            raise ValidationError(
+                f"No backend program store found for this run (expected {db_path})."
+            )
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT id, code, combined_score FROM programs "
+                    "ORDER BY (combined_score IS NULL), combined_score DESC, "
+                    "timestamp, id"
+                ).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            raise ValidationError(f"Cannot read the program store {db_path}: {exc}") from exc
+
+        scored = [row for row in rows if row[2] is not None]
+        if rank is not None:
+            if rank > len(scored):
+                raise ValidationError(
+                    f"No program found at rank {rank}: the scored population "
+                    f"has {len(scored)} program(s)."
+                )
+            prog_id, code, score = scored[rank - 1]
+            resolved_rank = rank
+        else:
+            resolved_rank = 0
+            prog_id, code, score = "", None, None
+            for idx, (row_id, row_code, row_score) in enumerate(scored, start=1):
+                if str(row_id) == program_id:
+                    prog_id, code, score = row_id, row_code, row_score
+                    resolved_rank = idx
+                    break
+            if resolved_rank == 0:
+                if any(str(row[0]) == program_id for row in rows):
+                    raise ValidationError(
+                        f"Program '{program_id}' has no combined_score (failed "
+                        "evaluation) and cannot be promoted to a solution."
+                    )
+                raise ValidationError(
+                    f"Program id '{program_id}' not found in the program store "
+                    f"of this run ({len(rows)} program(s))."
+                )
+        return RankedProgram(
+            program_id=str(prog_id),
+            code=str(code or ""),
+            rank=resolved_rank,
+            score=float(score) if score is not None else None,
         )
 
     def resume(
@@ -1597,7 +1911,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                     "SELECT id, generation, combined_score, correct, "
                     "public_metrics, parent_id FROM programs "
                     "ORDER BY (combined_score IS NULL), combined_score DESC, "
-                    "timestamp"
+                    "timestamp, id"
                 ).fetchall()
             finally:
                 conn.close()
@@ -1888,6 +2202,18 @@ class ShinkaBackend(ChildProcessReaperMixin):
         evo_section["results_dir"] = str(results_dir)
         db_section = dict(config.get("db_config") or {})
         job_section = dict(config.get("job_config") or {})
+        # R1 (#320/#253): max_proposal_jobs is a ShinkaEvolveRunner
+        # constructor kwarg in shinka 0.0.7 (default 6), NOT a LocalJobConfig
+        # field. Left in the section it would be dropped by
+        # ``_dataclass_kwargs`` with a warning and every run would fan out 6
+        # concurrent proposal streams — silently defeating the local-endpoint
+        # pin (UX-5/S16-21) and explicit overrides. Pop it out of the section
+        # and thread it to the runner; when unset, omit the kwarg so the
+        # engine default (and its CPU/memory scaling) applies.
+        max_proposal_jobs = job_section.pop("max_proposal_jobs", None)
+        runner_kwargs: dict[str, Any] = {}
+        if max_proposal_jobs is not None:
+            runner_kwargs["max_proposal_jobs"] = max_proposal_jobs
 
         # Ensure unbuffered output for real-time progress (S8a-09); this
         # affects the evaluation jobs the engine spawns. Carried inside the
@@ -1904,7 +2230,11 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
         runner: Any = None
         try:
-            with revolver_env(exports):
+            # R2 (#320/#260): cap the per-request LLM stall for the whole
+            # engine run — set/restore of the shinka.llm.client.TIMEOUT
+            # module global (read at call time; no-op when llm_timeout is
+            # unset). See _llm_request_timeout for the full rationale.
+            with revolver_env(exports), _llm_request_timeout(config.get("llm_timeout")):
                 runner = runner_cls(
                     evo_config=evo_cls(
                         **self._dataclass_kwargs(evo_section, evo_cls, "evo_config")
@@ -1916,6 +2246,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                     init_program_str=init_program_str,
                     evaluate_str=evaluate_str,
                     verbose=True,
+                    **runner_kwargs,
                 )
                 runner.run()
         except RevolverError:
@@ -2011,7 +2342,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                 rows = conn.execute(
                     "SELECT id, code, combined_score FROM programs "
                     "WHERE combined_score IS NOT NULL "
-                    "ORDER BY combined_score DESC, timestamp LIMIT ?",
+                    "ORDER BY combined_score DESC, timestamp, id LIMIT ?",
                     (_BEST_PROGRAMS_COUNT,),
                 ).fetchall()
             finally:

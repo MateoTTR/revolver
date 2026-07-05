@@ -114,7 +114,7 @@ src/revolver/
 │   ├── __init__.py          # Root Typer app, global options callback
 │   ├── project.py           # revolver project init
 │   ├── llm.py               # revolver llm {add,start,stop,status,list,remove}
-│   ├── problem.py           # revolver problem {test,version,versions}
+│   ├── problem.py           # revolver problem test, problem version {create,list,delete}
 │   ├── dataset.py           # revolver dataset {add,update,remove,list,info}
 │   ├── run.py               # revolver run {<default>,status,resume,list,info,delete}
 │   ├── eval.py              # revolver eval {<default>,results}

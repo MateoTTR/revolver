@@ -42,12 +42,16 @@ def run_launch(
         typer.Option("--dataset", help="Registered dataset name."),
     ] = None,
     backend: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--backend",
-            help=f"Evolution backend: {', '.join(AVAILABLE_BACKENDS)} (default: openevolve).",
+            help=(
+                f"Evolution backend: {', '.join(AVAILABLE_BACKENDS)}. "
+                "Defaults to the problem version's stored backend, "
+                "else openevolve (FR-PRB-016)."
+            ),
         ),
-    ] = "openevolve",
+    ] = None,
     iterations: Annotated[
         int | None,
         typer.Option("--iterations", help="Number of evolution iterations."),
@@ -180,7 +184,11 @@ def run_launch(
         suppress_info = json_mode or quiet
         os.environ["PYTHONUNBUFFERED"] = "1"
         if not dry_run and not suppress_info:
-            sys.stderr.write(f"Running {backend} evolution...\n")
+            # With no explicit --backend the effective backend is resolved
+            # inside launch_run (version-stored backend, U4) — keep the
+            # pre-launch message generic in that case.
+            engine = f"{backend} " if backend else ""
+            sys.stderr.write(f"Running {engine}evolution...\n")
         result = core_run.launch_run(config, quiet=suppress_info)
 
         if dry_run:
@@ -190,11 +198,20 @@ def run_launch(
                     json_mode=True,
                 )
             else:
+                # Display the RESOLVED backend (explicit --backend >
+                # version-stored backend > default — U4, FR-RUN-047). The
+                # fallback never surfaces the None sentinel (dry-run always
+                # sets resolved_config today; belt-and-suspenders).
+                resolved_backend = (
+                    result.resolved_config.backend
+                    if result.resolved_config is not None
+                    else (backend or core_run.DEFAULT_BACKEND)
+                )
                 render(
                     {
                         "status": "dry-run",
                         "run_id": result.run_id,
-                        "backend": backend,
+                        "backend": resolved_backend,
                         "problem_version": result.problem_version,
                         "llm": result.llm,
                         "dataset": result.dataset,
@@ -665,6 +682,30 @@ def run_info(
                 data["valid_iterations"] = f"{info.valid_iterations}/{info.iterations} ({pct}%)"
             if info.generation_time_s is not None:
                 data["generation_time_s"] = f"{info.generation_time_s:.1f}"
+            # Honest dual-score display (S18 / U11 — FR-RUN-055): the engine
+            # best is a max over single, survivorship-prone evaluations — it
+            # never renders without its "engine, single eval" label — shown
+            # NEXT TO the post-run training-eval mean labeled with its
+            # coverage (instances_valid/instances_total — FR-RUN-053).
+            engine_best: float | None = next(
+                (s.best_score for s in info.solutions if s.rank == 1 and s.best_score is not None),
+                None,
+            )
+            if engine_best is None:
+                # #306 display-time fallback — labeled the same way, never bare.
+                engine_best = info.run_best_score
+            if engine_best is not None:
+                data["best_score_engine"] = f"{engine_best:.4f} (engine, single eval)"
+            if info.post_eval_instances_total is not None:
+                coverage = (
+                    f"{info.post_eval_instances_valid or 0}/{info.post_eval_instances_total}"
+                )
+                if info.post_eval_score is not None:
+                    data["post_eval_score"] = (
+                        f"{info.post_eval_score:.4f} (mean, {coverage} instances)"
+                    )
+                else:
+                    data["post_eval_score"] = f"no score (mean, {coverage} instances)"
             # Program counters (UX-4 / S16-19): files extracted to programs/
             # plus the backend store total (only when the backend reports it).
             data["programs_extracted"] = info.programs_extracted
@@ -710,16 +751,19 @@ def run_info(
             if info.produced_no_children:
                 sys.stderr.write(f"WARNING: {core_run.UNPRODUCTIVE_RUN_MESSAGE}.\n")
 
-            # Display solutions. When a rank-1 solution has no post-run eval
-            # score, fall back to the engine's run best_score with a
-            # "(from run)" indicator (UX-4 / S16-20).
+            # Display solutions. Solution scores are engine numbers (a max
+            # over single, survivorship-prone evaluations) — they always
+            # carry the "engine, single eval" label (S18 / U11 —
+            # FR-RUN-055). When a rank-1 solution has no score, fall back to
+            # the engine's run best_score, labeled the same way plus a
+            # "from run" indicator (UX-4 / S16-20, #306 — display-only).
             if info.solutions:
                 sol_rows = []
                 for s in info.solutions:
                     if s.best_score is not None:
-                        score_str = f"{s.best_score:.4f}"
+                        score_str = f"{s.best_score:.4f} (engine, single eval)"
                     elif s.rank == 1 and info.run_best_score is not None:
-                        score_str = f"{info.run_best_score:.4f} (from run)"
+                        score_str = f"{info.run_best_score:.4f} (engine, single eval, from run)"
                     else:
                         score_str = "-"
                     sol_rows.append(
@@ -732,12 +776,16 @@ def run_info(
                     )
                 render(sol_rows, json_mode=False)
 
-            # Display programs
+            # Display programs. Program scores are engine numbers too — same
+            # "engine, single eval" label as the solutions table, so the
+            # single-eval number never renders bare (FR-RUN-055).
             if info.programs:
                 prog_rows = [
                     {
                         "rank": p.rank,
-                        "score": (f"{p.score:.4f}" if p.score is not None else "-"),
+                        "score": (
+                            f"{p.score:.4f} (engine, single eval)" if p.score is not None else "-"
+                        ),
                         "file": p.file,
                     }
                     for p in info.programs

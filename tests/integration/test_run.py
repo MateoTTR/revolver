@@ -1366,6 +1366,185 @@ def test_run_info_remote_no_token_caveat(project_with_prereqs: dict[str, Path]) 
     assert "under-report token usage" not in output
 
 
+# ── Test 12e: run info — honest dual-score display (S18 / U11, FR-RUN-055) ──
+
+
+@pytest.mark.integration
+def test_run_info_honest_score_labels(
+    project_with_prereqs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run info` renders the engine best labeled "engine, single eval" NEXT
+    TO the post-run training-eval mean labeled with its coverage
+    (instances_valid/instances_total — FR-RUN-053); the bare engine number
+    never appears without its label; JSON carries both fields (S18-06)."""
+    from revolver.infra.db import insert_eval_instance, insert_eval_metadata
+
+    # Keep the pre-flight eval from emitting the once-per-process
+    # "[revolver] numeric thread cap..." stderr line: its leading '[' breaks
+    # _parse_json_output when this test is the first launch in the process.
+    monkeypatch.setenv("REVOLVER_EVAL_NUM_THREADS", "0")
+
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Launch a run (engine best_score=0.95; post-run eval patched out).
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0
+    run_data = _parse_json_output(result)
+    run_id = run_data["run_id"]
+    solution_id = run_data["solution"]["solution_id"]
+
+    # Persist a post-run training eval for the rank-1 solution, as the
+    # S18-05 evaluate_solution path would: 2 solved instances contribute to
+    # the mean (0.5, 0.7 -> 0.6), 1 failed instance does not (coverage 2/3).
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_eval_metadata(
+            conn,
+            eval_id="eval-20260705-120000",
+            solution_id=solution_id,
+            dataset_name="train-small",
+            instance_count=3,
+            instances_solved=2,
+            eval_time_s=1.0,
+            user_aggregates=None,
+            evaluated_at=datetime.now(UTC),
+        )
+        for instance_id, value, status, error in (
+            ("instance_001.json", 0.5, "solved", None),
+            ("instance_002.json", 0.7, "solved", None),
+            ("instance_003.json", None, "failed", "boom"),
+        ):
+            insert_eval_instance(
+                conn,
+                eval_id="eval-20260705-120000",
+                instance_id=instance_id,
+                metric_name="combined_score" if value is not None else "_status",
+                value=value,
+                status=status,
+                error_message=error,
+                compute_time_s=0.1,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Add a rank-2 program with an engine score to the manifest so the
+    # programs detail table renders — its scores must carry the same
+    # "engine, single eval" label (the never-bare regex below guards it).
+    from revolver.infra.store import read_run_manifest, write_run_manifest
+
+    manifest = read_run_manifest(root, run_id) or {"run_id": run_id}
+    manifest["programs"] = [{"rank": 2, "score": 0.95, "file": "programs/rank-2.py"}]
+    write_run_manifest(root, run_id, manifest)
+
+    # Human output: both numbers rendered, with distinct labels.
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.cli.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+    ):
+        result = runner.invoke(
+            app, ["run", "info", run_id], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "0.9500 (engine, single eval)" in output
+    assert "0.6000 (mean, 2/3 instances)" in output
+    # The inflated engine number NEVER renders bare (FR-RUN-055).
+    assert re.search(r"0\.9500(?! \(engine, single eval\))", output) is None
+
+    # JSON output carries both fields.
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["--json", "run", "info", run_id], catch_exceptions=False)
+    assert result.exit_code == 0
+    info = _parse_json_output(result)
+    assert info["solutions"][0]["best_score"] == 0.95
+    assert info["post_eval_score"] == pytest.approx(0.6)
+    assert info["post_eval_instances_valid"] == 2
+    assert info["post_eval_instances_total"] == 3
+    assert "run_best_score" in info
+
+
+@pytest.mark.integration
+def test_run_info_fallback_engine_label(project_with_prereqs: dict[str, Path]) -> None:
+    """The #306 display-time fallback (rank-1 score <- engine run best) also
+    carries the "engine, single eval" label — the engine number never renders
+    bare — and stays display-only (no DB write; JSON keeps best_score null)."""
+    from revolver.infra.db import insert_run, insert_solution
+    from revolver.infra.store import create_run_dir, write_run_manifest
+
+    root = project_with_prereqs["root"]
+    run_id, solution_id = _next_ids()
+
+    create_run_dir(root, run_id)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+        # Rank-1 solution with NO score (post-run eval skipped/failed).
+        insert_solution(
+            conn,
+            solution_id=solution_id,
+            run_id=run_id,
+            rank=1,
+            best_score=None,
+            alias=None,
+        )
+    finally:
+        conn.close()
+    write_run_manifest(root, run_id, {"run_id": run_id, "programs": []})
+
+    fake_backend = MagicMock()
+    fake_backend.count_total.return_value = None
+    fake_backend.count_evolved_children.return_value = 1
+    fake_backend.read_progress.return_value = (5, 0.87)
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch("revolver.core.run.get_backend", return_value=fake_backend),
+    ):
+        result = runner.invoke(
+            app, ["run", "info", run_id], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # The fallback engine number renders with the label, never bare.
+    assert "0.8700 (engine, single eval)" in output
+    assert re.search(r"0\.8700(?! \(engine, single eval)", output) is None
+
+    # Display-only (#306): the solution score stays null in JSON; the engine
+    # number is carried by the labeled run_best_score field.
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch("revolver.core.run.get_backend", return_value=fake_backend),
+    ):
+        result = runner.invoke(app, ["--json", "run", "info", run_id], catch_exceptions=False)
+    assert result.exit_code == 0
+    info = _parse_json_output(result)
+    assert info["solutions"][0]["best_score"] is None
+    assert info["run_best_score"] == 0.87
+
+
 # ── Test 13: run resume — existing checkpoint (FR-RUN-013, 024) ─────────────
 
 
@@ -3242,6 +3421,178 @@ def test_run_dry_run_backend_surfaced(project_with_prereqs: dict[str, Path]) -> 
     assert isinstance(rc["backend_extras"], dict)
 
 
+# ── U4 (S18-09/10): version-stored backend resolution (FR-PRB-016) ──────────
+
+
+def _make_fake_resolution_backend(name: str) -> MagicMock:
+    """Fake EvolutionBackend for resolution-order tests (dry-run path only).
+
+    Substituted at the ``core.run.get_backend`` seam so the resolution
+    order is observable without either engine installed (the CI main job
+    has neither openevolve nor shinka).
+    """
+    from revolver.models.run import ResolvedConfig
+
+    fake = MagicMock()
+    fake.name = name
+    fake.is_available.return_value = (False, None)  # U5 re-validation skips
+    fake.build_config.return_value = {}
+    fake.resolved_config.return_value = ResolvedConfig(backend=name, iterations=7)
+    return fake
+
+
+@pytest.mark.integration
+def test_run_backend_resolution_order_and_mismatch_warn(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """U4 resolution order + mismatch warning (S18-09/10, FR-RUN-047 amended).
+
+    - ``version create v2 --backend shinka`` persists ``'shinka'`` on the
+      version row (FR-PRB-016, migration v14).
+    - ``run v2`` with no ``--backend`` resolves Shinka FROM THE VERSION
+      (observed at the ``get_backend`` seam), without any warning.
+    - ``run v2 --backend openevolve`` runs OpenEvolve (explicit wins) WITH
+      a mismatch warning on stderr.
+    - A version row with no stored backend (legacy pre-v14 shape) still
+      defaults to ``'openevolve'``.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    db_path = root / REVOLVER_DIR / "revolver.db"
+
+    # ── version create v2 --backend shinka persists 'shinka' ────────────
+    # Change the problem content so v2 does not collide with v1.0's hash.
+    program = root / "initial_program.py"
+    program.write_text(program.read_text() + "\n# v2 tweak\n", encoding="utf-8")
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(
+            app,
+            ["problem", "version", "create", "v2", "--backend", "shinka"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0, _get_all_output(result)
+
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT backend FROM problem_versions WHERE tag = ?", ("v2",)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "shinka"
+    finally:
+        conn.close()
+
+    # ── run v2 (no --backend) resolves Shinka from the version ──────────
+    fake_shinka = _make_fake_resolution_backend("shinka")
+    get_backend_recorder = MagicMock(side_effect=lambda name: fake_shinka)
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.core.run.get_backend", get_backend_recorder),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "run",
+                "--version",
+                "v2",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            catch_exceptions=False,
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    get_backend_recorder.assert_called_once_with("shinka")
+    data = _parse_json_output(result)
+    assert data["resolved_config"]["backend"] == "shinka"
+    # Deferring to the version is not a mismatch — no warning.
+    assert "Warning: version" not in output
+
+    # ── run v2 --backend openevolve: explicit wins, mismatch warns ──────
+    result = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v2",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "openevolve",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert (
+        "Warning: version 'v2' stores backend 'shinka' but --backend "
+        "'openevolve' was given. Proceeding with 'openevolve'." in output
+    )
+
+    # The explicit choice is what gets persisted on the run record
+    # (dry-runs insert nothing, so this is the project's only run row).
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute("SELECT backend FROM runs").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "openevolve"
+    finally:
+        conn.close()
+
+    # ── a version with no stored backend still defaults to openevolve ───
+    # Raw insert omitting the backend column = the legacy pre-v14 row shape
+    # after migration (the column default backfills 'openevolve').
+    conn = get_project_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO problem_versions (tag, hash, message, created_at) VALUES (?, ?, ?, ?)",
+            ("v0-legacy", "sha256:legacy0", "", "2026-01-01T00:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    fake_oe = _make_fake_resolution_backend("openevolve")
+    get_backend_recorder = MagicMock(side_effect=lambda name: fake_oe)
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.core.run.get_backend", get_backend_recorder),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "run",
+                "--version",
+                "v0-legacy",
+                "--llm",
+                "test-llm",
+                "--dataset",
+                "train-small",
+                "--dry-run",
+            ],
+            catch_exceptions=False,
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    get_backend_recorder.assert_called_once_with("openevolve")
+    assert "Warning: version" not in output
+
+
 # ── S17a-06: "completed" messaging only after teardown (U12 residual, #359) ──
 
 
@@ -3342,3 +3693,796 @@ def test_launch_run_completed_message_after_teardown(
         if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
+
+
+# ── FR-RUN-053: wrapper coverage keys + timeout side-channel (S18 / U13 ii) ──
+
+_EVALUATOR_TIMEOUT_MIX = '''\
+"""Evaluator: one instance times out, the others return metrics.
+
+The reserved "instances_user_key" metric probes the FR-RUN-053 rule that
+the "instances_" prefix is never averaged into the aggregate. The timeout
+trigger matches the file NAME only — pytest tmp dirs may contain "timeout"
+in the test-derived directory name.
+"""
+import os
+
+
+def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
+    if "timeout" in os.path.basename(instance_path):
+        raise TimeoutError("simulated per-instance timeout")
+    return {"combined_score": 0.5, "quality": 0.4, "instances_user_key": 9.0}
+'''
+
+# Driver that imports a generated OE wrapper by path and prints the
+# aggregated evaluate() result as JSON (subprocess isolation keeps the
+# wrapper's `from evaluator import ...` out of this process's sys.modules).
+_OE_WRAPPER_DRIVER = """\
+import importlib.util
+import json
+import sys
+
+spec = importlib.util.spec_from_file_location("_wrapper_under_test", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(mod.evaluate(sys.argv[2])))
+"""
+
+
+def _make_timeout_mix_project(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Snapshot + dataset (2 valid instances, 1 timing out) + program file."""
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "evaluator.py").write_text(_EVALUATOR_TIMEOUT_MIX, encoding="utf-8")
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "inst-01.json").write_text("{}", encoding="utf-8")
+    (dataset / "inst-02-timeout.json").write_text("{}", encoding="utf-8")
+    (dataset / "inst-03.json").write_text("{}", encoding="utf-8")
+    program = tmp_path / "program.py"
+    program.write_text("def solve():\n    return 0\n", encoding="utf-8")
+    return snapshot, dataset, program
+
+
+def _assert_coverage_contract(metrics: dict[str, object], log_db: Path) -> None:
+    """Shared FR-RUN-053 assertions for both backends' wrapper output."""
+    # Coverage keys are emitted as metadata...
+    assert metrics["instances_valid"] == pytest.approx(2.0)
+    assert metrics["instances_total"] == pytest.approx(3.0)
+    # ...and never summed/averaged into the score: combined_score is the
+    # FR-RUN-054 default-penalize mean (0.5 + 0.5 + timeout at 0.0) / 3 —
+    # NOT inflated by the coverage keys — and the user's reserved-prefix
+    # metric is excluded from aggregation entirely.
+    assert metrics["combined_score"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+    assert metrics["quality"] == pytest.approx(0.4)
+    assert "instances_user_key" not in metrics
+    # The timed-out instance is recorded on the side-channel (timeout marker
+    # row), distinguishable from ordinary failures.
+    conn = sqlite3.connect(log_db)
+    try:
+        rows = conn.execute(
+            "SELECT instance_id, value FROM instance_log WHERE metric = 'instances_timeout'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("inst-02-timeout.json", 1.0)]
+
+
+def _wrapper_env(dataset: Path, log_db: Path | None) -> dict[str, str]:
+    """Subprocess env for a generated wrapper run over *dataset*."""
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k not in ("REVOLVER_INSTANCE_PATH",)}
+    env["REVOLVER_DATASET_DIR"] = str(dataset)
+    env.pop("REVOLVER_INSTANCE_LOG", None)
+    if log_db is not None:
+        env["REVOLVER_INSTANCE_LOG"] = str(log_db)
+    return env
+
+
+def _run_oe_wrapper(
+    tmp_path: Path,
+    wrapper: Path,
+    program: Path,
+    dataset: Path,
+    log_db: Path | None = None,
+) -> tuple[dict[str, float], str]:
+    """Exec a generated OE wrapper's evaluate() in a subprocess.
+
+    Returns the aggregated metrics dict and the captured stderr.
+    """
+    import subprocess
+    import sys
+
+    driver = tmp_path / "oe_wrapper_driver.py"
+    driver.write_text(_OE_WRAPPER_DRIVER, encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(driver), str(wrapper), str(program)],
+        env=_wrapper_env(dataset, log_db),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout), proc.stderr
+
+
+def _generate_shinka_wrapper(
+    snapshot: Path,
+    run_dir: Path,
+    on_timeout: str = "penalize",
+    timeout_score: float = 0.0,
+) -> Path:
+    """Generate the Shinka wrapper for *snapshot* with the given policy."""
+    from revolver.infra.backends.base import BackendRunSpec
+    from revolver.infra.backends.shinka import ShinkaBackend
+    from revolver.models.llm import LLMEntry
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    spec = BackendRunSpec(
+        snapshot_dir=snapshot,
+        llm=LLMEntry(
+            name="test-llm",
+            source="local",
+            model="test-model",
+            base_url="http://localhost:11434/v1",
+            api_key_env=None,
+            registered_at=datetime.now(UTC),
+        ),
+        run_dir=run_dir,
+        on_timeout=on_timeout,
+        timeout_score=timeout_score,
+    )
+    return ShinkaBackend().generate_wrapper(spec)
+
+
+def _run_shinka_wrapper(
+    wrapper: Path,
+    program: Path,
+    dataset: Path,
+    results_dir: Path,
+    log_db: Path | None = None,
+) -> dict[str, float]:
+    """Run a generated Shinka wrapper (CLI contract) and return metrics.json."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(wrapper),
+            "--program_path",
+            str(program),
+            "--results_dir",
+            str(results_dir),
+        ],
+        env=_wrapper_env(dataset, log_db),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    metrics = json.loads((results_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert isinstance(metrics, dict)
+    return metrics
+
+
+@pytest.mark.integration
+def test_wrapper_coverage_keys_not_in_score(tmp_path: Path) -> None:
+    """Both wrapper templates emit coverage keys that never inflate the score.
+
+    FR-RUN-053 / FR-EVL-021 (S18 / U13 #367 commit ii): over a mixed
+    valid/timed-out dataset, the generated wrapper on BOTH backends emits
+    ``instances_valid``/``instances_total`` alongside the aggregated metrics,
+    excludes the reserved ``instances_`` prefix from the metric mean, and
+    records the timed-out instance on the ``REVOLVER_INSTANCE_LOG``
+    side-channel. The Shinka wrapper runs via its standalone fallback here,
+    so this covers the no-shinka CI env; the run_shinka_eval path is covered
+    by ``test_shinka_wrapper_timeout_branch`` (L2-Shinka).
+    """
+    from revolver.infra.backends.openevolve import generate_wrapper as oe_generate_wrapper
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+
+    # ── OpenEvolve wrapper (module contract: evaluate(program_path)) ────────
+    oe_run_dir = tmp_path / "run-oe"
+    oe_run_dir.mkdir()
+    oe_wrapper = oe_generate_wrapper(snapshot, oe_run_dir)
+    oe_log_db = tmp_path / "instance_log_oe.db"
+
+    oe_metrics, stderr = _run_oe_wrapper(tmp_path, oe_wrapper, program, dataset, oe_log_db)
+
+    _assert_coverage_contract(oe_metrics, oe_log_db)
+    assert "timeout for inst-02-timeout.json" in stderr
+
+    # ── ShinkaEvolve wrapper (CLI contract: --program_path/--results_dir) ───
+    shinka_wrapper = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka")
+    results_dir = tmp_path / "results"
+    shinka_log_db = tmp_path / "instance_log_shinka.db"
+
+    shinka_metrics = _run_shinka_wrapper(
+        shinka_wrapper, program, dataset, results_dir, shinka_log_db
+    )
+
+    _assert_coverage_contract(shinka_metrics, shinka_log_db)
+    correct = json.loads((results_dir / "correct.json").read_text(encoding="utf-8"))
+    assert correct["correct"] is True
+
+
+# ── FR-RUN-054: evaluation.on_timeout policy + validation (S18 / U13 iii) ────
+
+
+@pytest.mark.integration
+def test_on_timeout_penalize_vs_drop(tmp_path: Path) -> None:
+    """penalize (default) scores timeouts at timeout_score; drop restores 0.17.
+
+    FR-RUN-054 (S18 / U13 #367 commit iii), on BOTH wrapper templates over
+    the same mixed valid/timed-out dataset:
+
+    - default ``penalize`` counts the timed-out instance at ``timeout_score``
+      (default 0.0) in the fitness mean — the deliberate v0.18
+      fitness-landscape flip;
+    - ``on_timeout=drop`` restores the 0.17 survivor-mean;
+    - a custom finite ``timeout_score`` is honored;
+    - on a zero-timeout dataset the two policies produce identical scores.
+    """
+    from revolver.infra.backends.openevolve import generate_wrapper as oe_generate_wrapper
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+    survivor_mean = 0.5  # mean over the two valid instances (0.17 behavior)
+    penalized_mean = (0.5 + 0.5 + 0.0) / 3  # timeout counted at 0.0
+
+    # ── OpenEvolve template ──────────────────────────────────────────────────
+    dirs = {name: tmp_path / f"run-oe-{name}" for name in ("pen", "drop", "floor")}
+    for d in dirs.values():
+        d.mkdir()
+    wrapper_pen = oe_generate_wrapper(snapshot, dirs["pen"])  # default: penalize
+    wrapper_drop = oe_generate_wrapper(snapshot, dirs["drop"], on_timeout="drop")
+    wrapper_floor = oe_generate_wrapper(snapshot, dirs["floor"], timeout_score=-1.0)
+
+    pen_metrics, _ = _run_oe_wrapper(tmp_path, wrapper_pen, program, dataset)
+    drop_metrics, _ = _run_oe_wrapper(tmp_path, wrapper_drop, program, dataset)
+    floor_metrics, _ = _run_oe_wrapper(tmp_path, wrapper_floor, program, dataset)
+
+    assert pen_metrics["combined_score"] == pytest.approx(penalized_mean)
+    assert drop_metrics["combined_score"] == pytest.approx(survivor_mean)
+    assert floor_metrics["combined_score"] == pytest.approx((0.5 + 0.5 - 1.0) / 3)
+    # Coverage is policy-independent: the timed-out instance is never "valid".
+    for m in (pen_metrics, drop_metrics, floor_metrics):
+        assert m["instances_valid"] == pytest.approx(2.0)
+        assert m["instances_total"] == pytest.approx(3.0)
+
+    # ── ShinkaEvolve template (standalone fallback) ──────────────────────────
+    shinka_pen = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka-pen")
+    shinka_drop = _generate_shinka_wrapper(
+        snapshot, tmp_path / "run-shinka-drop", on_timeout="drop"
+    )
+
+    shinka_pen_metrics = _run_shinka_wrapper(
+        shinka_pen, program, dataset, tmp_path / "results-pen"
+    )
+    shinka_drop_metrics = _run_shinka_wrapper(
+        shinka_drop, program, dataset, tmp_path / "results-drop"
+    )
+
+    assert shinka_pen_metrics["combined_score"] == pytest.approx(penalized_mean)
+    assert shinka_drop_metrics["combined_score"] == pytest.approx(survivor_mean)
+
+    # ── Zero-timeout dataset: penalize ≡ drop (the policy is a no-op) ────────
+    clean_dataset = tmp_path / "dataset-clean"
+    clean_dataset.mkdir()
+    (clean_dataset / "inst-01.json").write_text("{}", encoding="utf-8")
+    (clean_dataset / "inst-03.json").write_text("{}", encoding="utf-8")
+
+    clean_pen, _ = _run_oe_wrapper(tmp_path, wrapper_pen, program, clean_dataset)
+    clean_drop, _ = _run_oe_wrapper(tmp_path, wrapper_drop, program, clean_dataset)
+
+    assert clean_pen == clean_drop
+    assert clean_pen["combined_score"] == pytest.approx(0.5)
+    assert clean_pen["instances_valid"] == pytest.approx(2.0)
+
+
+@pytest.mark.integration
+def test_evaluation_on_timeout_validation(project_with_prereqs: dict[str, Path]) -> None:
+    """Bad evaluation.* values are rejected at run AND dry-run (FR-RUN-054).
+
+    ``evaluation.*`` is a validated, Revolver-owned config section as of
+    S18 (previously popped/uninspected — typos were silent). An unknown
+    ``on_timeout`` value or a non-finite ``timeout_score`` exits 1 at the
+    shared launch point, before any side effect (no run dir, no DB record);
+    valid values are accepted.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    base_args = ["run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"]
+
+    # (a) Unknown on_timeout value -> exit 1 at --dry-run with a clear message.
+    result = _invoke_with_mocks(
+        [*base_args, "--dry-run", "--config-override", "evaluation.on_timeout=bogus"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Invalid evaluation.on_timeout 'bogus'" in output
+    assert "penalize, drop" in output
+
+    # (b) Non-finite timeout_score -> exit 1 at --dry-run.
+    result = _invoke_with_mocks(
+        [*base_args, "--dry-run", "--config-override", "evaluation.timeout_score=.inf"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "evaluation.timeout_score must be a finite number" in output
+
+    # (c) Rejected at a real run too, with no side effect (no run record).
+    result = _invoke_with_mocks(
+        [*base_args, "--config-override", "evaluation.on_timeout=bogus"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 1
+    conn = get_project_db(root / REVOLVER_DIR / "revolver.db")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+    # (d) Valid values pass: drop (the 0.17 escape hatch) dry-runs clean.
+    result = _invoke_with_mocks(
+        [
+            *base_args,
+            "--dry-run",
+            "--config-override",
+            "evaluation.on_timeout=drop",
+            "--config-override",
+            "evaluation.timeout_score=-1.0",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+
+# Driver that models run_shinka_eval's ProcessPoolExecutor split: the
+# producer module instance runs run_experiment(); a FRESH consumer module
+# instance (which never saw run_experiment run — like the parent process
+# when run_workers > 1) aggregates. A module-global coverage channel would
+# read 0.0/0.0 here; the stamped per-instance entries must not.
+_SHINKA_CROSS_PROCESS_DRIVER = """\
+import importlib.util
+import json
+import sys
+
+
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+producer = _load(sys.argv[1], "_wrapper_producer")
+results = producer.run_experiment(sys.argv[2])
+consumer = _load(sys.argv[1], "_wrapper_consumer")
+print(json.dumps(consumer.aggregate_metrics([results])))
+"""
+
+
+@pytest.mark.integration
+def test_shinka_coverage_survives_process_boundary(tmp_path: Path) -> None:
+    """Coverage keys travel with the results, not via a module-global.
+
+    FR-RUN-053 (S18 / U13 #367 commit ii, PR #257 review): shinka's
+    ``run_shinka_eval`` executes ``run_experiment()`` in a
+    ``ProcessPoolExecutor`` worker when ``run_workers > 1``, so a
+    module-global written by the worker's module instance never reaches
+    the parent's ``aggregate_metrics()``. The coverage keys are therefore
+    stamped onto the per-instance entries and read back from them. This
+    driver aggregates in a fresh module instance that never ran
+    ``run_experiment()`` — coverage must still be correct.
+    """
+    import subprocess
+    import sys
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+    wrapper = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka")
+
+    driver = tmp_path / "shinka_cross_process_driver.py"
+    driver.write_text(_SHINKA_CROSS_PROCESS_DRIVER, encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(driver), str(wrapper), str(program)],
+        env=_wrapper_env(dataset, None),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    metrics = json.loads(proc.stdout)
+    assert metrics["instances_valid"] == pytest.approx(2.0)
+    assert metrics["instances_total"] == pytest.approx(3.0)
+    # The mean is still the FR-RUN-054 default-penalize mean, uninflated.
+    assert metrics["combined_score"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+    assert "instances_user_key" not in metrics
+
+
+@pytest.mark.integration
+def test_resume_inherits_baked_timeout_policy(
+    tmp_project: Path,
+    dataset_dir: Path,
+    global_db_path: Path,
+) -> None:
+    """Resume reuses the parent's wrapper, so the baked policy persists.
+
+    FR-RUN-054 (S18 / U13 #367 commit iii): ``evaluation.on_timeout`` /
+    ``timeout_score`` are baked into the wrapper at launch; resume copies
+    the parent wrapper instead of regenerating it (FR-RUN-024), so a
+    non-default policy survives the resume without the overrides being
+    re-supplied.
+    """
+    from revolver.core.problem import create_version
+
+    # Instance-mode evaluator: only the generated (non-legacy) wrapper
+    # carries the baked policy constants.
+    fixtures_dir = Path(__file__).parent.parent / "fixtures"
+    shutil.copy2(fixtures_dir / "evaluator_instance.py", tmp_project / "evaluator.py")
+    shutil.copy2(
+        fixtures_dir / "initial_program_simple.py",
+        tmp_project / "initial_program.py",
+    )
+    shutil.copy2(fixtures_dir / "config_simple.yaml", tmp_project / "config.yaml")
+    create_version(tag="v1.0", message="Version v1.0", project_root=tmp_project)
+    _register_dataset(tmp_project, dataset_dir, compatible_with=["v1.0"])
+    _register_llm(global_db_path, base_url="http://localhost:11434/v1")
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--config-override",
+            "evaluation.on_timeout=drop",
+            "--config-override",
+            "evaluation.timeout_score=-0.5",
+        ],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    parent_run_dir = tmp_project / REVOLVER_DIR / "runs" / parent_run_id
+    parent_wrapper = (parent_run_dir / "_revolver_evaluator.py").read_text(encoding="utf-8")
+    assert "_ON_TIMEOUT = 'drop'" in parent_wrapper
+    assert "_TIMEOUT_SCORE = -0.5" in parent_wrapper
+
+    # Stage a checkpoint so resume can proceed (FR-RUN-024).
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    result = _invoke_with_mocks(
+        ["--json", "run", "resume", "--run", parent_run_id],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    resumed_run_id = _parse_json_output(result)["run_id"]
+
+    resumed_wrapper = (
+        tmp_project / REVOLVER_DIR / "runs" / resumed_run_id / "_revolver_evaluator.py"
+    ).read_text(encoding="utf-8")
+    # Copied verbatim, not regenerated: the baked policy is inherited.
+    assert resumed_wrapper == parent_wrapper
+
+
+@pytest.mark.integration
+def test_resume_post_eval_call_site_wiring(project_with_prereqs: dict[str, Path]) -> None:
+    """resume_run wires the post-run eval with the RESUMED run's identifiers.
+
+    S18-05 (PR #261 review): the resume call site threads the parent's
+    dataset name, the new run's rank-1 program path, and the project root
+    into ``_post_run_evaluation`` — asserted through the same seam the rest
+    of the suite patches (the helper's internals are covered by the direct
+    ``_post_run_evaluation`` tests).
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    parent_run_dir = root / REVOLVER_DIR / "runs" / parent_run_id
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    resume_run_id, resume_sol_id = _next_ids()
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation") as mock_post_eval,
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=10),
+    ):
+        result = runner.invoke(
+            app, ["--json", "run", "resume", "--run", parent_run_id], catch_exceptions=False
+        )
+
+    assert result.exit_code == 0, _get_all_output(result)
+
+    mock_post_eval.assert_called_once()
+    kwargs = mock_post_eval.call_args.kwargs
+    assert kwargs["run_id"] == resume_run_id
+    assert kwargs["solution_id"] == resume_sol_id
+    assert kwargs["dataset_name"] == "train-small"  # inherited from the parent
+    assert kwargs["project_root"] == root
+    new_run_dir = root / REVOLVER_DIR / "runs" / resume_run_id
+    assert kwargs["program_path"] == new_run_dir / "programs" / "rank-1.py"
+
+
+# ── U8: seed-metric pre-flight validation (FR-RUN-056, S18-11/12/14) ────────
+
+
+_FEATURE_DIM_CONFIG_SNIPPET = """
+database:
+  feature_dimensions: {dims}
+"""
+
+
+def _create_version_with_feature_dims(
+    project_root: Path,
+    tag: str,
+    dims: list[str],
+) -> None:
+    """Create a problem version whose config declares MAP-Elites feature dims."""
+    fixtures_dir = Path(__file__).parent.parent / "fixtures"
+    shutil.copy2(fixtures_dir / "evaluator_simple.py", project_root / "evaluator.py")
+    shutil.copy2(
+        fixtures_dir / "initial_program_simple.py",
+        project_root / "initial_program.py",
+    )
+    shutil.copy2(fixtures_dir / "config_simple.yaml", project_root / "config.yaml")
+    with open(project_root / "config.yaml", "a", encoding="utf-8") as f:
+        f.write(_FEATURE_DIM_CONFIG_SNIPPET.format(dims=json.dumps(dims)))
+
+    from revolver.core.problem import create_version
+
+    create_version(tag=tag, message=f"Version {tag}", project_root=project_root)
+
+
+def _invoke_run_expecting_no_engine(
+    args: list[str],
+    root: Path,
+    global_db_path: Path,
+) -> tuple[object, MagicMock]:
+    """Invoke a run/resume CLI command; return (result, mocked runner class).
+
+    Mirrors ``_invoke_with_mocks`` but hands the ``OpenEvolveRunner`` class
+    mock back so the caller can assert the engine was never constructed
+    (FR-RUN-056: the seed-metric error aborts before iteration 0).
+    """
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    run_id, sol_id = _next_ids()
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=sol_id),
+    ):
+        result = runner.invoke(app, args, catch_exceptions=False)
+    return result, mock_runner_cls
+
+
+@pytest.mark.integration
+def test_validate_seed_metrics_missing_dim_fails(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Seed missing a declared non-builtin feature dim fails fast (FR-RUN-056).
+
+    On both launch and resume, the ``validate_seed_metrics`` hook aborts
+    right after the pre-flight — before iteration 0, with exit 1 and no
+    engine construction — naming the missing dimension and listing the
+    available seed metrics (the fixture evaluator only produces
+    ``combined_score``).
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # ── Launch: v2.0 declares a dim the seed's metrics never contain ──
+    _create_version_with_feature_dims(root, "v2.0", ["correctness"])
+
+    result, mock_runner_cls = _invoke_run_expecting_no_engine(
+        ["run", "--version", "v2.0", "--llm", "test-llm", "--dataset", "train-small"],
+        root=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Feature dimension 'correctness' not found in seed metrics" in output
+    assert "Available metrics:" in output
+    assert "combined_score" in output
+    # Pre-flight itself passed — the failure is the 12b hook, one step later.
+    assert "Pre-flight check passed" in output
+    mock_runner_cls.assert_not_called()  # aborted before iteration 0
+
+    # The inserted run record was finalized as failed, never completed.
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute("SELECT status FROM runs").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "failed"
+    finally:
+        conn.close()
+
+    # ── Resume: the hook fires on the resume pre-flight too ──
+    # Launch a passing parent on v1.0 (no feature dims), stage a checkpoint,
+    # then declare the missing dim in the parent's SNAPSHOT config — the
+    # resume rebuilds its engine config from that snapshot.
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_run_id = _parse_json_output(result)["run_id"]
+    checkpoint_dir = (
+        root / REVOLVER_DIR / "runs" / parent_run_id / "oe-output" / "checkpoints" / "checkpoint_5"
+    )
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot_config = root / REVOLVER_DIR / "problem" / "v1.0" / "config.yaml"
+    snapshot_config.chmod(0o644)  # snapshots are stored read-only
+    with open(snapshot_config, "a", encoding="utf-8") as f:
+        f.write(_FEATURE_DIM_CONFIG_SNIPPET.format(dims=json.dumps(["correctness"])))
+
+    result, mock_runner_cls = _invoke_run_expecting_no_engine(
+        ["run", "resume", parent_run_id],
+        root=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Feature dimension 'correctness' not found in seed metrics" in output
+    assert "Available metrics:" in output
+    mock_runner_cls.assert_not_called()  # resume aborted before iteration 0
+
+
+@pytest.mark.integration
+def test_validate_seed_metrics_builtins_and_shinka_noop(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Builtin feature dims never trip the hook; the Shinka hook is a no-op.
+
+    ``complexity``/``diversity``/``combined_score`` are computed inside
+    OpenEvolve and legitimately absent from the seed's metrics (FR-RUN-056
+    allowlist), so a run declaring only builtins completes. ShinkaEvolve's
+    ``validate_seed_metrics`` never raises regardless of declared dims (its
+    only metric contract is ``combined_score``), so a Shinka run is
+    unaffected by the hook call site.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    _create_version_with_feature_dims(root, "v2.0", ["complexity", "diversity", "combined_score"])
+
+    result = _invoke_with_mocks(
+        ["run", "--version", "v2.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "Feature dimension" not in output
+
+    # Shinka no-op: even a declared non-builtin dim raises nothing — the
+    # backend has no per-dimension metric contract to enforce.
+    from revolver.infra.backends.shinka import ShinkaBackend
+
+    shinka = ShinkaBackend()
+    config = {"database": {"feature_dimensions": ["correctness"]}}
+    assert shinka.validate_seed_metrics(config, {"combined_score": 1.0}) is None
+    assert shinka.validate_seed_metrics(config, None) is None
+
+
+# ── U6 phase 2: default checkpoint cadence (FR-RUN-057, S18-13/14) ──────────
+
+
+@pytest.mark.integration
+def test_checkpoint_cadence_default_when_unset(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unset checkpoint_interval defaults to max(1, min(100, iters//10)) (OE).
+
+    A default <=100-iteration run gets a mid-run checkpoint (interval <
+    iterations); an explicit ``checkpoint_interval`` is preserved verbatim;
+    the S17a-12 phase-1 warn (5c) fires only on EXPLICIT equality; and the
+    5b clamp no longer trips on the old default-100-vs-small-iters case.
+    """
+    from datetime import UTC, datetime as dt
+
+    from revolver.infra.backends.openevolve import build_config
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=dt.now(UTC),
+    )
+
+    # Unset interval + 50 iterations -> defaulted mid-run cadence, silent.
+    config = build_config(problem_config=None, llm=llm, iterations=50)
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 5
+    assert config["checkpoint_interval"] < config["max_iterations"]
+    assert "no mid-run checkpoint" not in err
+    assert "Overriding to checkpoint_interval" not in err
+
+    # Explicit interval -> preserved verbatim, never overridden.
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=40"],
+    )
+    capsys.readouterr()
+    assert config["checkpoint_interval"] == 40
+
+    # EXPLICIT equality -> the 5c warn still fires (S17a-12 unchanged).
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=50"],
+    )
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 50
+    assert "no mid-run checkpoint" in err
+
+    # DEFAULTED equality (iterations=1 -> default interval 1) -> no 5c warn:
+    # the user never set the value, so there is nothing to nag about.
+    config = build_config(problem_config=None, llm=llm, iterations=1)
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 1
+    assert "no mid-run checkpoint" not in err
+
+    # Old default-100-vs-small-iters case: the 5a default (1) replaces the
+    # 5b clamp -> no clamp warning on the default path anymore.
+    config = build_config(problem_config=None, llm=llm, iterations=5)
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 1
+    assert "Overriding to checkpoint_interval" not in err

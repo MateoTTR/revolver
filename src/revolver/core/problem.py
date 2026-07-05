@@ -174,7 +174,9 @@ def create_version(
         message: Optional descriptive message for the version.
         project_root: Explicit project root, or ``None`` to auto-detect.
         backend: Evolution backend that validates ``config.yaml``
-            (ADR-007, S14-15). Defaults to ``"openevolve"``.
+            (ADR-007, S14-15). Defaults to ``"openevolve"``. Persisted on
+            the version row as the version-default backend for
+            ``revolver run`` (U4 / S18, FR-PRB-016, DES-003 §2.2.2).
 
     Returns:
         A tuple of (ProblemVersion, config_warnings) where config_warnings
@@ -277,11 +279,15 @@ def create_version(
         write_manifest(manifest_path, manifest_data)
         manifest_path.chmod(0o444)
 
-        # Build ProblemVersion
+        # Build ProblemVersion. The backend is persisted on the DB row as
+        # the version-default backend for `revolver run` (FR-PRB-016,
+        # migration v14) — deliberately NOT written to manifest.yaml nor
+        # factored into the snapshot hash (DES-003 DD-08).
         pv = ProblemVersion(
             tag=tag,
             hash=snap_hash,
             message=message,
+            backend=backend,
             created_at=now,
             files=file_snapshots,
         )

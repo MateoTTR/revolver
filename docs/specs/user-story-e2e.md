@@ -1,3 +1,7 @@
+---
+verified-against: v0.18.0
+---
+
 # User Story — End-to-End Workflow
 
 **Purpose**: Validate the CLI command flow from project creation to benchmark, using a concrete example.
@@ -15,7 +19,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.17.0
+    ✓ revolver         0.17.1
     ✓ openevolve       0.2.0
     ℹ shinkaevolve     not installed (optional). Install with: pip install 'revolver[shinka]'
 
@@ -278,7 +282,7 @@ Run started: v1.0 + (E) flash-pro (2 members) + train-small [shinka/ucb]
 > single global reasoning pool, so disagreeing member efforts collapse to the
 > highest level (never under-think) with a warning. If per-member effort
 > matters, keep the run on OpenEvolve. See the
-> [cross-engine ensemble section](../guides/tuning-oe-config.md#cross-engine-ensemble-the-same-ensemble-on-three-selection-strategies)
+> [cross-engine ensemble section](../guides/tuning-evolution.md#cross-engine-ensemble-the-same-ensemble-on-three-selection-strategies)
 > of the tuning guide for the full asymmetry.
 
 The capability gate fires **before** the run launches, so an unsupported

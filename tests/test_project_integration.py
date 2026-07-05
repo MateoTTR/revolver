@@ -255,6 +255,8 @@ def test_project_init_no_templates_json(tmp_path: pytest.TempPathFactory) -> Non
 # freshly-scaffolded project validates clean (zero validator warnings):
 # `num_iterations` -> `max_iterations`, top-level `population_size` moved
 # under a commented-out `database:` section (OE default 1000 preserved).
+# S18 (U13/#367, FR-RUN-054): evaluation section gains the on_timeout /
+# timeout_score timed-out-instance policy (default penalize).
 _EXPECTED_CONFIG_TEMPLATE = """\
 # OpenEvolve configuration — edit to match your problem.
 #
@@ -284,6 +286,12 @@ llm:
 # Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:
   timeout_per_instance: 30  # seconds
+  # Timed-out instance policy (v0.18): "penalize" counts the instance at
+  # timeout_score in the fitness mean; "drop" excludes it (pre-0.18
+  # survivor-mean). Note: with a negative timeout_score floor, lower
+  # scores are the penalty — mind negative-is-good metrics.
+  on_timeout: penalize
+  timeout_score: 0.0
 """
 
 

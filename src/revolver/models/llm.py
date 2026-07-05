@@ -34,7 +34,10 @@ class LLMEntry(BaseModel):
         base_url: OpenAI-compatible endpoint URL.
         api_key_env: Name of the environment variable holding the API key.
         max_tokens: Maximum tokens per LLM response (injected into OE config).
-        timeout_s: Request timeout in seconds (injected into OE config).
+        timeout_s: Per-request LLM timeout in seconds, mapped per backend
+            (OE: injected as ``llm.timeout``; Shinka: applied as the client
+            request timeout for the run — ensembles use the max over the
+            members that set it; R2 / #320 / #260).
         temperature: Sampling temperature (0.0-2.0) injected into OE config.
         reasoning_effort: Reasoning-effort level (``min|low|medium|high|max``;
             ``None`` = provider default). Per-member on OpenEvolve; merged into

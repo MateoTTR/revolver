@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 import signal
 import time
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from revolver.core.exceptions import ResourceError, ValidationError
 from revolver.models.llm import EnsembleEntry, LLMEntry
@@ -27,9 +27,139 @@ from revolver.models.run import ResolvedConfig, TokenUsage
 # Names accepted by :func:`get_backend`, in display order.
 AVAILABLE_BACKENDS: tuple[str, ...] = ("openevolve", "shinka")
 
+# Timed-out-instance policy baked into generated wrappers (FR-RUN-054,
+# U13/#367). "penalize" is the deliberate v0.18 default; "drop" restores
+# the pre-0.18 survivor-mean. The launch-point validator derives its
+# accepted values from this alias (single source of truth).
+OnTimeoutPolicy = Literal["penalize", "drop"]
+
 # Grace period between SIGTERM and SIGKILL when reaping run children (A2 /
 # #314). Shared by both backends' post-run teardown.
 _CHILD_REAP_GRACE_SECONDS = 3.0
+
+# Poll interval of the reap grace loop.
+_REAP_POLL_INTERVAL_SECONDS = 0.1
+
+
+# ── Reap helpers (S18-18 / #359) ──────────────────────────────────────────────
+# Raw-PID adaptations of the S17a ``infra/evaluator_runner.py`` pgid helpers
+# (``_own_pgid`` / ``_signal_child`` / ``_reap_process_group``). Those operate
+# on a live ``multiprocessing`` process handle; the reap backstop only has
+# bare PIDs recovered from ``/proc``, so the same logic is lifted here in PID
+# form and gated by an explicit PID-reuse guard — the #320 wedge showed the
+# snapshot-to-reap gap is unbounded (hours-to-days), so a bare PID must never
+# be trusted to still name the same process.
+
+
+def _direct_child_pids(pid: int | str) -> set[int]:
+    """Return the direct-children PIDs of *pid* (Linux ``/proc``).
+
+    Reads ``/proc/<pid>/task/*/children`` — the kernel-maintained list of
+    child PIDs — which needs no third-party dependency. Returns an empty set
+    on any platform without that interface (macOS, Windows) or on any read
+    error, so callers degrade to a no-op rather than failing the run.
+    """
+    children: set[int] = set()
+    task_dir = Path(f"/proc/{pid}/task")
+    if not task_dir.is_dir():
+        return children
+    try:
+        for tid_dir in task_dir.iterdir():
+            children_file = tid_dir / "children"
+            with contextlib.suppress(OSError):
+                for token in children_file.read_text().split():
+                    with contextlib.suppress(ValueError):
+                        children.add(int(token))
+    except OSError:
+        return children
+    return children
+
+
+def _pid_stat_fields(pid: int) -> tuple[str, int] | None:
+    """Return ``(state, start_time)`` for *pid* from ``/proc/<pid>/stat``.
+
+    ``start_time`` is stat field 22 (clock ticks since boot); together with
+    the PID it identifies one process *incarnation*, so a recycled PID is
+    detectable (same number, different start time). Returns ``None`` when the
+    process is gone or ``/proc`` is unavailable/unparsable.
+    """
+    try:
+        stat_text = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    # Field 2 (comm) may contain spaces and parentheses; the kernel format is
+    # unambiguous after the LAST ')'.
+    rparen = stat_text.rfind(")")
+    if rparen < 0:
+        return None
+    rest = stat_text[rparen + 1 :].split()
+    try:
+        # rest[0] = state (field 3); rest[19] = starttime (field 22).
+        return rest[0], int(rest[19])
+    except (IndexError, ValueError):
+        return None
+
+
+def _pid_start_time(pid: int) -> int | None:
+    """Return *pid*'s start time (see :func:`_pid_stat_fields`), or ``None``."""
+    fields = _pid_stat_fields(pid)
+    return None if fields is None else fields[1]
+
+
+def _pid_has_terminated(pid: int, start_time: int) -> bool:
+    """Whether the process incarnation ``(pid, start_time)`` no longer runs.
+
+    True when the PID is gone, was recycled (start-time mismatch — the
+    original process is dead), or is a zombie (already dead, merely awaiting
+    its parent's ``wait()`` — signalling it again is pointless).
+    """
+    fields = _pid_stat_fields(pid)
+    if fields is None or fields[1] != start_time:
+        return True
+    return fields[0] == "Z"
+
+
+def _signal_pid_if_unchanged(pid: int, start_time: int, sig: signal.Signals) -> None:
+    """Send *sig* to *pid* only if it is still the snapshotted incarnation.
+
+    PID-reuse guard: re-checking the ``/proc`` start time right before the
+    signal narrows the reuse window to the instant between the check and
+    ``os.kill`` (bare PIDs have no race-free pinning primitive); a recycled
+    PID is never signalled.
+    """
+    if _pid_start_time(pid) != start_time:
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.kill(pid, sig)
+
+
+def _own_process_group() -> int | None:
+    """Return the current process's own group id (``None`` off-POSIX)."""
+    try:
+        return os.getpgrp()
+    except (AttributeError, OSError):
+        return None
+
+
+def _sweep_group(pgid: int, members: dict[int, int], sig: signal.Signals) -> bool:
+    """Best-effort ``killpg`` of *pgid*, gated by member identity.
+
+    The group is signalled only when at least one of *members* (``pid ->
+    start_time`` captured at reap enumeration) verifiably still exists — if
+    every member is gone or recycled, the group has dissolved and a
+    same-numbered lookalike group must not be touched (PID-reuse guard).
+
+    Returns ``True`` when no per-PID fallback is needed (group signalled, or
+    verifiably empty); ``False`` when ``killpg`` itself failed and the caller
+    should fall back to single-PID signalling of the members.
+    """
+    if not any(_pid_start_time(pid) == start for pid, start in members.items()):
+        return True
+    try:
+        os.killpg(pgid, sig)
+    except (AttributeError, OSError):
+        return False
+    return True
 
 
 class ChildProcessReaperMixin:
@@ -42,67 +172,126 @@ class ChildProcessReaperMixin:
     in a ``finally`` block, reap any PID that appeared afterwards.
 
     Hoisted here (S17-04) so there is exactly one definition; ``ShinkaBackend``
-    and ``OpenEvolveBackend`` inherit it. The reap is Linux-only (needs
+    and ``OpenEvolveBackend`` inherit it. Hardened in S18-18 (#359): descendant
+    enumeration is recursive (grandchildren are seen, e.g. the per-instance
+    ``multiprocessing`` guard a Shinka eval job spawns — spike #320 §6),
+    survivors are swept per process group (``killpg`` with a single-PID
+    fallback, never our own group), and every signal is gated by a ``/proc``
+    start-time identity check (PID-reuse guard). The reap is Linux-only (needs
     ``/proc``) and a no-op elsewhere, and never raises — it is a defensive
     backstop, not part of the run's correctness path.
     """
 
     @staticmethod
     def _current_child_pids() -> set[int]:
-        """Return the PIDs of the current process's direct children (Linux).
+        """Return the PIDs of ALL live descendants of this process (Linux).
 
-        Reads ``/proc/self/task/*/children`` — the kernel-maintained list of
-        child PIDs — which needs no third-party dependency. Returns an empty
-        set on any platform without that interface (macOS, Windows) or on any
-        read error, so the caller's reap backstop simply becomes a no-op
+        S18-18 (#359): recursive — walks ``/proc/<pid>/task/*/children``
+        starting from ``/proc/self``, so grandchildren are enumerated, not
+        just direct children (a per-PID kill of a direct child would orphan
+        them — the observed #320 process tree, spike §6). Returns an empty
+        set on any platform without that interface (macOS, Windows) or on
+        any read error, so the caller's reap backstop simply becomes a no-op
         rather than failing the run.
         """
-        children: set[int] = set()
-        task_dir = Path("/proc/self/task")
-        if not task_dir.is_dir():
-            return children
-        try:
-            for tid_dir in task_dir.iterdir():
-                children_file = tid_dir / "children"
-                with contextlib.suppress(OSError):
-                    for token in children_file.read_text().split():
-                        with contextlib.suppress(ValueError):
-                            children.add(int(token))
-        except OSError:
-            return children
-        return children
+        descendants: set[int] = set()
+        frontier: list[int | str] = ["self"]
+        while frontier:
+            for child_pid in _direct_child_pids(frontier.pop()):
+                if child_pid not in descendants:
+                    descendants.add(child_pid)
+                    frontier.append(child_pid)
+        return descendants
 
     def _reap_run_children(self, pre_run_children: set[int]) -> None:
-        """Terminate evaluator children that outlived the engine run (A2).
+        """Terminate descendants that outlived the engine run (A2, S18-18).
 
-        Any child PID that appeared *after* the pre-run snapshot is sent
-        ``SIGTERM``, then ``SIGKILL`` after a short grace period. The run's
-        result is already persisted when the engine ``run()`` returns, so this
-        cannot truncate persistence. No-op on platforms without ``/proc`` child
-        enumeration.
+        Survivors are re-derived from ``/proc`` at reap time — the pre-run
+        snapshot only *excludes* pre-existing processes and is never used as
+        a kill list: the snapshot-to-reap gap is unbounded (#320 wedge:
+        hours-to-days), so a snapshot-era PID may long since belong to an
+        unrelated process. Each survivor's identity ``(pid, start_time)`` is
+        captured once at enumeration and re-verified before every signal
+        (PID-reuse guard, ``/proc/<pid>/stat`` field 22).
+
+        Kill strategy (S17a pgid helpers, adapted): survivors living in a
+        process group of their own — i.e. NOT the orchestrator's group — are
+        swept per-group via ``os.killpg`` (SIGTERM → grace → SIGKILL), so a
+        whole evaluator session dies together; survivors sharing the
+        orchestrator's group, or whose group cannot be determined, or whose
+        ``killpg`` fails, fall back to single-PID signalling. Our own group
+        is never signalled. The run's result is already persisted when the
+        engine ``run()`` returns, so this cannot truncate persistence. No-op
+        on platforms without ``/proc`` child enumeration.
         """
         survivors = self._current_child_pids() - pre_run_children
         if not survivors:
             return
 
+        # PID-reuse guard: pin each survivor to its /proc start time. A PID
+        # whose stat vanished between enumeration and here is already gone.
+        targets: dict[int, int] = {}
         for pid in survivors:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGTERM)
+            start_time = _pid_start_time(pid)
+            if start_time is not None:
+                targets[pid] = start_time
+        if not targets:
+            return
+
+        # Partition into foreign process groups (killpg sweep) and single
+        # PIDs (own/unknown group — per-PID signalling only).
+        own_pgid = _own_process_group()
+        groups: dict[int, dict[int, int]] = {}
+        singles: dict[int, int] = {}
+        for pid, start_time in targets.items():
+            pgid: int | None = None
+            with contextlib.suppress(OSError):
+                pgid = os.getpgid(pid)
+            if pgid is not None and own_pgid is not None and pgid != own_pgid:
+                groups.setdefault(pgid, {})[pid] = start_time
+            else:
+                singles[pid] = start_time
+
+        self._signal_targets(groups, singles, signal.SIGTERM)
 
         deadline = time.monotonic() + _CHILD_REAP_GRACE_SECONDS
-        remaining = set(survivors)
+        remaining = dict(targets)
         while remaining and time.monotonic() < deadline:
             for pid in list(remaining):
-                try:
-                    os.kill(pid, 0)
-                except (ProcessLookupError, OSError):
-                    remaining.discard(pid)
+                if _pid_has_terminated(pid, remaining[pid]):
+                    del remaining[pid]
             if remaining:
-                time.sleep(0.1)
+                time.sleep(_REAP_POLL_INTERVAL_SECONDS)
+        if not remaining:
+            return
 
-        for pid in remaining:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGKILL)
+        groups = {
+            pgid: live
+            for pgid, members in groups.items()
+            if (live := {pid: st for pid, st in members.items() if pid in remaining})
+        }
+        singles = {pid: st for pid, st in singles.items() if pid in remaining}
+        self._signal_targets(groups, singles, signal.SIGKILL)
+
+    @staticmethod
+    def _signal_targets(
+        groups: dict[int, dict[int, int]],
+        singles: dict[int, int],
+        sig: signal.Signals,
+    ) -> None:
+        """One signalling pass over the partitioned reap targets.
+
+        Foreign groups are swept via :func:`_sweep_group`; a group whose
+        ``killpg`` fails degrades to per-PID signalling of its (identity-
+        verified) members — the single-PID fallback. Single PIDs are always
+        signalled individually, identity-verified.
+        """
+        for pgid, members in groups.items():
+            if not _sweep_group(pgid, members, sig):
+                for pid, start_time in members.items():
+                    _signal_pid_if_unchanged(pid, start_time, sig)
+        for pid, start_time in singles.items():
+            _signal_pid_if_unchanged(pid, start_time, sig)
 
 
 class BackendUnavailableError(ResourceError):
@@ -221,6 +410,14 @@ class BackendRunSpec:
         conn: Global DB connection, required when *ensemble* is provided
             (member LLM resolution at config-build time).
         timeout_per_instance: Per-instance evaluation timeout in seconds.
+        on_timeout: Timed-out instance policy baked into the generated
+            wrapper (FR-RUN-054): ``"penalize"`` (default — the deliberate
+            v0.18 fitness-landscape flip) counts the instance at
+            *timeout_score* in the metric mean; ``"drop"`` excludes it,
+            restoring the pre-0.18 survivor-mean. Parsed and validated at
+            the shared launch point in ``core.run`` on both backends.
+        timeout_score: Finite penalty score a timed-out instance contributes
+            under ``on_timeout="penalize"`` (FR-RUN-054). Default ``0.0``.
         wrapper_path: Path to the generated wrapper evaluator. Populated
             by the orchestrator from :meth:`EvolutionBackend.generate_wrapper`;
             when ``None`` the backend derives its conventional location.
@@ -241,6 +438,8 @@ class BackendRunSpec:
     llm_weight_overrides: dict[str, float] | None = None
     conn: Any | None = None
     timeout_per_instance: float | None = None
+    on_timeout: OnTimeoutPolicy = "penalize"
+    timeout_score: float = 0.0
     wrapper_path: Path | None = None
 
 
@@ -261,6 +460,31 @@ class RecoveredProgram:
 
     program_id: str
     code: str
+    score: float | None = None
+    language: str = "python"
+
+
+@dataclass
+class RankedProgram:
+    """A population program addressed by rank or program id (FR-SOL-021).
+
+    Returned by :meth:`EvolutionBackend.extract_ranked_program`. Carries
+    enough to materialize ``programs/rank-<N>.py`` on demand and to record
+    the promoted solution's ``best_score`` (top-N promotion, #299).
+
+    Attributes:
+        program_id: The backend's internal id of the program.
+        code: The program source code.
+        rank: 1-based rank of the program in the backend's scored
+            population (``combined_score`` descending — the same ordering
+            ``run population`` displays for scored programs).
+        score: The program's ``combined_score`` (``None`` if unavailable).
+        language: Program language (``"python"`` by default).
+    """
+
+    program_id: str
+    code: str
+    rank: int
     score: float | None = None
     language: str = "python"
 
@@ -352,6 +576,41 @@ class EvolutionBackend(Protocol):
         """Generate the wrapper evaluator file; return its path."""
         ...
 
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """Fail fast when the seed's metrics cannot feed the backend's config.
+
+        Called by the orchestrator right after the pre-flight evaluation, on
+        both launch and resume (U8 / FR-RUN-056, DES-005 §4.4) — and skipped
+        whenever the pre-flight itself is skipped (empty dataset). OpenEvolve
+        raises :class:`~revolver.core.exceptions.ValidationError` when a
+        metric named in ``database.feature_dimensions`` is absent or
+        non-numeric in the seed's pre-flight metrics (builtins computed
+        inside the engine are allowlisted); ShinkaEvolve is a no-op (its only
+        metric contract is ``combined_score``). Failing here aborts before
+        iteration 0 — without the hook, a missing feature metric only
+        crashes at the engine's seed-add.
+
+        The default implementation is a **no-op**. Because ``EvolutionBackend``
+        is a structural :class:`~typing.Protocol` (not subclassed), concrete
+        backends without seed-metric requirements provide their own explicit
+        no-op rather than inheriting this body.
+
+        Args:
+            config: The built engine config dict (as returned by
+                :meth:`build_config`).
+            seed_metrics: The seed's pre-flight ``InstanceTestResult.metrics``
+                (``None`` when the evaluator reported no metrics).
+
+        Raises:
+            ValidationError: When a declared metric is absent or non-numeric
+                in *seed_metrics* (exit 1, before iteration 0).
+        """
+        return None
+
     def launch(
         self,
         spec: BackendRunSpec,
@@ -440,6 +699,50 @@ class EvolutionBackend(Protocol):
         raise RecoveryNotSupportedError(
             "This backend does not support best-of-checkpoint recovery."
         )
+
+    def extract_ranked_program(
+        self,
+        run_dir: Path,
+        rank: int | None = None,
+        program_id: str | None = None,
+    ) -> RankedProgram:
+        """Read an arbitrary-ranked or id-addressed population program.
+
+        Serves top-N solution promotion (FR-SOL-021, #299): ``solution
+        extract --rank N`` / ``--program-id <id>`` on a backend advertising
+        :attr:`BackendCapabilities.top_n_extraction`. This is a **read-only**
+        lookup — the orchestrator (``core.solution.extract_solution``)
+        materializes the returned code to ``programs/rank-<N>.py`` only
+        after its alias/duplicate validation passes, which makes the path
+        retroactive on old run dirs with no layout change.
+
+        The default implementation raises
+        :class:`~revolver.core.exceptions.ValidationError`. Because
+        ``EvolutionBackend`` is a structural :class:`~typing.Protocol`, each
+        concrete backend provides its own body: ShinkaEvolve reads its
+        ``programs.sqlite`` store; OpenEvolve raises the not-supported error
+        explicitly (``top_n_extraction=False`` — consciously deferred,
+        ADR-007 v0.18 amendment).
+
+        Args:
+            run_dir: Directory of the completed run.
+            rank: 1-based rank in the scored population (``combined_score``
+                descending). Exactly one of *rank*/*program_id* is required.
+            program_id: Backend program id, resolved to its rank in the
+                same ordering.
+
+        Returns:
+            The addressed :class:`RankedProgram`.
+
+        Raises:
+            ValidationError: The backend has no top-N extraction; neither or
+                both of *rank*/*program_id* were given; the program store is
+                missing/unreadable; the rank exceeds the scored population;
+                or the program id is unknown or unscored.
+        """
+        from revolver.core.exceptions import ValidationError
+
+        raise ValidationError(f"Top-N extraction is not supported on backend '{self.name}'.")
 
     def read_progress(self, run_dir: Path) -> tuple[int | None, float | None]:
         """Cheap live-progress read: ``(iterations_done, best_score)``."""

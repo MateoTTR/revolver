@@ -60,7 +60,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | Document | Path | Purpose |
 |---|---|---|
 | Initial program guide | [docs/guides/initial-program-structure.md](docs/guides/initial-program-structure.md) | Best practices for OpenEvolve initial programs |
-| Tuning OE config guide | [docs/guides/tuning-oe-config.md](docs/guides/tuning-oe-config.md) | Tuning OpenEvolve parameters (MAP-Elites, islands, parallelism, temperature) |
+| Tuning guide | [docs/guides/tuning-evolution.md](docs/guides/tuning-evolution.md) | Tuning evolution runs — backend-neutral concepts, cross-engine ensembles, OpenEvolve/ShinkaEvolve knob references |
 
 ### Claude Agents
 
@@ -69,7 +69,7 @@ At the start of each session, read this file entirely, then follow the "Session 
 | code-reviewer | [.claude/agents/code-reviewer/agent.md](.claude/agents/code-reviewer/agent.md) | Auto after `gh pr create` (PostToolUse hook) |
 | spec-reviewer | [.claude/agents/spec-reviewer/agent.md](.claude/agents/spec-reviewer/agent.md) | When spec/DES/ADR files are modified |
 | validation-reviewer | [.claude/agents/validation-reviewer/agent.md](.claude/agents/validation-reviewer/agent.md) | When validation docs or specs change |
-| doc-reviewer | [.claude/agents/doc-reviewer/agent.md](.claude/agents/doc-reviewer/agent.md) | After release, or when README/guides/user-story-e2e change. Run AFTER spec-reviewer and validation-reviewer |
+| doc-reviewer | [.claude/agents/doc-reviewer/agent.md](.claude/agents/doc-reviewer/agent.md) | After release, when README/guides/user-story-e2e change, or when CLI source (`src/revolver/cli/*.py`) changes (#354 trigger inversion). Run AFTER spec-reviewer and validation-reviewer |
 | scrum-master | [.claude/agents/scrum-master/agent.md](.claude/agents/scrum-master/agent.md) | At sprint planning/review boundaries |
 
 ### Sprint Planning
@@ -142,7 +142,7 @@ Before tagging a release (`vX.Y.Z`):
    - *(release steps 1–6 below)*
    - **doc-reviewer** → fix all FAIL/WARN findings → commit + push (runs post-release because it checks version numbers in README/guides)
 1. **Version bump** — Update `version` in **both** `pyproject.toml` and `src/revolver/__init__.py`
-1b. **README update (when the release changes user-facing behavior)** — Refresh `README.md` on `develop` before the merge to `main`: features list, release/sprint table, install instructions (extras), CLI examples, test counts. The post-release doc-reviewer validates it but must not be the first time the README sees the release.
+1b. **README update (when the release changes user-facing behavior)** — Refresh `README.md` on `develop` before the merge to `main`: features list, release/sprint table, install instructions (extras), CLI examples, test counts. The post-release doc-reviewer validates it but must not be the first time the README sees the release. Also re-verify the guides (`docs/guides/*.md`) and `docs/specs/user-story-e2e.md` against the release and refresh their `verified-against: vX.Y.Z` front-matter stamps — CI (`tests/unit/test_doc_freshness.py`, also run by doc-lint) fails any stamp more than one minor version behind.
 2. **Merge completeness** — Ensure ALL sprint PRs are merged into `develop`
 3. **Commit + push** — Commit the version bump on `develop`, push
 4. **Merge `develop` → `main`** — `git checkout main && git merge develop`

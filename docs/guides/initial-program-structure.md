@@ -1,3 +1,7 @@
+---
+verified-against: v0.18.0
+---
+
 # Initial Program Structure Guide
 
 Best practices for structuring initial programs that OpenEvolve can optimize
@@ -369,7 +373,7 @@ parameter tweaking of the existing code.
 
 A richer `problem.md` gives the LLM the **vocabulary and concepts** it needs
 to formulate sophisticated solutions. This is especially important in
-[full-rewrite mode](tuning-oe-config.md#full-rewrite-mode), where the LLM
+[full-rewrite mode](tuning-evolution.md#full-rewrite-mode), where the LLM
 generates the entire program from scratch and has maximum freedom to choose
 its approach.
 

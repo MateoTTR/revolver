@@ -224,10 +224,10 @@ A **Solution** is a **lightweight reference** to a program within a Run. It is a
 - **Program path** (derived): `.revolver/runs/<run_id>/programs/rank-<N>.py`
 - **Lineage**: Inherited from the parent Run (problem version, dataset, LLM, config, generation time, iterations)
 - **Run reference**: Links to the Run that produced it (`run_id`)
-- **Creation**: The rank-1 solution is auto-created by `revolver run`. Additional solutions can be extracted on demand via `revolver solution extract --run <id> --rank <N>`, which promotes a stored program to a first-class solution with post-extraction training evaluation.
+- **Creation**: The rank-1 solution is auto-created by `revolver run`. Additional solutions can be extracted on demand via `revolver solution extract --run <id> --rank <N>` (or `--program-id <id>`), which promotes a population program to a first-class solution with post-extraction training evaluation. Ranks > 1 and program ids are gated on the run backend's `top_n_extraction` capability (ShinkaEvolve: native; OpenEvolve: rank 1 only — FR-SOL-021).
 
 A **Run** is the first-class physical entity that owns all artifacts from an evolution on the selected backend (ADR-007):
-- **Programs**: The best evolved program is stored as `.revolver/runs/<run_id>/programs/rank-1.py` (from backend output — both backends currently materialize a single best program) and is auto-promoted to a solution. The full population remains inspectable via `run population`; promoting arbitrary population members is a planned extension (top-N extraction, ADR-007 capability).
+- **Programs**: The best evolved program is stored as `.revolver/runs/<run_id>/programs/rank-1.py` (from backend output — both backends currently materialize a single best program) and is auto-promoted to a solution. The full population remains inspectable via `run population`; arbitrary population members are promoted via `solution extract --rank N` / `--program-id` on top-N-capable backends (ShinkaEvolve reads its `programs.sqlite` retroactively and materializes `rank-<N>.py` on demand; OpenEvolve is consciously deferred — top-N extraction, ADR-007 capability, FR-SOL-021).
 - **Resume state**: Backend resume state for potential resume (OpenEvolve: checkpoint in `.revolver/runs/<run_id>/oe-checkpoint/`; ShinkaEvolve: results dir with its SQLite DB)
 - **Config**: The backend config used for this run
 - **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)
@@ -298,8 +298,8 @@ revolver llm status
 
 # Create an ensemble of multiple LLMs
 revolver llm ensemble create multi-model-v1
-revolver llm ensemble add multi-model-v1 claude-opus --weight 0.7
-revolver llm ensemble add multi-model-v1 gemini-pro --weight 0.3
+revolver llm ensemble add multi-model-v1 --llm claude-opus --weight 0.7
+revolver llm ensemble add multi-model-v1 --llm gemini-pro --weight 0.3
 
 # Use ensemble in a run
 revolver run --version v1.0 --llm multi-model-v1 --dataset train-small
@@ -371,18 +371,16 @@ Once testing passes, the user locks down the problem definition and datasets:
 
 ```
 # Create an immutable problem version
-revolver problem version --tag v1.0 --message "Initial formulation"
+revolver problem version create v1.0 --message "Initial formulation"
 
 # Register a training dataset (creates immutable snapshot)
-revolver dataset add \
-  --name train-small \
+revolver dataset add train-small \
   --split train \
   --path ./data/instances-small/ \
   --compatible-with v1.0
 
 # Register an evaluation dataset
-revolver dataset add \
-  --name eval-benchmark \
+revolver dataset add eval-benchmark \
   --split eval \
   --path ./data/instances-eval/ \
   --compatible-with v1.0
@@ -392,13 +390,13 @@ revolver dataset info train-small
 # → 50 instances, split: train, compatible with: v1.0
 
 # Later, after refining the problem:
-revolver problem version --tag v1.1 --message "Refined objective function"
+revolver problem version create v1.1 --message "Refined objective function"
 
 # Update dataset compatibility (if the data is still valid for v1.1)
 revolver dataset update train-small --add-compatible-with v1.1
 
 # List everything
-revolver problem versions
+revolver problem version list
 revolver dataset list
 ```
 
@@ -451,7 +449,7 @@ revolver eval results --solution claude-small-v1.1
 ```
 # Compare multiple solutions
 revolver benchmark \
-  --solutions claude-small-v1.1 gemma-small-v1.1 claude-large-v1.1 \
+  --solutions claude-small-v1.1,gemma-small-v1.1,claude-large-v1.1 \
   --dataset eval-benchmark
 
 # View benchmark results

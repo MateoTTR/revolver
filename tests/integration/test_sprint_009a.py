@@ -67,17 +67,27 @@ def _make_llm(**kwargs: object) -> LLMEntry:
 
 
 @pytest.mark.integration
-def test_build_config_checkpoint_interval_override() -> None:
-    """checkpoint_interval absent + iterations=5 -> override to 5."""
+def test_build_config_checkpoint_interval_override(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """checkpoint_interval absent + iterations=5 -> U6p2 default cadence.
+
+    Pre-S18, the unset interval fell back to OE's default of 100, which
+    exceeded 5 iterations, and the 5b guard clamped it to 5 with a warning
+    (completion checkpoint only). The S18-13 default cadence (FR-RUN-057)
+    now fires first — max(1, min(100, 5 // 10)) = 1 — so the run keeps
+    mid-run checkpoints and the 5b clamp no longer trips on the default
+    path (no clamp warning either).
+    """
     llm = _make_llm()
     config = build_config(
         problem_config=None,
         llm=llm,
         iterations=5,
     )
-    # OE default is 100, which exceeds 5 iterations.
-    # The guard should override checkpoint_interval to 5.
-    assert config["checkpoint_interval"] == 5
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 1
+    assert "Overriding to checkpoint_interval" not in err
 
 
 @pytest.mark.integration

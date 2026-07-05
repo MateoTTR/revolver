@@ -25,7 +25,7 @@ OpenEvolve and ShinkaEvolve provide the core evolutionary loop for LLM-guided co
 revolver project init                  # Initialize a new optimization project (--backend scaffolds the matching config.yaml)
 revolver doctor                        # Verify environment dependencies
 revolver setup                         # Install missing Python dependencies
-revolver llm add/update/start/stop/remove  # Register and manage LLMs (local Ollama or remote API)
+revolver llm add/update/start/stop/remove  # Register and manage LLMs (local Ollama or remote API; per-LLM --timeout honored on both backends)
 revolver llm list/status               # Monitor registered LLMs and GPU usage
 revolver llm ensemble create/add/list/info/remove  # Create and manage multi-model ensembles (per-member --weight/--reasoning-effort)
 revolver problem test                  # Validate evaluator against instances
@@ -36,7 +36,7 @@ revolver run/run resume                # Launch (--backend openevolve|shinka), t
 revolver run status/list/info/population/cleanup/delete  # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
-revolver solution show/extract/delete  # Show, extract solution code or clean up
+revolver solution show/extract/delete  # Show, extract solution code (top-N via --rank N / --program-id, ShinkaEvolve-native, gated per backend) or clean up
 revolver solution export/diff          # Export solutions or compare two solutions
 revolver benchmark/benchmark results   # Compare multiple solutions on same dataset
 revolver benchmark list/export/delete  # Manage and export benchmark results (CSV/JSON)
@@ -212,7 +212,7 @@ REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution <solution-id> --dataset eva
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1439+ tests, ~35s; L3 e2e tests are deselected by default — run with -m e2e)
+# Run tests (1585 passed / 4 skipped, ~35s; +58 shinkaevolve-marked tests need a real-shinka env; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
@@ -256,16 +256,55 @@ mypy
 | Sprint 016a | Corrective (demo feedback v0.16.0): network-Ollama probe honours `--base-url`/`OLLAMA_HOST`, clean Shinka post-run shutdown, OE local `--parallel` auto-pin, warning-free OE config scaffold, positional `run resume`, bridge token under-count caveat, CI global-DB isolation | v0.16.1 | Done |
 | Sprint 017 | Multi-LLM ensemble validated end-to-end: `--selection {fixed,ucb,ucb1,thompson}`, `--llm-weight`, per-LLM `--reasoning-effort` (capability-gated per backend), B9 no-op `--config-override` warn, correctness slice (OE wrapper numeric guard, teardown, `solution extract --from-checkpoint`), `REVOLVER_HOME`/`--global-db` | v0.17.0 | Done |
 | Sprint 017a | Corrective hotfix (demo feedback v0.17.0): killable eval subprocess (no more leaked eval workers) + BLAS thread caps (`REVOLVER_EVAL_NUM_THREADS`), finalize backstop reap, `--selection-kwarg` value coercion + dry-run fail-fast, OE key-less local ensemble placeholder key, `=`-token CLI hint, snapshot config re-validation at run, checkpoint-interval recoverability warn, dry-run surfacing of resolved bandit kwargs | v0.17.1 | Done |
+| Sprint 018 | Eval-honesty semantic slice: honest timeout penalize + dual-score `run info` display, backend-on-version, seed-metric pre-flight, checkpoint cadence — plus Shinka-native top-N promotion (`solution extract --rank`), reap hardening, doc anti-rot (command lint + freshness stamps), Shinka LLM-request timeout lever | v0.18.0 | Done |
+
+### Behavior changes (v0.18)
+
+v0.18.0 makes **six deliberate default-path changes**. The first two are the
+headline ones for anyone re-running a 0.17 config:
+
+- **Timeout handling now penalizes by default.** An instance that **times out**
+  during evolution contributes a **penalty score** (`evaluation.timeout_score`,
+  default `0.0`) to the program's fitness mean instead of being silently
+  dropped. This is a **fitness-landscape change**: runs may explore differently
+  than on 0.17, and best-scores are lower-but-honest. To restore the previous
+  survivorship-mean behavior, set `evaluation.on_timeout: drop` (config.yaml)
+  or `--config-override evaluation.on_timeout=drop`. Caveat: `timeout_score`
+  is used as a floor — on negative-is-good metrics (e.g. scores are negated
+  costs), the default `0.0` would *reward* timeouts; set it below your worst
+  valid score.
+- **Default checkpoint cadence.** When `checkpoint_interval` is left unset, a
+  run now checkpoints every `max(1, min(100, iterations//10))` iterations
+  (previously a flat `100`), so a killed short run has a mid-run checkpoint to
+  resume from. Explicit `checkpoint_interval` values (config.yaml or
+  `--config-override`) are never overridden. Expect more frequent checkpoint
+  directories on default short runs.
+- **Post-run eval persists.** The automatic post-run evaluation now persists
+  `eval_metadata`/`eval_instances` through the standard eval path and uses that
+  path's per-instance timeout (previously stderr-only, with a hardcoded 300 s
+  timeout).
+- **Seed-metric pre-flight fail-fast.** A run whose seed program lacks a
+  declared non-builtin `database.feature_dimensions` metric now aborts at
+  pre-flight, before iteration 0, with a clear message (the builtins
+  `complexity`/`diversity`/`combined_score` are allowed). Runs that previously
+  launched no longer do.
+- **`run info` dual score.** `run info` now shows the engine best labeled
+  "(engine, single eval)" next to the coverage-labeled post-eval mean.
+- **Reserved coverage keys.** Generated evaluator wrappers emit the
+  `instances_valid`/`instances_total` coverage keys; the `instances_` metric
+  prefix is now reserved (never summed into the displayed score).
 
 ## Known Issues
 
 - **Engine `best_score` is a single, possibly optimistic engine evaluation.**
-  Engine-side scoring averages only the dataset instances that complete within
-  the per-instance timeout, and `best_score` is a `max()` over single noisy
-  evaluations — so it can overstate the champion's true quality. Re-score the
-  saved best solution with `revolver eval` (which runs every instance) for
-  reporting; honest timeout/fitness semantics land in v0.18. See the
-  [tuning guide](docs/guides/tuning-oe-config.md#known-issues) for details.
+  `best_score` is a `max()` over single noisy evaluations, so it can overstate
+  the champion's true quality. As of v0.18, timed-out instances are penalized
+  into the fitness mean by default (`evaluation.on_timeout: drop` restores the
+  0.17 survivor-mean), and `run info` shows the engine best labeled
+  "(engine, single eval)" next to a coverage-labeled post-eval mean — report
+  the post-eval mean, or re-score with `revolver eval` (which runs every
+  instance). See the
+  [tuning guide](docs/guides/tuning-evolution.md#known-issues) for details.
 
 ## Documentation
 

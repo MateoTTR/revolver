@@ -24,10 +24,10 @@ Launch an evolution run on the selected backend.
 | `--version <tag>` | string | Yes | Problem version to use |
 | `--llm <name>` | string | Yes | Registered LLM or ensemble name |
 | `--dataset <name>` | string | Yes | Registered training dataset |
-| `--backend <name>` | string | No | Evolution backend: `openevolve` (default) or `shinka`. Stored in the run record (FR-RUN-047) |
+| `--backend <name>` | string | No | Evolution backend: `openevolve` or `shinka`. When omitted, the problem version's stored backend is used, falling back to `openevolve` (resolution order: explicit flag > version backend > default — FR-RUN-047, FR-PRB-016). An explicit value that differs from the version's stored backend warns on stderr. Stored in the run record (FR-RUN-047) |
 | `--iterations <n>` | int | No | Number of evolution iterations. Overrides config.yaml value. Mapped to the backend's native parameter (OE: `max_iterations`; Shinka: `num_generations`) |
 | `--alias <name>` | string | No | User-friendly name for the generated solution |
-| `--config-override <key=value>` | string[] | No | Override specific backend config values (validated against the selected backend's schema) |
+| `--config-override <key=value>` | string[] | No | Override specific backend config values (validated against the selected backend's schema). `evaluation.*` keys (e.g. `evaluation.on_timeout`, `evaluation.timeout_score`) are a Revolver-owned section and value-validated at run/dry-run (FR-RUN-054) |
 | `--dry-run` | flag | No | Validate all inputs and display the resolved config (neutral fields + backend extras) without launching the run |
 | `--temperature <float>` | float | No | Override the LLM sampling temperature (range: 0.0–2.0). Mapped per backend (OE: `llm.temperature`; Shinka: per-model `llm_kwargs`) |
 | `--parallel <int>` | int | No | Override evaluation parallelism (positive integer). Mapped per backend (OE: `evaluator.parallel_evaluations`; Shinka: evaluation job pool, with a warning) |
@@ -149,7 +149,7 @@ Resume an interrupted run from its checkpoint. Creates a NEW run from the parent
 3. Create a new run (`resumed_from: <parent-run-id>`). On **both backends the parent's resume state is READ but never mutated**: OpenEvolve copies the checkpoint into the new run dir, and **ShinkaEvolve clones the parent's `shinka-output/`** (`copytree` of `programs.sqlite` + sidecars, every `gen_*/` dir, and any `bandit_state.pkl`/`prompts.sqlite`) into the new run dir and continues the DB-driven search **on the clone**. The parent's `shinka-output/` stays byte-unchanged (clone-resume isolation), and because the clone is itself the new run's artifact tree, no post-run snapshot copy is needed. The resumed run's token/valid counts are cumulative over the parent chain, while the parent's `run population`/`run status` continue to reflect only the parent's own (untouched) database.
 4. The resumed run uses the **parent run's backend** (cross-backend resume is not supported)
 5. If `--llm` is provided, use the specified LLM or ensemble instead of the parent run's LLM
-6. Reuse the parent run's wrapper evaluator (no regeneration)
+6. Reuse the parent run's wrapper evaluator (no regeneration) — including the parent wrapper's baked `evaluation.on_timeout`/`timeout_score` policy (FR-RUN-054)
 7. Re-launch the backend from the parent's resume state with the (optionally overridden) configuration. `--iterations N` means **N more iterations on top of the parent chain** on both backends (when omitted, the parent run's iteration count is reused)
 8. On completion: the new run gets its own ID, directory, programs, and a single solution DB row (rank-1)
 
@@ -208,13 +208,16 @@ Run: run-20260310-143000
   Directory: .revolver/runs/run-20260310-143000/
 
 Solution (auto-created):
-  sol-20260310-143000  rank=#1  score=0.91  claude-small-v1.1
+  sol-20260310-143000  rank=#1  claude-small-v1.1
+  Best score: 0.91 (engine, single eval)
+  Post-eval mean: 0.87 (48/50 instances valid)
 
 Programs (from backend output):
   #1  score=0.91  → sol-20260310-143000 (extracted)
   #2  score=0.85
   #3  score=0.79
-  Use `revolver solution extract --run run-20260310-143000 --rank <N>` to promote.
+  Use `revolver solution extract --run run-20260310-143000 --rank <N>` to promote
+  (ranks > 1 require a top-N-capable backend — FR-SOL-021).
 
 Resume chain: (none)
 ```
@@ -226,8 +229,11 @@ Resume chain: (none)
 > (every row in ShinkaEvolve's `programs.sqlite`). The DB total is only shown
 > on backends that report it — it is omitted on OpenEvolve, where a full total
 > would require parsing the checkpoint. When a rank-1 solution has no post-run
-> eval score of its own, its score falls back to the engine's run best with a
-> `(from run)` indicator.
+> eval score of its own, its score falls back to the engine's run best, labeled
+> `(engine, single eval)` — the former bare `(from run)` indicator — so the
+> single-eval engine number never renders unlabeled (FR-RUN-055). When a
+> post-run eval mean exists, it is displayed next to the engine best with its
+> FR-RUN-053 coverage (`instances_valid/instances_total`).
 
 **Output** (human, ensemble):
 ```
@@ -304,8 +310,8 @@ Deleted run "run-20260310-143000"
 | FR-RUN-008 | MUST | Store all top-ranked programs as `rank-N.py` files in the run directory (from backend output). Create **one** solution DB row for the best program (rank-1), referencing (`run_id`, `rank=1`). Additional programs can be promoted to solutions via `revolver solution extract`. | §4.6 |
 | FR-RUN-009 | MUST | Record full lineage in `RunManifest` in the run directory: problem version, dataset, LLM, config, timestamp, iterations, generation time | §4.6 |
 | FR-RUN-010 | MUST | Store metrics (best scores per iteration) in SQLite | §4.6 |
-| FR-RUN-019 | MUST | On completion, evaluate the rank-1 program on all training instances and store raw per-instance results in SQLite (same format as `revolver eval`). Each per-instance eval subprocess is killed at its timeout (no leaked workers) and runs under the `REVOLVER_EVAL_NUM_THREADS` thread cap (DES-005 §7, v0.17.1). | §4.6 |
-| FR-RUN-020 | MUST | Training results are accessible via `revolver eval results --solution <id> --dataset <train-dataset>` | — |
+| FR-RUN-019 | MUST | On completion, evaluate the rank-1 program on all training instances **through `core.eval.evaluate_solution`**, persisting raw per-instance results into `eval_metadata`/`eval_instances` (same storage path as `revolver eval` — no longer a stderr-only report; task-86 residue, U11/#368). The per-instance timeout comes from the eval path (the hardcoded 300 s is removed); a failed post-run eval still only **warns** (never fails the run); the write is guarded against DB contention with the still-open launch connection (commit/WAL/busy_timeout before the call). Each per-instance eval subprocess is killed at its timeout (no leaked workers) and runs under the `REVOLVER_EVAL_NUM_THREADS` thread cap (DES-005 §7, v0.17.1). | §4.6 |
+| FR-RUN-020 | MUST | Training results are accessible via `revolver eval results --solution <id> --dataset <train-dataset>` (persisted through the FR-RUN-019 eval path — U11/#368) | — |
 | FR-RUN-011 | MUST | Store the backend resume state in the run directory for resume capability (OpenEvolve: checkpoint dir; ShinkaEvolve: results dir) | §4.6, §5.5 |
 | FR-RUN-012 | MUST | Support `--alias` for user-friendly solution naming | §4.6 |
 | FR-RUN-013 | MUST | `resume` creates a new run from parent checkpoint. The parent run is immutable. | §5.5 |
@@ -337,11 +343,17 @@ Deleted run "run-20260310-143000"
 | FR-RUN-044 | MUST | Run metadata stores `llm_type` (`single` or `ensemble`) indicating whether a single LLM or an ensemble was used | — |
 | FR-RUN-045 | MUST | Run metadata stores `llm_snapshot` (JSON) capturing the full LLM or ensemble configuration at run time for traceability | NFR-020 |
 | FR-RUN-046 | MUST | `--llm` accepts ensemble names; when an ensemble is used, the backend is configured with multiple models, mapped first-class per backend (ADR-007 A2/A3). OpenEvolve uses a weighted `llm.models` array (member weights honored; per-member `reasoning_effort` honored). ShinkaEvolve maps all members to `evo_config.llm_models[]` with `--selection` driving `llm_dynamic_selection`; under `fixed`, member weights seed `FixedSampler.prior_probs` (apples-to-apples with the OE weighted ensemble). Weights carry across **OE-weighted** and **Shinka-`fixed`** only — under Shinka adaptive modes (`ucb`/`ucb1`/`thompson`) weights are ignored **by design** (bandit starts uniform) and per-member `reasoning_effort` is OpenEvolve-only. Both asymmetries are verified ShinkaEvolve 0.0.7 constraints surfaced via `capabilities()` (map-with-warn), **not** a silent drop. | — |
-| FR-RUN-047 | MUST | `--backend {openevolve,shinka}` selects the evolution backend (default: `openevolve`). The backend is stored in the run record and manifest, and surfaced in `run info`, `run list`, and dry-run output. `resume` inherits the parent run's backend. | ADR-007 |
+| FR-RUN-047 | MUST | `--backend {openevolve,shinka}` selects the evolution backend. Resolution order: **explicit `--backend` > the problem version's stored backend (FR-PRB-016) > default `openevolve`** — omitting the flag defers to the version, so flag absence MUST be distinguishable from an explicit `openevolve` (`None` sentinel, not a hard CLI default — U4/#369). An explicit `--backend` that differs from the version's stored backend **warns on stderr** (never errors). `--dry-run` resolves the backend identically. The resolved backend is stored in the run record and manifest, and surfaced in `run info`, `run list`, and dry-run output. `resume` inherits the parent run's backend. | ADR-007 |
 | FR-RUN-048 | MUST | Backend capability differences are reported honestly: an option not supported by the selected backend produces a warning (map-with-warn), never a silent no-op or an error that breaks scripts | ADR-007 D3/D4 |
 | FR-RUN-049 | MUST | `--selection {fixed,ucb,ucb1,thompson}` is a neutral run lever selecting the ensemble member-selection strategy, validated against the resolved backend's `capabilities().selection_strategies` (ADR-007 A1/A4). OpenEvolve supports only weighted (`fixed`) selection and **rejects** any non-`fixed` value with a clear error naming the supported strategy (exit 1). ShinkaEvolve maps it to `evo_config.llm_dynamic_selection` (`fixed`/`ucb`/`ucb1` [alias of `AsymmetricUCB`]/`thompson`). `--selection-kwarg k=v` (repeatable) is routed only to the **selected** sampler's constructor (never a union); `cost_aware_coef` applies to `ucb`/`ucb1` and defaults to 0 (ADR-007 A5). | ADR-007 A1/A4/A5 |
 | FR-RUN-050 | MUST | `--llm-weight model=w` (repeatable) overrides an ensemble member's weight for this run only, taking precedence over the registry weight. Honored on OpenEvolve (patches the weighted sampler's per-member `weight`) and on ShinkaEvolve **only under `--selection fixed`** (folded into the `FixedSampler.prior_probs` vector). Under Shinka adaptive modes it is **ignored with a warning** (the bandit starts uniform — ADR-007 A3). Per-member weight/effort is reachable only via this dedicated flag, not `--config-override` (which cannot address list members). | ADR-007 A1/A3 |
 | FR-RUN-051 | MUST | `revolver solution extract --from-checkpoint` recovers the best program of an `interrupted`/`failed` OpenEvolve run from its latest checkpoint (`best_program_id` in the checkpoint `metadata.json` + `programs/{id}.json`), routed via a backend-neutral `EvolutionBackend` recovery method (B7). The **default** `solution extract` behavior is unchanged — it still rejects `interrupted` runs. A run too short to have produced a checkpoint yields a clear error. | — |
+| FR-RUN-052 | MUST | Score display and population ranking (`run status` live progress, `run population`, and the checkpoint best-score fallback) **prefer a numeric `combined_score`** over the sum-of-numeric-metrics; the sum is the fallback only when no numeric `combined_score` exists in the metrics dict, and a metrics dict lacking `combined_score` never crashes display. Display/fallback-only change — the solution-DB `best_score` is already `combined_score`-based (DES-005 §4.5; U13/#367) | — |
+| FR-RUN-053 | MUST | The generated wrapper evaluator on **both backends** emits the coverage keys `instances_valid`/`instances_total` alongside the aggregated metrics and records each timed-out instance on a side-channel; the `instances_` metric prefix is **reserved** for coverage metadata and excluded from the wrapper's metric mean (read-path counterpart: FR-EVL-021 as amended — coverage is metadata, never averaged into a score); the ShinkaEvolve wrapper gains a **distinct `TimeoutError` branch** (today it catches all exceptions in one branch) so timeouts are distinguishable from failures (DES-005 §3.2; U13/#367) | — |
+| FR-RUN-054 | MUST | `evaluation.on_timeout: penalize\|drop` controls how the generated wrapper scores a timed-out instance: **`penalize` (default) counts the instance at `evaluation.timeout_score` (finite, default `0.0`) in the metric mean; `drop` excludes it, restoring the 0.17 survivor-mean**. The default flip to `penalize` is a **deliberate v0.18 fitness-landscape change** (release-noted; `evaluation.on_timeout=drop` is the escape hatch). Both keys are parsed at the shared launch point on both backends and their values are **validated at run/dry-run** (unknown `on_timeout` value or non-finite `timeout_score` → exit 1): `evaluation.*` is a validated, **Revolver-owned** config section (previously popped/uninspected). Resume inherits the parent wrapper's baked policy; on a run with zero timeouts, `penalize` and `drop` produce identical scores (DES-005 §3.2; U13/#367) | — |
+| FR-RUN-055 | MUST | `run info` shows the engine best score labeled **"engine, single eval"** next to the post-run eval mean labeled with the FR-RUN-053 coverage (`instances_valid/instances_total`); the #306 display-time score fallback (rank-1 solution with no post-eval score of its own) is labeled "engine, single eval" so the single-eval engine number **never renders bare**; JSON output carries both fields. The residual two-timeout semantics (engine fitness penalizes, post-eval reports coverage-labeled means) is **by design** — labels carry the burden (triage v0.17 §3; U11/#368) | — |
+| FR-RUN-056 | MUST | After the existing pre-flight evaluation — on **both launch and resume** — a backend `validate_seed_metrics` hook fails fast (**before iteration 0**) when a metric named in `database.feature_dimensions` is absent or non-numeric in the seed's pre-flight metrics; the error names the missing dimension and the available metrics. The builtins `complexity`/`diversity`/`combined_score` are **allowlisted** (computed inside OpenEvolve); ShinkaEvolve's hook is a no-op (its only metric contract is `combined_score`); the hook is skipped whenever pre-flight itself is skipped (empty dataset) (U8/#370) | — |
+| FR-RUN-057 | SHOULD | OpenEvolve-only: when `checkpoint_interval` is **unset** (absent from both config.yaml and `--config-override`), the effective interval defaults to `max(1, min(100, iterations//10))` so a killed ≤100-iteration run has a mid-run checkpoint to resume from; an explicit `checkpoint_interval` is **never overridden**, and the S17a-12 phase-1 warning keeps firing only on explicit equality. Release-noted v0.18 default-path change (U6 phase 2/#364) | — |
 
 ---
 
@@ -369,6 +381,9 @@ Deleted run "run-20260310-143000"
 | `delete` with non-existent run | Error: "Run '<run-id>' not found" | 1 |
 | `delete` in JSON mode without `--force` | Error: "Use --force to delete in JSON mode (no interactive prompt)" | 1 |
 | `delete` confirmation declined by user | No deletion, exit silently | 1 |
+| `evaluation.on_timeout` set to a value other than `penalize`/`drop`, or `evaluation.timeout_score` non-finite | Error: "Invalid evaluation.on_timeout '<value>'. Supported: penalize, drop." / "evaluation.timeout_score must be a finite number." Rejected at run **and** `--dry-run` (FR-RUN-054). | 1 |
+| Seed program's pre-flight metrics lack a metric named in `database.feature_dimensions` (or its value is non-numeric) | Error: "Feature dimension '<name>' not found in seed metrics. Available metrics: <list>." Fails **before iteration 0** on both launch and resume (FR-RUN-056); the builtins `complexity`/`diversity`/`combined_score` never trigger this error. | 1 |
+| Explicit `--backend` differs from the problem version's stored backend | Warning on stderr: "Warning: version '<tag>' stores backend '<stored>' but --backend '<explicit>' was given. Proceeding with '<explicit>'." Proceeds with the explicit backend (FR-RUN-047). | 0 (continue) |
 
 ---
 

@@ -25,17 +25,19 @@ import copy
 from datetime import UTC, datetime
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import shutil
 import sys
 import time
 import traceback
-from typing import Any, Literal
+from typing import Any, Literal, cast, get_args
 
 import yaml
 
 from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
+from revolver.core.eval import compute_aggregates, evaluate_solution
 from revolver.core.exceptions import (
     ActiveRunError,
     ExternalError,
@@ -51,6 +53,7 @@ from revolver.infra.backends.base import (
     BackendRunSpec,
     ChildProcessReaperMixin,
     EvolutionBackend,
+    OnTimeoutPolicy,
 )
 from revolver.infra.backends.openevolve import (
     # DEPRECATED shim re-exports: wrapper generation moved into
@@ -84,6 +87,8 @@ from revolver.infra.db import (
     delete_run as db_delete_run,
     get_dataset,
     get_dataset_compat,
+    get_eval_instances,
+    get_eval_metadata,
     get_global_db,
     get_latest_run,
     get_llm,
@@ -281,6 +286,60 @@ def _warn_snapshot_config_findings(backend: EvolutionBackend, snapshot_dir: Path
         return
     for finding in findings:
         sys.stderr.write(f"Warning: snapshot config.yaml: {finding}\n")
+
+
+# Supported evaluation.on_timeout policy values (FR-RUN-054), derived from
+# the OnTimeoutPolicy Literal alias (single source of truth).
+_ON_TIMEOUT_VALUES: tuple[str, ...] = get_args(OnTimeoutPolicy)
+
+
+def _parse_evaluation_policy(
+    engine_config: dict[str, Any],
+) -> tuple[OnTimeoutPolicy, float]:
+    """Parse + validate ``evaluation.on_timeout`` / ``evaluation.timeout_score``.
+
+    FR-RUN-054 (S18 / U13 #367 iii): ``evaluation.*`` is a validated,
+    Revolver-owned config section — previously the OE backend popped it
+    uninspected and Shinka never inspected its keys, so a typo like
+    ``on_timeout: penalise`` was silent. Called at the shared launch point
+    on BOTH backends, before the ``--dry-run`` early return, so bad values
+    are rejected at run *and* dry-run (exit 1) with no side effect.
+
+    Defaults: ``on_timeout="penalize"`` (the deliberate v0.18
+    fitness-landscape flip — ``drop`` restores the 0.17 survivor-mean) and
+    ``timeout_score=0.0``.
+
+    Args:
+        engine_config: The built engine config dict (``backend.build_config``
+            output — base config.yaml merged with ``--config-override``).
+
+    Returns:
+        The validated ``(on_timeout, timeout_score)`` pair.
+
+    Raises:
+        ValidationError: On an unknown ``on_timeout`` value or a
+            non-finite/non-numeric ``timeout_score``.
+    """
+    eval_cfg = engine_config.get("evaluation")
+    if not isinstance(eval_cfg, dict):
+        eval_cfg = {}
+
+    on_timeout = eval_cfg.get("on_timeout", "penalize")
+    if on_timeout not in _ON_TIMEOUT_VALUES:
+        raise ValidationError(
+            f"Invalid evaluation.on_timeout '{on_timeout}'. "
+            f"Supported: {', '.join(_ON_TIMEOUT_VALUES)}."
+        )
+
+    timeout_score = eval_cfg.get("timeout_score", 0.0)
+    if (
+        isinstance(timeout_score, bool)
+        or not isinstance(timeout_score, (int, float))
+        or not math.isfinite(timeout_score)
+    ):
+        raise ValidationError("evaluation.timeout_score must be a finite number.")
+
+    return cast("OnTimeoutPolicy", on_timeout), float(timeout_score)
 
 
 def _determine_run_status(
@@ -669,6 +728,70 @@ def _finalize_backstop_reap(pre_run_children: set[int]) -> None:
             sys.stderr.write(f"Warning: finalize child-process reap failed: {exc}\n")
 
 
+def _run_preflight_check(
+    backend: EvolutionBackend,
+    engine_config: dict[str, Any],
+    wrapper_path: Path,
+    initial_program: Path,
+    dataset_path: Path,
+) -> None:
+    """Pre-flight evaluation + seed-metric validation (DES-005 §2.1 steps 12/12b).
+
+    Shared by :func:`launch_run` and :func:`resume_run` (S18-12): evaluates
+    the initial program on the first dataset instance using the generated
+    wrapper — catching evaluator errors (crashes, timeouts, misconfigured
+    arguments) before wasting LLM tokens on a full evolution run — then feeds
+    the resulting metrics to the backend's ``validate_seed_metrics`` hook
+    (U8 / FR-RUN-056). Skipped entirely — hook included — when the dataset
+    directory holds no instances. Any failure raises before iteration 0, so
+    the run aborts with no engine construction.
+
+    Raises:
+        RevolverError: When the pre-flight evaluation fails (crash/timeout).
+        ValidationError: When the backend's seed-metric validation fails
+            (e.g. OpenEvolve: a non-builtin ``database.feature_dimensions``
+            metric absent or non-numeric in the seed's metrics).
+    """
+    preflight_instances = sorted(
+        (p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()),
+        key=lambda p: p.name,
+    )
+    if not preflight_instances:
+        return
+    first_instance = preflight_instances[0]
+    preflight_result = eval_run_instance(
+        evaluator_path=wrapper_path,
+        program_path=initial_program,
+        instance_path=first_instance,
+        timeout_s=60.0,
+    )
+    if preflight_result.status != "pass":
+        raise RevolverError(
+            f"Pre-flight check failed: initial program evaluation "
+            f"{preflight_result.status} on {first_instance.name}."
+            + (f" Error: {preflight_result.error}" if preflight_result.error else "")
+            + " Fix the evaluator or initial program before running evolution."
+        )
+    # Log success
+    score_info = ""
+    if preflight_result.metrics:
+        cs = preflight_result.metrics.get("combined_score")
+        if cs is not None:
+            score_info = f", score={cs:.4f}"
+        if cs == 0.0:
+            sys.stderr.write(
+                f"Warning: pre-flight check passed but score=0.0 "
+                f"on {first_instance.name}. Evolution may not "
+                f"produce improvements.\n"
+            )
+    sys.stderr.write(f"Pre-flight check passed ({first_instance.name}{score_info}).\n")
+
+    # Step 12b — seed-metric validation (U8 / FR-RUN-056): fail fast, before
+    # iteration 0, when the built config declares a feature metric the seed
+    # does not produce (OpenEvolve; Shinka's hook is a no-op).
+    backend.validate_seed_metrics(engine_config, preflight_result.metrics)
+
+
 # ── launch_run (DES-005 §2.1) ────────────────────────────────────────────────
 
 
@@ -683,8 +806,12 @@ def launch_run(
     Orchestrates the entire run lifecycle per DES-005 section 2.1:
     validate inputs, generate wrapper, build the engine config, launch,
     collect results, create solution, write manifest. Engine-specific
-    steps are mediated by the backend selected via ``config.backend``
-    (ADR-007, FR-RUN-047).
+    steps are mediated by the resolved backend (ADR-007, FR-RUN-047 as
+    amended): explicit ``config.backend`` > the problem version's stored
+    backend (FR-PRB-016) > default ``'openevolve'``. ``config.backend``
+    is a ``None`` sentinel when ``--backend`` was not given; an explicit
+    value that differs from the version's stored backend warns on stderr
+    and wins (U4 / S18). ``--dry-run`` resolves identically.
 
     Args:
         config: Run configuration with problem version, LLM, dataset,
@@ -696,7 +823,7 @@ def launch_run(
         A :class:`RunResult` with run ID, solution, programs, and token usage.
 
     Raises:
-        ValidationError: If ``config.backend`` is not a registered
+        ValidationError: If the resolved backend name is not a registered
             backend (exit code 1).
         BackendUnavailableError: If the selected backend is not
             installed (exit code 3).
@@ -704,9 +831,6 @@ def launch_run(
         IntegrityError: On dataset integrity mismatch (exit code 2).
         ExternalError: On evolution engine failure (exit code 4).
     """
-    # 0. Resolve the evolution backend (ADR-007 D1; unknown name → exit 1)
-    backend: EvolutionBackend = get_backend(config.backend)
-
     # 1. Resolve project root
     root = _resolve_project_root(project_root)
     db_path = root / REVOLVER_DIR / "revolver.db"
@@ -714,10 +838,27 @@ def launch_run(
     proj_conn = get_project_db(db_path)
     global_conn = get_global_db()
     try:
-        # 2. Validate problem version exists
+        # 2. Validate problem version exists. Loaded BEFORE backend
+        # resolution so the version-stored backend is available (U4 / S18).
         pv = get_problem_version(proj_conn, config.problem_version)
         if pv is None:
             raise RevolverError(f"Problem version '{config.problem_version}' not found.")
+
+        # 2b. Resolve the evolution backend (ADR-007 D1; unknown name →
+        # exit 1). Resolution order: explicit --backend > version-stored
+        # backend (FR-PRB-016) > default 'openevolve' — config.backend is
+        # None when --backend was not given (FR-RUN-047 as amended,
+        # DES-005 §2.1 step 2b, DES-003 §2.2.2).
+        backend_name = config.backend or pv.backend or DEFAULT_BACKEND
+        backend: EvolutionBackend = get_backend(backend_name)
+        if config.backend is not None and config.backend != pv.backend:
+            # Explicit mismatch: warn (never error) and honor the explicit
+            # choice — the stored value is a default, not a constraint.
+            sys.stderr.write(
+                f"Warning: version '{config.problem_version}' stores backend "
+                f"'{pv.backend}' but --backend '{config.backend}' was given. "
+                f"Proceeding with '{config.backend}'.\n"
+            )
 
         # 3. Resolve LLM or ensemble (global DB) — S11-08
         llm_or_ensemble = resolve_llm_or_ensemble(config.llm_name, global_conn)
@@ -813,6 +954,19 @@ def launch_run(
 
         oe_config = backend.build_config(spec)
 
+        # Parse + validate the evaluation.* policy at the shared launch point
+        # (FR-RUN-054, both backends). Runs BEFORE the --dry-run early return
+        # so a bad value is rejected at run and dry-run alike, with no side
+        # effect (no run dir, no DB record). The wrapper settings themselves
+        # are consumed at wrapper generation below; Revolver config uses the
+        # "evaluation:" section, OE's own "evaluator:" section is honored as
+        # a fallback for timeout_per_instance only.
+        spec.on_timeout, spec.timeout_score = _parse_evaluation_policy(oe_config)
+        eval_cfg = oe_config.get("evaluation", oe_config.get("evaluator", {}))
+        spec.timeout_per_instance = (
+            eval_cfg.get("timeout_per_instance") if isinstance(eval_cfg, dict) else None
+        )
+
         # Single-owner iterations resolution (S14-05, ADR-007 D4): the
         # orchestrator owns the canonical value — CLI flag first, then the
         # backend-neutral reading of the built config (max_iterations on
@@ -863,14 +1017,10 @@ def launch_run(
         run_dir = create_run_dir(root, run_id)
         spec.run_dir = run_dir
 
-        # 10. Generate wrapper evaluator (via the backend — ADR-007 D1)
-        # Revolver config uses "evaluation:" section; OE uses "evaluator:".
-        # Check both keys, preferring "evaluation" (user-facing).
-        eval_cfg = oe_config.get("evaluation", oe_config.get("evaluator", {}))
-        timeout_per_instance: float | None = (
-            eval_cfg.get("timeout_per_instance") if isinstance(eval_cfg, dict) else None
-        )
-        spec.timeout_per_instance = timeout_per_instance
+        # 10. Generate wrapper evaluator (via the backend — ADR-007 D1).
+        # The evaluation.* wrapper settings (timeout_per_instance and the
+        # FR-RUN-054 on_timeout/timeout_score policy) were parsed into the
+        # spec at the shared launch point above, before the dry-run return.
         wrapper_path = backend.generate_wrapper(spec)
         spec.wrapper_path = wrapper_path
 
@@ -959,51 +1109,16 @@ def launch_run(
                 # Record start time
                 start_time = time.monotonic()
 
-                # Pre-flight check: evaluate initial program on first instance
-                initial_program = snapshot_dir / "initial_program.py"
-                preflight_instances = sorted(
-                    (
-                        p
-                        for p in dataset_path.iterdir()
-                        if not p.name.startswith(".") and p.is_file()
-                    ),
-                    key=lambda p: p.name,
+                # Pre-flight evaluation + seed-metric validation (steps
+                # 12/12b — shared with resume_run, S18-12). Raises before
+                # the engine is constructed.
+                _run_preflight_check(
+                    backend,
+                    oe_config,
+                    wrapper_path=wrapper_path,
+                    initial_program=snapshot_dir / "initial_program.py",
+                    dataset_path=dataset_path,
                 )
-                if preflight_instances:
-                    first_instance = preflight_instances[0]
-                    preflight_result = eval_run_instance(
-                        evaluator_path=wrapper_path,
-                        program_path=initial_program,
-                        instance_path=first_instance,
-                        timeout_s=60.0,
-                    )
-                    if preflight_result.status != "pass":
-                        raise RevolverError(
-                            f"Pre-flight check failed: initial program evaluation "
-                            f"{preflight_result.status} on {first_instance.name}."
-                            + (
-                                f" Error: {preflight_result.error}"
-                                if preflight_result.error
-                                else ""
-                            )
-                            + " Fix the evaluator or initial program before "
-                            "running evolution."
-                        )
-                    # Log success
-                    score_info = ""
-                    if preflight_result.metrics:
-                        cs = preflight_result.metrics.get("combined_score")
-                        if cs is not None:
-                            score_info = f", score={cs:.4f}"
-                        if cs == 0.0:
-                            sys.stderr.write(
-                                f"Warning: pre-flight check passed but score=0.0 "
-                                f"on {first_instance.name}. Evolution may not "
-                                f"produce improvements.\n"
-                            )
-                    sys.stderr.write(
-                        f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
-                    )
 
                 # Snapshot direct children for the finalize backstop
                 # (S17a-06 / #359): anything that appears from here on and
@@ -1089,12 +1204,10 @@ def launch_run(
                     run_id=run_id,
                     solution_id=solution_id,
                     snapshot_dir=snapshot_dir,
+                    dataset_name=config.dataset_name,
                     dataset_path=dataset_path,
-                    program_path=(
-                        run_dir / "programs" / "rank-1.py"
-                        if (run_dir / "programs" / "rank-1.py").exists()
-                        else initial_program
-                    ),
+                    program_path=run_dir / "programs" / "rank-1.py",
+                    project_root=root,
                 )
             except Exception as exc:
                 sys.stderr.write(f"Warning: post-run evaluation failed: {exc}\n")
@@ -1239,94 +1352,45 @@ def launch_run(
 # ── _post_run_evaluation (FR-RUN-019/020) ────────────────────────────────────
 
 
-def _run_post_eval(
-    evaluator_path: Path,
-    program_path: Path,
-    dataset_path: Path,
-    run_id: str,
-    solution_id: str,
-) -> None:
-    """Run the inline post-run evaluation on training instances.
-
-    This is the extracted evaluation logic from Sprint 004.
-    It iterates over all instances, evaluates each via
-    ``evaluator_runner.run_instance()``, and logs results to stderr.
-
-    Args:
-        evaluator_path: Path to the evaluator ``.py`` file.
-        program_path: Path to the rank-1 program file.
-        dataset_path: Path to the dataset directory.
-        run_id: ID of the completed run (for logging).
-        solution_id: ID of the rank-1 solution (for logging).
-    """
-    # TODO(S5-08): Replace with core.eval.evaluate_solution() after PR C merge.
-    # The signature should become:
-    #   core.eval.evaluate_solution(
-    #       solution_id_or_alias=solution_id,
-    #       dataset_name=<dataset>,
-    #       force=True,
-    #       on_progress=None,
-    #   )
-    # This function can then be removed entirely.
-
-    # Enumerate instances
-    instances = sorted(
-        p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()
-    )
-    if not instances:
-        sys.stderr.write("Warning: no instances found, skipping post-run evaluation.\n")
-        return
-
-    sys.stderr.write(
-        f"Post-run evaluation: evaluating {len(instances)} instances "
-        f"(run={run_id}, solution={solution_id})...\n"
-    )
-
-    passed = 0
-    failed = 0
-    for inst in instances:
-        result = eval_run_instance(
-            evaluator_path=evaluator_path,
-            program_path=program_path,
-            instance_path=inst,
-            timeout_s=300.0,
-        )
-        if result.status == "pass":
-            passed += 1
-        else:
-            failed += 1
-            sys.stderr.write(
-                f"  Instance {result.instance_id}: {result.status}"
-                + (f" — {result.error}" if result.error else "")
-                + "\n"
-            )
-
-    sys.stderr.write(
-        f"Post-run evaluation complete: {passed}/{len(instances)} passed, {failed} failed.\n"
-    )
-
-
 def _post_run_evaluation(
     proj_conn: Any,
     run_id: str,
     solution_id: str,
     snapshot_dir: Path,
+    dataset_name: str,
     dataset_path: Path,
     program_path: Path,
+    project_root: Path | None = None,
 ) -> None:
     """Evaluate the rank-1 program on all training instances.
 
-    Thin wrapper that validates paths and delegates to ``_run_post_eval()``.
-    Once ``core.eval`` is available (PR C merge), this will delegate to
-    ``core.eval.evaluate_solution()`` instead.
+    Delegates to :func:`revolver.core.eval.evaluate_solution` (S18 / U11 —
+    FR-RUN-019/020), which persists per-instance results to
+    ``eval_metadata``/``eval_instances``. Results become accessible via
+    ``revolver eval results --solution <id> --dataset <train-dataset>`` and
+    are read back by ``run info`` for the honest dual-score display
+    (FR-RUN-055). The per-instance timeout comes from the eval path — the
+    pre-S18 hardcoded ``timeout_s=300`` is gone.
+
+    Failure semantics are warn-only: both call sites (``launch_run`` and
+    ``resume_run``) wrap this helper in a ``try/except`` that warns on
+    stderr — a failed or missing post-run eval never fails the run.
 
     Args:
-        proj_conn: Open project database connection (unused in current impl).
-        run_id: ID of the completed run.
-        solution_id: ID of the rank-1 solution.
-        snapshot_dir: Path to the problem version snapshot.
-        dataset_path: Path to the dataset directory.
-        program_path: Path to the rank-1 program file.
+        proj_conn: Open project database connection still held by the
+            orchestrator. Committed here (DB-contention guard) so the eval
+            path's own connection to the same SQLite file cannot contend
+            with a pending write transaction.
+        run_id: ID of the completed run (for logging).
+        solution_id: ID of the rank-1 solution to evaluate.
+        snapshot_dir: Path to the problem version snapshot (evaluator check).
+        dataset_name: Registered training dataset name, threaded through so
+            the persisted eval rows reference the registered dataset (S18-05).
+        dataset_path: Path to the dataset directory (kept for DES-005 §7
+            signature parity; instance enumeration happens in the eval path).
+        program_path: Path to the rank-1 program file (pre-check only; the
+            eval path re-resolves it from the solution record).
+        project_root: Explicit project root threaded to the eval path.
     """
     evaluator_path = snapshot_dir / EVALUATOR_FILENAME
     if not evaluator_path.exists():
@@ -1341,12 +1405,40 @@ def _post_run_evaluation(
         )
         return
 
-    _run_post_eval(
-        evaluator_path=evaluator_path,
-        program_path=program_path,
-        dataset_path=dataset_path,
-        run_id=run_id,
-        solution_id=solution_id,
+    # DB-contention guard (S18-05): the orchestrator still holds its open
+    # project connection when evaluate_solution opens its own connection to
+    # the same SQLite file. Commit any pending write transaction so the eval
+    # writes cannot contend with it. The eval-path connection itself waits
+    # out residual locks via the busy_timeout PRAGMA applied by
+    # get_project_db to every connection (busy_timeout acts on the
+    # connection that encounters the lock, not on the holder; WAL likewise
+    # comes from get_project_db).
+    with contextlib.suppress(Exception):
+        proj_conn.commit()
+
+    sys.stderr.write(
+        f"Post-run evaluation: evaluating dataset '{dataset_name}' "
+        f"(run={run_id}, solution={solution_id})...\n"
+    )
+
+    # force=True: evaluate_solution raises when an eval already exists for
+    # (solution, dataset). The rank-1 solution was created moments ago, so a
+    # pre-existing eval is only possible on ID reuse — replace it rather
+    # than fail the fresh post-run eval. warn_split=False: this is the
+    # training evaluation (FR-RUN-019), so the FR-EVL-009 "expected 'eval'"
+    # split warning would be misleading noise on every completed run.
+    result = evaluate_solution(
+        solution_id_or_alias=solution_id,
+        dataset_name=dataset_name,
+        force=True,
+        project_root=project_root,
+        warn_split=False,
+    )
+
+    meta = result.metadata
+    sys.stderr.write(
+        f"Post-run evaluation complete: {meta.instances_solved}/{meta.instance_count} "
+        f"instances solved (eval {meta.eval_id}).\n"
     )
 
 
@@ -1644,52 +1736,18 @@ def resume_run(
             with revolver_env(env_vars):
                 start_time = time.monotonic()
 
-                # Pre-flight check: evaluate initial program on first instance
-                wrapper_path = new_run_dir / backend.wrapper_filename
-                initial_program = snapshot_dir / "initial_program.py"
-                preflight_instances = sorted(
-                    (
-                        p
-                        for p in dataset_path.iterdir()
-                        if not p.name.startswith(".") and p.is_file()
-                    ),
-                    key=lambda p: p.name,
+                # Pre-flight evaluation + seed-metric validation (steps
+                # 12/12b of §2.1, mirrored on resume as §2.3 step 13b —
+                # shared with launch_run, S18-12). Raises before the engine
+                # is constructed; validate_seed_metrics fires on resume too
+                # (FR-RUN-056).
+                _run_preflight_check(
+                    backend,
+                    oe_config,
+                    wrapper_path=new_run_dir / backend.wrapper_filename,
+                    initial_program=snapshot_dir / "initial_program.py",
+                    dataset_path=dataset_path,
                 )
-                if preflight_instances:
-                    first_instance = preflight_instances[0]
-                    preflight_result = eval_run_instance(
-                        evaluator_path=wrapper_path,
-                        program_path=initial_program,
-                        instance_path=first_instance,
-                        timeout_s=60.0,
-                    )
-                    if preflight_result.status != "pass":
-                        raise RevolverError(
-                            f"Pre-flight check failed: initial program evaluation "
-                            f"{preflight_result.status} on {first_instance.name}."
-                            + (
-                                f" Error: {preflight_result.error}"
-                                if preflight_result.error
-                                else ""
-                            )
-                            + " Fix the evaluator or initial program before "
-                            "running evolution."
-                        )
-                    # Log success
-                    score_info = ""
-                    if preflight_result.metrics:
-                        cs = preflight_result.metrics.get("combined_score")
-                        if cs is not None:
-                            score_info = f", score={cs:.4f}"
-                        if cs == 0.0:
-                            sys.stderr.write(
-                                f"Warning: pre-flight check passed but score=0.0 "
-                                f"on {first_instance.name}. Evolution may not "
-                                f"produce improvements.\n"
-                            )
-                    sys.stderr.write(
-                        f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
-                    )
 
                 # Snapshot direct children for the finalize backstop
                 # (S17a-06 / #359), mirroring launch_run.
@@ -1779,12 +1837,10 @@ def resume_run(
                     run_id=new_run_id,
                     solution_id=solution_id,
                     snapshot_dir=snapshot_dir,
+                    dataset_name=parent_dataset_name,
                     dataset_path=dataset_path,
-                    program_path=(
-                        new_run_dir / "programs" / "rank-1.py"
-                        if (new_run_dir / "programs" / "rank-1.py").exists()
-                        else initial_program
-                    ),
+                    program_path=new_run_dir / "programs" / "rank-1.py",
+                    project_root=root,
                 )
             except Exception as exc:
                 sys.stderr.write(f"Warning: post-run evaluation failed: {exc}\n")
@@ -2276,6 +2332,35 @@ def get_run_info(
             except Exception:
                 logger.debug("run best_score fallback read failed in get_run_info", exc_info=True)
 
+        # 6d. Post-run training-eval aggregate for the rank-1 solution
+        #     (S18 / U11 — FR-RUN-055). Read back the eval persisted by the
+        #     post-run evaluation (FR-RUN-019 via core.eval) on the run's
+        #     training dataset and surface the honest mean of combined_score
+        #     with its coverage (instances in the mean / total instances —
+        #     FR-RUN-053), to be rendered NEXT TO the engine best.
+        #     combined_score is the evaluator-contract metric (DES-006:
+        #     enforced at pre-flight and defaulted by both wrapper
+        #     templates), so the aggregate is deliberately keyed on it;
+        #     other metrics stay accessible via `eval results`.
+        post_eval_score: float | None = None
+        post_eval_instances_valid: int | None = None
+        post_eval_instances_total: int | None = None
+        rank1_solution = next((s for s in solutions if s.rank == 1), None)
+        if rank1_solution is not None:
+            try:
+                eval_meta = get_eval_metadata(conn, rank1_solution.id, str(run_data["dataset"]))
+                if eval_meta is not None:
+                    eval_rows = get_eval_instances(conn, eval_meta.eval_id)
+                    agg = compute_aggregates(eval_rows).get("combined_score")
+                    post_eval_instances_total = eval_meta.instance_count
+                    if agg is not None:
+                        post_eval_score = agg.mean
+                        post_eval_instances_valid = agg.count
+                    else:
+                        post_eval_instances_valid = 0
+            except Exception:
+                logger.debug("post-run eval read failed in get_run_info", exc_info=True)
+
         return RunInfo(
             run_id=str(run_data["id"]),
             problem_version=str(run_data["problem_version"]),
@@ -2304,6 +2389,9 @@ def get_run_info(
             programs_extracted=len(programs),
             total_programs=total_programs,
             run_best_score=run_best_score,
+            post_eval_score=post_eval_score,
+            post_eval_instances_valid=post_eval_instances_valid,
+            post_eval_instances_total=post_eval_instances_total,
             resume_chain=chain,
             llm_type=str(run_data.get("llm_type", "single")),
             llm_snapshot=(str(run_data["llm_snapshot"]) if run_data.get("llm_snapshot") else None),

@@ -38,9 +38,9 @@ Register a new LLM in the global registry.
 | `--api-key-env <var>` | string | For remote | Environment variable name holding the API key (e.g., `ANTHROPIC_API_KEY`) |
 | `--base-url <url>` | string | No | Override API base URL. Auto-set to `http://localhost:11434/v1` for Ollama |
 | `--pull` | flag | No | For Ollama: immediately pull the model after registration (default: prompt user) |
-| `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Injected into OpenEvolve config at run time. |
-| `--timeout <seconds>` | int | No | Request timeout in seconds. Injected into OpenEvolve config at run time. |
-| `--temperature <float>` | float | No | Sampling temperature (0.0–2.0). Injected into OpenEvolve config at run time. |
+| `--max-tokens <n>` | int | No | Maximum tokens per LLM response. Stored in the registry and projected into the backend config at run time (OE: `llm.max_tokens`; Shinka: `llm_kwargs.max_tokens`) — FR-LLM-019. |
+| `--timeout <seconds>` | int | No | Request timeout in seconds. Stored in the registry and projected into the backend config at run time (OE: `llm.timeout`; Shinka: `llm_timeout` → the engine's LLM-request timeout, R2) — FR-LLM-019. |
+| `--temperature <float>` | float | No | Sampling temperature (0.0–2.0). Stored in the registry and projected into the backend config at run time (OE: `llm.temperature`; Shinka: `llm_kwargs.temperatures`) — FR-LLM-019. |
 | `--reasoning-effort <level>` | string | No | Reasoning effort for reasoning-capable models: `min`, `low`, `medium`, `high`, or `max`. Stored in the registry and projected per backend at run time (FR-LLM-026). |
 
 **Output** (human):

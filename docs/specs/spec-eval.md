@@ -131,7 +131,7 @@ instance_003.json     FAILED          —         —
 | FR-EVL-006 | MUST | Compute aggregate statistics (mean, min, max, p10, p50, p90, std) at read time from stored raw data — aggregates are not stored separately | NFR-013 |
 | FR-EVL-007 | MUST | Verify dataset integrity before evaluation | §7.2 |
 | FR-EVL-008 | MUST | Warn if dataset is not compatible with the solution's problem version | §7.4 |
-| FR-EVL-009 | MUST | Warn (do not block) if dataset split is not `eval` | §4.3 |
+| FR-EVL-009 | MUST | Warn (do not block) if dataset split is not `eval`. The post-run training evaluation (FR-RUN-019/020) suppresses this warning (`warn_split=False`): evaluating the training split there is by design. | §4.3 |
 | FR-EVL-010 | MUST | Handle evaluator exceptions per instance without aborting the full evaluation | — |
 | FR-EVL-011 | MUST | Record instances where evaluation failed (count as "unsolved") | §5.6 |
 | FR-EVL-012 | SHOULD | Display a progress bar during evaluation | — |
@@ -143,7 +143,7 @@ instance_003.json     FAILED          —         —
 | FR-EVL-018 | MUST | If evaluation results already exist for a (solution, dataset) pair, require confirmation before re-evaluating. `--force` skips confirmation. In `--json` mode, return error without `--force`. | — |
 | FR-EVL-019 | MUST | For legacy evaluators (`evaluate()`), perform a global aggregation call after per-instance evaluation: call `evaluate()` with `REVOLVER_DATASET_DIR` set and `REVOLVER_INSTANCE_PATH` unset. Store result in `user_aggregates`. | DES-006 v0.2 |
 | FR-EVL-020 | MUST | Display both Revolver-computed aggregates and user aggregates (if available) in results output. | DES-006 v0.2 |
-| FR-EVL-021 | MUST | Metric aggregation (both the training/run aggregation loop and eval aggregation) MUST guard against non-numeric metric fields: only values that are `int` or `float` (excluding `bool`) are aggregated; non-numeric fields (e.g. an `error` string returned on some instances) are skipped, not coerced to 0.0 or allowed to crash the aggregation. A candidate returning a non-numeric field on some instances is scored on its numeric metrics only (B1). | DES-006 §4.3 |
+| FR-EVL-021 | MUST | Metric aggregation (both the training/run aggregation loop and eval aggregation) MUST guard against non-numeric metric fields: only values that are `int` or `float` (excluding `bool`) are aggregated; non-numeric fields (e.g. an `error` string returned on some instances) are skipped, not coerced to 0.0 or allowed to crash the aggregation. A candidate returning a non-numeric field on some instances is scored on its numeric metrics only (B1). The reserved **`instances_*` coverage keys** (`instances_valid`/`instances_total` — FR-RUN-053) are likewise **excluded from aggregation everywhere** (the training/run loop and read-time `compute_aggregates` alike): coverage is metadata, never averaged into a score (U13/#367). | DES-006 §4.3 |
 
 ---
 
