@@ -37,6 +37,7 @@ from typing import Any, Literal, cast, get_args
 import yaml
 
 from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
+from revolver.core.eval import evaluate_solution
 from revolver.core.exceptions import (
     ActiveRunError,
     ExternalError,
@@ -1154,12 +1155,10 @@ def launch_run(
                     run_id=run_id,
                     solution_id=solution_id,
                     snapshot_dir=snapshot_dir,
+                    dataset_name=config.dataset_name,
                     dataset_path=dataset_path,
-                    program_path=(
-                        run_dir / "programs" / "rank-1.py"
-                        if (run_dir / "programs" / "rank-1.py").exists()
-                        else initial_program
-                    ),
+                    program_path=run_dir / "programs" / "rank-1.py",
+                    project_root=root,
                 )
             except Exception as exc:
                 sys.stderr.write(f"Warning: post-run evaluation failed: {exc}\n")
@@ -1304,94 +1303,45 @@ def launch_run(
 # ── _post_run_evaluation (FR-RUN-019/020) ────────────────────────────────────
 
 
-def _run_post_eval(
-    evaluator_path: Path,
-    program_path: Path,
-    dataset_path: Path,
-    run_id: str,
-    solution_id: str,
-) -> None:
-    """Run the inline post-run evaluation on training instances.
-
-    This is the extracted evaluation logic from Sprint 004.
-    It iterates over all instances, evaluates each via
-    ``evaluator_runner.run_instance()``, and logs results to stderr.
-
-    Args:
-        evaluator_path: Path to the evaluator ``.py`` file.
-        program_path: Path to the rank-1 program file.
-        dataset_path: Path to the dataset directory.
-        run_id: ID of the completed run (for logging).
-        solution_id: ID of the rank-1 solution (for logging).
-    """
-    # TODO(S5-08): Replace with core.eval.evaluate_solution() after PR C merge.
-    # The signature should become:
-    #   core.eval.evaluate_solution(
-    #       solution_id_or_alias=solution_id,
-    #       dataset_name=<dataset>,
-    #       force=True,
-    #       on_progress=None,
-    #   )
-    # This function can then be removed entirely.
-
-    # Enumerate instances
-    instances = sorted(
-        p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()
-    )
-    if not instances:
-        sys.stderr.write("Warning: no instances found, skipping post-run evaluation.\n")
-        return
-
-    sys.stderr.write(
-        f"Post-run evaluation: evaluating {len(instances)} instances "
-        f"(run={run_id}, solution={solution_id})...\n"
-    )
-
-    passed = 0
-    failed = 0
-    for inst in instances:
-        result = eval_run_instance(
-            evaluator_path=evaluator_path,
-            program_path=program_path,
-            instance_path=inst,
-            timeout_s=300.0,
-        )
-        if result.status == "pass":
-            passed += 1
-        else:
-            failed += 1
-            sys.stderr.write(
-                f"  Instance {result.instance_id}: {result.status}"
-                + (f" — {result.error}" if result.error else "")
-                + "\n"
-            )
-
-    sys.stderr.write(
-        f"Post-run evaluation complete: {passed}/{len(instances)} passed, {failed} failed.\n"
-    )
-
-
 def _post_run_evaluation(
     proj_conn: Any,
     run_id: str,
     solution_id: str,
     snapshot_dir: Path,
+    dataset_name: str,
     dataset_path: Path,
     program_path: Path,
+    project_root: Path | None = None,
 ) -> None:
     """Evaluate the rank-1 program on all training instances.
 
-    Thin wrapper that validates paths and delegates to ``_run_post_eval()``.
-    Once ``core.eval`` is available (PR C merge), this will delegate to
-    ``core.eval.evaluate_solution()`` instead.
+    Delegates to :func:`revolver.core.eval.evaluate_solution` (S18 / U11 —
+    FR-RUN-019/020), which persists per-instance results to
+    ``eval_metadata``/``eval_instances``. Results become accessible via
+    ``revolver eval results --solution <id> --dataset <train-dataset>`` and
+    are read back by ``run info`` for the honest dual-score display
+    (FR-RUN-055). The per-instance timeout comes from the eval path — the
+    pre-S18 hardcoded ``timeout_s=300`` is gone.
+
+    Failure semantics are warn-only: both call sites (``launch_run`` and
+    ``resume_run``) wrap this helper in a ``try/except`` that warns on
+    stderr — a failed or missing post-run eval never fails the run.
 
     Args:
-        proj_conn: Open project database connection (unused in current impl).
-        run_id: ID of the completed run.
-        solution_id: ID of the rank-1 solution.
-        snapshot_dir: Path to the problem version snapshot.
-        dataset_path: Path to the dataset directory.
-        program_path: Path to the rank-1 program file.
+        proj_conn: Open project database connection still held by the
+            orchestrator. Committed here (DB-contention guard) so the eval
+            path's own connection to the same SQLite file cannot contend
+            with a pending write transaction.
+        run_id: ID of the completed run (for logging).
+        solution_id: ID of the rank-1 solution to evaluate.
+        snapshot_dir: Path to the problem version snapshot (evaluator check).
+        dataset_name: Registered training dataset name, threaded through so
+            the persisted eval rows reference the registered dataset (S18-05).
+        dataset_path: Path to the dataset directory (kept for DES-005 §7
+            signature parity; instance enumeration happens in the eval path).
+        program_path: Path to the rank-1 program file (pre-check only; the
+            eval path re-resolves it from the solution record).
+        project_root: Explicit project root threaded to the eval path.
     """
     evaluator_path = snapshot_dir / EVALUATOR_FILENAME
     if not evaluator_path.exists():
@@ -1406,12 +1356,37 @@ def _post_run_evaluation(
         )
         return
 
-    _run_post_eval(
-        evaluator_path=evaluator_path,
-        program_path=program_path,
-        dataset_path=dataset_path,
-        run_id=run_id,
-        solution_id=solution_id,
+    # DB-contention guard (S18-05): the orchestrator still holds its open
+    # project connection when evaluate_solution opens its own connection to
+    # the same SQLite file. Commit any pending write transaction so the eval
+    # writes cannot contend with it, and raise the busy timeout on the held
+    # connection as a fallback (WAL journal mode is already applied by
+    # get_project_db).
+    with contextlib.suppress(Exception):
+        proj_conn.commit()
+    with contextlib.suppress(Exception):
+        proj_conn.execute("PRAGMA busy_timeout=10000")
+
+    sys.stderr.write(
+        f"Post-run evaluation: evaluating dataset '{dataset_name}' "
+        f"(run={run_id}, solution={solution_id})...\n"
+    )
+
+    # force=True: evaluate_solution raises when an eval already exists for
+    # (solution, dataset). The rank-1 solution was created moments ago, so a
+    # pre-existing eval is only possible on ID reuse — replace it rather
+    # than fail the fresh post-run eval.
+    result = evaluate_solution(
+        solution_id_or_alias=solution_id,
+        dataset_name=dataset_name,
+        force=True,
+        project_root=project_root,
+    )
+
+    meta = result.metadata
+    sys.stderr.write(
+        f"Post-run evaluation complete: {meta.instances_solved}/{meta.instance_count} "
+        f"instances solved (eval {meta.eval_id}).\n"
     )
 
 
@@ -1844,12 +1819,10 @@ def resume_run(
                     run_id=new_run_id,
                     solution_id=solution_id,
                     snapshot_dir=snapshot_dir,
+                    dataset_name=parent_dataset_name,
                     dataset_path=dataset_path,
-                    program_path=(
-                        new_run_dir / "programs" / "rank-1.py"
-                        if (new_run_dir / "programs" / "rank-1.py").exists()
-                        else initial_program
-                    ),
+                    program_path=new_run_dir / "programs" / "rank-1.py",
+                    project_root=root,
                 )
             except Exception as exc:
                 sys.stderr.write(f"Warning: post-run evaluation failed: {exc}\n")

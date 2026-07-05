@@ -881,41 +881,152 @@ def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
 # ── _post_run_evaluation tests ────────────────────────────────────────────────
 
 
+def _insert_completed_run_with_rank1(
+    root: Path,
+    db_path: Path,
+    run_id: str,
+    solution_id: str,
+    best_score: float | None = 0.95,
+) -> Path:
+    """Insert a completed run + rank-1 solution and materialize rank-1.py.
+
+    Returns the rank-1 program path.
+    """
+    create_run_dir(root, run_id)
+    programs_dir = root / REVOLVER_DIR / "runs" / run_id / "programs"
+    programs_dir.mkdir(parents=True, exist_ok=True)
+    program_path = programs_dir / "rank-1.py"
+    program_path.write_text("# rank-1 program\n")
+
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+        insert_solution(
+            conn,
+            solution_id=solution_id,
+            run_id=run_id,
+            rank=1,
+            best_score=best_score,
+            alias=None,
+        )
+    finally:
+        conn.close()
+    return program_path
+
+
 @pytest.mark.unit
-def test_post_run_evaluation_evaluates_instances(
+def test_post_run_eval_persists_via_evaluate_solution(
     project_with_prereqs: dict, capsys: pytest.CaptureFixture
 ) -> None:
-    """_post_run_evaluation must evaluate all training instances."""
+    """S18-05 (U11 A): the post-run eval delegates to core.eval.evaluate_solution
+    and persists eval_metadata/eval_instances — no longer a stderr-only path —
+    with no DB-contention error while the orchestrator still holds its open
+    project connection mid-transaction (FR-RUN-019/020)."""
+    from revolver.infra.db import get_eval_instances, get_eval_metadata
+
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+    snapshot_dir = project_with_prereqs["snapshot_dir"]
+    dataset_dir = project_with_prereqs["dataset_dir"]
+
+    run_id = "run-20260705-100000"
+    solution_id = "sol-20260705-100000"
+    program_path = _insert_completed_run_with_rank1(root, db_path, run_id, solution_id)
+
+    proj_conn = get_project_db(db_path)
+    try:
+        # Simulate launch_run still holding the project connection with a
+        # pending (uncommitted) write transaction when the post-run eval
+        # opens its own connection — the DB-contention guard must absorb it.
+        proj_conn.execute(
+            "UPDATE runs SET status = 'completed' WHERE id = ?",
+            (run_id,),
+        )
+
+        _post_run_evaluation(
+            proj_conn=proj_conn,
+            run_id=run_id,
+            solution_id=solution_id,
+            snapshot_dir=snapshot_dir,
+            dataset_name="train-small",
+            dataset_path=dataset_dir,
+            program_path=program_path,
+            project_root=root,
+        )
+    finally:
+        proj_conn.close()
+
+    # Persisted (FR-RUN-020): eval_metadata + eval_instances rows exist and
+    # are accessible via the eval read path.
+    conn = get_project_db(db_path)
+    try:
+        meta = get_eval_metadata(conn, solution_id, "train-small")
+        assert meta is not None, "post-run eval must persist eval_metadata"
+        assert meta.instance_count == 2
+        assert meta.instances_solved == 2
+        rows = get_eval_instances(conn, meta.eval_id)
+        assert len(rows) == 2
+        assert all(r.metrics.get("combined_score") == 1.0 for r in rows)
+    finally:
+        conn.close()
+
+    captured = capsys.readouterr()
+    assert "Post-run evaluation" in captured.err
+    assert "2/2 instances solved" in captured.err
+
+
+@pytest.mark.unit
+def test_post_run_eval_delegates_force_true_no_hardcoded_timeout(
+    project_with_prereqs: dict,
+) -> None:
+    """S18-05: the Task-86 residue is gone — no _run_post_eval helper, no
+    hardcoded timeout_s=300. evaluate_solution is called with force=True and
+    the eval path's own timeout; the held connection is committed first."""
+    from revolver.core import run as core_run_module
+
+    assert not hasattr(core_run_module, "_run_post_eval")
+
     root = project_with_prereqs["root"]
     snapshot_dir = project_with_prereqs["snapshot_dir"]
     dataset_dir = project_with_prereqs["dataset_dir"]
 
-    # Create a program file
     program_path = root / "test_program.py"
     program_path.write_text("# test program\n")
 
-    from revolver.models.problem import InstanceTestResult
-
-    mock_result = InstanceTestResult(
-        instance_id="instance1.txt",
-        status="pass",
-        metrics={"combined_score": 1.0},
-        time_s=0.1,
-    )
-
-    with patch("revolver.core.run.eval_run_instance", return_value=mock_result):
+    mock_conn = MagicMock()
+    with patch("revolver.core.run.evaluate_solution") as mock_eval:
         _post_run_evaluation(
-            proj_conn=MagicMock(),
+            proj_conn=mock_conn,
             run_id="run-test",
             solution_id="sol-test",
             snapshot_dir=snapshot_dir,
+            dataset_name="train-small",
             dataset_path=dataset_dir,
             program_path=program_path,
+            project_root=root,
         )
 
-    captured = capsys.readouterr()
-    assert "Post-run evaluation" in captured.err
-    assert "2/2 passed" in captured.err
+    mock_eval.assert_called_once()
+    kwargs = mock_eval.call_args.kwargs
+    assert kwargs["solution_id_or_alias"] == "sol-test"
+    assert kwargs["dataset_name"] == "train-small"
+    assert kwargs["force"] is True
+    assert kwargs["project_root"] == root
+    assert "timeout_s" not in kwargs, "timeout must come from the eval path"
+    # DB-contention guard: the held connection is committed before the call.
+    mock_conn.commit.assert_called_once()
 
 
 @pytest.mark.unit
@@ -931,8 +1042,10 @@ def test_post_run_evaluation_warns_on_missing_evaluator(
         run_id="run-test",
         solution_id="sol-test",
         snapshot_dir=empty_dir,
+        dataset_name="train-small",
         dataset_path=project_with_prereqs["dataset_dir"],
         program_path=Path("/nonexistent/program.py"),
+        project_root=project_with_prereqs["root"],
     )
 
     captured = capsys.readouterr()
@@ -951,12 +1064,92 @@ def test_post_run_evaluation_warns_on_missing_program(
         run_id="run-test",
         solution_id="sol-test",
         snapshot_dir=snapshot_dir,
+        dataset_name="train-small",
         dataset_path=project_with_prereqs["dataset_dir"],
         program_path=Path("/nonexistent/program.py"),
+        project_root=project_with_prereqs["root"],
     )
 
     captured = capsys.readouterr()
     assert "program not found" in captured.err
+
+
+@pytest.mark.unit
+def test_launch_run_post_eval_failure_warns_only(
+    project_with_prereqs: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """A failed post-run eval only warns on stderr — the run still completes
+    (warn-only semantics preserved by S18-05)."""
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=datetime.now(UTC),
+    )
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    mock_run_output = RunOutput(best_score=0.95, best_program="prog", output_dir=None)
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch("revolver.core.run.verify_dataset_integrity", return_value=good_integrity),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch(
+            "revolver.core.run._post_run_evaluation",
+            side_effect=RuntimeError("eval boom"),
+        ),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
+    ):
+        mock_global_db.return_value = MagicMock()
+
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=100, completion_tokens=50)
+        mock_proxy_cls.return_value = mock_proxy
+
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = mock_run_output
+        mock_oe_cls.return_value = mock_runner
+
+        result = launch_run(config, project_root=root)
+
+    assert result.run_id
+    captured = capsys.readouterr()
+    assert "Warning: post-run evaluation failed: eval boom" in captured.err
+
+    # The run is still marked completed in the DB.
+    conn = get_project_db(project_with_prereqs["db_path"])
+    try:
+        cursor = conn.execute("SELECT status FROM runs WHERE id = ?", (result.run_id,))
+        assert cursor.fetchone()[0] == "completed"
+    finally:
+        conn.close()
 
 
 # ── pre-flight check tests ────────────────────────────────────────────────────
