@@ -887,7 +887,10 @@ revolver run --version v1.0 --llm my-bridge --dataset train \
 
 > Note: this applies to the OpenEvolve path only. The **ShinkaEvolve**
 > backend does not use the HTTP proxy (it reads `programs.sqlite`), so the
-> 60-s trap does not apply there.
+> 60-s trap does not apply there — shinka's own client default is **1200 s**,
+> and the same registry `--timeout` maps onto it: see
+> [LLM request timeout](#llm-request-timeout-llm_timeout) in the Shinka knob
+> reference (#320).
 
 ### Multi-objective setup
 
@@ -1226,6 +1229,37 @@ revolver run --backend shinka --llm codestral-local \
   --config-override job_config.max_proposal_jobs=3
 ```
 
+### LLM request timeout (`llm_timeout`)
+
+ShinkaEvolve hard-codes its per-request LLM client timeout to **1200 s**
+(20 min) with no config or env override, and wraps every call in a
+multi-layer retry stack — a stalled endpoint can therefore wedge a run for
+hours while the log freezes at `==> QUERYING` (#320). Revolver maps the
+registry's neutral per-call timeout onto this backend: when the run's LLM
+(or any ensemble member) is registered with `--timeout N`, Revolver sets
+shinka's client timeout to that value for the duration of the run and
+restores it afterwards. For ensembles the **maximum** over the members' set
+timeouts wins (conservative — the slowest member is never truncated). When
+no member sets `--timeout`, the engine default (1200 s) is left untouched.
+
+```bash
+# Fail fast on a wedge-prone local endpoint: cap each LLM request at 5 min
+revolver llm update qwen-local --timeout 300
+revolver run --backend shinka --llm qwen-local --iterations 100
+```
+
+A `--dry-run` shows the resolved value as `llm_timeout` under the Shinka
+backend extras; `--config-override llm_timeout=N` overrides it for a single
+run.
+
+> **Honest limits.** This lever caps the **per-attempt** stall — a dead
+> endpoint now surfaces as retry errors within roughly the configured
+> timeout instead of 20-minute cliffs — but shinka 0.0.7 bakes its retry
+> backoff budget (`max_time=6000` s) at import time, so the **total** worst
+> case across the full retry stack stays hours-long until upstream exposes
+> the request timeout and retry budget as configuration (spike #320
+> analysis: `docs/analysis/spike-320-qwen15-deadlock.md`).
+
 ### Novelty rejection
 
 ShinkaEvolve's signature diversity mechanism: candidate programs are
@@ -1260,6 +1294,7 @@ revolver run --backend shinka --llm my-llm \
 | Temperature | `--temperature F` → `llm_kwargs.temperatures=[F]` | Engine pool `[0.0,0.5,1.0]` when unset | |
 | Reasoning effort | registry `--reasoning-effort` → `llm_kwargs.reasoning_efforts` | Model default | Global pool; highest wins on disagreement; inert for local/bridge |
 | Proposal jobs | `job_config.max_proposal_jobs` | Engine default 6; auto-pinned to 1 for `--source local` | `--parallel` is a no-op here |
+| Per-call LLM timeout | registry `--timeout` → `llm_timeout` | Engine default 1200 s | Ensemble: max over set member timeouts; caps the per-attempt stall only (#320) |
 | Novelty rejection | `evo_config.embedding_model` | `null` (disabled) | Enable with an OpenAI embedding model + key |
 | Spend cap | `evo_config.max_api_costs` | `null` (no cap) | Hard USD cap enforced by the engine |
 | Eval timeout (Revolver) | `evaluation.timeout_per_instance` | 30 s | Revolver-specific section |
@@ -1312,3 +1347,4 @@ Before launching a tuned run:
 - [ ] **OpenEvolve**: `feature_dimensions` count is appropriate for the iteration budget
 - [ ] **ShinkaEvolve**: `--selection fixed` if you want the ensemble weights actually applied (short runs especially)
 - [ ] **ShinkaEvolve**: `max_proposal_jobs` matches your endpoint's real concurrency
+- [ ] **ShinkaEvolve**: registry `--timeout` set on wedge-prone (slow local) LLMs — caps the per-attempt stall (#320)

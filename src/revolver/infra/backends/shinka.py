@@ -38,7 +38,7 @@ DES-006 §1.3, FR-RUN-047/048, sprint-014 S14-07..13.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
 import json
@@ -212,8 +212,11 @@ _PROVIDER_ENV_VARS: dict[str, str] = {
 # tolerated by validate_config() and ignored by the engine projection:
 # - evaluation: wrapper settings (timeout_per_instance);
 # - output_dir: injected by the orchestrator (DES-005 §14.1);
-# - llm_env: env-var export map produced by build_config() (D5).
-_REVOLVER_SECTIONS = frozenset({"evaluation", "output_dir", "llm_env"})
+# - llm_env: env-var export map produced by build_config() (D5);
+# - llm_timeout: resolved per-request LLM timeout (R2 / #320 / #260) —
+#   applied by ``_run_engine`` via set/restore of the module global
+#   ``shinka.llm.client.TIMEOUT`` (see :func:`_llm_request_timeout`).
+_REVOLVER_SECTIONS = frozenset({"evaluation", "output_dir", "llm_env", "llm_timeout"})
 
 # Shinka config sections and their backing dataclass import paths.
 _SECTION_DATACLASSES: dict[str, tuple[str, str]] = {
@@ -744,6 +747,67 @@ def _as_number(value: Any) -> float:
     return 0.0
 
 
+@contextlib.contextmanager
+def _llm_request_timeout(timeout: Any) -> Iterator[None]:
+    """Set/restore ``shinka.llm.client.TIMEOUT`` around an engine run (R2/#260).
+
+    shinka 0.0.7 hard-codes the LLM request timeout
+    (``shinka/llm/constants.py``: ``TIMEOUT = 1200``) with no config or env
+    override, and its four-layer retry stack multiplies a stalled endpoint
+    into an hours-long wedge (spike #320,
+    ``docs/analysis/spike-320-qwen15-deadlock.md`` §3). ``shinka/llm/client.py``
+    reads the module global **at call time** (clients are constructed per
+    query), so setting it before the run applies to every LLM request of the
+    run — empirically verified by the spike's fast-mode repro, which patches
+    exactly this seam (§2 Run 2, §5 R2). The previous value is always restored
+    on exit (success or raise): the mutation must never outlive the run.
+
+    *timeout* is the resolved Revolver-owned ``llm_timeout`` config value from
+    ``build_config`` (registry ``timeout_s``; ensembles: max over the members
+    that set it). ``None`` (nothing set) leaves the engine default (1200 s)
+    untouched. An invalid value or an unexpected shinka layout degrades to a
+    stderr warning — a tuning lever must never crash the run.
+
+    Honest limit (documented in ``docs/guides/tuning-evolution.md``): this
+    caps the **per-attempt** stall only; shinka bakes its backoff budget
+    (``max_time=6000``) at import time, so the total worst case across the
+    retry stack stays hours-long until upstream exposes the retry budget (R3).
+    """
+    if timeout is None:
+        yield
+        return
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        sys.stderr.write(
+            f"Warning: ignoring invalid llm_timeout value {timeout!r} for the "
+            f"shinka backend (expected a positive number of seconds); the "
+            f"engine default request timeout applies.\n"
+        )
+        yield
+        return
+    try:
+        import shinka.llm.client as shinka_llm_client  # type: ignore[import-not-found,import-untyped,unused-ignore]
+    except Exception:
+        # A client module that imports-but-raises must degrade to the
+        # warning below, never crash the run (the lever is best-effort).
+        shinka_llm_client = None
+    if shinka_llm_client is None or not hasattr(shinka_llm_client, "TIMEOUT"):
+        sys.stderr.write(
+            "Warning: could not apply llm_timeout on the shinka backend: "
+            "shinka.llm.client.TIMEOUT not found (unexpected shinka layout); "
+            "the engine default request timeout applies.\n"
+        )
+        yield
+        return
+    saved = shinka_llm_client.TIMEOUT
+    shinka_llm_client.TIMEOUT = timeout
+    try:
+        yield
+    finally:
+        # Never leave the module global mutated past the run: other code in
+        # this process (or a subsequent run) must see the pristine module.
+        shinka_llm_client.TIMEOUT = saved
+
+
 class ShinkaBackend(ChildProcessReaperMixin):
     """``EvolutionBackend`` adapter for ShinkaEvolve (ADR-007, Sprint 014)."""
 
@@ -864,8 +928,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
         two segments are probed so a deeper key under a dict-valued field
         (``evo_config.llm_kwargs.max_tokens``) is not mistaken for a no-op.
         Revolver-owned sections (:data:`_REVOLVER_SECTIONS`:
-        ``evaluation``/``output_dir``/``llm_env``) are tolerated by
-        ``validate_config`` and never warn. Degrades to silence when shinka is
+        ``evaluation``/``output_dir``/``llm_env``/``llm_timeout``) are
+        tolerated by ``validate_config`` and never warn. Degrades to silence when shinka is
         not installed (``validate_config`` returns ``[]``).
 
         This intentionally overlaps ``_dataclass_kwargs`` for the
@@ -1011,6 +1075,26 @@ class ShinkaBackend(ChildProcessReaperMixin):
         member_path_warned_inert = self._project_reasoning_efforts(llm_kwargs, members)
         if llm_kwargs:
             evo["llm_kwargs"] = llm_kwargs
+
+        # 2c. LLM request timeout (R2 / #320 / #260): the neutral per-LLM
+        #     registry field ``timeout_s`` (``revolver llm add/update
+        #     --timeout``) has no Shinka config seam — shinka 0.0.7 hard-codes
+        #     the client timeout (``shinka/llm/constants.py``: TIMEOUT=1200).
+        #     Resolve the effective value into the Revolver-owned top-level
+        #     ``llm_timeout`` key; ``_run_engine`` set/restores
+        #     ``shinka.llm.client.TIMEOUT`` around the run (see
+        #     :func:`_llm_request_timeout`). Ensembles resolve to the MAX over
+        #     the members that set ``timeout_s`` (conservative — never
+        #     truncate the slowest member). When nothing sets it, the key
+        #     stays absent and the engine default is left untouched. A
+        #     ``--config-override llm_timeout=…`` (step 5) still wins.
+        member_timeouts = [
+            member_llm.timeout_s
+            for _member, member_llm in members
+            if member_llm.timeout_s is not None
+        ]
+        if member_timeouts:
+            config["llm_timeout"] = max(member_timeouts)
 
         # --parallel has no neutral Shinka mapping in S14 (eval job pools
         # are engine-tier concerns) — warn instead of silently ignoring
@@ -1424,6 +1508,10 @@ class ShinkaBackend(ChildProcessReaperMixin):
             ("parent_selection_strategy", db.get("parent_selection_strategy")),
             ("migration_interval", db.get("migration_interval")),
             ("max_proposal_jobs", job.get("max_proposal_jobs")),
+            # R2 (#320/#260): the resolved per-request LLM timeout the engine
+            # run will apply via shinka.llm.client.TIMEOUT — surfaced so
+            # --dry-run is honest about it (absent = engine default 1200 s).
+            ("llm_timeout", config.get("llm_timeout")),
             ("results_dir", evo.get("results_dir")),
         ):
             if value is not None:
@@ -2142,7 +2230,11 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
         runner: Any = None
         try:
-            with revolver_env(exports):
+            # R2 (#320/#260): cap the per-request LLM stall for the whole
+            # engine run — set/restore of the shinka.llm.client.TIMEOUT
+            # module global (read at call time; no-op when llm_timeout is
+            # unset). See _llm_request_timeout for the full rationale.
+            with revolver_env(exports), _llm_request_timeout(config.get("llm_timeout")):
                 runner = runner_cls(
                     evo_config=evo_cls(
                         **self._dataclass_kwargs(evo_section, evo_cls, "evo_config")

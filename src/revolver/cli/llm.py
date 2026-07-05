@@ -86,7 +86,10 @@ def llm_add(
         int | None,
         typer.Option(
             "--timeout",
-            help="Request timeout in seconds (injected into OE config).",
+            help=(
+                "Per-request LLM timeout in seconds, mapped per backend "
+                "(OE: llm.timeout; Shinka: client timeout for the run)."
+            ),
         ),
     ] = None,
     temperature: Annotated[
@@ -417,7 +420,10 @@ def llm_update(
         int | None,
         typer.Option(
             "--timeout",
-            help="Request timeout in seconds (injected into OE config).",
+            help=(
+                "Per-request LLM timeout in seconds, mapped per backend "
+                "(OE: llm.timeout; Shinka: client timeout for the run)."
+            ),
         ),
     ] = None,
     temperature: Annotated[

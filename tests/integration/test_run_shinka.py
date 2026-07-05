@@ -181,13 +181,17 @@ def _create_problem_version(project_root: Path, tag: str) -> None:
     create_version(tag=tag, message=f"Version {tag}", project_root=project_root)
 
 
-def _register_local_llm(global_db_path: Path, name: str = "test-llm") -> None:
+def _register_local_llm(
+    global_db_path: Path,
+    name: str = "test-llm",
+    timeout_s: int | None = None,
+) -> None:
     """Register a local (Ollama-shaped) LLM in the global database."""
     conn = get_global_db_at(global_db_path)
     try:
         conn.execute(
             "INSERT INTO llms (name, provider, model, source, base_url, "
-            "api_key_env, registered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "api_key_env, timeout_s, registered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 "ollama",
@@ -195,6 +199,7 @@ def _register_local_llm(global_db_path: Path, name: str = "test-llm") -> None:
                 "local",
                 "http://localhost:11434/v1",
                 None,
+                timeout_s,
                 datetime.now(UTC).isoformat(),
             ),
         )
@@ -778,7 +783,7 @@ def test_shinka_population_no_cell_indices(project_with_prereqs: dict[str, Path]
 # is the tightest unit for the mapping and captures the exact evo_config keys.
 
 
-def _local_llm_entry(name: str) -> LLMEntry:
+def _local_llm_entry(name: str, timeout_s: int | None = None) -> LLMEntry:
     """Build a local (Ollama-shaped) ``LLMEntry`` for spec construction."""
     return LLMEntry(
         name=name,
@@ -786,6 +791,7 @@ def _local_llm_entry(name: str) -> LLMEntry:
         model=f"{name}-model",
         source="local",
         base_url="http://localhost:11434/v1",
+        timeout_s=timeout_s,
         registered_at=datetime.now(UTC),
     )
 
@@ -796,7 +802,7 @@ def _register_llm_entry(global_db_path: Path, entry: LLMEntry) -> None:
     try:
         conn.execute(
             "INSERT INTO llms (name, provider, model, source, base_url, "
-            "api_key_env, registered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "api_key_env, timeout_s, registered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry.name,
                 entry.provider,
@@ -804,6 +810,7 @@ def _register_llm_entry(global_db_path: Path, entry: LLMEntry) -> None:
                 entry.source,
                 entry.base_url,
                 entry.api_key_env,
+                entry.timeout_s,
                 entry.registered_at.isoformat(),
             ),
         )
@@ -820,10 +827,14 @@ def _ensemble_spec(
     selection: str | None = None,
     selection_kwargs: dict[str, Any] | None = None,
     llm_weight_overrides: dict[str, float] | None = None,
+    timeouts: dict[str, int] | None = None,
 ) -> BackendRunSpec:
     """Register the member LLMs and build an ensemble ``BackendRunSpec``."""
     for member in members:
-        _register_llm_entry(global_db_path, _local_llm_entry(member.llm_name))
+        _register_llm_entry(
+            global_db_path,
+            _local_llm_entry(member.llm_name, timeout_s=(timeouts or {}).get(member.llm_name)),
+        )
     conn = get_global_db_at(global_db_path)
     primary = _local_llm_entry(members[0].llm_name)
     ensemble = EnsembleEntry(name="ens", members=members, created_at=datetime.now(UTC))
@@ -1112,3 +1123,182 @@ def test_shinka_resolved_config_surfaces_selection_kwargs(
     assert kwargs["prior_probs"] == pytest.approx([0.7, 0.3])
     assert resolved.llm_models is not None
     assert [entry["weight"] for entry in resolved.llm_models] == pytest.approx([0.7, 0.3])
+
+
+# ── (g) LLM request timeout lever (R2 / #320 / #260) ─────────────────────────
+# The neutral registry field ``timeout_s`` maps onto shinka's module global
+# ``shinka.llm.client.TIMEOUT`` (hard-coded 1200 s in 0.0.7, read at call
+# time — the seam the spike's fast-mode repro empirically verified).
+# ``_run_engine`` sets it for the duration of the engine run and restores it
+# afterwards; ``--dry-run`` surfaces the resolved value as ``llm_timeout``.
+
+
+def _make_timeout_probe_runner(
+    observed: list[Any],
+    run_exc: Exception | None = None,
+) -> MagicMock:
+    """Mock runner class whose run() records shinka.llm.client.TIMEOUT.
+
+    The capture happens inside ``run()`` — i.e. while the engine would be
+    issuing LLM requests — so the recorded value is exactly what shinka's
+    per-query client construction would read. Writes the fixture DB (clean
+    completion) unless *run_exc* is given.
+    """
+
+    def _factory(**kwargs: Any) -> MagicMock:
+        instance = MagicMock()
+
+        def _run() -> None:
+            import shinka.llm.client as shinka_llm_client
+
+            observed.append(shinka_llm_client.TIMEOUT)
+            if run_exc is not None:
+                raise run_exc
+            results_dir = Path(kwargs["evo_config"].results_dir)
+            build_programs_db(results_dir / "programs.sqlite")
+
+        instance.run.side_effect = _run
+        return instance
+
+    return MagicMock(side_effect=_factory)
+
+
+def _timeout_run_args(llm_name: str, *extra: str) -> list[str]:
+    """CLI args for a Shinka run against *llm_name*."""
+    return [
+        "run",
+        "--version",
+        "v1.0",
+        "--llm",
+        llm_name,
+        "--dataset",
+        "train-small",
+        "--backend",
+        "shinka",
+        "--iterations",
+        str(_ITERATIONS),
+        *extra,
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_llm_timeout_set_and_restored(project_with_prereqs: dict[str, Path]) -> None:
+    """An LLM registered with timeout_s=300 → TIMEOUT is 300 during the
+    engine run and restored to the previous value afterwards."""
+    import shinka.llm.client as shinka_llm_client
+
+    _register_local_llm(project_with_prereqs["global_db_path"], name="slow-llm", timeout_s=300)
+    original = shinka_llm_client.TIMEOUT
+    observed: list[Any] = []
+
+    result, _cls, _run_id = _invoke_with_mocks(
+        _timeout_run_args("slow-llm"),
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+        mock_runner_cls=_make_timeout_probe_runner(observed),
+    )
+
+    assert result.exit_code == 0, _get_all_output(result)
+    assert observed == [300]
+    assert original == shinka_llm_client.TIMEOUT
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_llm_timeout_restored_when_engine_raises(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """The previous TIMEOUT is restored even when the engine run crashes."""
+    import shinka.llm.client as shinka_llm_client
+
+    _register_local_llm(project_with_prereqs["global_db_path"], name="slow-llm", timeout_s=300)
+    original = shinka_llm_client.TIMEOUT
+    observed: list[Any] = []
+
+    result, _cls, _run_id = _invoke_with_mocks(
+        _timeout_run_args("slow-llm"),
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+        mock_runner_cls=_make_timeout_probe_runner(observed, run_exc=RuntimeError("boom")),
+    )
+
+    assert result.exit_code != 0
+    assert observed == [300]
+    assert original == shinka_llm_client.TIMEOUT
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_no_llm_timeout_global_untouched(project_with_prereqs: dict[str, Path]) -> None:
+    """No timeout_s anywhere → the module global is never touched (shinka's
+    default stays in force for the run)."""
+    import shinka.llm.client as shinka_llm_client
+
+    original = shinka_llm_client.TIMEOUT
+    observed: list[Any] = []
+
+    result, _cls, _run_id = _invoke_with_mocks(
+        _timeout_run_args("test-llm"),  # project fixture LLM: no timeout_s
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+        mock_runner_cls=_make_timeout_probe_runner(observed),
+    )
+
+    assert result.exit_code == 0, _get_all_output(result)
+    assert observed == [original]
+    assert original == shinka_llm_client.TIMEOUT
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_ensemble_llm_timeout_max_wins(tmp_path: Path, global_db_path: Path) -> None:
+    """Mixed member timeouts (120/600/unset) resolve to the max (600) —
+    conservative: the slowest member is never truncated."""
+    members = [
+        EnsembleMember(llm_name="m-a"),
+        EnsembleMember(llm_name="m-b"),
+        EnsembleMember(llm_name="m-c"),
+    ]
+    spec = _ensemble_spec(
+        tmp_path,
+        global_db_path,
+        members,
+        timeouts={"m-a": 120, "m-b": 600},
+    )
+
+    config = ShinkaBackend().build_config(spec)
+
+    assert config["llm_timeout"] == 600
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_dry_run_surfaces_llm_timeout(project_with_prereqs: dict[str, Path]) -> None:
+    """--dry-run shows the resolved llm_timeout without constructing the
+    engine (honest display, R2/#260)."""
+    _register_local_llm(project_with_prereqs["global_db_path"], name="slow-llm", timeout_s=300)
+
+    result, mock_runner_cls, _run_id = _invoke_with_mocks(
+        [
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "slow-llm",
+            "--dataset",
+            "train-small",
+            "--backend",
+            "shinka",
+            "--dry-run",
+        ],
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+    )
+
+    assert result.exit_code == 0, _get_all_output(result)
+    output = _get_all_output(result)
+    assert "llm_timeout" in output
+    assert "300" in output
+    # Dry-run has no side effects: the engine was never constructed.
+    assert mock_runner_cls.call_count == 0

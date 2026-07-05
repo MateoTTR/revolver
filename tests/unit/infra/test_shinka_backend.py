@@ -145,6 +145,11 @@ class _FakeLocalJobConfig:
     conda_env: str | None = None
 
 
+# Matches shinka 0.0.7's hard-coded default (shinka/llm/constants.py:1) —
+# spike #320 §3.2 L1. The R2 lever tests assert set/restore against it.
+_FAKE_SHINKA_DEFAULT_TIMEOUT = 1200
+
+
 @pytest.fixture
 def fake_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inject fake ``shinka.*`` modules so availability checks succeed."""
@@ -155,10 +160,20 @@ def fake_shinka(monkeypatch: pytest.MonkeyPatch) -> None:
     database.DatabaseConfig = _FakeDatabaseConfig  # type: ignore[attr-defined]
     launch = types.ModuleType("shinka.launch")
     launch.LocalJobConfig = _FakeLocalJobConfig  # type: ignore[attr-defined]
+    # shinka.llm.client carries the module-global request timeout the R2
+    # lever (#320/#260) set/restores around an engine run. A fresh module
+    # object per test — mutations can never leak across tests.
+    llm_pkg = types.ModuleType("shinka.llm")
+    llm_client = types.ModuleType("shinka.llm.client")
+    llm_client.TIMEOUT = _FAKE_SHINKA_DEFAULT_TIMEOUT  # type: ignore[attr-defined]
+    pkg.llm = llm_pkg  # type: ignore[attr-defined]
+    llm_pkg.client = llm_client  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "shinka", pkg)
     monkeypatch.setitem(sys.modules, "shinka.core", core)
     monkeypatch.setitem(sys.modules, "shinka.database", database)
     monkeypatch.setitem(sys.modules, "shinka.launch", launch)
+    monkeypatch.setitem(sys.modules, "shinka.llm", llm_pkg)
+    monkeypatch.setitem(sys.modules, "shinka.llm.client", llm_client)
 
 
 # The "shinka not installed" tests use the shared ``no_shinka`` fixture
@@ -1633,6 +1648,271 @@ class TestMaxProposalJobsThreading:
 
         assert resolved.backend_extras["max_proposal_jobs"] == 1
         assert calls[0]["max_proposal_jobs"] == 1
+
+
+class TestLlmRequestTimeoutLever:
+    """R2 (#320/#260): registry ``timeout_s`` → ``shinka.llm.client.TIMEOUT``.
+
+    shinka 0.0.7 hard-codes its LLM request timeout (1200 s) with no config
+    seam; the module global is read at call time, so ``_run_engine``
+    set/restores it around the engine run (empirically verified seam —
+    spike #320 §2 Run 2). ``build_config`` resolves the neutral per-LLM
+    ``timeout_s`` into the Revolver-owned top-level ``llm_timeout`` key
+    (ensemble: max over the members that set it) and ``resolved_config``
+    surfaces it so ``--dry-run`` is honest about it. Mirrors the OE twins in
+    ``tests/test_llm_config.py`` (``test_build_config_injects_timeout``).
+    """
+
+    # ── build_config resolution ──────────────────────────────────────────
+
+    def test_build_config_resolves_llm_timeout(self, fake_shinka: None, tmp_path: Path) -> None:
+        """A single LLM with timeout_s=300 resolves llm_timeout=300."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path, llm=_make_llm(timeout_s=300)))
+        assert config["llm_timeout"] == 300
+
+    def test_build_config_no_llm_timeout_when_unset(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """No timeout_s anywhere → the key stays absent (engine default)."""
+        config = ShinkaBackend().build_config(_make_spec(tmp_path))
+        assert "llm_timeout" not in config
+
+    def test_ensemble_max_member_timeout_wins(self, fake_shinka: None, tmp_path: Path) -> None:
+        """Mixed member timeouts (120/600/unset) → max wins (never truncate
+        the slowest member)."""
+        db_path = tmp_path / "global.db"
+        conn = get_global_db_at(db_path)
+        try:
+            insert_llm(conn, _make_llm(name="m-a", timeout_s=120))
+            insert_llm(conn, _make_llm(name="m-b", timeout_s=600))
+            insert_llm(conn, _make_llm(name="m-c"))
+            ensemble = EnsembleEntry(
+                name="ens",
+                members=[
+                    EnsembleMember(llm_name="m-a"),
+                    EnsembleMember(llm_name="m-b"),
+                    EnsembleMember(llm_name="m-c"),
+                ],
+                created_at=datetime(2026, 1, 1),
+            )
+            spec = _make_spec(
+                tmp_path,
+                llm=_make_llm(name="m-a", timeout_s=120),
+                ensemble=ensemble,
+                conn=conn,
+            )
+            config = ShinkaBackend().build_config(spec)
+        finally:
+            conn.close()
+        assert config["llm_timeout"] == 600
+
+    def test_ensemble_without_timeouts_leaves_key_absent(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """No member sets timeout_s → the key stays absent (engine default)."""
+        db_path = tmp_path / "global.db"
+        conn = get_global_db_at(db_path)
+        try:
+            insert_llm(conn, _make_llm(name="m-a"))
+            insert_llm(conn, _make_llm(name="m-b"))
+            ensemble = EnsembleEntry(
+                name="ens",
+                members=[
+                    EnsembleMember(llm_name="m-a"),
+                    EnsembleMember(llm_name="m-b"),
+                ],
+                created_at=datetime(2026, 1, 1),
+            )
+            spec = _make_spec(tmp_path, llm=_make_llm(name="m-a"), ensemble=ensemble, conn=conn)
+            config = ShinkaBackend().build_config(spec)
+        finally:
+            conn.close()
+        assert "llm_timeout" not in config
+
+    # ── dry-run surface ──────────────────────────────────────────────────
+
+    def test_resolved_config_surfaces_llm_timeout(self, fake_shinka: None, tmp_path: Path) -> None:
+        """The resolved llm_timeout appears in the dry-run backend_extras."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path, llm=_make_llm(timeout_s=300)))
+        assert backend.resolved_config(config).backend_extras["llm_timeout"] == 300
+
+    def test_resolved_config_omits_llm_timeout_when_unset(
+        self, fake_shinka: None, tmp_path: Path
+    ) -> None:
+        """No timeout resolved → dry-run stays uncluttered (no entry)."""
+        backend = ShinkaBackend()
+        config = backend.build_config(_make_spec(tmp_path))
+        assert "llm_timeout" not in backend.resolved_config(config).backend_extras
+
+    # ── set/restore around the engine run ────────────────────────────────
+
+    def test_launch_sets_and_restores_global_timeout(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """TIMEOUT is 300 for the duration of run() and restored afterwards."""
+        observed: list[Any] = []
+
+        def _capture_and_write(call: dict[str, Any]) -> None:
+            observed.append(sys.modules["shinka.llm.client"].TIMEOUT)
+            _write_fixture_db(call)
+
+        _install_fake_runner(monkeypatch, on_run=_capture_and_write)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, llm=_make_llm(timeout_s=300))
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert observed == [300]
+        assert sys.modules["shinka.llm.client"].TIMEOUT == _FAKE_SHINKA_DEFAULT_TIMEOUT
+
+    def test_restores_global_timeout_when_engine_raises(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The previous value is restored even when the engine run raises."""
+        observed: list[Any] = []
+
+        def _capture_then_boom(call: dict[str, Any]) -> None:
+            observed.append(sys.modules["shinka.llm.client"].TIMEOUT)
+            raise RuntimeError("boom")
+
+        _install_fake_runner(monkeypatch, on_run=_capture_then_boom)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, llm=_make_llm(timeout_s=300))
+
+        with pytest.raises(ExternalError, match="ShinkaEvolve run failed"):
+            backend.launch(spec, backend.build_config(spec))
+
+        assert observed == [300]
+        assert sys.modules["shinka.llm.client"].TIMEOUT == _FAKE_SHINKA_DEFAULT_TIMEOUT
+
+    def test_no_timeout_leaves_global_untouched(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No timeout_s anywhere → the module global is never touched."""
+        observed: list[Any] = []
+
+        def _capture_and_write(call: dict[str, Any]) -> None:
+            observed.append(sys.modules["shinka.llm.client"].TIMEOUT)
+            _write_fixture_db(call)
+
+        _install_fake_runner(monkeypatch, on_run=_capture_and_write)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path)
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert observed == [_FAKE_SHINKA_DEFAULT_TIMEOUT]
+        assert sys.modules["shinka.llm.client"].TIMEOUT == _FAKE_SHINKA_DEFAULT_TIMEOUT
+
+    # ── override escape hatch + degradation ──────────────────────────────
+
+    def test_override_wins_over_registry_timeout(
+        self,
+        fake_shinka: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--config-override llm_timeout=450 wins over the registry value.
+
+        ``llm_timeout`` is Revolver-owned (:data:`_REVOLVER_SECTIONS`), so
+        the B9 no-op-override probe must stay silent for it.
+        """
+        observed: list[Any] = []
+
+        def _capture_and_write(call: dict[str, Any]) -> None:
+            observed.append(sys.modules["shinka.llm.client"].TIMEOUT)
+            _write_fixture_db(call)
+
+        _install_fake_runner(monkeypatch, on_run=_capture_and_write)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(
+            tmp_path,
+            llm=_make_llm(timeout_s=300),
+            config_overrides=["llm_timeout=450"],
+        )
+        config = backend.build_config(spec)
+        assert config["llm_timeout"] == 450
+
+        backend.launch(spec, config)
+
+        assert observed == [450]
+        assert sys.modules["shinka.llm.client"].TIMEOUT == _FAKE_SHINKA_DEFAULT_TIMEOUT
+        assert "llm_timeout" not in capsys.readouterr().err
+
+    def test_explicit_null_override_opts_out(
+        self, fake_shinka: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """llm_timeout=null opts out: the global stays untouched (same
+        convention as the max_proposal_jobs null opt-out, PR #254)."""
+        observed: list[Any] = []
+
+        def _capture_and_write(call: dict[str, Any]) -> None:
+            observed.append(sys.modules["shinka.llm.client"].TIMEOUT)
+            _write_fixture_db(call)
+
+        _install_fake_runner(monkeypatch, on_run=_capture_and_write)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(
+            tmp_path,
+            llm=_make_llm(timeout_s=300),
+            config_overrides=["llm_timeout=null"],
+        )
+        config = backend.build_config(spec)
+        assert config["llm_timeout"] is None
+
+        resolved = backend.resolved_config(config)
+        backend.launch(spec, config)
+
+        assert "llm_timeout" not in resolved.backend_extras
+        assert observed == [_FAKE_SHINKA_DEFAULT_TIMEOUT]
+
+    def test_invalid_value_warns_and_engine_default_applies(
+        self,
+        fake_shinka: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A non-numeric llm_timeout warns and never reaches the global —
+        a tuning lever must never crash (or silently corrupt) the run."""
+        observed: list[Any] = []
+
+        def _capture_and_write(call: dict[str, Any]) -> None:
+            observed.append(sys.modules["shinka.llm.client"].TIMEOUT)
+            _write_fixture_db(call)
+
+        _install_fake_runner(monkeypatch, on_run=_capture_and_write)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, config_overrides=["llm_timeout=abc"])
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert observed == [_FAKE_SHINKA_DEFAULT_TIMEOUT]
+        assert sys.modules["shinka.llm.client"].TIMEOUT == _FAKE_SHINKA_DEFAULT_TIMEOUT
+        assert "invalid llm_timeout" in capsys.readouterr().err
+
+    def test_missing_client_module_warns_and_run_completes(
+        self,
+        fake_shinka: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An unexpected shinka layout degrades to a warning, not a crash."""
+        # None in sys.modules makes ``import shinka.llm.client`` raise
+        # ImportError (halted import) — simulates an upstream restructure.
+        monkeypatch.setitem(sys.modules, "shinka.llm", None)  # type: ignore[arg-type]
+        monkeypatch.setitem(sys.modules, "shinka.llm.client", None)  # type: ignore[arg-type]
+        calls = _install_fake_runner(monkeypatch, on_run=_write_fixture_db)
+        backend = ShinkaBackend()
+        spec = _make_engine_spec(tmp_path, llm=_make_llm(timeout_s=300))
+
+        backend.launch(spec, backend.build_config(spec))
+
+        assert len(calls) == 1  # the run went through
+        assert "could not apply llm_timeout" in capsys.readouterr().err
 
 
 class TestShinkaResume:
