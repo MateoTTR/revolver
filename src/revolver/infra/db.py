@@ -823,7 +823,8 @@ def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
     if cursor.fetchone() is not None:
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(
-                "ALTER TABLE problem_versions ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve'"
+                "ALTER TABLE problem_versions "
+                "ADD COLUMN backend TEXT NOT NULL DEFAULT 'openevolve'"
             )
         conn.commit()
 
