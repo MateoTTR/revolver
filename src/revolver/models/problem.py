@@ -35,6 +35,11 @@ class ProblemVersion(BaseModel):
         tag: Human-readable version tag (e.g. ``"v1.0"``).
         hash: Snapshot hash computed from all constituent file hashes.
         message: Optional commit-style message describing the version.
+        backend: Evolution backend the version was validated against at
+            create time; serves as the version-default backend for
+            ``revolver run`` (FR-PRB-016, DES-003 §2.2.2, migration v14).
+            DB metadata only — absent from ``manifest.yaml`` and the
+            snapshot hash (DD-08).
         created_at: Timestamp of version creation.
         files: List of file snapshots included in this version.
     """
@@ -44,6 +49,7 @@ class ProblemVersion(BaseModel):
     tag: str
     hash: str
     message: str = ""
+    backend: str = "openevolve"
     created_at: datetime
     files: list[FileSnapshot] = []
 
