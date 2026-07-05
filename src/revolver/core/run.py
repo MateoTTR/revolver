@@ -1361,13 +1361,13 @@ def _post_run_evaluation(
     # DB-contention guard (S18-05): the orchestrator still holds its open
     # project connection when evaluate_solution opens its own connection to
     # the same SQLite file. Commit any pending write transaction so the eval
-    # writes cannot contend with it, and raise the busy timeout on the held
-    # connection as a fallback (WAL journal mode is already applied by
-    # get_project_db).
+    # writes cannot contend with it. The eval-path connection itself waits
+    # out residual locks via the busy_timeout PRAGMA applied by
+    # get_project_db to every connection (busy_timeout acts on the
+    # connection that encounters the lock, not on the holder; WAL likewise
+    # comes from get_project_db).
     with contextlib.suppress(Exception):
         proj_conn.commit()
-    with contextlib.suppress(Exception):
-        proj_conn.execute("PRAGMA busy_timeout=10000")
 
     sys.stderr.write(
         f"Post-run evaluation: evaluating dataset '{dataset_name}' "
@@ -2325,6 +2325,10 @@ def get_run_info(
         #     training dataset and surface the honest mean of combined_score
         #     with its coverage (instances in the mean / total instances —
         #     FR-RUN-053), to be rendered NEXT TO the engine best.
+        #     combined_score is the evaluator-contract metric (DES-006:
+        #     enforced at pre-flight and defaulted by both wrapper
+        #     templates), so the aggregate is deliberately keyed on it;
+        #     other metrics stay accessible via `eval results`.
         post_eval_score: float | None = None
         post_eval_instances_valid: int | None = None
         post_eval_instances_total: int | None = None

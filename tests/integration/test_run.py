@@ -1434,6 +1434,15 @@ def test_run_info_honest_score_labels(
     finally:
         conn.close()
 
+    # Add a rank-2 program with an engine score to the manifest so the
+    # programs detail table renders — its scores must carry the same
+    # "engine, single eval" label (the never-bare regex below guards it).
+    from revolver.infra.store import read_run_manifest, write_run_manifest
+
+    manifest = read_run_manifest(root, run_id) or {"run_id": run_id}
+    manifest["programs"] = [{"rank": 2, "score": 0.95, "file": "programs/rank-2.py"}]
+    write_run_manifest(root, run_id, manifest)
+
     # Human output: both numbers rendered, with distinct labels.
     with (
         patch("pathlib.Path.cwd", return_value=root),
@@ -4003,3 +4012,61 @@ def test_resume_inherits_baked_timeout_policy(
     ).read_text(encoding="utf-8")
     # Copied verbatim, not regenerated: the baked policy is inherited.
     assert resumed_wrapper == parent_wrapper
+
+
+@pytest.mark.integration
+def test_resume_post_eval_call_site_wiring(project_with_prereqs: dict[str, Path]) -> None:
+    """resume_run wires the post-run eval with the RESUMED run's identifiers.
+
+    S18-05 (PR #261 review): the resume call site threads the parent's
+    dataset name, the new run's rank-1 program path, and the project root
+    into ``_post_run_evaluation`` — asserted through the same seam the rest
+    of the suite patches (the helper's internals are covered by the direct
+    ``_post_run_evaluation`` tests).
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    parent_run_dir = root / REVOLVER_DIR / "runs" / parent_run_id
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    resume_run_id, resume_sol_id = _next_ids()
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation") as mock_post_eval,
+        patch("revolver.core.run.generate_run_id", return_value=resume_run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=resume_sol_id),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=10),
+    ):
+        result = runner.invoke(
+            app, ["--json", "run", "resume", "--run", parent_run_id], catch_exceptions=False
+        )
+
+    assert result.exit_code == 0, _get_all_output(result)
+
+    mock_post_eval.assert_called_once()
+    kwargs = mock_post_eval.call_args.kwargs
+    assert kwargs["run_id"] == resume_run_id
+    assert kwargs["solution_id"] == resume_sol_id
+    assert kwargs["dataset_name"] == "train-small"  # inherited from the parent
+    assert kwargs["project_root"] == root
+    new_run_dir = root / REVOLVER_DIR / "runs" / resume_run_id
+    assert kwargs["program_path"] == new_run_dir / "programs" / "rank-1.py"

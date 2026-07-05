@@ -386,6 +386,13 @@ def _configure_connection(conn: sqlite3.Connection) -> None:
     """Apply standard PRAGMAs to a connection."""
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # Wait out short-lived write locks held by concurrent connections
+    # (e.g. the post-run eval path opening its own connection while the
+    # orchestrator still holds one — FR-RUN-019) instead of failing with
+    # SQLITE_BUSY immediately. busy_timeout only acts on the connection
+    # that ENCOUNTERS the lock, so it must be set here, on every
+    # connection, not on the lock holder.
+    conn.execute("PRAGMA busy_timeout=10000")
 
 
 def _ensure_schema_version(conn: sqlite3.Connection) -> None:

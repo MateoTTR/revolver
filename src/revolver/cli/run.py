@@ -759,12 +759,16 @@ def run_info(
                     )
                 render(sol_rows, json_mode=False)
 
-            # Display programs
+            # Display programs. Program scores are engine numbers too — same
+            # "engine, single eval" label as the solutions table, so the
+            # single-eval number never renders bare (FR-RUN-055).
             if info.programs:
                 prog_rows = [
                     {
                         "rank": p.rank,
-                        "score": (f"{p.score:.4f}" if p.score is not None else "-"),
+                        "score": (
+                            f"{p.score:.4f} (engine, single eval)" if p.score is not None else "-"
+                        ),
                         "file": p.file,
                     }
                     for p in info.programs
