@@ -220,13 +220,17 @@ Key fixtures defined in `tests/conftest.py`:
 ### 6.4 CI Pipeline
 
 ```
-push / PR:
+push / PR — ci.yml (code paths; `**.md` and `docs/**` are path-ignored):
   ├── ruff check + ruff format --check
   ├── mypy --strict
-  ├── pytest tests/unit/ --cov --cov-fail-under=80
-  ├── pytest tests/integration/ -m integration
-  ├── pip install openevolve && pytest tests/integration/test_run_oe.py  (non-blocking)
-  └── pip install "revolver[shinka]" && pytest tests/integration/test_shinka_wrapper.py tests/integration/test_shinka_db.py tests/integration/test_run_shinka.py  (non-blocking)
+  ├── pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"  (Python 3.12 + 3.14 matrix)
+  └── pip install "openevolve>=0.2.26" && pytest tests/integration/test_run_oe.py  (3.12 only, non-blocking)
+
+push / PR — doc-lint.yml (markdown/docs paths: `**.md`, `docs/**` — exactly the set ci.yml ignores):
+  └── pytest tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py  (#354 command-lint + #355 freshness stamps, blocking)
+
+tag push (v*) — ci.yml version-check:
+  └── tag == pyproject.toml version == src/revolver/__init__.py __version__
 
 nightly (standard runner):
   └── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
@@ -235,7 +239,9 @@ manual (self-hosted + GPU):
   └── pytest tests/e2e/ -m e2e_gpu  (Ollama + real model)
 ```
 
-**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge. L2-OE, L2-Shinka and E2E failures are reported but do not block.
+**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge; the doc-lint workflow is blocking on docs-only changes. L2-OE and E2E failures are reported but do not block.
+
+**No Shinka job in CI**: ci.yml runs **no** ShinkaEvolve step — the main test job's `-m "unit or integration"` selection runs without the `[shinka]` extra installed (Shinka-gated modules auto-skip via `pytest.importorskip`), and only the OpenEvolve contract tests get a dedicated non-blocking step. The L2-Shinka contract suites are selected by the `-m shinkaevolve` marker (6+ modules — no longer the historic 3-file list) and run manually in a shinka-enabled environment (e.g. before a release); adding a Shinka-env CI step remains aspirational.
 
 **Draft PRs**: lint and test jobs are skipped for draft PRs to save CI minutes.
 
@@ -302,7 +308,7 @@ The validation documents ([val-integration-tests.md](val-integration-tests.md), 
 - **Marker vs. level**: the documentary level (L1/L2/L3) classifies a test's *scope*; the pytest
   marker (`unit` / `integration` / …, §6.2) drives *CI selection*. The two usually coincide but
   may deliberately differ — e.g. the #354 doc command-lint
-  (`test_doc_command_lint::test_doc_command_lint_resolves_cli_tree`, S18) is tracked as an L2
+  (`test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, S18) is tracked as an L2
   scenario (it exercises the real Typer CLI tree against the whole docs corpus) but runs under
   the `unit` marker so it executes in the blocking CI selection (sprint-018 S18-21). Where marker
   and level differ, the validation docs say so on the row. Note that historic top-level suites

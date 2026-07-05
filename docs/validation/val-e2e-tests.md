@@ -1,6 +1,6 @@
 # Revolver — End-to-End Tests (Level 3)
 
-**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice): §3.5 Scenario 5 — timeout penalize-vs-drop against the fake server
+**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice): §3.5 Scenario 5 — timeout penalize-vs-drop against the fake server (planned — S19, carry-over from S18)
 **Date**: 2026-07-05
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [User Story E2E](../specs/user-story-e2e.md)
@@ -182,7 +182,7 @@ exercised); complements FR-RUN-047/048 from Scenario 3.
 
 **CI suitability**: runs on any runner (no GPU required); non-blocking like Scenario 3.
 
-### 3.5 Scenario 5 — Timeout Penalize-vs-Drop (**planned — S18**, U13 #367)
+### 3.5 Scenario 5 — Timeout Penalize-vs-Drop (**planned — S19 (carry-over from S18)**, U13 #367)
 
 `tests/e2e/test_timeout_penalize_drop.py` — validates the v0.18 honest-timeout semantics end-to-end
 against the fake LLM server: a real mini-evolution whose dataset contains one instance that **times
@@ -219,7 +219,7 @@ penalize/drop aggregation, and the coverage keys.
   ├── test_remote_only.py           # Scenario 2 (planned)
   ├── test_shinka_backend.py        # Scenario 3 (implemented & passing — S14, ADR-007)
   ├── test_shinka_ensemble_bandit.py  # Scenario 4 (planned — S17, ADR-007 Amendment)
-  └── test_timeout_penalize_drop.py # Scenario 5 (planned — S18, U13 #367)
+  └── test_timeout_penalize_drop.py # Scenario 5 (planned — S19, carry-over from S18, U13 #367)
   ```
 - **Markers**:
   - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`

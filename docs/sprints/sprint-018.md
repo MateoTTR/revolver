@@ -141,25 +141,25 @@ New IDs (added to `val-integration-tests.md`) that must pass at sprint end. Base
 
 | Area | Scenario | Test ID | Status |
 |---|---|---|---|
-| U13 display | `parse_population`/`run status` rank by `combined_score`, not sum-of-metrics | `test_oe_display_prefers_combined_score` | Planned |
-| U13 coverage | Wrapper `instances_valid`/`instances_total` emitted, **not** summed into the score | `test_wrapper_coverage_keys_not_in_score` | Planned |
-| U13 timeout | Shinka wrapper's distinct `TimeoutError` branch records the timeout on the side-channel | `test_shinka_wrapper_timeout_branch` | Planned |
-| U13 penalize | Default run penalizes a timed-out instance with `timeout_score`; `on_timeout=drop` restores survivor-mean | `test_on_timeout_penalize_vs_drop` | Planned |
-| U13 validation | `evaluation.on_timeout=bogus` / non-finite `timeout_score` rejected at run/dry-run | `test_evaluation_on_timeout_validation` | Planned |
-| U11 post-eval | Post-run eval writes `eval_metadata`/`eval_instances` (no longer stderr-only); no DB-contention error | `test_post_run_eval_persists_via_evaluate_solution` | Planned |
-| U11 display | `run info` shows engine best ("single eval") + post-eval mean (coverage-labeled); #306 fallback labeled | `test_run_info_honest_score_labels` | Planned |
-| U4 migration | Fresh + v13-upgrade project DB gets `problem_versions.backend`; global DB no-ops; rows default `openevolve` | `test_db_migration_v14_problem_versions_backend` | Planned |
-| U4 resolution | `version create --backend shinka` persists; `run` resolves it; explicit `--backend` mismatch warns | `test_run_backend_resolution_order_and_mismatch_warn` | Planned |
-| U8 seed | Seed missing a declared non-builtin `feature_dimensions` metric fails at pre-flight (launch + resume) | `test_validate_seed_metrics_missing_dim_fails` | Planned |
-| U8 builtins | Declared builtin dim (`complexity`/`diversity`/`combined_score`) never errors; Shinka no-op | `test_validate_seed_metrics_builtins_and_shinka_noop` | Planned |
-| U6 phase 2 | Default ≤100-iter run gets a mid-run checkpoint; explicit `checkpoint_interval` untouched | `test_checkpoint_cadence_default_when_unset` | Planned |
-| Top-N | `solution extract --rank 2` promotes the 2nd-best Shinka program; `--program-id` path | `test_solution_extract_rank_n_shinka` | Planned |
-| Top-N gate | `--rank 2` on an OE run → clear "not supported" error | `test_solution_extract_rank_unsupported_oe` | Planned |
-| Reap hardening | A leaked **grandchild** is reaped via recursive-descendant + `killpg`; single-PID fallback | `test_reaper_grandchild_killpg` | Planned |
-| Doc lint | Lint catches a renamed flag; passes on deprecated `--tag`; parses untagged fences | `test_doc_command_lint_resolves_cli_tree` | Planned |
-| Non-regression | Full suite (1471+ baseline) green (no-shinka env); Shinka L2 green (shinka env) | full-suite regression | Planned |
+| U13 display | `parse_population`/`run status` rank by `combined_score`, not sum-of-metrics | `test_oe_display_prefers_combined_score` | Passed |
+| U13 coverage | Wrapper `instances_valid`/`instances_total` emitted, **not** summed into the score | `test_wrapper_coverage_keys_not_in_score` | Passed |
+| U13 timeout | Shinka wrapper's distinct `TimeoutError` branch records the timeout on the side-channel | `test_shinka_wrapper_timeout_branch` | Passed |
+| U13 penalize | Default run penalizes a timed-out instance with `timeout_score`; `on_timeout=drop` restores survivor-mean | `test_on_timeout_penalize_vs_drop` | Passed |
+| U13 validation | `evaluation.on_timeout=bogus` / non-finite `timeout_score` rejected at run/dry-run | `test_evaluation_on_timeout_validation` | Passed |
+| U11 post-eval | Post-run eval writes `eval_metadata`/`eval_instances` (no longer stderr-only); no DB-contention error | `test_post_run_eval_persists_via_evaluate_solution` | Passed |
+| U11 display | `run info` shows engine best ("single eval") + post-eval mean (coverage-labeled); #306 fallback labeled | `test_run_info_honest_score_labels` | Passed |
+| U4 migration | Fresh + v13-upgrade project DB gets `problem_versions.backend`; global DB no-ops; rows default `openevolve` | `test_db_migration_v14_problem_versions_backend` | Passed |
+| U4 resolution | `version create --backend shinka` persists; `run` resolves it; explicit `--backend` mismatch warns | `test_run_backend_resolution_order_and_mismatch_warn` | Passed |
+| U8 seed | Seed missing a declared non-builtin `feature_dimensions` metric fails at pre-flight (launch + resume) | `test_validate_seed_metrics_missing_dim_fails` | Passed |
+| U8 builtins | Declared builtin dim (`complexity`/`diversity`/`combined_score`) never errors; Shinka no-op | `test_validate_seed_metrics_builtins_and_shinka_noop` | Passed |
+| U6 phase 2 | Default ≤100-iter run gets a mid-run checkpoint; explicit `checkpoint_interval` untouched | `test_checkpoint_cadence_default_when_unset` | Passed |
+| Top-N | `solution extract --rank 2` promotes the 2nd-best Shinka program; `--program-id` path | `test_solution_extract_rank_n_shinka` | Passed |
+| Top-N gate | `--rank 2` on an OE run → clear "not supported" error | `test_solution_extract_rank_unsupported_oe` | Passed |
+| Reap hardening | A leaked **grandchild** is reaped via recursive-descendant + `killpg`; single-PID fallback | `test_reaper_grandchild_killpg` (module `tests/integration/test_reaper_hardening.py`) | Passed |
+| Doc lint | Lint catches a renamed flag; passes on deprecated `--tag`; parses untagged fences | `test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve` | Passed |
+| Non-regression | Full suite (1471+ baseline) green (no-shinka env); Shinka L2 green (shinka env) | full-suite regression | Passed (1585 passed / 4 skipped, no-shinka env; 58 shinkaevolve-marked green on real shinka 0.0.7) |
 
-**Test count planned**: **16 new automated L2 test IDs** + 1 spike deliverable (#320) + full-suite regression. Expected suite ~1487+.
+**Test count planned**: **16 new automated L2 test IDs** + 1 spike deliverable (#320) + full-suite regression. Expected suite ~1487+ — actual at sprint end: **1585** (extra growth from R1/R2, top-N, reap, doc-freshness and L1 twins).
 
 ---
 
