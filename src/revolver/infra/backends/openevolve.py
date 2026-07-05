@@ -817,6 +817,23 @@ def build_config(
         # B9 (S17-30): warn on override keys that land on no OpenEvolve field.
         _warn_noop_config_overrides(config_overrides, parsed_overrides)
 
+    # 5a. U6 phase 2 (S18-13 / FR-RUN-057): default checkpoint cadence.
+    # When checkpoint_interval is UNSET (absent from both the problem
+    # config.yaml and --config-override — checked after step 5 so an
+    # override counts as explicit), default it to max(1, min(100,
+    # iterations // 10)) so a killed <=100-iteration run has a mid-run
+    # checkpoint to resume from (the engine default of 100 meant zero
+    # mid-run checkpoints for the whole default regime). An EXPLICIT value
+    # is never touched; a defaulted one is always <= iterations, which
+    # naturally defuses 5b's default-100-vs-small-iters clamp. Release-noted
+    # v0.18 default-path change (sprint-018 exit criterion 10). Shinka has
+    # no checkpoint_interval concept — this is OpenEvolve-only.
+    interval_is_explicit = "checkpoint_interval" in config
+    if not interval_is_explicit:
+        cadence_iters = config.get("max_iterations")
+        if isinstance(cadence_iters, int) and cadence_iters > 0:
+            config["checkpoint_interval"] = max(1, min(100, cadence_iters // 10))
+
     # 5b. Guard: ensure checkpoint_interval <= iterations for resume capability
     effective_interval = config.get("checkpoint_interval", 100)  # OE default
     effective_iters = config.get("max_iterations")
@@ -846,11 +863,13 @@ def build_config(
     # count means the only checkpoint is the completion one — a killed or
     # interrupted run has nothing to resume from. Checked on the PRE-clamp
     # value so it never stacks on 5b (the strictly-> regime is 5b's: it has
-    # already warned and clamped, incl. the default-template case of OE's
-    # 100 default vs small iteration counts — S17a code review). Warn-only;
-    # a smarter default cadence is the v0.18 phase 2 (backlog 364).
+    # already warned and clamped — S17a code review). Warn-only, and gated
+    # on an EXPLICIT interval (U6 phase 2 / S18-13): the 5a default cadence
+    # can legitimately equal iterations (max_iterations=1) and must not
+    # nag the user about a value they never set.
     if (
-        effective_iters is not None
+        interval_is_explicit
+        and effective_iters is not None
         and isinstance(effective_interval, int)
         and isinstance(effective_iters, int)
         and effective_iters > 0
