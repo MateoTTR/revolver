@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING
 from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
 
 if TYPE_CHECKING:
-    from revolver.infra.backends.base import RecoveredProgram
+    from revolver.infra.backends.base import (
+        EvolutionBackend,
+        RankedProgram,
+        RecoveredProgram,
+    )
 from revolver.infra.db import (
     delete_solution as db_delete_solution,
     get_project_db,
@@ -336,7 +340,11 @@ def extract_solution(
     """Promote a stored program to a new solution DB entry.
 
     1. Verify run exists and is completed
-    2. Verify program file exists at ``.revolver/runs/<run_id>/programs/rank-<rank>.py``
+    2. Resolve the target program: verify
+       ``.revolver/runs/<run_id>/programs/rank-<rank>.py`` exists — on a
+       top-N-capable backend a missing rank-N file (or a ``program_id``
+       request) is resolved from the backend program store instead and
+       materialized on demand (FR-SOL-021, retroactive on old runs)
     3. Validate: check alias uniqueness and duplicate ``(run_id, rank)``
     4. Generate unique ID: ``sol-YYYYMMDD-HHMMSS`` (with counter for collisions)
     5. Atomically delete old solution (if ``force=True``) and insert new one
@@ -358,7 +366,11 @@ def extract_solution(
     Ranks > 1 and ``program_id`` are gated on the run backend's
     ``capabilities().top_n_extraction`` (FR-SOL-021, ADR-007): a non-capable
     backend (OpenEvolve — consciously deferred, #299) is rejected with a
-    clear "not supported" error before any other validation.
+    clear "not supported" error before any other validation. On a capable
+    backend (ShinkaEvolve) the program is read from the backend store
+    (``programs.sqlite``); a ``program_id`` is resolved to its rank in the
+    scored population, and the store's ``combined_score`` is recorded as
+    ``best_score``.
 
     Args:
         run_id: ID of the run that produced the program.
@@ -380,13 +392,12 @@ def extract_solution(
         The newly created :class:`Solution`.
 
     Raises:
-        RevolverError: If the run is not found or the program file does not
-            exist, or ``program_id`` extraction is requested (the on-demand
-            backend path lands with S18-16).
+        RevolverError: If the run is not found.
         ValidationError: If rank is <= 0, ``program_id`` is combined with a
             rank > 1 or ``from_checkpoint``, the requested rank/program_id is
             not supported on the run's backend (FR-SOL-021), the run is not
-            completed, or the program file does not exist.
+            completed, or no program exists at the requested rank/id (absent
+            file and not materializable from the backend store).
         CheckpointRecoveryError: ``from_checkpoint`` requested but no usable
             checkpoint exists yet.
         RecoveryNotSupportedError: ``from_checkpoint`` requested on a backend
@@ -418,22 +429,17 @@ def extract_solution(
         # extraction (capabilities().top_n_extraction — ADR-007 v0.18
         # amendment). OpenEvolve consciously stays non-capable in v0.18
         # (checkpoint-granularity limit + pre-U13 ordering, #299).
+        top_n_backend: EvolutionBackend | None = None
         if rank > 1 or program_id is not None:
             from revolver.infra.backends.base import get_backend
 
             backend_name = str(run.get("backend") or "openevolve")
-            if not get_backend(backend_name).capabilities().top_n_extraction:
+            backend = get_backend(backend_name)
+            if not backend.capabilities().top_n_extraction:
                 raise ValidationError(
                     f"Top-N extraction is not supported on backend '{backend_name}'."
                 )
-            if program_id is not None:
-                # Stage 1 (S18-15) ships the CLI surface and the capability
-                # gate; the on-demand backend extraction path
-                # (ShinkaBackend.extract_ranked_program) lands with S18-16.
-                raise RevolverError(
-                    "Extraction by program id is not implemented yet for "
-                    f"backend '{backend_name}'."
-                )
+            top_n_backend = backend
 
         run_dir = root / REVOLVER_DIR / RUNS_DIR / run_id
         program_path = run_dir / "programs" / f"rank-{rank}.py"
@@ -452,6 +458,7 @@ def extract_solution(
             )
 
         recovered: RecoveredProgram | None = None
+        ranked: RankedProgram | None = None
         if not use_checkpoint:
             if status not in ("completed", "completed_with_errors"):
                 if from_checkpoint:
@@ -461,9 +468,24 @@ def extract_solution(
                     )
                 raise ValidationError(f"Run '{run_id}' is not completed (status: '{status}')")
 
-            # 2. Verify program file exists
-            if not program_path.exists():
-                raise ValidationError(f"Program file not found: {program_path}")
+            # 2. Resolve the target program (FR-SOL-021). A program id is
+            # always resolved through the backend store (it also yields the
+            # program's rank — the DB slot the solution row records); a
+            # rank-addressed request uses the already-materialized
+            # programs/rank-<N>.py when present, and falls back to the
+            # backend store on a top-N-capable backend (on-demand
+            # materialization — retroactive on old runs, no layout change).
+            # Both lookups are read-only here; the code is written to disk
+            # only after the alias/duplicate/force validation below.
+            if program_id is not None and top_n_backend is not None:
+                ranked = top_n_backend.extract_ranked_program(run_dir, program_id=program_id)
+                rank = ranked.rank
+                program_path = run_dir / "programs" / f"rank-{rank}.py"
+            elif not program_path.exists():
+                if top_n_backend is not None:
+                    ranked = top_n_backend.extract_ranked_program(run_dir, rank=rank)
+                else:
+                    raise ValidationError(f"No program found at rank {rank} for run '{run_id}'")
         else:
             # Read-only recovery (fails fast on an unrecoverable run). The
             # recovered code is materialized to disk only *after* the
@@ -490,20 +512,29 @@ def extract_solution(
                         f"Solution already exists for run={run_id}, rank={rank}"
                     )
 
-        # 3b. Materialize the recovered checkpoint program now that all
-        # validation has passed — never before (finding #2: no stray file on
-        # an aborted command).
+        # 3b. Materialize the recovered checkpoint program — or the
+        # backend-store ranked program (FR-SOL-021) — now that all
+        # validation has passed, never before (finding #2: no stray file on
+        # an aborted command). A ranked program whose rank-<N>.py already
+        # exists (e.g. --program-id resolving to the materialized rank 1)
+        # is not rewritten; its store score is still recorded.
         recovered_score: float | None = None
         if recovered is not None:
             program_path.parent.mkdir(parents=True, exist_ok=True)
             program_path.write_text(recovered.code, encoding="utf-8")
             recovered_score = recovered.score
+        if ranked is not None:
+            if not program_path.exists():
+                program_path.parent.mkdir(parents=True, exist_ok=True)
+                program_path.write_text(ranked.code, encoding="utf-8")
+            recovered_score = ranked.score
 
         # 4. Generate unique ID
         solution_id = _generate_solution_id(conn)
 
-        # 5. best_score: unavailable from a program file, but recovered from
-        # the checkpoint metadata when --from-checkpoint was used (B7).
+        # 5. best_score: unavailable from a program file, but known when the
+        # program came from the checkpoint metadata (--from-checkpoint, B7)
+        # or from the backend program store (FR-SOL-021).
         best_score: float | None = recovered_score
 
         # 6. Atomic delete + insert within a single transaction.

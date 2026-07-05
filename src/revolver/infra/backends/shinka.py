@@ -65,6 +65,7 @@ from revolver.infra.backends.base import (
     BackendUnavailableError,
     ChildProcessReaperMixin,
     ProgressInfo,
+    RankedProgram,
     RecoveredProgram,
 )
 from revolver.infra.backends.openevolve import (
@@ -1585,6 +1586,100 @@ class ShinkaBackend(ChildProcessReaperMixin):
             "ShinkaEvolve has no filesystem checkpoint to recover from "
             "(interrupted-run state lives in programs.sqlite). "
             "Best-of-checkpoint recovery is an OpenEvolve capability."
+        )
+
+    def extract_ranked_program(
+        self,
+        run_dir: Path,
+        rank: int | None = None,
+        program_id: str | None = None,
+    ) -> RankedProgram:
+        """Read the rank-N (or id-addressed) program from ``programs.sqlite``.
+
+        Top-N promotion is Shinka-native (FR-SOL-021, #299,
+        ``top_n_extraction=True``): the full population — source code
+        included — lives in ``programs.sqlite``, so this is the rank-1
+        materialization query (:meth:`_materialize_best_programs`:
+        ``combined_score DESC``, ties broken by insertion timestamp)
+        without its ``LIMIT``. Programs with a SQL ``NULL``
+        ``combined_score`` (failed evaluations) are excluded — the
+        resulting ranks match what ``run population`` displays for scored
+        programs. Read-only: the caller materializes
+        ``programs/rank-<N>.py`` after validation, so the path works
+        retroactively on old run dirs with no layout change.
+
+        Args:
+            run_dir: The run directory (``programs.sqlite`` is read from
+                ``<run_dir>/shinka-output/``).
+            rank: 1-based rank in the scored population. Exactly one of
+                *rank*/*program_id* is required.
+            program_id: Program id, resolved to its rank in the same
+                ordering.
+
+        Returns:
+            The addressed :class:`RankedProgram` (id, code, resolved rank,
+            ``combined_score``).
+
+        Raises:
+            ValidationError: Neither or both of *rank*/*program_id* given;
+                no readable ``programs.sqlite``; the rank exceeds the
+                scored population; or the program id is unknown or has no
+                ``combined_score`` (failed evaluation).
+        """
+        if (rank is None) == (program_id is None):
+            raise ValidationError(
+                "Exactly one of rank/program_id is required for ranked extraction."
+            )
+        db_path = self._programs_db_path(run_dir)
+        if not db_path.exists():
+            raise ValidationError(
+                f"No backend program store found for this run (expected {db_path})."
+            )
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT id, code, combined_score FROM programs "
+                    "ORDER BY (combined_score IS NULL), combined_score DESC, "
+                    "timestamp"
+                ).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            raise ValidationError(f"Cannot read the program store {db_path}: {exc}") from exc
+
+        scored = [row for row in rows if row[2] is not None]
+        if rank is not None:
+            if rank > len(scored):
+                raise ValidationError(
+                    f"No program found at rank {rank}: the scored population "
+                    f"has {len(scored)} program(s)."
+                )
+            prog_id, code, score = scored[rank - 1]
+            resolved_rank = rank
+        else:
+            resolved_rank = 0
+            prog_id, code, score = "", None, None
+            for idx, (row_id, row_code, row_score) in enumerate(scored, start=1):
+                if str(row_id) == program_id:
+                    prog_id, code, score = row_id, row_code, row_score
+                    resolved_rank = idx
+                    break
+            if resolved_rank == 0:
+                if any(str(row[0]) == program_id for row in rows):
+                    raise ValidationError(
+                        f"Program '{program_id}' has no combined_score (failed "
+                        "evaluation) and cannot be promoted to a solution."
+                    )
+                raise ValidationError(
+                    f"Program id '{program_id}' not found in the program store "
+                    f"of this run ({len(rows)} program(s))."
+                )
+        return RankedProgram(
+            program_id=str(prog_id),
+            code=str(code or ""),
+            rank=resolved_rank,
+            score=float(score) if score is not None else None,
         )
 
     def resume(

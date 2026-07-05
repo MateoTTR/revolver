@@ -8,7 +8,7 @@ Tests cover:
   run backend's ``capabilities().top_n_extraction`` — S18-15)
 
 Traceable to: FR-SOL-011..013, FR-SOL-021, DES-005 section 7,
-PR #122 review findings, sprint-018 S18-15.
+PR #122 review findings, sprint-018 S18-15/S18-16.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
+from revolver.core.exceptions import DuplicateNameError, ValidationError
 from revolver.core.project import init_project
 from revolver.core.solution import extract_solution
 from revolver.infra.db import (
@@ -28,6 +28,7 @@ from revolver.infra.db import (
     insert_solution,
 )
 from revolver.infra.store import REVOLVER_DIR, RUNS_DIR
+from tests.fixtures.programs_sqlite import SHINKA_OUTPUT_SUBDIR, build_programs_db
 
 
 def _setup_project_with_run(
@@ -159,8 +160,9 @@ class TestExtractSolutionTopNGate:
     def test_rank_2_on_shinka_passes_gate(self, tmp_path: Path) -> None:
         """rank=2 on a Shinka run passes the gate and promotes rank-2.
 
-        Stage 1 plumbing: the rank-2 program file already exists on disk
-        (the on-demand materialization from ``programs.sqlite`` is S18-16).
+        Existing-file fast path: the rank-2 program file already exists on
+        disk, so the backend store is never consulted (the on-demand
+        ``programs.sqlite`` path is covered by the S18-16 tests).
         """
         root = _setup_project_with_run(tmp_path, backend="shinka", rank=2)
         sol = extract_solution(
@@ -174,20 +176,46 @@ class TestExtractSolutionTopNGate:
 
     @pytest.mark.unit
     @pytest.mark.shinkaevolve
-    def test_program_id_on_shinka_stage1_not_implemented(self, tmp_path: Path) -> None:
-        """program_id on a Shinka run passes the gate; Stage-1 stub raises.
+    def test_program_id_on_shinka_missing_store_raises(self, tmp_path: Path) -> None:
+        """program_id on a Shinka run without programs.sqlite errors clearly.
 
-        Pinned intermediate contract — replaced by the real
-        ``ShinkaBackend.extract_ranked_program`` path in S18-16.
+        The gate passes (``top_n_extraction=True``) but the run dir has no
+        backend program store to resolve the id from (S18-16).
         """
         root = _setup_project_with_run(tmp_path, backend="shinka")
-        with pytest.raises(RevolverError, match="not implemented yet"):
+        with pytest.raises(ValidationError, match="No backend program store"):
             extract_solution(
                 "run-test-001",
                 1,
                 program_id="prog-42",
                 project_root=root,
             )
+
+    @pytest.mark.unit
+    @pytest.mark.shinkaevolve
+    def test_program_id_on_shinka_resolves_rank_and_score(self, tmp_path: Path) -> None:
+        """program_id resolves to its rank and records the store score (S18-16).
+
+        ``prog-gen2-best`` is the best scored fixture program: the id
+        resolves to rank 1, whose ``rank-1.py`` already exists on disk —
+        the existing file is not rewritten (no clobber), but the store's
+        ``combined_score`` (0.91) is still recorded as ``best_score``.
+        """
+        root = _setup_project_with_run(tmp_path, backend="shinka")
+        run_dir = root / REVOLVER_DIR / RUNS_DIR / "run-test-001"
+        build_programs_db(run_dir / SHINKA_OUTPUT_SUBDIR / "programs.sqlite")
+
+        sol = extract_solution(
+            "run-test-001",
+            1,
+            program_id="prog-gen2-best",
+            project_root=root,
+        )
+        assert sol.rank == 1
+        assert sol.best_score == pytest.approx(0.91)
+        # The pre-existing rank-1.py was not rewritten.
+        rank1 = run_dir / "programs" / "rank-1.py"
+        assert rank1.read_text(encoding="utf-8") == "def solve(): pass\n"
 
     @pytest.mark.unit
     def test_program_id_with_rank_n_raises(self, tmp_path: Path) -> None:
