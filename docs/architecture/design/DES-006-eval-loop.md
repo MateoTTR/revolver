@@ -596,12 +596,18 @@ def evaluate_solution(
     parallelism: int = 1,
     force: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
+    project_root: Path | None = None,
+    *,
+    warn_split: bool = True,
 ) -> EvalResult:
     """
     Evaluate a solution against a dataset.
     Resolves solution → run → program path, iterates instances,
     stores raw results, computes aggregates.
     Called by both CLI (revolver eval) and core.run (post-run eval).
+    The post-run training evaluation (FR-RUN-019/020) passes
+    warn_split=False so FR-EVL-009's "expected 'eval' split" warning
+    does not fire on every completed run.
 
     If results already exist for this (solution, dataset) pair:
     - force=True: delete and re-evaluate silently

@@ -31,7 +31,7 @@ This document details the design of the `revolver run` commands: `run` (launch a
 | **OpenEvolve configuration** | Programmatically configure LLM endpoint, iterations, output dir |
 | **Execution** | Launch OpenEvolve via controller class (not `run_evolution()`) |
 | **Progress monitoring** | Display iteration count, best score, elapsed time |
-| **Result collection** | Store all top-ranked programs in run directory, auto-create rank-1 solution reference in DB |
+| **Result collection** | Materialize the best program as `rank-1.py` in the run directory and auto-promote it (rank-1 solution reference in DB); the rest of the population stays in the backend store, materialized on demand by `solution extract` (DD-07, §7.3) |
 | **Post-run evaluation** | Evaluate rank-1 program on training instances (FR-RUN-019) |
 | **Concurrency control** | Per-run lock files in `.revolver/runs/locks/` |
 
@@ -122,9 +122,10 @@ Core (core/run.py) → launch_run()
   │ 16. Monitor progress                            ──► callback to CLI for display
   │ 17. On completion:
   │     a. Stop token proxy, read token counts      ──► Infra: token_proxy.stop()
-  │     b. Collect all top-ranked programs           ──► Infra: openevolve.collect_results()
-  │        Save as rank-1.py, rank-2.py, ...
-  │        in .revolver/runs/<id>/programs/
+  │     b. Materialize the best program              ──► Infra: openevolve.collect_results()
+  │        as rank-1.py in .revolver/runs/<id>/programs/
+  │        (the rest of the population stays in the backend store,
+  │         materialized on demand by solution extract — DD-07, §7.3)
   │     c. Copy checkpoint, config, evaluator       ──► Infra: store
   │        into run directory
   │     d. Generate solution ID for rank-1          ──► generate_solution_id()
@@ -202,8 +203,10 @@ Core (core/run.py) → resume_run()
   │ 15. Launch OpenEvolve with checkpoint           ──► Infra: openevolve.run(checkpoint=...)
   │ 16. Monitor progress                            ──► callback to CLI for display
   │ 17. On completion (same as fresh run):
-  │     a. Collect all top-ranked programs → save as rank-1.py, rank-2.py, ...
+  │     a. Materialize the best program as rank-1.py
   │        in .revolver/runs/<new_id>/programs/
+  │        (the rest of the population stays in the backend store,
+  │         materialized on demand by solution extract — DD-07, §7.3)
   │     b. Copy checkpoint, config into new run directory
   │     c. Generate solution ID for rank-1
   │        Insert solution row (run_id, rank=1) in DB
@@ -656,6 +659,11 @@ served by `project init`.
   (Shinka's 4096 starves thinking-capable models, which return empty content) and
   `max_patch_attempts` defaults to 10 (Shinka's 1 loses a whole generation on a single malformed
   patch). Both respect an explicit `config.yaml` value and `--config-override`.
+- **LLM request timeout (R2 / #260, S18).** The registered `--timeout` is projected as the
+  engine's LLM-request timeout: `max(timeout_s over ensemble members that set it)` →
+  sets/restores `shinka.llm.client.TIMEOUT` around the engine run; surfaced as `llm_timeout` in
+  `resolved_config.backend_extras`. `--config-override llm_timeout=N` is the escape hatch and
+  `llm_timeout=null` opts out; when unset, shinka's default (1200 s) is left untouched.
 - Unsupported options are reported honestly (**FR-RUN-048**, map-with-warn): `--parallel` has no
   neutral Shinka mapping and warns on stderr instead of silently no-opping. **Ensembles are now
   supported via the bandit mapping above** (the earlier "ensembles raise `ValidationError` /
@@ -664,7 +672,7 @@ served by `project init`.
 - `resolved_config()` maps `evo_config.num_generations` → iterations, `db_config.num_islands` →
   num_islands, a single-valued `llm_kwargs.temperatures` → temperature, and pushes Shinka-exclusive
   keys (`patch_types`, `max_patch_attempts`, `max_tokens`, `reasoning_efforts`, `max_api_costs`,
-  `archive_size`, …) into `backend_extras`.
+  `llm_timeout`, `archive_size`, …) into `backend_extras`.
 
 > **`--source local` concurrency on Shinka (UX-5, planned S16).** `ShinkaBackend.build_config()`
 > additionally pins `job_config.max_proposal_jobs = 1` for a `source == "local"` LLM unless the user
@@ -741,10 +749,10 @@ previously enumerated **direct** children only and killed per-PID — a grandchi
 evaluator (or surviving Shinka's single-PID wrapper kill) could outlive teardown. S18 hardens
 `ChildProcessReaperMixin` in `infra/backends/base.py`: `_current_child_pids()` enumerates
 descendants **recursively** (walking `/proc/<pid>/task/*/children`), and `_reap_run_children()`
-reaps each survivor's whole **process group** via `os.getpgid` + the S17a `evaluator_runner.py`
-pgid helpers (`_reap_process_group`: SIGTERM → 3 s grace → SIGKILL, single-PID fallback when
-`getpgid`/`killpg` fails), which also guards PID reuse. No import cycle: `evaluator_runner`
-imports only `models.problem`. This backstop closes the Shinka single-PID wrapper-kill
+reaps each survivor's whole **process group** via `os.getpgid` — the pgid logic (SIGTERM → 3 s
+grace → SIGKILL, single-PID fallback when `getpgid`/`killpg` fails) is reimplemented locally in
+`base.py` in PID form (`evaluator_runner` is not imported), which also guards PID reuse.
+This backstop closes the Shinka single-PID wrapper-kill
 grandchildren caveat (triage §1). The run-level reap lives **here**; §7's teardown note covers
 the separate per-instance eval primitive (0.17.1).
 
@@ -953,6 +961,7 @@ def _post_run_evaluation(
     dataset_name: str,
     dataset_path: Path,
     program_path: Path,
+    project_root: Path | None = None,
 ) -> None:
     """
     Evaluate the rank-1 program on training instances.
@@ -1252,8 +1261,7 @@ Each run has its own directory under `.revolver/runs/`. Solutions do not have th
 │   │   ├── eval_log.db                # Evaluator log (optional, FR-RUN-027)
 │   │   └── programs/
 │   │       ├── rank-1.py
-│   │       ├── rank-2.py
-│   │       └── rank-3.py
+│   │       └── rank-2.py  (materialized on demand by solution extract)
 │   ├── run-20260310-160000/
 │   │   └── ...
 │   └── locks/
@@ -1328,6 +1336,7 @@ def _post_run_evaluation(
     dataset_name: str,
     dataset_path: Path,
     program_path: Path,
+    project_root: Path | None = None,
 ) -> None:
     """Evaluate rank-1 program on training instances after run.
     S18 / U11: routes through core.eval.evaluate_solution() — persists

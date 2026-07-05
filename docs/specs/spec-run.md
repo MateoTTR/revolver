@@ -383,7 +383,7 @@ Deleted run "run-20260310-143000"
 | `delete` confirmation declined by user | No deletion, exit silently | 1 |
 | `evaluation.on_timeout` set to a value other than `penalize`/`drop`, or `evaluation.timeout_score` non-finite | Error: "Invalid evaluation.on_timeout '<value>'. Supported: penalize, drop." / "evaluation.timeout_score must be a finite number." Rejected at run **and** `--dry-run` (FR-RUN-054). | 1 |
 | Seed program's pre-flight metrics lack a metric named in `database.feature_dimensions` (or its value is non-numeric) | Error: "Feature dimension '<name>' not found in seed metrics. Available metrics: <list>." Fails **before iteration 0** on both launch and resume (FR-RUN-056); the builtins `complexity`/`diversity`/`combined_score` never trigger this error. | 1 |
-| Explicit `--backend` differs from the problem version's stored backend | Warning on stderr: "Version '<tag>' was created for backend '<version-backend>'; running with backend '<explicit>'." Proceeds with the explicit backend (FR-RUN-047). | 0 (continue) |
+| Explicit `--backend` differs from the problem version's stored backend | Warning on stderr: "Warning: version '<tag>' stores backend '<stored>' but --backend '<explicit>' was given. Proceeding with '<explicit>'." Proceeds with the explicit backend (FR-RUN-047). | 0 (continue) |
 
 ---
 

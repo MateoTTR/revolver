@@ -131,7 +131,7 @@ instance_003.json     FAILED          —         —
 | FR-EVL-006 | MUST | Compute aggregate statistics (mean, min, max, p10, p50, p90, std) at read time from stored raw data — aggregates are not stored separately | NFR-013 |
 | FR-EVL-007 | MUST | Verify dataset integrity before evaluation | §7.2 |
 | FR-EVL-008 | MUST | Warn if dataset is not compatible with the solution's problem version | §7.4 |
-| FR-EVL-009 | MUST | Warn (do not block) if dataset split is not `eval` | §4.3 |
+| FR-EVL-009 | MUST | Warn (do not block) if dataset split is not `eval`. The post-run training evaluation (FR-RUN-019/020) suppresses this warning (`warn_split=False`): evaluating the training split there is by design. | §4.3 |
 | FR-EVL-010 | MUST | Handle evaluator exceptions per instance without aborting the full evaluation | — |
 | FR-EVL-011 | MUST | Record instances where evaluation failed (count as "unsolved") | §5.6 |
 | FR-EVL-012 | SHOULD | Display a progress bar during evaluation | — |

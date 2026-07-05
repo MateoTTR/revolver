@@ -125,7 +125,7 @@ Promote a program from a run into a first-class solution — the **rank-1** prog
 **Behavior**:
 1. Verify the run exists and has status `completed`
 2. Resolve the target program (default: rank 1). For `--rank <N>` with N > 1 or `--program-id`, resolve the run's backend and check `capabilities().top_n_extraction`: a non-capable backend (OpenEvolve) exits 1 with a clear "not supported on '<backend>'" error (FR-SOL-021)
-3. Verify a program file `rank-<N>.py` exists in the run's `programs/` directory; on a top-N-capable backend (ShinkaEvolve) a missing `rank-<N>.py` is materialized on demand from the backend store (`programs.sqlite`) — retroactively on old runs, with no run-dir layout change
+3. Verify a program file `rank-<N>.py` exists in the run's `programs/` directory. On a top-N-capable backend (ShinkaEvolve) the backend store (`programs.sqlite`) is consulted to record the population score even when `rank-<N>.py` already exists (the on-disk file stays authoritative and is never rewritten); a missing `rank-<N>.py` is additionally materialized on demand from the store — retroactively on old runs, with no run-dir layout change
 4. If `--force` is not set: verify no solution already exists for `(run_id, rank)` — prevent duplicates
 5. If `--force` is set and a solution already exists for `(run_id, rank)`: delete the existing solution and its evaluation data before proceeding
 6. Generate a new solution ID (`sol-YYYYMMDD-HHMMSS`)
