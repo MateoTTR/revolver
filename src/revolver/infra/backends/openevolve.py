@@ -1097,8 +1097,10 @@ def _display_score_from_metrics(metrics: dict[str, Any]) -> float | None:
     the sum inflates the displayed score whenever auxiliary numeric metrics
     exist alongside ``combined_score`` (U13/#367 display guard). The sum is
     the fallback only when no numeric ``combined_score`` is present
-    (population ranking still needs a number), and a metrics dict with no
-    numeric values at all yields ``None`` — never a crash.
+    (population ranking still needs a number); the reserved ``instances_``
+    coverage prefix (FR-RUN-053) is excluded from that fallback sum so the
+    coverage keys can never inflate it. A metrics dict with no other
+    numeric values yields ``None`` — never a crash.
 
     Booleans are excluded everywhere (``bool`` is an ``int`` subclass).
 
@@ -1112,7 +1114,11 @@ def _display_score_from_metrics(metrics: dict[str, Any]) -> float | None:
     if isinstance(combined, (int, float)) and not isinstance(combined, bool):
         return float(combined)
     numeric_vals = [
-        v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+        v
+        for k, v in metrics.items()
+        if not k.startswith("instances_")
+        and isinstance(v, (int, float))
+        and not isinstance(v, bool)
     ]
     if numeric_vals:
         return float(sum(numeric_vals))

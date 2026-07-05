@@ -32,7 +32,7 @@ import shutil
 import sys
 import time
 import traceback
-from typing import Any, Literal
+from typing import Any, Literal, cast, get_args
 
 import yaml
 
@@ -52,6 +52,7 @@ from revolver.infra.backends.base import (
     BackendRunSpec,
     ChildProcessReaperMixin,
     EvolutionBackend,
+    OnTimeoutPolicy,
 )
 from revolver.infra.backends.openevolve import (
     # DEPRECATED shim re-exports: wrapper generation moved into
@@ -284,11 +285,14 @@ def _warn_snapshot_config_findings(backend: EvolutionBackend, snapshot_dir: Path
         sys.stderr.write(f"Warning: snapshot config.yaml: {finding}\n")
 
 
-# Supported evaluation.on_timeout policy values (FR-RUN-054).
-_ON_TIMEOUT_VALUES = ("penalize", "drop")
+# Supported evaluation.on_timeout policy values (FR-RUN-054), derived from
+# the OnTimeoutPolicy Literal alias (single source of truth).
+_ON_TIMEOUT_VALUES: tuple[str, ...] = get_args(OnTimeoutPolicy)
 
 
-def _parse_evaluation_policy(engine_config: dict[str, Any]) -> tuple[str, float]:
+def _parse_evaluation_policy(
+    engine_config: dict[str, Any],
+) -> tuple[OnTimeoutPolicy, float]:
     """Parse + validate ``evaluation.on_timeout`` / ``evaluation.timeout_score``.
 
     FR-RUN-054 (S18 / U13 #367 iii): ``evaluation.*`` is a validated,
@@ -332,7 +336,7 @@ def _parse_evaluation_policy(engine_config: dict[str, Any]) -> tuple[str, float]
     ):
         raise ValidationError("evaluation.timeout_score must be a finite number.")
 
-    return on_timeout, float(timeout_score)
+    return cast("OnTimeoutPolicy", on_timeout), float(timeout_score)
 
 
 def _determine_run_status(

@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 import signal
 import time
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from revolver.core.exceptions import ResourceError, ValidationError
 from revolver.models.llm import EnsembleEntry, LLMEntry
@@ -26,6 +26,12 @@ from revolver.models.run import ResolvedConfig, TokenUsage
 
 # Names accepted by :func:`get_backend`, in display order.
 AVAILABLE_BACKENDS: tuple[str, ...] = ("openevolve", "shinka")
+
+# Timed-out-instance policy baked into generated wrappers (FR-RUN-054,
+# U13/#367). "penalize" is the deliberate v0.18 default; "drop" restores
+# the pre-0.18 survivor-mean. The launch-point validator derives its
+# accepted values from this alias (single source of truth).
+OnTimeoutPolicy = Literal["penalize", "drop"]
 
 # Grace period between SIGTERM and SIGKILL when reaping run children (A2 /
 # #314). Shared by both backends' post-run teardown.
@@ -249,7 +255,7 @@ class BackendRunSpec:
     llm_weight_overrides: dict[str, float] | None = None
     conn: Any | None = None
     timeout_per_instance: float | None = None
-    on_timeout: str = "penalize"
+    on_timeout: OnTimeoutPolicy = "penalize"
     timeout_score: float = 0.0
     wrapper_path: Path | None = None
 

@@ -332,11 +332,6 @@ _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
 _ON_TIMEOUT = {on_timeout!r}
 _TIMEOUT_SCORE = {timeout_score!r}
 
-# Coverage bookkeeping (FR-RUN-053): populated by run_experiment(), read by
-# aggregate_metrics(). Both run inside the same process on the
-# run_shinka_eval path and on the standalone fallback alike.
-_COVERAGE = {{"instances_valid": 0.0, "instances_total": 0.0}}
-
 
 def _call_evaluate_instance(program_path, instance_path):
     """Call evaluate_instance with optional per-instance timeout guard."""
@@ -413,10 +408,18 @@ def run_experiment(program_path, seed=0):
                 "[revolver] evaluation failed for " + inst.name + ": " + str(exc),
                 file=sys.stderr,
             )
-    _COVERAGE["instances_valid"] = float(valid)
-    _COVERAGE["instances_total"] = float(len(instances))
     if not per_instance:
         raise RuntimeError("all instance evaluations failed")
+    # Coverage bookkeeping (FR-RUN-053): stamped onto every per-instance
+    # entry so it travels WITH the results. run_shinka_eval may execute
+    # run_experiment() in a ProcessPoolExecutor worker (run_workers > 1)
+    # where a module-global would never reach the parent's
+    # aggregate_metrics(); the stamped entries cross the pickle boundary.
+    # The reserved "instances_" prefix keeps the stamps out of the mean.
+    for m in per_instance:
+        if isinstance(m, dict):
+            m["instances_valid"] = float(valid)
+            m["instances_total"] = float(len(instances))
     return per_instance
 
 
@@ -427,8 +430,8 @@ def aggregate_metrics(results):
     each entry is the per-instance metrics list from run_experiment().
 
     The reserved "instances_" coverage prefix is NEVER averaged into the
-    metrics (FR-RUN-053); the coverage keys are appended as metadata from
-    the run_experiment() bookkeeping instead.
+    metrics (FR-RUN-053); the coverage keys are read back from the
+    per-instance entries stamped by run_experiment() instead.
     """
     all_metrics = [m for run_result in results for m in run_result]
     aggregated = {{}}
@@ -452,9 +455,18 @@ def aggregate_metrics(results):
     # to exist; validate_result() independently marks the run incorrect when
     # the user metrics lacked it, so this default never masks a failure.
     aggregated.setdefault("combined_score", 0.0)
-    # Coverage keys: metadata, not fitness (FR-RUN-053).
-    aggregated["instances_valid"] = _COVERAGE["instances_valid"]
-    aggregated["instances_total"] = _COVERAGE["instances_total"]
+    # Coverage keys: metadata, not fitness (FR-RUN-053) — read back from the
+    # stamped per-instance entries so the values survive a process boundary
+    # (see run_experiment). Every entry within a run carries identical
+    # stamps; across runs the last one wins (same dataset every run).
+    instances_valid = 0.0
+    instances_total = 0.0
+    for m in all_metrics:
+        if isinstance(m, dict) and "instances_total" in m:
+            instances_valid = float(m.get("instances_valid", 0.0))
+            instances_total = float(m["instances_total"])
+    aggregated["instances_valid"] = instances_valid
+    aggregated["instances_total"] = instances_total
     return aggregated
 
 

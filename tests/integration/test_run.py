@@ -3696,3 +3696,140 @@ def test_evaluation_on_timeout_validation(project_with_prereqs: dict[str, Path])
     )
     output = _get_all_output(result)
     assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+
+# Driver that models run_shinka_eval's ProcessPoolExecutor split: the
+# producer module instance runs run_experiment(); a FRESH consumer module
+# instance (which never saw run_experiment run — like the parent process
+# when run_workers > 1) aggregates. A module-global coverage channel would
+# read 0.0/0.0 here; the stamped per-instance entries must not.
+_SHINKA_CROSS_PROCESS_DRIVER = """\
+import importlib.util
+import json
+import sys
+
+
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+producer = _load(sys.argv[1], "_wrapper_producer")
+results = producer.run_experiment(sys.argv[2])
+consumer = _load(sys.argv[1], "_wrapper_consumer")
+print(json.dumps(consumer.aggregate_metrics([results])))
+"""
+
+
+@pytest.mark.integration
+def test_shinka_coverage_survives_process_boundary(tmp_path: Path) -> None:
+    """Coverage keys travel with the results, not via a module-global.
+
+    FR-RUN-053 (S18 / U13 #367 commit ii, PR #257 review): shinka's
+    ``run_shinka_eval`` executes ``run_experiment()`` in a
+    ``ProcessPoolExecutor`` worker when ``run_workers > 1``, so a
+    module-global written by the worker's module instance never reaches
+    the parent's ``aggregate_metrics()``. The coverage keys are therefore
+    stamped onto the per-instance entries and read back from them. This
+    driver aggregates in a fresh module instance that never ran
+    ``run_experiment()`` — coverage must still be correct.
+    """
+    import subprocess
+    import sys
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+    wrapper = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka")
+
+    driver = tmp_path / "shinka_cross_process_driver.py"
+    driver.write_text(_SHINKA_CROSS_PROCESS_DRIVER, encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(driver), str(wrapper), str(program)],
+        env=_wrapper_env(dataset, None),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    metrics = json.loads(proc.stdout)
+    assert metrics["instances_valid"] == pytest.approx(2.0)
+    assert metrics["instances_total"] == pytest.approx(3.0)
+    # The mean is still the FR-RUN-054 default-penalize mean, uninflated.
+    assert metrics["combined_score"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+    assert "instances_user_key" not in metrics
+
+
+@pytest.mark.integration
+def test_resume_inherits_baked_timeout_policy(
+    tmp_project: Path,
+    dataset_dir: Path,
+    global_db_path: Path,
+) -> None:
+    """Resume reuses the parent's wrapper, so the baked policy persists.
+
+    FR-RUN-054 (S18 / U13 #367 commit iii): ``evaluation.on_timeout`` /
+    ``timeout_score`` are baked into the wrapper at launch; resume copies
+    the parent wrapper instead of regenerating it (FR-RUN-024), so a
+    non-default policy survives the resume without the overrides being
+    re-supplied.
+    """
+    from revolver.core.problem import create_version
+
+    # Instance-mode evaluator: only the generated (non-legacy) wrapper
+    # carries the baked policy constants.
+    fixtures_dir = Path(__file__).parent.parent / "fixtures"
+    shutil.copy2(fixtures_dir / "evaluator_instance.py", tmp_project / "evaluator.py")
+    shutil.copy2(
+        fixtures_dir / "initial_program_simple.py",
+        tmp_project / "initial_program.py",
+    )
+    shutil.copy2(fixtures_dir / "config_simple.yaml", tmp_project / "config.yaml")
+    create_version(tag="v1.0", message="Version v1.0", project_root=tmp_project)
+    _register_dataset(tmp_project, dataset_dir, compatible_with=["v1.0"])
+    _register_llm(global_db_path, base_url="http://localhost:11434/v1")
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--config-override",
+            "evaluation.on_timeout=drop",
+            "--config-override",
+            "evaluation.timeout_score=-0.5",
+        ],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    parent_run_dir = tmp_project / REVOLVER_DIR / "runs" / parent_run_id
+    parent_wrapper = (parent_run_dir / "_revolver_evaluator.py").read_text(encoding="utf-8")
+    assert "_ON_TIMEOUT = 'drop'" in parent_wrapper
+    assert "_TIMEOUT_SCORE = -0.5" in parent_wrapper
+
+    # Stage a checkpoint so resume can proceed (FR-RUN-024).
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    result = _invoke_with_mocks(
+        ["--json", "run", "resume", "--run", parent_run_id],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    resumed_run_id = _parse_json_output(result)["run_id"]
+
+    resumed_wrapper = (
+        tmp_project / REVOLVER_DIR / "runs" / resumed_run_id / "_revolver_evaluator.py"
+    ).read_text(encoding="utf-8")
+    # Copied verbatim, not regenerated: the baked policy is inherited.
+    assert resumed_wrapper == parent_wrapper
