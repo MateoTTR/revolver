@@ -106,6 +106,12 @@ def _spawn_tree(tmp_path: Path, *, setsid: bool) -> tuple[subprocess.Popen[str],
     )
     assert child.stdout is not None
     line = child.stdout.readline()  # blocks until the grandchild started
+    if not line.strip():
+        # Child died before reporting its grandchild — fail legibly instead
+        # of an opaque ValueError on int("").
+        raise AssertionError(
+            f"child tree died before reporting its grandchild (exit={child.poll()})"
+        )
     return child, int(line.strip())
 
 
@@ -275,7 +281,11 @@ def test_reaper_stale_snapshot_pid_never_signalled(
     monkeypatch.setattr(os, "killpg", _recording_killpg)
 
     # Reap against the ORIGINAL pre-run snapshot: dead_pid appeared after
-    # it, yet must not be treated as a survivor.
+    # it, yet must not be treated as a survivor. NOTE: dead_pid is excluded
+    # by the `current - pre` set difference before the identity guard even
+    # runs — this test pins the stale-snapshot filtering; the recycled-PID
+    # identity guard itself is discriminated by
+    # test_signal_pid_if_unchanged_blocks_recycled_pid.
     mixin._reap_run_children(pre)
 
     assert all(pid != dead_pid for pid, _ in kill_calls)
