@@ -1486,6 +1486,20 @@ class ShinkaBackend(ChildProcessReaperMixin):
         output_path.write_text(wrapper_code)
         return output_path
 
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """No-op seed-metric validation (U8 / FR-RUN-056).
+
+        ShinkaEvolve's only metric contract is ``combined_score`` — the
+        wrapper always synthesizes it — so there is no per-dimension
+        requirement to enforce against the seed's pre-flight metrics
+        (the ``database.feature_dimensions`` check is OpenEvolve-only).
+        """
+        return None
+
     # ── Engine tier — S14-10..13 ──────────────────────────────────────────────
 
     def launch(

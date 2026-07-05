@@ -127,6 +127,13 @@ REVOLVER_KEYS = frozenset({"initial_program", "num_generations", "timeout_per_in
 #   generated wrapper evaluator, never passed to the OpenEvolve Config schema.
 REVOLVER_SECTIONS = frozenset({"evaluation"})
 
+# Feature dimensions computed *inside* OpenEvolve (U8 / FR-RUN-056). They are
+# legitimately absent from the evaluator's (and thus the seed's pre-flight)
+# metrics, so validate_seed_metrics() must never require them: ``complexity``
+# and ``diversity`` are engine builtins derived from the program itself, and
+# ``combined_score`` is the fitness the engine reads from every evaluation.
+OE_BUILTIN_FEATURE_DIMENSIONS = frozenset({"complexity", "diversity", "combined_score"})
+
 # Default LLM request timeout (seconds) injected for ``--source local``
 # endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
 # OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
@@ -1830,6 +1837,48 @@ class OpenEvolveBackend:
             on_timeout=spec.on_timeout,
             timeout_score=spec.timeout_score,
         )
+
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """Fail fast when ``database.feature_dimensions`` names a metric the
+        seed does not produce (U8 / FR-RUN-056, DES-005 §4.4).
+
+        Every non-builtin dimension declared in *config* must be present and
+        numeric in the seed's pre-flight metrics — otherwise the run would
+        only crash at the engine's seed-add, after the run record, wrapper,
+        and lock already exist. The :data:`OE_BUILTIN_FEATURE_DIMENSIONS`
+        (``complexity``/``diversity``/``combined_score``) are computed inside
+        OpenEvolve and never required. A non-float-coercible metric already
+        fails pydantic validation inside ``run_instance``, so the live case
+        here is the *absent* metric; the numeric check is a defensive belt.
+
+        Raises:
+            ValidationError: Naming the missing dimension and listing the
+                available seed metrics (exit 1, before iteration 0).
+        """
+        db_section = config.get("database")
+        if not isinstance(db_section, dict):
+            return
+        dimensions = db_section.get("feature_dimensions")
+        if not isinstance(dimensions, list):
+            return
+        metrics = seed_metrics if isinstance(seed_metrics, dict) else {}
+        for dim in dimensions:
+            if not isinstance(dim, str) or dim in OE_BUILTIN_FEATURE_DIMENSIONS:
+                continue
+            value = metrics.get(dim)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                continue
+            available = ", ".join(sorted(metrics)) if metrics else "none"
+            raise ValidationError(
+                f"Feature dimension '{dim}' not found in seed metrics. "
+                f"Available metrics: {available}. Either make the evaluator "
+                f"return a numeric '{dim}' metric or remove it from "
+                f"database.feature_dimensions."
+            )
 
     def launch(
         self,
