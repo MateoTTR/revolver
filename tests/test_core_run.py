@@ -985,6 +985,9 @@ def test_post_run_eval_persists_via_evaluate_solution(
     captured = capsys.readouterr()
     assert "Post-run evaluation" in captured.err
     assert "2/2 instances solved" in captured.err
+    # The FR-EVL-009 split warning is suppressed on the post-run path:
+    # evaluating the training split is by design (FR-RUN-019).
+    assert "expected 'eval'" not in captured.err
 
 
 @pytest.mark.unit
@@ -1024,6 +1027,7 @@ def test_post_run_eval_delegates_force_true_no_hardcoded_timeout(
     assert kwargs["dataset_name"] == "train-small"
     assert kwargs["force"] is True
     assert kwargs["project_root"] == root
+    assert kwargs["warn_split"] is False, "train-split warning is by-design noise here"
     assert "timeout_s" not in kwargs, "timeout must come from the eval path"
     # DB-contention guard: the held connection is committed before the call.
     mock_conn.commit.assert_called_once()

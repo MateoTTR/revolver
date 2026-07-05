@@ -1377,12 +1377,15 @@ def _post_run_evaluation(
     # force=True: evaluate_solution raises when an eval already exists for
     # (solution, dataset). The rank-1 solution was created moments ago, so a
     # pre-existing eval is only possible on ID reuse — replace it rather
-    # than fail the fresh post-run eval.
+    # than fail the fresh post-run eval. warn_split=False: this is the
+    # training evaluation (FR-RUN-019), so the FR-EVL-009 "expected 'eval'"
+    # split warning would be misleading noise on every completed run.
     result = evaluate_solution(
         solution_id_or_alias=solution_id,
         dataset_name=dataset_name,
         force=True,
         project_root=project_root,
+        warn_split=False,
     )
 
     meta = result.metadata
