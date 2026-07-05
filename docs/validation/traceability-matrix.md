@@ -294,8 +294,8 @@ Design: [DES-005 §post-run](../architecture/design/DES-005-run-orchestration.md
 | FR-SOL-018 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_show_stdout` | Implemented |
 | FR-SOL-019 | MUST | DES-005 | L2 | `integration/test_solution::test_solution_export_default` | Implemented |
 | FR-SOL-020 | SHOULD | DES-005 | L2 | `integration/test_solution::test_solution_diff_different` | Implemented |
-| FR-SOL-021 | MUST | DES-005 §extract/§4.6, ADR-007 §capabilities | L2 | `integration/test_solution::test_solution_extract_rank_n_shinka` | Planned (S18 / top-N #299 — `solution extract --rank N` (and `--program-id <id>` where supported) promotes an arbitrary-ranked/identified population program, gated on `capabilities().top_n_extraction`; Shinka reads `programs.sqlite` retroactively and materializes `programs/rank-<N>.py`; `(run_id, rank)` uniqueness enforced; `--rank 1` behaves exactly as today) |
-| FR-SOL-021 | MUST | DES-005 §4.6, ADR-007 §capabilities | L2 | `integration/test_solution::test_solution_extract_rank_unsupported_oe` | Planned (S18 / top-N #299 — a non-capable backend (OpenEvolve, consciously deferred) exits 1 with a clear "not supported on `<backend>`" error) |
+| FR-SOL-021 | MUST | DES-005 §extract/§4.6, ADR-007 §capabilities | L2 | `integration/test_solution::test_solution_extract_rank_n_shinka` | Implemented (S18 / top-N #299 — `solution extract --rank N` (and `--program-id <id>` where supported) promotes an arbitrary-ranked/identified population program, gated on `capabilities().top_n_extraction`; Shinka reads `programs.sqlite` retroactively and materializes `programs/rank-<N>.py`; `(run_id, rank)` uniqueness enforced; `--rank 1` behaves exactly as today) |
+| FR-SOL-021 | MUST | DES-005 §4.6, ADR-007 §capabilities | L2 | `integration/test_solution::test_solution_extract_rank_unsupported_oe` | Implemented (S18 / top-N #299 — a non-capable backend (OpenEvolve, consciously deferred) exits 1 with a clear "not supported on `<backend>`" error) |
 
 ---
 

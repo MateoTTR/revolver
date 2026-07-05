@@ -216,7 +216,8 @@ Programs (from backend output):
   #1  score=0.91  → sol-20260310-143000 (extracted)
   #2  score=0.85
   #3  score=0.79
-  Use `revolver solution extract --run run-20260310-143000 --rank <N>` to promote.
+  Use `revolver solution extract --run run-20260310-143000 --rank <N>` to promote
+  (ranks > 1 require a top-N-capable backend — FR-SOL-021).
 
 Resume chain: (none)
 ```

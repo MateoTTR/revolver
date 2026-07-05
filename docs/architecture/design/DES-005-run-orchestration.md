@@ -1236,7 +1236,7 @@ class ProgressInfo(BaseModel):
 
 ## 9. Storage Layout
 
-Each run has its own directory under `.revolver/runs/`. Solutions do not have their own directories — they are DB references to programs stored in the run directory. All top-ranked programs from OpenEvolve are stored as `rank-N.py` files; only rank-1 is auto-promoted to a solution. Others can be promoted on demand via `solution extract`.
+Each run has its own directory under `.revolver/runs/`. Solutions do not have their own directories — they are DB references to programs stored in the run directory. A completed run materializes the **best** program as `programs/rank-1.py` (both backends — single best, since S9-B2) and auto-promotes it to a solution. On a top-N-capable backend (ShinkaEvolve), `solution extract --rank N` / `--program-id` materializes additional `rank-<N>.py` files on demand from the backend program store — retroactively on old runs, no layout change (FR-SOL-021, §7.3).
 
 ```
 .revolver/
@@ -1429,7 +1429,7 @@ User      CLI         Core            OpenEvolve    Store    DB       Hashing
  │◄progress│◄─progress─│◄── on_progress ────│            │        │
  │         │           │                     │            │        │
  │         │           │◄── results ─────────│            │        │
- │         │           │── save programs ────►│ (rank-N.py)│        │
+ │         │           │── save programs ────►│ (rank-1.py)│        │
  │         │           │── copy checkpoint ──►│            │        │
  │         │           │── gen solution ID (rank-1)         │        │
  │         │           │── insert solution ──────────────►│         │
@@ -1466,7 +1466,7 @@ User      CLI         Core            OpenEvolve    Store    DB
  │         │           │                      │ (resume)   │
  │◄progress│◄─progress─│◄── on_progress ─────│            │
  │         │           │◄── results ──────────│            │
- │         │           │── save programs ─────►│ (rank-N.py)│
+ │         │           │── save programs ─────►│ (rank-1.py)│
  │         │           │── gen solution ID (rank-1)          │
  │         │           │── insert solution ─────────────────►│
  │         │           │── post-run eval (rank-1) │            │
@@ -1532,14 +1532,14 @@ Env vars are set before the run and cleaned up after. The context manager patter
 
 ### DD-07: Extract on demand — rank-1 auto-created, others on demand
 
-`revolver run` always stores all top-ranked programs from OpenEvolve output as `rank-1.py`, `rank-2.py`, ..., `rank-N.py` in the run's `programs/` directory. However, only the best program (rank-1) is automatically promoted to a solution in the DB. Additional programs can be promoted on demand via `revolver solution extract --run <id> --rank N`.
+`revolver run` materializes the single **best** program as `rank-1.py` in the run's `programs/` directory (S9-B2 revision — the engines reliably output one best program) and automatically promotes it to a solution in the DB. The rest of the population stays in the backend's own store; additional programs are promoted on demand via `revolver solution extract --run <id> --rank N` (or `--program-id`), which materializes the requested `rank-<N>.py` at extraction time on a top-N-capable backend (FR-SOL-021, §7.3).
 
 **Key properties**:
 - One auto-created solution per run (rank-1), with post-run training eval
-- All programs stored in the run directory for inspection via `run info`
+- The full population is inspectable via `run population` (read from the backend store); `rank-<N>.py` files beyond rank-1 are materialized lazily at extraction time
 - `solution extract` creates a new solution row `(run_id, rank)` and runs training eval at extraction time
 - `UNIQUE(run_id, rank)` constraint prevents duplicate extractions
-- No `--top-n` flag on `revolver run` — the number of programs stored is determined by OpenEvolve's internal behavior
+- No `--top-n` flag on `revolver run` — promotion depth is decided at extraction time, never at run time
 
 **Why extract on demand** (v0.2 → v0.3 evolution):
 
@@ -1550,7 +1550,7 @@ The previous design (v0.2 DD-07) auto-created N solution rows when `--top-n > 1`
 
 **Workflow**:
 1. `revolver run --version v1.1 --llm claude --dataset train-small` → auto-creates rank-1 solution
-2. `revolver run info run-20260310-143000` → shows all stored programs with scores
+2. `revolver run population run-20260310-143000` → shows the ranked population with scores
 3. `revolver solution extract --run run-20260310-143000 --rank 2 --alias "alt-approach"` → promotes rank-2
 
 **Post-run behavior**:

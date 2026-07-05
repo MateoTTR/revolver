@@ -224,10 +224,10 @@ A **Solution** is a **lightweight reference** to a program within a Run. It is a
 - **Program path** (derived): `.revolver/runs/<run_id>/programs/rank-<N>.py`
 - **Lineage**: Inherited from the parent Run (problem version, dataset, LLM, config, generation time, iterations)
 - **Run reference**: Links to the Run that produced it (`run_id`)
-- **Creation**: The rank-1 solution is auto-created by `revolver run`. Additional solutions can be extracted on demand via `revolver solution extract --run <id> --rank <N>`, which promotes a stored program to a first-class solution with post-extraction training evaluation.
+- **Creation**: The rank-1 solution is auto-created by `revolver run`. Additional solutions can be extracted on demand via `revolver solution extract --run <id> --rank <N>` (or `--program-id <id>`), which promotes a population program to a first-class solution with post-extraction training evaluation. Ranks > 1 and program ids are gated on the run backend's `top_n_extraction` capability (ShinkaEvolve: native; OpenEvolve: rank 1 only — FR-SOL-021).
 
 A **Run** is the first-class physical entity that owns all artifacts from an evolution on the selected backend (ADR-007):
-- **Programs**: The best evolved program is stored as `.revolver/runs/<run_id>/programs/rank-1.py` (from backend output — both backends currently materialize a single best program) and is auto-promoted to a solution. The full population remains inspectable via `run population`; promoting arbitrary population members is a planned extension (top-N extraction, ADR-007 capability).
+- **Programs**: The best evolved program is stored as `.revolver/runs/<run_id>/programs/rank-1.py` (from backend output — both backends currently materialize a single best program) and is auto-promoted to a solution. The full population remains inspectable via `run population`; arbitrary population members are promoted via `solution extract --rank N` / `--program-id` on top-N-capable backends (ShinkaEvolve reads its `programs.sqlite` retroactively and materializes `rank-<N>.py` on demand; OpenEvolve is consciously deferred — top-N extraction, ADR-007 capability, FR-SOL-021).
 - **Resume state**: Backend resume state for potential resume (OpenEvolve: checkpoint in `.revolver/runs/<run_id>/oe-checkpoint/`; ShinkaEvolve: results dir with its SQLite DB)
 - **Config**: The backend config used for this run
 - **Wrapper**: The generated evaluator wrapper (`_revolver_evaluator.py`)
