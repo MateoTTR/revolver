@@ -101,7 +101,8 @@ _LOCAL_API_KEY_PLACEHOLDER = "ollama"
 # Number of ranked programs materialized into <results_dir>/best/ after a
 # run. Mirrors OpenEvolve's output (a single best/best_program.py) so the
 # orchestrator's program collection behaves identically across backends;
-# top-N extraction (capabilities().top_n_extraction) is an S15 extension.
+# top-N extraction beyond rank 1 is served on demand by
+# extract_ranked_program (S18 / #299), not by widening this count.
 _BEST_PROGRAMS_COUNT = 1
 
 # Sane LLM-setting defaults for the Shinka path (Sprint 015 Scope B, #301).
@@ -1600,7 +1601,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
         ``top_n_extraction=True``): the full population — source code
         included — lives in ``programs.sqlite``, so this is the rank-1
         materialization query (:meth:`_materialize_best_programs`:
-        ``combined_score DESC``, ties broken by insertion timestamp)
+        ``combined_score DESC``, ties broken by insertion timestamp then id)
         without its ``LIMIT``. Programs with a SQL ``NULL``
         ``combined_score`` (failed evaluations) are excluded — the
         resulting ranks match what ``run population`` displays for scored
@@ -1641,7 +1642,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                 rows = conn.execute(
                     "SELECT id, code, combined_score FROM programs "
                     "ORDER BY (combined_score IS NULL), combined_score DESC, "
-                    "timestamp"
+                    "timestamp, id"
                 ).fetchall()
             finally:
                 conn.close()
@@ -1822,7 +1823,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                     "SELECT id, generation, combined_score, correct, "
                     "public_metrics, parent_id FROM programs "
                     "ORDER BY (combined_score IS NULL), combined_score DESC, "
-                    "timestamp"
+                    "timestamp, id"
                 ).fetchall()
             finally:
                 conn.close()
@@ -2249,7 +2250,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
                 rows = conn.execute(
                     "SELECT id, code, combined_score FROM programs "
                     "WHERE combined_score IS NOT NULL "
-                    "ORDER BY combined_score DESC, timestamp LIMIT ?",
+                    "ORDER BY combined_score DESC, timestamp, id LIMIT ?",
                     (_BEST_PROGRAMS_COUNT,),
                 ).fetchall()
             finally:

@@ -1214,13 +1214,35 @@ def test_solution_extract_rank_n_shinka(tmp_project: Path) -> None:
     assert [r[0] for r in rows] == [1, 2]
     assert rows[1][1] == pytest.approx(0.55)  # distinct combined_score, not 0.91
 
-    # UNIQUE(run_id, rank): a second --rank 2 without --force is rejected.
+    # UNIQUE(run_id, rank): a second --rank 2 without --force is rejected,
+    # naming the blocking solution and the --force way out (spec wording).
     result_dup = _invoke_with_cwd(
         ["solution", "extract", "--run", "run-shinka-store", "--rank", "2"],
         tmp_project,
     )
     assert result_dup.exit_code == 1  # type: ignore[union-attr]
-    assert "already exists" in _get_all_output(result_dup).lower()
+    dup_output = _get_all_output(result_dup)
+    assert "already exists" in dup_output.lower()
+    assert "--force" in dup_output
+
+    # --force re-extract of the now-materialized rank-2 file must NOT
+    # silently drop the recorded best_score (PR #268 review): the file is
+    # promoted as-is, but the store score is still consulted and recorded.
+    result_force = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-store", "--rank", "2", "--force"],
+        tmp_project,
+    )
+    assert result_force.exit_code == 0, _get_all_output(result_force)  # type: ignore[union-attr]
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT best_score FROM solutions WHERE run_id = ? AND rank = 2",
+            ("run-shinka-store",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == pytest.approx(0.55)  # preserved, not NULL
 
 
 @pytest.mark.integration

@@ -481,11 +481,23 @@ def extract_solution(
                 ranked = top_n_backend.extract_ranked_program(run_dir, program_id=program_id)
                 rank = ranked.rank
                 program_path = run_dir / "programs" / f"rank-{rank}.py"
-            elif not program_path.exists():
-                if top_n_backend is not None:
+            elif top_n_backend is not None:
+                # Rank-addressed on a top-N backend: consult the store even
+                # when rank-<N>.py already exists — the file stays
+                # authoritative for the code (never rewritten in 3b), but
+                # the store score is recorded so a --force re-extract never
+                # silently drops the previously recorded best_score
+                # (PR #268 review). When the store is missing/unreadable or
+                # the rank is not in it, an EXISTING file is still
+                # promotable (score unknown, as before); a missing file
+                # stays an error.
+                try:
                     ranked = top_n_backend.extract_ranked_program(run_dir, rank=rank)
-                else:
-                    raise ValidationError(f"No program found at rank {rank} for run '{run_id}'")
+                except ValidationError:
+                    if not program_path.exists():
+                        raise
+            elif not program_path.exists():
+                raise ValidationError(f"No program found at rank {rank} for run '{run_id}'")
         else:
             # Read-only recovery (fails fast on an unrecoverable run). The
             # recovered code is materialized to disk only *after* the
@@ -508,8 +520,11 @@ def extract_solution(
                 if force:
                     old_solution_id = s.id
                 else:
+                    # Wording per spec-solution.md (edge-case table): name
+                    # the blocking solution and the --force way out.
                     raise DuplicateNameError(
-                        f"Solution already exists for run={run_id}, rank={rank}"
+                        f"Solution already exists for run '{run_id}' rank {rank}: "
+                        f"'{s.id}'. Use --force to replace."
                     )
 
         # 3b. Materialize the recovered checkpoint program — or the
