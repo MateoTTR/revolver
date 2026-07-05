@@ -1,3 +1,7 @@
+---
+verified-against: v0.17.1
+---
+
 # Initial Program Structure Guide
 
 Best practices for structuring initial programs that OpenEvolve can optimize

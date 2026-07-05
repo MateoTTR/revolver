@@ -291,6 +291,8 @@ def evaluate_solution(
     force: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
     project_root: Path | None = None,
+    *,
+    warn_split: bool = True,
 ) -> EvalResult:
     """Evaluate a solution against a dataset.
 
@@ -306,6 +308,11 @@ def evaluate_solution(
         force: If ``True``, delete existing evaluation before re-evaluating.
         on_progress: Callback ``(completed, total)`` for progress reporting.
         project_root: Explicit project root, or ``None`` to auto-detect.
+        warn_split: Emit the FR-EVL-009 warning when the dataset split is
+            not eval-eligible. The post-run training evaluation
+            (FR-RUN-019, ``core.run``) passes ``False``: evaluating the
+            training split there is by design, so the "expected 'eval'"
+            warning would be misleading noise on every completed run.
 
     Returns:
         An :class:`EvalResult` with metadata, aggregates, and compute time.
@@ -351,7 +358,9 @@ def evaluate_solution(
 
         # 5. Warn if split is not eval-eligible (FR-EVL-009). "both"
         #    (dual-use) datasets are eval-eligible — no warning (UX-3 / S16-18).
-        if ds.split is not None and ds.split not in ("eval", "both"):
+        #    Suppressed on the post-run training eval path (warn_split=False):
+        #    evaluating the train split there is by design (FR-RUN-019).
+        if warn_split and ds.split is not None and ds.split not in ("eval", "both"):
             sys.stderr.write(
                 f"Warning: dataset '{dataset_name}' has split='{ds.split}' (expected 'eval').\n"
             )

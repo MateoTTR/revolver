@@ -81,6 +81,21 @@ def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]
     return {"combined_score": 0.5, "via_instance": 1.0}
 '''
 
+_EVALUATOR_ONE_TIMEOUT = '''\
+"""Evaluator: the instance named *-timeout.* times out, the rest succeed.
+
+The timeout trigger matches the file NAME only — pytest tmp dirs may
+contain "timeout" in the test-derived directory name.
+"""
+import os
+
+
+def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
+    if "timeout" in os.path.basename(instance_path):
+        raise TimeoutError("simulated per-instance timeout")
+    return {"combined_score": 0.5}
+'''
+
 _PROGRAM_SOURCE = "def solve(data):\n    return sum(data)\n"
 
 
@@ -126,13 +141,14 @@ def _run_wrapper(
     program: Path,
     results_dir: Path,
     dataset_dir: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a wrapper the way Shinka's local scheduler does.
 
     Command shape verified in ``shinka/launch/scheduler.py::_build_command``:
     ``python <wrapper> --program_path <program> --results_dir <dir>``.
     """
-    env = {**os.environ, "REVOLVER_DATASET_DIR": str(dataset_dir)}
+    env = {**os.environ, "REVOLVER_DATASET_DIR": str(dataset_dir), **(extra_env or {})}
     return subprocess.run(
         [
             sys.executable,
@@ -300,6 +316,54 @@ class TestGenerateWrapperContract:
         assert proc.returncode == 0, proc.stderr
         correct = _read_json(results_dir / "correct.json")
         assert correct["correct"] is False
+
+    def test_shinka_wrapper_timeout_branch(self, tmp_path: Path) -> None:
+        """A timed-out instance hits the distinct TimeoutError branch (FR-RUN-053).
+
+        S18 / U13 #367 commit (ii): the Shinka wrapper previously caught ALL
+        exceptions in one branch, so a timeout was indistinguishable from an
+        ordinary failure. The generated wrapper now records the timed-out
+        instance on the ``REVOLVER_INSTANCE_LOG`` side-channel (marker metric
+        ``instances_timeout``) and reports it via the coverage keys, while
+        the surviving instances keep the run correct.
+        """
+        import sqlite3
+
+        wrapper = _generate_wrapper(tmp_path, _EVALUATOR_ONE_TIMEOUT)
+        results_dir = tmp_path / "results"
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        (dataset_dir / "inst-01.json").write_text("{}")
+        (dataset_dir / "inst-02-timeout.json").write_text("{}")
+        (dataset_dir / "inst-03.json").write_text("{}")
+        log_db = tmp_path / "instance_log.db"
+
+        proc = _run_wrapper(
+            wrapper,
+            _make_program(tmp_path),
+            results_dir,
+            dataset_dir,
+            extra_env={"REVOLVER_INSTANCE_LOG": str(log_db)},
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        # The timed-out instance is on the side-channel with the timeout
+        # marker — distinguishable from a plain failure.
+        conn = sqlite3.connect(log_db)
+        try:
+            rows = conn.execute(
+                "SELECT instance_id, value FROM instance_log WHERE metric = 'instances_timeout'"
+            ).fetchall()
+        finally:
+            conn.close()
+        assert rows == [("inst-02-timeout.json", 1.0)]
+        # Coverage keys report the honest per-instance coverage (FR-RUN-053).
+        metrics = _read_json(results_dir / "metrics.json")
+        assert metrics["instances_valid"] == pytest.approx(2.0)
+        assert metrics["instances_total"] == pytest.approx(3.0)
+        # The surviving instances keep the run correct.
+        correct = _read_json(results_dir / "correct.json")
+        assert correct["correct"] is True
 
     def test_wrapper_missing_combined_score_raises_or_incorrect(self, tmp_path: Path) -> None:
         """(e) Missing combined_score in metrics raises or marks incorrect."""

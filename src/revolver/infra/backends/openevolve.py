@@ -127,6 +127,13 @@ REVOLVER_KEYS = frozenset({"initial_program", "num_generations", "timeout_per_in
 #   generated wrapper evaluator, never passed to the OpenEvolve Config schema.
 REVOLVER_SECTIONS = frozenset({"evaluation"})
 
+# Feature dimensions computed *inside* OpenEvolve (U8 / FR-RUN-056). They are
+# legitimately absent from the evaluator's (and thus the seed's pre-flight)
+# metrics, so validate_seed_metrics() must never require them: ``complexity``
+# and ``diversity`` are engine builtins derived from the program itself, and
+# ``combined_score`` is the fitness the engine reads from every evaluation.
+OE_BUILTIN_FEATURE_DIMENSIONS = frozenset({"complexity", "diversity", "combined_score"})
+
 # Default LLM request timeout (seconds) injected for ``--source local``
 # endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
 # OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
@@ -810,6 +817,23 @@ def build_config(
         # B9 (S17-30): warn on override keys that land on no OpenEvolve field.
         _warn_noop_config_overrides(config_overrides, parsed_overrides)
 
+    # 5a. U6 phase 2 (S18-13 / FR-RUN-057): default checkpoint cadence.
+    # When checkpoint_interval is UNSET (absent from both the problem
+    # config.yaml and --config-override — checked after step 5 so an
+    # override counts as explicit), default it to max(1, min(100,
+    # iterations // 10)) so a killed <=100-iteration run has a mid-run
+    # checkpoint to resume from (the engine default of 100 meant zero
+    # mid-run checkpoints for the whole default regime). An EXPLICIT value
+    # is never touched; a defaulted one is always <= iterations, which
+    # naturally defuses 5b's default-100-vs-small-iters clamp. Release-noted
+    # v0.18 default-path change (sprint-018 exit criterion 10). Shinka has
+    # no checkpoint_interval concept — this is OpenEvolve-only.
+    interval_is_explicit = "checkpoint_interval" in config
+    if not interval_is_explicit:
+        cadence_iters = config.get("max_iterations")
+        if isinstance(cadence_iters, int) and cadence_iters > 0:
+            config["checkpoint_interval"] = max(1, min(100, cadence_iters // 10))
+
     # 5b. Guard: ensure checkpoint_interval <= iterations for resume capability
     effective_interval = config.get("checkpoint_interval", 100)  # OE default
     effective_iters = config.get("max_iterations")
@@ -839,11 +863,13 @@ def build_config(
     # count means the only checkpoint is the completion one — a killed or
     # interrupted run has nothing to resume from. Checked on the PRE-clamp
     # value so it never stacks on 5b (the strictly-> regime is 5b's: it has
-    # already warned and clamped, incl. the default-template case of OE's
-    # 100 default vs small iteration counts — S17a code review). Warn-only;
-    # a smarter default cadence is the v0.18 phase 2 (backlog 364).
+    # already warned and clamped — S17a code review). Warn-only, and gated
+    # on an EXPLICIT interval (U6 phase 2 / S18-13): the 5a default cadence
+    # can legitimately equal iterations (max_iterations=1) and must not
+    # nag the user about a value they never set.
     if (
-        effective_iters is not None
+        interval_is_explicit
+        and effective_iters is not None
         and isinstance(effective_interval, int)
         and isinstance(effective_iters, int)
         and effective_iters > 0
@@ -1090,12 +1116,48 @@ def _build_cell_reverse_map(
     return reverse
 
 
+def _display_score_from_metrics(metrics: dict[str, Any]) -> float | None:
+    """Extract the display/ranking score from an OE metrics dict (FR-RUN-052).
+
+    Prefers a numeric ``combined_score`` over the sum-of-numeric-metrics:
+    the sum inflates the displayed score whenever auxiliary numeric metrics
+    exist alongside ``combined_score`` (U13/#367 display guard). The sum is
+    the fallback only when no numeric ``combined_score`` is present
+    (population ranking still needs a number); the reserved ``instances_``
+    coverage prefix (FR-RUN-053) is excluded from that fallback sum so the
+    coverage keys can never inflate it. A metrics dict with no other
+    numeric values yields ``None`` — never a crash.
+
+    Booleans are excluded everywhere (``bool`` is an ``int`` subclass).
+
+    Args:
+        metrics: The program's metrics dict from an OE checkpoint.
+
+    Returns:
+        The score to display/rank by, or ``None`` if no numeric value exists.
+    """
+    combined = metrics.get("combined_score")
+    if isinstance(combined, (int, float)) and not isinstance(combined, bool):
+        return float(combined)
+    numeric_vals = [
+        v
+        for k, v in metrics.items()
+        if not k.startswith("instances_")
+        and isinstance(v, (int, float))
+        and not isinstance(v, bool)
+    ]
+    if numeric_vals:
+        return float(sum(numeric_vals))
+    return None
+
+
 def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
     """Parse OE checkpoint programs into a ranked population list.
 
     Scans ``checkpoint_dir/programs/*.json``, loads each program,
-    extracts key fields and computes combined_score (sum of numeric
-    metric values, matching OpenEvolve's ``_safe_sum_metrics`` convention).
+    extracts key fields and computes the display score via
+    :func:`_display_score_from_metrics` — a numeric ``combined_score``
+    when present, else the sum of numeric metric values (FR-RUN-052).
 
     Also reads ``metadata.json`` to resolve MAP-Elites cell indices
     and island assignments for each program.
@@ -1120,13 +1182,9 @@ def parse_population(checkpoint_dir: Path) -> list[dict[str, Any]]:
         try:
             data = _json.loads(prog_file.read_text(encoding="utf-8"))
             metrics = data.get("metrics", {})
-            # Combined score = sum of numeric metric values (OE convention)
-            numeric_vals = [
-                v
-                for v in metrics.values()
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
-            ]
-            combined_score = sum(numeric_vals) if numeric_vals else 0.0
+            # Display guard (FR-RUN-052): prefer combined_score over the sum.
+            score = _display_score_from_metrics(metrics)
+            combined_score = score if score is not None else 0.0
 
             prog_id = data.get("id", prog_file.stem)
             cell_info = cell_map.get(prog_id, {})
@@ -1161,8 +1219,9 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
     corresponding program file from ``programs/{id}.json`` and extracts
     the score.
 
-    Score extraction mirrors :func:`parse_population`: sums all numeric
-    metric values.
+    Score extraction mirrors :func:`parse_population` (FR-RUN-052):
+    prefers a numeric ``combined_score``, falling back to the sum of
+    numeric metric values only when no ``combined_score`` exists.
 
     All file operations are read-only and error-tolerant — the checkpoint
     may be mid-write by a concurrent OpenEvolve process.
@@ -1193,14 +1252,9 @@ def read_checkpoint_best_score(checkpoint_dir: Path) -> float | None:
         if not isinstance(metrics, dict):
             return None
 
-        # Sum of all numeric metric values (consistent with parse_population)
-        numeric_vals = [
-            v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
-        ]
-        if numeric_vals:
-            return float(sum(numeric_vals))
-
-        return None
+        # Display guard (FR-RUN-052, consistent with parse_population):
+        # prefer combined_score, fall back to the numeric-metric sum.
+        return _display_score_from_metrics(metrics)
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -1346,6 +1400,13 @@ from evaluator import evaluate_instance
 # Per-instance timeout in seconds (None = no timeout)
 _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
 
+# Timed-out instance policy baked at generation time (FR-RUN-054):
+# "penalize" (v0.18 default) counts the instance at _TIMEOUT_SCORE in the
+# fitness mean; "drop" excludes it (pre-0.18 survivor-mean). Validated at
+# the launch point; resume inherits this baked policy with the wrapper.
+_ON_TIMEOUT = {on_timeout!r}
+_TIMEOUT_SCORE = {timeout_score!r}
+
 
 def _call_evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
     """Call evaluate_instance with optional per-instance timeout guard."""
@@ -1396,18 +1457,33 @@ def evaluate(program_path: str) -> dict[str, float]:
     )
 
     all_metrics: list[dict[str, float]] = []
+    valid = 0  # instances that genuinely returned metrics (FR-RUN-053)
     for inst in instances:
         try:
             metrics = _call_evaluate_instance(program_path, str(inst))
             all_metrics.append(metrics)
+            valid += 1
             _log_instance(inst.name, metrics)
         except TimeoutError as _te:
+            # Distinct timeout branch (FR-RUN-053): record the timed-out
+            # instance on the side-channel so it stays visible per instance.
             print(f"[revolver] timeout for {{inst.name}}: {{_te}}", file=sys.stderr)
+            _log_timeout(inst.name)
+            if _ON_TIMEOUT == "penalize":
+                # FR-RUN-054 (v0.18 default): a timed-out instance
+                # contributes the penalty score to the fitness mean
+                # instead of silently vanishing from it.
+                all_metrics.append({{"combined_score": _TIMEOUT_SCORE}})
+            # "drop": fall through — survivor-mean (pre-0.18 behavior).
         except Exception as _e:
             print(f"[revolver] evaluation failed for {{inst.name}}: {{_e}}", file=sys.stderr)
 
     if not all_metrics:
-        return {{"combined_score": 0.0}}
+        return {{
+            "combined_score": 0.0,
+            "instances_valid": 0.0,
+            "instances_total": float(len(instances)),
+        }}
 
     # Numeric guard (B1 / FR-EVL-021): a user evaluate_instance may emit
     # non-numeric fields (e.g. {{"error": "boom"}}) alongside numeric metrics.
@@ -1425,15 +1501,20 @@ def evaluate(program_path: str) -> dict[str, float]:
     result: dict[str, float] = {{"combined_score": combined}}
 
     # Include other metrics as aggregated means, dropping non-numeric values.
+    # The reserved "instances_" coverage prefix is NEVER averaged into the
+    # metrics (FR-RUN-053; read-path counterpart: FR-EVL-021 as amended).
     all_keys: set[str] = set()
     for m in all_metrics:
         all_keys.update(m.keys())
     for key in sorted(all_keys):
-        if key != "combined_score":
+        if key != "combined_score" and not key.startswith("instances_"):
             vals = [m[key] for m in all_metrics if key in m and _is_number(m[key])]
             if vals:
                 result[key] = statistics.mean(vals)
 
+    # Coverage keys: metadata, not fitness (FR-RUN-053).
+    result["instances_valid"] = float(valid)
+    result["instances_total"] = float(len(instances))
     return result
 
 
@@ -1454,6 +1535,34 @@ def _log_instance(instance_id: str, metrics: dict[str, float]) -> None:
                 "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
                 (instance_id, metric, value, os.getpid()),
             )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Side-channel is best-effort
+
+
+def _log_timeout(instance_id: str) -> None:
+    """Record a timed-out instance on the SQLite side-channel (FR-RUN-053).
+
+    Same best-effort channel as _log_instance, with a status marker row
+    (metric "instances_timeout", value 1.0 — reserved "instances_" prefix,
+    never aggregated) so timed-out instances stay visible per instance
+    regardless of how the fitness mean treats them.
+    """
+    log_path = os.environ.get("REVOLVER_INSTANCE_LOG")
+    if not log_path:
+        return
+    try:
+        conn = sqlite3.connect(log_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS instance_log "
+            "(instance_id TEXT, metric TEXT, value REAL, pid INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
+            (instance_id, "instances_timeout", 1.0, os.getpid()),
+        )
         conn.commit()
         conn.close()
     except Exception:
@@ -1496,6 +1605,8 @@ def generate_wrapper(
     snapshot_dir: Path,
     output_dir: Path,
     timeout_per_instance: float | None = None,
+    on_timeout: str = "penalize",
+    timeout_score: float = 0.0,
 ) -> Path:
     """Generate the wrapper evaluator file for OpenEvolve.
 
@@ -1515,6 +1626,13 @@ def generate_wrapper(
             When set, each ``evaluate_instance()`` call is guarded by a
             ``multiprocessing.Process`` with ``.join(timeout)`` + ``.kill()``.
             Defaults to ``None`` (no timeout).
+        on_timeout: Timed-out instance policy baked into the wrapper
+            (FR-RUN-054): ``"penalize"`` (default, v0.18 fitness-landscape
+            flip) counts the instance at *timeout_score* in the fitness
+            mean; ``"drop"`` excludes it (pre-0.18 survivor-mean).
+            Validated upstream at the shared launch point in ``core.run``.
+        timeout_score: Finite penalty score contributed by a timed-out
+            instance under ``on_timeout="penalize"``. Defaults to ``0.0``.
 
     Returns:
         Path to the generated (or copied) ``_revolver_evaluator.py``.
@@ -1554,6 +1672,8 @@ def generate_wrapper(
         wrapper_code = _WRAPPER_TEMPLATE.format(
             snapshot_dir=str(snapshot_dir),
             timeout_per_instance=timeout_per_instance,
+            on_timeout=on_timeout,
+            timeout_score=timeout_score,
         )
         output_path.write_text(wrapper_code)
         return output_path
@@ -1567,7 +1687,9 @@ def generate_wrapper(
 # ── Project-init config template (S13-13, FR-PRJ-005) ────────────────────────
 # Moved from revolver.core.project (template ownership inverted per ADR-007:
 # the backend serves its own config.yaml scaffold via config_template()).
-# Content must stay byte-identical to the pre-S13 core/project template.
+# Originally byte-identical to the pre-S13 core/project template; reworked in
+# S16a (A6/#318, schema-correct keys) and S18 (U13/#367, evaluation.on_timeout
+# policy). The golden copy lives in tests/test_project_integration.py.
 
 _CONFIG_TEMPLATE = """\
 # OpenEvolve configuration — edit to match your problem.
@@ -1598,6 +1720,12 @@ llm:
 # Evaluation settings (Revolver-specific; not part of the OpenEvolve schema).
 evaluation:
   timeout_per_instance: 30  # seconds
+  # Timed-out instance policy (v0.18): "penalize" counts the instance at
+  # timeout_score in the fitness mean; "drop" excludes it (pre-0.18
+  # survivor-mean). Note: with a negative timeout_score floor, lower
+  # scores are the penalty — mind negative-is-good metrics.
+  on_timeout: penalize
+  timeout_score: 0.0
 """
 
 
@@ -1725,7 +1853,51 @@ class OpenEvolveBackend:
             spec.snapshot_dir,
             run_dir,
             timeout_per_instance=spec.timeout_per_instance,
+            on_timeout=spec.on_timeout,
+            timeout_score=spec.timeout_score,
         )
+
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """Fail fast when ``database.feature_dimensions`` names a metric the
+        seed does not produce (U8 / FR-RUN-056, DES-005 §4.4).
+
+        Every non-builtin dimension declared in *config* must be present and
+        numeric in the seed's pre-flight metrics — otherwise the run would
+        only crash at the engine's seed-add, after the run record, wrapper,
+        and lock already exist. The :data:`OE_BUILTIN_FEATURE_DIMENSIONS`
+        (``complexity``/``diversity``/``combined_score``) are computed inside
+        OpenEvolve and never required. A non-float-coercible metric already
+        fails pydantic validation inside ``run_instance``, so the live case
+        here is the *absent* metric; the numeric check is a defensive belt.
+
+        Raises:
+            ValidationError: Naming the missing dimension and listing the
+                available seed metrics (exit 1, before iteration 0).
+        """
+        db_section = config.get("database")
+        if not isinstance(db_section, dict):
+            return
+        dimensions = db_section.get("feature_dimensions")
+        if not isinstance(dimensions, list):
+            return
+        metrics = seed_metrics if isinstance(seed_metrics, dict) else {}
+        for dim in dimensions:
+            if not isinstance(dim, str) or dim in OE_BUILTIN_FEATURE_DIMENSIONS:
+                continue
+            value = metrics.get(dim)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                continue
+            available = ", ".join(sorted(metrics)) if metrics else "none"
+            raise ValidationError(
+                f"Feature dimension '{dim}' not found in seed metrics. "
+                f"Available metrics: {available}. Either make the evaluator "
+                f"return a numeric '{dim}' metric or remove it from "
+                f"database.feature_dimensions."
+            )
 
     def launch(
         self,

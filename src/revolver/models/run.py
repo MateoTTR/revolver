@@ -60,7 +60,12 @@ class RunConfig(BaseModel):
         parallel: Number of parallel evaluations for OpenEvolve.
         rewrite_mode: Full-rewrite mode shortcut. When ``True``, sets
             ``diff_based_evolution=false`` and ``max_code_length=50000``.
-        backend: Evolution backend name (ADR-007). Defaults to ``"openevolve"``.
+        backend: Evolution backend name (ADR-007). ``None`` sentinel =
+            "not specified" (U4 / S18): the effective backend resolves
+            ``explicit --backend > version-stored backend (FR-PRB-016) >
+            default 'openevolve'`` in ``launch_run`` — the sentinel keeps
+            an explicit ``"openevolve"`` distinguishable from flag absence
+            (FR-RUN-047 as amended).
         selection: Ensemble selection strategy (``--selection``; ADR-007
             Amendment A2). ``None`` = backend default. Accepted values are
             capability-gated per backend (OpenEvolve: ``weighted`` only;
@@ -82,7 +87,7 @@ class RunConfig(BaseModel):
     temperature: float | None = None
     parallel: int | None = None
     rewrite_mode: bool = False
-    backend: str = "openevolve"
+    backend: str | None = None
     selection: str | None = None
     selection_kwargs: list[str] | None = None
     llm_weight_overrides: list[str] | None = None
@@ -336,8 +341,20 @@ class RunInfo(BaseModel):
             ShinkaEvolve's ``programs.sqlite``; ``None`` on OpenEvolve, where
             a full total needs checkpoint parsing — UX-4 / S16-19).
         run_best_score: Best score recorded by the engine at run completion,
-            used as a fallback for the rank-1 solution score when its own
-            post-run eval score is missing (UX-4 / S16-20).
+            used as a display-time fallback for the rank-1 solution score
+            when its own score is missing (UX-4 / S16-20, #306 — never a DB
+            write). A max over single, survivorship-prone evaluations: it is
+            rendered ONLY under the "engine, single eval" label
+            (S18 / U11 — FR-RUN-055), never bare.
+        post_eval_score: Post-run training-eval mean of ``combined_score``
+            over solved instances (honest, multi-instance — S18 / U11,
+            FR-RUN-055). Read back from the persisted post-run eval
+            (FR-RUN-019 via ``core.eval``). ``None`` when no post-run eval
+            exists or no instance produced a score.
+        post_eval_instances_valid: Coverage label numerator (FR-RUN-053):
+            number of instances contributing to ``post_eval_score``.
+        post_eval_instances_total: Coverage label denominator (FR-RUN-053):
+            total training instances in the post-run eval.
         resume_chain: Ordered list of ancestor run IDs.
         llm_type: ``"single"`` or ``"ensemble"``.
         llm_snapshot: JSON string with LLM/ensemble configuration snapshot.
@@ -363,6 +380,9 @@ class RunInfo(BaseModel):
     programs_extracted: int = 0
     total_programs: int | None = None
     run_best_score: float | None = None
+    post_eval_score: float | None = None
+    post_eval_instances_valid: int | None = None
+    post_eval_instances_total: int | None = None
     resume_chain: list[str] = []
     llm_type: str = "single"
     llm_snapshot: str | None = None
