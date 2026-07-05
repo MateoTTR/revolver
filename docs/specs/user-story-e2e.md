@@ -1,3 +1,7 @@
+---
+verified-against: v0.17.1
+---
+
 # User Story — End-to-End Workflow
 
 **Purpose**: Validate the CLI command flow from project creation to benchmark, using a concrete example.
