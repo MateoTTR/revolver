@@ -786,7 +786,9 @@ def _llm_request_timeout(timeout: Any) -> Iterator[None]:
         return
     try:
         import shinka.llm.client as shinka_llm_client  # type: ignore[import-not-found,import-untyped,unused-ignore]
-    except ImportError:
+    except Exception:
+        # A client module that imports-but-raises must degrade to the
+        # warning below, never crash the run (the lever is best-effort).
         shinka_llm_client = None
     if shinka_llm_client is None or not hasattr(shinka_llm_client, "TIMEOUT"):
         sys.stderr.write(
@@ -926,8 +928,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
         two segments are probed so a deeper key under a dict-valued field
         (``evo_config.llm_kwargs.max_tokens``) is not mistaken for a no-op.
         Revolver-owned sections (:data:`_REVOLVER_SECTIONS`:
-        ``evaluation``/``output_dir``/``llm_env``) are tolerated by
-        ``validate_config`` and never warn. Degrades to silence when shinka is
+        ``evaluation``/``output_dir``/``llm_env``/``llm_timeout``) are
+        tolerated by ``validate_config`` and never warn. Degrades to silence when shinka is
         not installed (``validate_config`` returns ``[]``).
 
         This intentionally overlaps ``_dataclass_kwargs`` for the
