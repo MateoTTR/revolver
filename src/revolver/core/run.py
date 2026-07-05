@@ -728,6 +728,70 @@ def _finalize_backstop_reap(pre_run_children: set[int]) -> None:
             sys.stderr.write(f"Warning: finalize child-process reap failed: {exc}\n")
 
 
+def _run_preflight_check(
+    backend: EvolutionBackend,
+    engine_config: dict[str, Any],
+    wrapper_path: Path,
+    initial_program: Path,
+    dataset_path: Path,
+) -> None:
+    """Pre-flight evaluation + seed-metric validation (DES-005 §2.1 steps 12/12b).
+
+    Shared by :func:`launch_run` and :func:`resume_run` (S18-12): evaluates
+    the initial program on the first dataset instance using the generated
+    wrapper — catching evaluator errors (crashes, timeouts, misconfigured
+    arguments) before wasting LLM tokens on a full evolution run — then feeds
+    the resulting metrics to the backend's ``validate_seed_metrics`` hook
+    (U8 / FR-RUN-056). Skipped entirely — hook included — when the dataset
+    directory holds no instances. Any failure raises before iteration 0, so
+    the run aborts with no engine construction.
+
+    Raises:
+        RevolverError: When the pre-flight evaluation fails (crash/timeout).
+        ValidationError: When the backend's seed-metric validation fails
+            (e.g. OpenEvolve: a non-builtin ``database.feature_dimensions``
+            metric absent or non-numeric in the seed's metrics).
+    """
+    preflight_instances = sorted(
+        (p for p in dataset_path.iterdir() if not p.name.startswith(".") and p.is_file()),
+        key=lambda p: p.name,
+    )
+    if not preflight_instances:
+        return
+    first_instance = preflight_instances[0]
+    preflight_result = eval_run_instance(
+        evaluator_path=wrapper_path,
+        program_path=initial_program,
+        instance_path=first_instance,
+        timeout_s=60.0,
+    )
+    if preflight_result.status != "pass":
+        raise RevolverError(
+            f"Pre-flight check failed: initial program evaluation "
+            f"{preflight_result.status} on {first_instance.name}."
+            + (f" Error: {preflight_result.error}" if preflight_result.error else "")
+            + " Fix the evaluator or initial program before running evolution."
+        )
+    # Log success
+    score_info = ""
+    if preflight_result.metrics:
+        cs = preflight_result.metrics.get("combined_score")
+        if cs is not None:
+            score_info = f", score={cs:.4f}"
+        if cs == 0.0:
+            sys.stderr.write(
+                f"Warning: pre-flight check passed but score=0.0 "
+                f"on {first_instance.name}. Evolution may not "
+                f"produce improvements.\n"
+            )
+    sys.stderr.write(f"Pre-flight check passed ({first_instance.name}{score_info}).\n")
+
+    # Step 12b — seed-metric validation (U8 / FR-RUN-056): fail fast, before
+    # iteration 0, when the built config declares a feature metric the seed
+    # does not produce (OpenEvolve; Shinka's hook is a no-op).
+    backend.validate_seed_metrics(engine_config, preflight_result.metrics)
+
+
 # ── launch_run (DES-005 §2.1) ────────────────────────────────────────────────
 
 
@@ -1045,51 +1109,16 @@ def launch_run(
                 # Record start time
                 start_time = time.monotonic()
 
-                # Pre-flight check: evaluate initial program on first instance
-                initial_program = snapshot_dir / "initial_program.py"
-                preflight_instances = sorted(
-                    (
-                        p
-                        for p in dataset_path.iterdir()
-                        if not p.name.startswith(".") and p.is_file()
-                    ),
-                    key=lambda p: p.name,
+                # Pre-flight evaluation + seed-metric validation (steps
+                # 12/12b — shared with resume_run, S18-12). Raises before
+                # the engine is constructed.
+                _run_preflight_check(
+                    backend,
+                    oe_config,
+                    wrapper_path=wrapper_path,
+                    initial_program=snapshot_dir / "initial_program.py",
+                    dataset_path=dataset_path,
                 )
-                if preflight_instances:
-                    first_instance = preflight_instances[0]
-                    preflight_result = eval_run_instance(
-                        evaluator_path=wrapper_path,
-                        program_path=initial_program,
-                        instance_path=first_instance,
-                        timeout_s=60.0,
-                    )
-                    if preflight_result.status != "pass":
-                        raise RevolverError(
-                            f"Pre-flight check failed: initial program evaluation "
-                            f"{preflight_result.status} on {first_instance.name}."
-                            + (
-                                f" Error: {preflight_result.error}"
-                                if preflight_result.error
-                                else ""
-                            )
-                            + " Fix the evaluator or initial program before "
-                            "running evolution."
-                        )
-                    # Log success
-                    score_info = ""
-                    if preflight_result.metrics:
-                        cs = preflight_result.metrics.get("combined_score")
-                        if cs is not None:
-                            score_info = f", score={cs:.4f}"
-                        if cs == 0.0:
-                            sys.stderr.write(
-                                f"Warning: pre-flight check passed but score=0.0 "
-                                f"on {first_instance.name}. Evolution may not "
-                                f"produce improvements.\n"
-                            )
-                    sys.stderr.write(
-                        f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
-                    )
 
                 # Snapshot direct children for the finalize backstop
                 # (S17a-06 / #359): anything that appears from here on and
@@ -1707,52 +1736,18 @@ def resume_run(
             with revolver_env(env_vars):
                 start_time = time.monotonic()
 
-                # Pre-flight check: evaluate initial program on first instance
-                wrapper_path = new_run_dir / backend.wrapper_filename
-                initial_program = snapshot_dir / "initial_program.py"
-                preflight_instances = sorted(
-                    (
-                        p
-                        for p in dataset_path.iterdir()
-                        if not p.name.startswith(".") and p.is_file()
-                    ),
-                    key=lambda p: p.name,
+                # Pre-flight evaluation + seed-metric validation (steps
+                # 12/12b of §2.1, mirrored on resume as §2.3 step 13b —
+                # shared with launch_run, S18-12). Raises before the engine
+                # is constructed; validate_seed_metrics fires on resume too
+                # (FR-RUN-056).
+                _run_preflight_check(
+                    backend,
+                    oe_config,
+                    wrapper_path=new_run_dir / backend.wrapper_filename,
+                    initial_program=snapshot_dir / "initial_program.py",
+                    dataset_path=dataset_path,
                 )
-                if preflight_instances:
-                    first_instance = preflight_instances[0]
-                    preflight_result = eval_run_instance(
-                        evaluator_path=wrapper_path,
-                        program_path=initial_program,
-                        instance_path=first_instance,
-                        timeout_s=60.0,
-                    )
-                    if preflight_result.status != "pass":
-                        raise RevolverError(
-                            f"Pre-flight check failed: initial program evaluation "
-                            f"{preflight_result.status} on {first_instance.name}."
-                            + (
-                                f" Error: {preflight_result.error}"
-                                if preflight_result.error
-                                else ""
-                            )
-                            + " Fix the evaluator or initial program before "
-                            "running evolution."
-                        )
-                    # Log success
-                    score_info = ""
-                    if preflight_result.metrics:
-                        cs = preflight_result.metrics.get("combined_score")
-                        if cs is not None:
-                            score_info = f", score={cs:.4f}"
-                        if cs == 0.0:
-                            sys.stderr.write(
-                                f"Warning: pre-flight check passed but score=0.0 "
-                                f"on {first_instance.name}. Evolution may not "
-                                f"produce improvements.\n"
-                            )
-                    sys.stderr.write(
-                        f"Pre-flight check passed ({first_instance.name}{score_info}).\n"
-                    )
 
                 # Snapshot direct children for the finalize backstop
                 # (S17a-06 / #359), mirroring launch_run.
