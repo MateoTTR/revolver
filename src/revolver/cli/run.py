@@ -42,12 +42,16 @@ def run_launch(
         typer.Option("--dataset", help="Registered dataset name."),
     ] = None,
     backend: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--backend",
-            help=f"Evolution backend: {', '.join(AVAILABLE_BACKENDS)} (default: openevolve).",
+            help=(
+                f"Evolution backend: {', '.join(AVAILABLE_BACKENDS)}. "
+                "Defaults to the problem version's stored backend, "
+                "else openevolve (FR-PRB-016)."
+            ),
         ),
-    ] = "openevolve",
+    ] = None,
     iterations: Annotated[
         int | None,
         typer.Option("--iterations", help="Number of evolution iterations."),
@@ -180,7 +184,11 @@ def run_launch(
         suppress_info = json_mode or quiet
         os.environ["PYTHONUNBUFFERED"] = "1"
         if not dry_run and not suppress_info:
-            sys.stderr.write(f"Running {backend} evolution...\n")
+            # With no explicit --backend the effective backend is resolved
+            # inside launch_run (version-stored backend, U4) — keep the
+            # pre-launch message generic in that case.
+            engine = f"{backend} " if backend else ""
+            sys.stderr.write(f"Running {engine}evolution...\n")
         result = core_run.launch_run(config, quiet=suppress_info)
 
         if dry_run:
@@ -190,11 +198,18 @@ def run_launch(
                     json_mode=True,
                 )
             else:
+                # Display the RESOLVED backend (explicit --backend >
+                # version-stored backend > default — U4, FR-RUN-047).
+                resolved_backend = (
+                    result.resolved_config.backend
+                    if result.resolved_config is not None
+                    else backend
+                )
                 render(
                     {
                         "status": "dry-run",
                         "run_id": result.run_id,
-                        "backend": backend,
+                        "backend": resolved_backend,
                         "problem_version": result.problem_version,
                         "llm": result.llm,
                         "dataset": result.dataset,
