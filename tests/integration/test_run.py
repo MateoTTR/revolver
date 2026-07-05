@@ -4242,3 +4242,247 @@ def test_resume_post_eval_call_site_wiring(project_with_prereqs: dict[str, Path]
     assert kwargs["project_root"] == root
     new_run_dir = root / REVOLVER_DIR / "runs" / resume_run_id
     assert kwargs["program_path"] == new_run_dir / "programs" / "rank-1.py"
+
+
+# ── U8: seed-metric pre-flight validation (FR-RUN-056, S18-11/12/14) ────────
+
+
+_FEATURE_DIM_CONFIG_SNIPPET = """
+database:
+  feature_dimensions: {dims}
+"""
+
+
+def _create_version_with_feature_dims(
+    project_root: Path,
+    tag: str,
+    dims: list[str],
+) -> None:
+    """Create a problem version whose config declares MAP-Elites feature dims."""
+    fixtures_dir = Path(__file__).parent.parent / "fixtures"
+    shutil.copy2(fixtures_dir / "evaluator_simple.py", project_root / "evaluator.py")
+    shutil.copy2(
+        fixtures_dir / "initial_program_simple.py",
+        project_root / "initial_program.py",
+    )
+    shutil.copy2(fixtures_dir / "config_simple.yaml", project_root / "config.yaml")
+    with open(project_root / "config.yaml", "a", encoding="utf-8") as f:
+        f.write(_FEATURE_DIM_CONFIG_SNIPPET.format(dims=json.dumps(dims)))
+
+    from revolver.core.problem import create_version
+
+    create_version(tag=tag, message=f"Version {tag}", project_root=project_root)
+
+
+def _invoke_run_expecting_no_engine(
+    args: list[str],
+    root: Path,
+    global_db_path: Path,
+) -> tuple[object, MagicMock]:
+    """Invoke a run/resume CLI command; return (result, mocked runner class).
+
+    Mirrors ``_invoke_with_mocks`` but hands the ``OpenEvolveRunner`` class
+    mock back so the caller can assert the engine was never constructed
+    (FR-RUN-056: the seed-metric error aborts before iteration 0).
+    """
+    mock_runner_cls = MagicMock(return_value=_make_mock_runner())
+    mock_proxy_cls = MagicMock(return_value=_make_mock_proxy())
+    run_id, sol_id = _next_ids()
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner", mock_runner_cls),
+        patch("revolver.core.run.TokenCountingProxy", mock_proxy_cls),
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.generate_run_id", return_value=run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=sol_id),
+    ):
+        result = runner.invoke(app, args, catch_exceptions=False)
+    return result, mock_runner_cls
+
+
+@pytest.mark.integration
+def test_validate_seed_metrics_missing_dim_fails(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Seed missing a declared non-builtin feature dim fails fast (FR-RUN-056).
+
+    On both launch and resume, the ``validate_seed_metrics`` hook aborts
+    right after the pre-flight — before iteration 0, with exit 1 and no
+    engine construction — naming the missing dimension and listing the
+    available seed metrics (the fixture evaluator only produces
+    ``combined_score``).
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # ── Launch: v2.0 declares a dim the seed's metrics never contain ──
+    _create_version_with_feature_dims(root, "v2.0", ["correctness"])
+
+    result, mock_runner_cls = _invoke_run_expecting_no_engine(
+        ["run", "--version", "v2.0", "--llm", "test-llm", "--dataset", "train-small"],
+        root=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Feature dimension 'correctness' not found in seed metrics" in output
+    assert "Available metrics:" in output
+    assert "combined_score" in output
+    # Pre-flight itself passed — the failure is the 12b hook, one step later.
+    assert "Pre-flight check passed" in output
+    mock_runner_cls.assert_not_called()  # aborted before iteration 0
+
+    # The inserted run record was finalized as failed, never completed.
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute("SELECT status FROM runs").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "failed"
+    finally:
+        conn.close()
+
+    # ── Resume: the hook fires on the resume pre-flight too ──
+    # Launch a passing parent on v1.0 (no feature dims), stage a checkpoint,
+    # then declare the missing dim in the parent's SNAPSHOT config — the
+    # resume rebuilds its engine config from that snapshot.
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_run_id = _parse_json_output(result)["run_id"]
+    checkpoint_dir = (
+        root / REVOLVER_DIR / "runs" / parent_run_id / "oe-output" / "checkpoints" / "checkpoint_5"
+    )
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot_config = root / REVOLVER_DIR / "problem" / "v1.0" / "config.yaml"
+    snapshot_config.chmod(0o644)  # snapshots are stored read-only
+    with open(snapshot_config, "a", encoding="utf-8") as f:
+        f.write(_FEATURE_DIM_CONFIG_SNIPPET.format(dims=json.dumps(["correctness"])))
+
+    result, mock_runner_cls = _invoke_run_expecting_no_engine(
+        ["run", "resume", parent_run_id],
+        root=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Feature dimension 'correctness' not found in seed metrics" in output
+    assert "Available metrics:" in output
+    mock_runner_cls.assert_not_called()  # resume aborted before iteration 0
+
+
+@pytest.mark.integration
+def test_validate_seed_metrics_builtins_and_shinka_noop(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """Builtin feature dims never trip the hook; the Shinka hook is a no-op.
+
+    ``complexity``/``diversity``/``combined_score`` are computed inside
+    OpenEvolve and legitimately absent from the seed's metrics (FR-RUN-056
+    allowlist), so a run declaring only builtins completes. ShinkaEvolve's
+    ``validate_seed_metrics`` never raises regardless of declared dims (its
+    only metric contract is ``combined_score``), so a Shinka run is
+    unaffected by the hook call site.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    _create_version_with_feature_dims(root, "v2.0", ["complexity", "diversity", "combined_score"])
+
+    result = _invoke_with_mocks(
+        ["run", "--version", "v2.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "Feature dimension" not in output
+
+    # Shinka no-op: even a declared non-builtin dim raises nothing — the
+    # backend has no per-dimension metric contract to enforce.
+    from revolver.infra.backends.shinka import ShinkaBackend
+
+    shinka = ShinkaBackend()
+    config = {"database": {"feature_dimensions": ["correctness"]}}
+    assert shinka.validate_seed_metrics(config, {"combined_score": 1.0}) is None
+    assert shinka.validate_seed_metrics(config, None) is None
+
+
+# ── U6 phase 2: default checkpoint cadence (FR-RUN-057, S18-13/14) ──────────
+
+
+@pytest.mark.integration
+def test_checkpoint_cadence_default_when_unset(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unset checkpoint_interval defaults to max(1, min(100, iters//10)) (OE).
+
+    A default <=100-iteration run gets a mid-run checkpoint (interval <
+    iterations); an explicit ``checkpoint_interval`` is preserved verbatim;
+    the S17a-12 phase-1 warn (5c) fires only on EXPLICIT equality; and the
+    5b clamp no longer trips on the old default-100-vs-small-iters case.
+    """
+    from datetime import UTC, datetime as dt
+
+    from revolver.infra.backends.openevolve import build_config
+    from revolver.models.llm import LLMEntry
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="http://localhost:11434/v1",
+        registered_at=dt.now(UTC),
+    )
+
+    # Unset interval + 50 iterations -> defaulted mid-run cadence, silent.
+    config = build_config(problem_config=None, llm=llm, iterations=50)
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 5
+    assert config["checkpoint_interval"] < config["max_iterations"]
+    assert "no mid-run checkpoint" not in err
+    assert "Overriding to checkpoint_interval" not in err
+
+    # Explicit interval -> preserved verbatim, never overridden.
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=40"],
+    )
+    capsys.readouterr()
+    assert config["checkpoint_interval"] == 40
+
+    # EXPLICIT equality -> the 5c warn still fires (S17a-12 unchanged).
+    config = build_config(
+        problem_config=None,
+        llm=llm,
+        iterations=50,
+        config_overrides=["checkpoint_interval=50"],
+    )
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 50
+    assert "no mid-run checkpoint" in err
+
+    # DEFAULTED equality (iterations=1 -> default interval 1) -> no 5c warn:
+    # the user never set the value, so there is nothing to nag about.
+    config = build_config(problem_config=None, llm=llm, iterations=1)
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 1
+    assert "no mid-run checkpoint" not in err
+
+    # Old default-100-vs-small-iters case: the 5a default (1) replaces the
+    # 5b clamp -> no clamp warning on the default path anymore.
+    config = build_config(problem_config=None, llm=llm, iterations=5)
+    err = capsys.readouterr().err
+    assert config["checkpoint_interval"] == 1
+    assert "Overriding to checkpoint_interval" not in err
