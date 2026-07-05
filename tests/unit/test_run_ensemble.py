@@ -451,7 +451,11 @@ class TestBuildConfigEnsemble:
 
         assert config == {
             "max_iterations": 10,
-            "checkpoint_interval": 10,
+            # S18-13 (U6 phase 2, FR-RUN-057): unset checkpoint_interval now
+            # defaults to max(1, min(100, iterations // 10)) = 1 — the one
+            # deliberate, release-noted default-path change here (previously
+            # the 5b guard clamped OE's default of 100 down to 10).
+            "checkpoint_interval": 1,
             "llm": {
                 "primary_model": "gemini-2.5-flash",
                 "api_base": "https://api.example.com/v1",

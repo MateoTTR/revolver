@@ -368,6 +368,41 @@ class EvolutionBackend(Protocol):
         """Generate the wrapper evaluator file; return its path."""
         ...
 
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """Fail fast when the seed's metrics cannot feed the backend's config.
+
+        Called by the orchestrator right after the pre-flight evaluation, on
+        both launch and resume (U8 / FR-RUN-056, DES-005 §4.4) — and skipped
+        whenever the pre-flight itself is skipped (empty dataset). OpenEvolve
+        raises :class:`~revolver.core.exceptions.ValidationError` when a
+        metric named in ``database.feature_dimensions`` is absent or
+        non-numeric in the seed's pre-flight metrics (builtins computed
+        inside the engine are allowlisted); ShinkaEvolve is a no-op (its only
+        metric contract is ``combined_score``). Failing here aborts before
+        iteration 0 — without the hook, a missing feature metric only
+        crashes at the engine's seed-add.
+
+        The default implementation is a **no-op**. Because ``EvolutionBackend``
+        is a structural :class:`~typing.Protocol` (not subclassed), concrete
+        backends without seed-metric requirements provide their own explicit
+        no-op rather than inheriting this body.
+
+        Args:
+            config: The built engine config dict (as returned by
+                :meth:`build_config`).
+            seed_metrics: The seed's pre-flight ``InstanceTestResult.metrics``
+                (``None`` when the evaluator reported no metrics).
+
+        Raises:
+            ValidationError: When a declared metric is absent or non-numeric
+                in *seed_metrics* (exit 1, before iteration 0).
+        """
+        return None
+
     def launch(
         self,
         spec: BackendRunSpec,

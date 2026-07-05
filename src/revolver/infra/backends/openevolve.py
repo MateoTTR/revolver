@@ -127,6 +127,13 @@ REVOLVER_KEYS = frozenset({"initial_program", "num_generations", "timeout_per_in
 #   generated wrapper evaluator, never passed to the OpenEvolve Config schema.
 REVOLVER_SECTIONS = frozenset({"evaluation"})
 
+# Feature dimensions computed *inside* OpenEvolve (U8 / FR-RUN-056). They are
+# legitimately absent from the evaluator's (and thus the seed's pre-flight)
+# metrics, so validate_seed_metrics() must never require them: ``complexity``
+# and ``diversity`` are engine builtins derived from the program itself, and
+# ``combined_score`` is the fitness the engine reads from every evaluation.
+OE_BUILTIN_FEATURE_DIMENSIONS = frozenset({"complexity", "diversity", "combined_score"})
+
 # Default LLM request timeout (seconds) injected for ``--source local``
 # endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
 # OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
@@ -810,6 +817,23 @@ def build_config(
         # B9 (S17-30): warn on override keys that land on no OpenEvolve field.
         _warn_noop_config_overrides(config_overrides, parsed_overrides)
 
+    # 5a. U6 phase 2 (S18-13 / FR-RUN-057): default checkpoint cadence.
+    # When checkpoint_interval is UNSET (absent from both the problem
+    # config.yaml and --config-override — checked after step 5 so an
+    # override counts as explicit), default it to max(1, min(100,
+    # iterations // 10)) so a killed <=100-iteration run has a mid-run
+    # checkpoint to resume from (the engine default of 100 meant zero
+    # mid-run checkpoints for the whole default regime). An EXPLICIT value
+    # is never touched; a defaulted one is always <= iterations, which
+    # naturally defuses 5b's default-100-vs-small-iters clamp. Release-noted
+    # v0.18 default-path change (sprint-018 exit criterion 10). Shinka has
+    # no checkpoint_interval concept — this is OpenEvolve-only.
+    interval_is_explicit = "checkpoint_interval" in config
+    if not interval_is_explicit:
+        cadence_iters = config.get("max_iterations")
+        if isinstance(cadence_iters, int) and cadence_iters > 0:
+            config["checkpoint_interval"] = max(1, min(100, cadence_iters // 10))
+
     # 5b. Guard: ensure checkpoint_interval <= iterations for resume capability
     effective_interval = config.get("checkpoint_interval", 100)  # OE default
     effective_iters = config.get("max_iterations")
@@ -839,11 +863,13 @@ def build_config(
     # count means the only checkpoint is the completion one — a killed or
     # interrupted run has nothing to resume from. Checked on the PRE-clamp
     # value so it never stacks on 5b (the strictly-> regime is 5b's: it has
-    # already warned and clamped, incl. the default-template case of OE's
-    # 100 default vs small iteration counts — S17a code review). Warn-only;
-    # a smarter default cadence is the v0.18 phase 2 (backlog 364).
+    # already warned and clamped — S17a code review). Warn-only, and gated
+    # on an EXPLICIT interval (U6 phase 2 / S18-13): the 5a default cadence
+    # can legitimately equal iterations (max_iterations=1) and must not
+    # nag the user about a value they never set.
     if (
-        effective_iters is not None
+        interval_is_explicit
+        and effective_iters is not None
         and isinstance(effective_interval, int)
         and isinstance(effective_iters, int)
         and effective_iters > 0
@@ -1830,6 +1856,48 @@ class OpenEvolveBackend:
             on_timeout=spec.on_timeout,
             timeout_score=spec.timeout_score,
         )
+
+    def validate_seed_metrics(
+        self,
+        config: dict[str, Any],
+        seed_metrics: dict[str, float] | None,
+    ) -> None:
+        """Fail fast when ``database.feature_dimensions`` names a metric the
+        seed does not produce (U8 / FR-RUN-056, DES-005 §4.4).
+
+        Every non-builtin dimension declared in *config* must be present and
+        numeric in the seed's pre-flight metrics — otherwise the run would
+        only crash at the engine's seed-add, after the run record, wrapper,
+        and lock already exist. The :data:`OE_BUILTIN_FEATURE_DIMENSIONS`
+        (``complexity``/``diversity``/``combined_score``) are computed inside
+        OpenEvolve and never required. A non-float-coercible metric already
+        fails pydantic validation inside ``run_instance``, so the live case
+        here is the *absent* metric; the numeric check is a defensive belt.
+
+        Raises:
+            ValidationError: Naming the missing dimension and listing the
+                available seed metrics (exit 1, before iteration 0).
+        """
+        db_section = config.get("database")
+        if not isinstance(db_section, dict):
+            return
+        dimensions = db_section.get("feature_dimensions")
+        if not isinstance(dimensions, list):
+            return
+        metrics = seed_metrics if isinstance(seed_metrics, dict) else {}
+        for dim in dimensions:
+            if not isinstance(dim, str) or dim in OE_BUILTIN_FEATURE_DIMENSIONS:
+                continue
+            value = metrics.get(dim)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                continue
+            available = ", ".join(sorted(metrics)) if metrics else "none"
+            raise ValidationError(
+                f"Feature dimension '{dim}' not found in seed metrics. "
+                f"Available metrics: {available}. Either make the evaluator "
+                f"return a numeric '{dim}' metric or remove it from "
+                f"database.feature_dimensions."
+            )
 
     def launch(
         self,
