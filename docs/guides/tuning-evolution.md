@@ -1,5 +1,5 @@
 ---
-verified-against: v0.17.1
+verified-against: v0.18.0
 ---
 
 # Tuning Evolution Runs
@@ -572,6 +572,30 @@ run); ShinkaEvolve accepts `fixed | ucb | ucb1 | thompson`. Omitting
 The levers in this section belong to Revolver itself, not to either engine —
 they behave identically regardless of `--backend`.
 
+### Timed-out instance policy (`evaluation.on_timeout`, `evaluation.timeout_score`)
+
+Since v0.18, an instance that hits `evaluation.timeout_per_instance` during
+evolution is **penalized by default**: it contributes
+`evaluation.timeout_score` (default `0.0`, must be finite) to the program's
+fitness mean instead of silently vanishing from it. This is a deliberate
+fitness-landscape change — best-scores are lower but honest, and a program
+that times out on hard instances now feels selection pressure. Both wrapper
+templates implement the same policy, and both emit the reserved
+`instances_valid`/`instances_total` coverage keys (never averaged into the
+score) so `run info` can label its coverage.
+
+- Restore the pre-0.18 survivor-mean: `evaluation.on_timeout: drop` in
+  config.yaml, or `--config-override evaluation.on_timeout=drop`.
+- Lower-is-better metrics: the default `0.0` assumes a higher-is-better
+  score around positive values — where `timeout_score` acts as a floor and
+  *negative is good*, pick a value genuinely worse than any real instance
+  score.
+- Values are validated at run **and** dry-run (`penalize|drop`, finite
+  score): a typo fails fast instead of being silently ignored.
+- The policy is baked into the generated wrapper at launch; **resume
+  inherits the parent run's policy** without re-supplying the overrides.
+- A run with zero timeouts scores identically under both policies.
+
 ### Evaluation thread caps (`REVOLVER_EVAL_NUM_THREADS`)
 
 Revolver's own evaluation paths — post-run training eval, `revolver eval`,
@@ -1062,7 +1086,7 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 | Parallel evaluations | `evaluator.parallel_evaluations` | `--parallel N` | 1 |
 | Temperature | `llm.temperature` | `--temperature F` | Model default |
 | Iterations | `max_iterations` | `--iterations N` | From config.yaml |
-| Checkpoint interval | `checkpoint_interval` | `--config-override checkpoint_interval=N` | 100 |
+| Checkpoint interval | `checkpoint_interval` | `--config-override checkpoint_interval=N` | `max(1, min(100, iterations//10))` when unset (v0.18) |
 | Cascade evaluation | `evaluator.cascade_evaluation` | `--config-override evaluator.cascade_evaluation=true` | `false` (Revolver default) |
 | Diff-based evolution | `diff_based_evolution` | `--rewrite-mode` (sets to `false`) | `true` |
 | Max code length | `max_code_length` | `--rewrite-mode` (sets to `50000`) | 10000 |
@@ -1070,6 +1094,7 @@ Dotted keys reach nested config sections (e.g., `evaluator.parallel_evaluations`
 | Ensemble models | `llm.models` | `--llm <ensemble-name>` | N/A (auto-generated) |
 | Reasoning effort | `llm.reasoning_effort` | `revolver llm add/update <name> --reasoning-effort low` (registry) or `llm ensemble add --reasoning-effort low` (per member) | Model default |
 | Eval timeout (Revolver) | `evaluation.timeout_per_instance` | (config.yaml, Revolver-specific) | 30 s |
+| Timeout policy (Revolver) | `evaluation.on_timeout` / `evaluation.timeout_score` | (config.yaml or `--config-override`, Revolver-specific) | `penalize` / `0.0` since v0.18 (`drop` restores pre-0.18) |
 
 ---
 
@@ -1295,6 +1320,7 @@ revolver run --backend shinka --llm my-llm \
 | Reasoning effort | registry `--reasoning-effort` → `llm_kwargs.reasoning_efforts` | Model default | Global pool; highest wins on disagreement; inert for local/bridge |
 | Proposal jobs | `job_config.max_proposal_jobs` | Engine default 6; auto-pinned to 1 for `--source local` | `--parallel` is a no-op here |
 | Per-call LLM timeout | registry `--timeout` → `llm_timeout` | Engine default 1200 s | Ensemble: max over set member timeouts; caps the per-attempt stall only (#320) |
+| Timeout policy (Revolver) | `evaluation.on_timeout` / `evaluation.timeout_score` | `penalize` / `0.0` since v0.18 | `drop` restores pre-0.18 survivor-mean; backend-neutral (see Operational levers) |
 | Novelty rejection | `evo_config.embedding_model` | `null` (disabled) | Enable with an OpenAI embedding model + key |
 | Spend cap | `evo_config.max_api_costs` | `null` (no cap) | Hard USD cap enforced by the engine |
 | Eval timeout (Revolver) | `evaluation.timeout_per_instance` | 30 s | Revolver-specific section |
@@ -1311,16 +1337,18 @@ of each candidate program. Two effects can inflate it:
 
 - **Evaluation noise** — `max()` over noisy single evaluations picks the
   lucky ones.
-- **Timeout survivorship** — the engine-side evaluation averages over the
-  dataset instances that *completed* within the per-instance timeout;
-  instances that time out or fail are dropped from the mean, so a program
-  that only finishes its easy instances can score higher than one
-  evaluated on all of them.
+- **Timeout survivorship** (only with `evaluation.on_timeout: drop`) — in
+  drop mode the engine-side evaluation averages over the dataset instances
+  that *completed* within the per-instance timeout, so a program that only
+  finishes its easy instances can score higher than one evaluated on all of
+  them. As of v0.18 the default is penalize: a timed-out instance
+  contributes `evaluation.timeout_score` (default `0.0`) to the mean.
 
-Until fitness accounts for timeouts (planned for v0.18), treat the engine
-`best_score` as an evolution-pressure signal, not a reportable result:
-**re-score the saved best solution with `revolver eval` (which runs every
-instance) and report that number.**
+The noise effect remains: treat the engine `best_score` as an
+evolution-pressure signal, not a reportable result. `run info` now labels
+it "(engine, single eval)" next to a coverage-labeled post-eval mean —
+report that mean, or **re-score the saved best solution with `revolver
+eval` (which runs every instance) and report that number.**
 
 ### Bandit selection cannot be warm-started (shinka)
 

@@ -300,26 +300,34 @@ The sprint is complete when ALL of the following hold:
 
 ## Sprint Review
 
-_Filled at sprint end._
+_Filled 2026-07-05 (sessions 058 + 059). All 9 planned PRs merged, plus two stretch PRs (R1 #254, R2 #269) pre-authorized by the S18-20 spike clause._
 
 ### Tests passing
-- X / Y integration tests passing (baseline 1471; ~1487+ expected)
+- **1585 passed / 4 skipped** (no-shinka env; baseline 1471, ~1487+ expected — the extra growth comes from R1/R2, top-N, reap hardening, doc-freshness, and the L1 twins added during reviews). All 16 planned L2 IDs shipped and pass (see the Integration Tests table above — two IDs were renamed at implementation time and are reconciled in the validation docs).
+- **58 `shinkaevolve`-marked tests green on real shinka 0.0.7** (verified in two envs: `revolver-demos` and `shinka-spike`).
+- Code reviews across the 6 implementation PRs of sessions 058–059: **0 CRITICAL** total; every WARNING was fixed in-PR (notably: PR-1's Shinka coverage keys made process-boundary-safe; PR-5's `--force` re-extract no longer drops the recorded `best_score`; PR-2's programs-table scores labeled).
 
 ### Demo-able features
-- [ ] U13 — timed-out instances penalized by default; `on_timeout=drop` restores 0.17
-- [ ] U11 — `run info` shows engine best (single-eval) next to honest coverage-labeled post-eval mean
-- [ ] U4 — `version create --backend shinka` then `run` (no `--backend`) resolves Shinka from the version; mismatch warns
-- [ ] U8 — seed missing a declared feature metric fails at pre-flight, not mid-run
-- [ ] U6 phase 2 — default ≤100-iter run has a mid-run checkpoint to resume from
-- [ ] Top-N — `solution extract --rank 2` promotes the 2nd-best Shinka program; OE clear "not supported"
-- [ ] Reap hardening — grandchild reap via recursive/killpg
-- [ ] Doc anti-rot — command-lint CI test + freshness stamps + backend-neutral tuning guide
+- [x] U13 — timed-out instances penalized by default; `on_timeout=drop` restores 0.17 (PR-1 #257)
+- [x] U11 — `run info` shows engine best (single-eval) next to honest coverage-labeled post-eval mean (PR-2 #261)
+- [x] U4 — `version create --backend shinka` then `run` (no `--backend`) resolves Shinka from the version; mismatch warns (PR-3 #264, migration v14)
+- [x] U8 — seed missing a declared feature metric fails at pre-flight, not mid-run (PR-4 #265)
+- [x] U6 phase 2 — default ≤100-iter run has a mid-run checkpoint to resume from (PR-4 #265)
+- [x] Top-N — `solution extract --rank 2` promotes the 2nd-best Shinka program; OE clear "not supported"; `--program-id` promotes an arbitrary population program (PR-5 #268)
+- [x] Reap hardening — grandchild reap via recursive `/proc` descendants + killpg, `(pid, starttime)` PID-reuse guard (PR-6 #267)
+- [x] Doc anti-rot — command-lint CI test + freshness stamps (incl. the fresh-major `X.0` grace window) + backend-neutral tuning guide (PR-8 #251, PR-8b #256, PR-9 #250)
+- [x] **Stretch R2** — Shinka honors the registry `timeout_s` (`llm register --timeout`): max-over-members set/restored on `shinka.llm.client.TIMEOUT` around the run; dry-run surfaces `llm_timeout` (#269)
 
 ### #320 spike verdict
-- Repro outcome / root cause / recommendation:
+- **REPRODUCED, model-independently** (stalling fake OpenAI endpoint, 2 live runs — PR-7 #252, analysis in [spike-320-qwen15-deadlock.md](../analysis/spike-320-qwen15-deadlock.md)). Root cause: **unbounded LLM-call stall × four-layer multiplicative retry stack** (hard-coded `TIMEOUT=1200` × SDK retries × backoff 6000 s × `MAX_RETRIES` × `max_patch_attempts` ≈ 60 h worst case per proposal); ShinkaEvolve's stuck-watchdog is structurally blind (`running_proposal_jobs > 0` for the wedge's whole lifetime). `qwen15` was the trigger, not the cause.
+- Recommendations delivered: **R1** (`max_proposal_jobs` silent-drop fix, #254 — shipped in-sprint), **R2** (LLM-request timeout lever, #269 — shipped as the S18 stretch; honest limits documented in the tuning guide), **R3** (upstream ShinkaEvolve issue — GO'd 2026-07-05 with pre-publication review; draft at [spike-320-upstream-issue-draft.md](../analysis/spike-320-upstream-issue-draft.md)).
+- The spike's §6 process-tree evidence directly scoped PR-6's tests (grandchild reap, PID-reuse guard "not theoretical").
 
 ### Carry-over
-- OE top-N (post-#367) → S19
+- OE top-N (post-#367) → S19 (`top_n_extraction=False` stays on OE; checkpoint-granularity option documented in ADR-007/DES-005)
 - #357 executable e2e + generated CLI reference → S19 (reuses the #354 CLI-tree walker)
 - U9 per-arm bandit prior (#371) → upstream, demand-gated
-- Any tasks not completed within this sprint's waves
+- L3 E2E Scenario 5 (penalize-vs-drop against the fake server) → S19 (was S18-optional; L2-covered by `test_on_timeout_penalize_vs_drop`)
+- R3 upstream issue publication → pending Mathieu's validation of the draft text (+ repro-script minimization)
+- Pre-existing doc drift observed during PR-5 (docs claim a "post-extraction training evaluation" at extract time that the CLI has never run) → backlog candidate
+- Live Shinka smoke on ≥0.17.1 via the bridge (deferred since S17a) — now doubly interesting: would exercise the R2 timeout lever live
