@@ -3,7 +3,7 @@
 Registers commands on the ``solution_app`` Typer instance from
 ``revolver.cli``.
 
-Traceable to: DES-005 §7, FR-SOL-001..013.
+Traceable to: DES-005 §7, FR-SOL-001..013, FR-SOL-021.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import typer
 from revolver.cli import solution_app
 from revolver.cli.error_handler import cli_error_boundary
 from revolver.core import solution as core_solution
+from revolver.core.exceptions import ValidationError
 from revolver.infra.output import print_confirmation, render
 
 # ── solution list (FR-SOL-001, FR-SOL-002) ──────────────────────────────────
@@ -266,7 +267,7 @@ def solution_diff(
             sys.stdout.write("".join(diff_lines))
 
 
-# ── solution extract (FR-SOL-011..013) ──────────────────────────────────────
+# ── solution extract (FR-SOL-011..013, FR-SOL-021) ──────────────────────────
 
 
 @solution_app.command("extract")
@@ -276,6 +277,28 @@ def solution_extract(
         str,
         typer.Option("--run", help="Run ID to extract from."),
     ],
+    rank: Annotated[
+        int | None,
+        typer.Option(
+            "--rank",
+            help=(
+                "Rank of the population program to promote (default: 1). "
+                "Ranks > 1 require a backend with top-N extraction support "
+                "(FR-SOL-021)."
+            ),
+        ),
+    ] = None,
+    program_id: Annotated[
+        str | None,
+        typer.Option(
+            "--program-id",
+            help=(
+                "Backend program ID of the population program to promote "
+                "(top-N-capable backends only). Mutually exclusive with "
+                "--rank."
+            ),
+        ),
+    ] = None,
     alias: Annotated[
         str | None,
         typer.Option("--alias", help="Optional alias for the new solution."),
@@ -295,22 +318,29 @@ def solution_extract(
         ),
     ] = False,
 ) -> None:
-    """Promote the best program from a run to a solution entry.
+    """Promote a program from a run to a solution entry.
 
-    Extracts rank-1 (best) program. Use --force to replace an existing
-    extraction for the same run. Use --from-checkpoint to recover the best
-    program of an interrupted/failed run from its latest checkpoint (B7).
+    Extracts the rank-1 (best) program by default. Use --rank N or
+    --program-id to promote an arbitrary population program on a backend
+    with top-N extraction support (FR-SOL-021). Use --force to replace an
+    existing extraction for the same (run, rank). Use --from-checkpoint to
+    recover the best program of an interrupted/failed run from its latest
+    checkpoint (B7).
     """
     with cli_error_boundary():
         json_mode: bool = ctx.obj.get("json", False) if ctx.obj else False
         quiet: bool = ctx.obj.get("quiet", False) if ctx.obj else False
 
+        if rank is not None and program_id is not None:
+            raise ValidationError("--rank and --program-id are mutually exclusive.")
+
         solution = core_solution.extract_solution(
             run_id=run,
-            rank=1,
+            rank=rank if rank is not None else 1,
             alias=alias,
             force=force,
             from_checkpoint=from_checkpoint,
+            program_id=program_id,
         )
 
         sys.stderr.write(
@@ -370,8 +400,6 @@ def solution_delete(
         # Confirmation logic lives in the CLI layer, not in core
         if not force:
             if json_mode:
-                from revolver.core.exceptions import ValidationError
-
                 raise ValidationError("Use --force to delete in JSON mode (no interactive prompt)")
             typer.confirm(f"Delete solution '{solution}'?", abort=True)
 

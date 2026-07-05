@@ -26,6 +26,11 @@ from revolver.infra.db import (
     insert_solution,
 )
 from revolver.infra.store import REVOLVER_DIR, RUNS_DIR
+from tests.fixtures.programs_sqlite import (
+    FIXTURE_PROGRAM_ROWS,
+    SHINKA_OUTPUT_SUBDIR,
+    build_programs_db,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -645,12 +650,15 @@ def _seed_interrupted_run(
     *,
     status: str = "interrupted",
     write_rank1: bool = True,
+    backend: str = "openevolve",
 ) -> Path:
     """Seed a run (default interrupted) and return its dir.
 
     ``write_rank1=False`` skips the placeholder ``programs/rank-1.py`` so a
     test can assert it is *absent* after an aborted --from-checkpoint command
-    (finding #2: no stray file on abort).
+    (finding #2: no stray file on abort). ``backend`` selects the run's
+    recorded backend (the FR-SOL-021 top-N gate resolves capabilities from
+    it).
     """
     _create_problem_version_in_db(tmp_project, "v1.0")
     _create_dataset_in_db(tmp_project, "train-small")
@@ -670,7 +678,7 @@ def _seed_interrupted_run(
             llm_model="gpt-4",
             created_at=datetime.now(UTC),
             status=status,
-            backend="openevolve",
+            backend=backend,
         )
     finally:
         conn.close()
@@ -930,10 +938,12 @@ def test_solution_extract_force(project_with_solutions: Path) -> None:
 
 
 @pytest.mark.integration
-def test_solution_extract_no_rank_flag(project_with_solutions: Path) -> None:
-    """``--rank`` is absent from ``solution extract --help`` output.
+def test_solution_extract_rank_flag_revived(project_with_solutions: Path) -> None:
+    """``--rank`` and ``--program-id`` are present in ``solution extract --help``.
 
-    Validates: S9-07 — rank removed from CLI.
+    Validates: FR-SOL-021 / S18-15 — the ``--rank`` flag removed in S9-07
+    (tasks 197/198) is revived alongside the new ``--program-id`` flag;
+    ``--run`` and ``--force`` are unchanged.
     """
     result = _invoke_with_cwd(
         ["solution", "extract", "--help"],
@@ -941,10 +951,390 @@ def test_solution_extract_no_rank_flag(project_with_solutions: Path) -> None:
     )
     assert result.exit_code == 0  # type: ignore[union-attr]
     output = _get_all_output(result)
-    assert "--rank" not in output
-    # --force and --run should still be present
+    assert "--rank" in output
+    assert "--program-id" in output
     assert "--force" in output
     assert "--run" in output
+
+
+@pytest.mark.integration
+def test_solution_extract_rank_1_explicit_behaves_as_default(tmp_project: Path) -> None:
+    """``solution extract --rank 1`` behaves exactly as the default path.
+
+    Validates: FR-SOL-021 / S18-15 — an explicit ``--rank 1`` on an
+    OpenEvolve run does NOT trigger the top-N capability gate and promotes
+    the rank-1 program exactly as the flagless invocation does.
+    """
+    _seed_interrupted_run(tmp_project, "run-rank1", status="completed")
+
+    result = _invoke_with_cwd(
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-rank1",
+            "--rank",
+            "1",
+            "--alias",
+            "explicit-rank1",
+        ],
+        tmp_project,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "explicit-rank1" in output
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT run_id, rank, alias FROM solutions WHERE run_id = ?",
+            ("run-rank1",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[1] == 1
+    assert row[2] == "explicit-rank1"
+
+
+@pytest.mark.integration
+def test_solution_extract_rank_unsupported_oe(tmp_project: Path) -> None:
+    """``--rank 2`` on an OpenEvolve run exits non-zero with a clear error.
+
+    Validates: FR-SOL-021 / S18-15 — OpenEvolve advertises
+    ``top_n_extraction=False`` (consciously deferred, #299), so ranks > 1
+    are rejected with a clear "not supported on '<backend>'" message.
+    """
+    _seed_interrupted_run(tmp_project, "run-oe-rank2", status="completed")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-oe-rank2", "--rank", "2"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "Top-N extraction is not supported on backend 'openevolve'" in output
+
+    # The gate rejected before any mutation: no solution row was created.
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM solutions WHERE run_id = ?", ("run-oe-rank2",)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is None
+
+
+@pytest.mark.integration
+def test_solution_extract_program_id_unsupported_oe(tmp_project: Path) -> None:
+    """``--program-id`` on an OpenEvolve run hits the same top-N gate.
+
+    Validates: FR-SOL-021 / S18-15.
+    """
+    _seed_interrupted_run(tmp_project, "run-oe-pid", status="completed")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-oe-pid", "--program-id", "prog-42"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "Top-N extraction is not supported on backend 'openevolve'" in output
+
+
+@pytest.mark.integration
+def test_solution_extract_rank_and_program_id_mutually_exclusive(tmp_project: Path) -> None:
+    """``--rank`` and ``--program-id`` together are rejected (FR-SOL-021)."""
+    result = _invoke_with_cwd(
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-any",
+            "--rank",
+            "2",
+            "--program-id",
+            "prog-42",
+        ],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "mutually exclusive" in output
+
+
+@pytest.mark.integration
+def test_solution_extract_from_checkpoint_rejects_rank_n(tmp_project: Path) -> None:
+    """``--from-checkpoint --rank 2`` is rejected: recovery is rank-1 only.
+
+    Validates: S18-15 guard — checkpoint recovery returns the *best*
+    program, so materializing it under an arbitrary rank slot would record
+    a wrong (rank, program) pair.
+    """
+    _seed_interrupted_run(tmp_project, "run-int-rank2")
+
+    result = _invoke_with_cwd(
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-int-rank2",
+            "--from-checkpoint",
+            "--rank",
+            "2",
+        ],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "rank-1" in output
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_rank_2_passes_gate_on_shinka(tmp_project: Path) -> None:
+    """``--rank 2`` on a Shinka run passes the top-N gate and promotes rank-2.
+
+    Validates: FR-SOL-021 / S18-15 — ShinkaEvolve advertises
+    ``top_n_extraction=True``, so the request reaches the extraction path.
+    Existing-file fast path: ``programs/rank-2.py`` is already on disk, so
+    the backend store is never consulted (this run dir has NO
+    ``programs.sqlite`` — the command must still succeed) and both solution
+    rows coexist per ``UNIQUE(run_id, rank)``. The on-demand store path for
+    a *missing* rank-N file is ``test_solution_extract_rank_n_shinka``.
+    """
+    run_dir = _seed_interrupted_run(
+        tmp_project, "run-shinka", status="completed", backend="shinka"
+    )
+    (run_dir / "programs" / "rank-2.py").write_text(
+        "def solve(): return 2  # second-best\n", encoding="utf-8"
+    )
+
+    # rank-1 first (default path), then rank-2 — both rows must coexist.
+    result_r1 = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka"],
+        tmp_project,
+    )
+    assert result_r1.exit_code == 0  # type: ignore[union-attr]
+
+    result_r2 = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka", "--rank", "2"],
+        tmp_project,
+    )
+    assert result_r2.exit_code == 0, _get_all_output(result_r2)  # type: ignore[union-attr]
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT rank FROM solutions WHERE run_id = ? ORDER BY rank",
+            ("run-shinka",),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in rows] == [1, 2]
+
+
+def _distinct_code_rows() -> tuple[dict[str, object], ...]:
+    """Fixture program rows with per-program source code.
+
+    The shared :data:`FIXTURE_PROGRAM_ROWS` all carry the same code; the
+    top-N tests need distinct code per program to assert that the right
+    program was materialized. Scored ranking (``combined_score``
+    descending): prog-gen2-best (0.91), prog-gen1-a (0.55),
+    prog-init (0.40), prog-gen1-b (0.10).
+    """
+    rows = []
+    for row in FIXTURE_PROGRAM_ROWS:
+        new_row = dict(row)
+        new_row["code"] = f"def solve():  # {row['id']}\n    return {row['id']!r}\n"
+        rows.append(new_row)
+    return tuple(rows)
+
+
+def _seed_shinka_run_with_store(tmp_project: Path, run_id: str) -> Path:
+    """Seed a completed Shinka run whose population lives in programs.sqlite.
+
+    Only ``programs/rank-1.py`` is materialized on disk (the shape a real
+    completed run leaves behind); every other rank must be read on demand
+    from the fixture store. Returns the run dir.
+    """
+    run_dir = _seed_interrupted_run(tmp_project, run_id, status="completed", backend="shinka")
+    build_programs_db(
+        run_dir / SHINKA_OUTPUT_SUBDIR / "programs.sqlite", rows=_distinct_code_rows()
+    )
+    return run_dir
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_rank_n_shinka(tmp_project: Path) -> None:
+    """``--rank 2`` on a Shinka run promotes the 2nd-best program (FR-SOL-021).
+
+    Validates: FR-SOL-021 / S18-16 — with no ``rank-2.py`` on disk, the
+    program is read from ``programs.sqlite`` (the rank-1 query without its
+    LIMIT), materialized retroactively to ``programs/rank-2.py`` with no
+    run-dir layout change, and promoted with its distinct
+    ``combined_score`` (0.55, not the best 0.91). ``UNIQUE(run_id, rank)``
+    is respected: the rank-2 row coexists with rank-1 and a duplicate
+    ``--rank 2`` is rejected.
+    """
+    run_dir = _seed_shinka_run_with_store(tmp_project, "run-shinka-store")
+    rank2 = run_dir / "programs" / "rank-2.py"
+    assert not rank2.exists()  # precondition: on-demand path, not a file read
+
+    result_r1 = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-store"],
+        tmp_project,
+    )
+    assert result_r1.exit_code == 0  # type: ignore[union-attr]
+
+    result_r2 = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-store", "--rank", "2"],
+        tmp_project,
+    )
+    assert result_r2.exit_code == 0, _get_all_output(result_r2)  # type: ignore[union-attr]
+
+    # The 2nd-best program (prog-gen1-a, 0.55) was materialized.
+    assert rank2.exists()
+    assert "prog-gen1-a" in rank2.read_text(encoding="utf-8")
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT rank, best_score FROM solutions WHERE run_id = ? ORDER BY rank",
+            ("run-shinka-store",),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in rows] == [1, 2]
+    assert rows[1][1] == pytest.approx(0.55)  # distinct combined_score, not 0.91
+
+    # UNIQUE(run_id, rank): a second --rank 2 without --force is rejected,
+    # naming the blocking solution and the --force way out (spec wording).
+    result_dup = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-store", "--rank", "2"],
+        tmp_project,
+    )
+    assert result_dup.exit_code == 1  # type: ignore[union-attr]
+    dup_output = _get_all_output(result_dup)
+    assert "already exists" in dup_output.lower()
+    assert "--force" in dup_output
+
+    # --force re-extract of the now-materialized rank-2 file must NOT
+    # silently drop the recorded best_score (PR #268 review): the file is
+    # promoted as-is, but the store score is still consulted and recorded.
+    result_force = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-store", "--rank", "2", "--force"],
+        tmp_project,
+    )
+    assert result_force.exit_code == 0, _get_all_output(result_force)  # type: ignore[union-attr]
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT best_score FROM solutions WHERE run_id = ? AND rank = 2",
+            ("run-shinka-store",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == pytest.approx(0.55)  # preserved, not NULL
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_rank_exceeds_population_shinka(tmp_project: Path) -> None:
+    """A rank beyond the scored population errors cleanly (FR-SOL-021).
+
+    The fixture store has 4 scored programs (2 more rows carry a SQL NULL
+    ``combined_score`` and are excluded from the ranking).
+    """
+    _seed_shinka_run_with_store(tmp_project, "run-shinka-deep")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-deep", "--rank", "99"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "No program found at rank 99" in output
+    assert "4 program(s)" in output
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_program_id_shinka(tmp_project: Path) -> None:
+    """``--program-id`` promotes an arbitrary population program (FR-SOL-021).
+
+    Validates: FR-SOL-021 / S18-16 — ``prog-init`` is the 3rd-best scored
+    program (0.40): the id is resolved to rank 3 in the ``combined_score``
+    ordering, materialized to ``programs/rank-3.py``, and promoted with its
+    own score.
+    """
+    run_dir = _seed_shinka_run_with_store(tmp_project, "run-shinka-pid")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-pid", "--program-id", "prog-init"],
+        tmp_project,
+    )
+    assert result.exit_code == 0, _get_all_output(result)  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "rank=3" in output
+
+    rank3 = run_dir / "programs" / "rank-3.py"
+    assert rank3.exists()
+    assert "prog-init" in rank3.read_text(encoding="utf-8")
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT rank, best_score FROM solutions WHERE run_id = ?",
+            ("run-shinka-pid",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == 3
+    assert row[1] == pytest.approx(0.40)
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_program_id_unknown_shinka(tmp_project: Path) -> None:
+    """An unknown ``--program-id`` errors cleanly, naming the id (FR-SOL-021)."""
+    _seed_shinka_run_with_store(tmp_project, "run-shinka-unknown")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-unknown", "--program-id", "prog-nope"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "Program id 'prog-nope' not found" in output
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_program_id_unscored_shinka(tmp_project: Path) -> None:
+    """An unscored (failed) program id is rejected with a clear reason.
+
+    ``prog-gen2-broken`` exists in the store but carries a SQL NULL
+    ``combined_score`` (failed evaluation) — it has no rank to promote at.
+    """
+    _seed_shinka_run_with_store(tmp_project, "run-shinka-broken")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-broken", "--program-id", "prog-gen2-broken"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "no combined_score" in output
 
 
 @pytest.mark.integration

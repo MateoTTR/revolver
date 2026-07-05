@@ -50,6 +50,7 @@ from revolver.infra.backends.base import (
     BackendRunSpec,
     ChildProcessReaperMixin,
     ProgressInfo,
+    RankedProgram,
     RecoveredProgram,
 )
 from revolver.models.llm import EnsembleEntry, LLMEntry
@@ -1952,6 +1953,23 @@ class OpenEvolveBackend:
         usable checkpoint exists yet.
         """
         return recover_best_from_checkpoint(run_dir)
+
+    def extract_ranked_program(
+        self,
+        run_dir: Path,
+        rank: int | None = None,
+        program_id: str | None = None,
+    ) -> RankedProgram:
+        """Explicitly unsupported: OE has no reliable top-N store (FR-SOL-021).
+
+        ``top_n_extraction=False`` is a conscious v0.18 deferral (ADR-007
+        amendment, #299): only checkpointed populations are recoverable
+        (granularity depends on ``checkpoint_interval``), and OE ranking
+        must first ride on ``combined_score`` (post-U13, FR-RUN-052).
+        Callers are expected to consult :meth:`capabilities` first — the
+        ``solution extract`` gate does — so this body is defense in depth.
+        """
+        raise ValidationError(f"Top-N extraction is not supported on backend '{self.name}'.")
 
     def resume(
         self,

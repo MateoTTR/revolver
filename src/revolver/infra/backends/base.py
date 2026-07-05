@@ -465,6 +465,31 @@ class RecoveredProgram:
 
 
 @dataclass
+class RankedProgram:
+    """A population program addressed by rank or program id (FR-SOL-021).
+
+    Returned by :meth:`EvolutionBackend.extract_ranked_program`. Carries
+    enough to materialize ``programs/rank-<N>.py`` on demand and to record
+    the promoted solution's ``best_score`` (top-N promotion, #299).
+
+    Attributes:
+        program_id: The backend's internal id of the program.
+        code: The program source code.
+        rank: 1-based rank of the program in the backend's scored
+            population (``combined_score`` descending — the same ordering
+            ``run population`` displays for scored programs).
+        score: The program's ``combined_score`` (``None`` if unavailable).
+        language: Program language (``"python"`` by default).
+    """
+
+    program_id: str
+    code: str
+    rank: int
+    score: float | None = None
+    language: str = "python"
+
+
+@dataclass
 class BackendRunResult:
     """Engine-neutral result of a completed evolution run.
 
@@ -674,6 +699,50 @@ class EvolutionBackend(Protocol):
         raise RecoveryNotSupportedError(
             "This backend does not support best-of-checkpoint recovery."
         )
+
+    def extract_ranked_program(
+        self,
+        run_dir: Path,
+        rank: int | None = None,
+        program_id: str | None = None,
+    ) -> RankedProgram:
+        """Read an arbitrary-ranked or id-addressed population program.
+
+        Serves top-N solution promotion (FR-SOL-021, #299): ``solution
+        extract --rank N`` / ``--program-id <id>`` on a backend advertising
+        :attr:`BackendCapabilities.top_n_extraction`. This is a **read-only**
+        lookup — the orchestrator (``core.solution.extract_solution``)
+        materializes the returned code to ``programs/rank-<N>.py`` only
+        after its alias/duplicate validation passes, which makes the path
+        retroactive on old run dirs with no layout change.
+
+        The default implementation raises
+        :class:`~revolver.core.exceptions.ValidationError`. Because
+        ``EvolutionBackend`` is a structural :class:`~typing.Protocol`, each
+        concrete backend provides its own body: ShinkaEvolve reads its
+        ``programs.sqlite`` store; OpenEvolve raises the not-supported error
+        explicitly (``top_n_extraction=False`` — consciously deferred,
+        ADR-007 v0.18 amendment).
+
+        Args:
+            run_dir: Directory of the completed run.
+            rank: 1-based rank in the scored population (``combined_score``
+                descending). Exactly one of *rank*/*program_id* is required.
+            program_id: Backend program id, resolved to its rank in the
+                same ordering.
+
+        Returns:
+            The addressed :class:`RankedProgram`.
+
+        Raises:
+            ValidationError: The backend has no top-N extraction; neither or
+                both of *rank*/*program_id* were given; the program store is
+                missing/unreadable; the rank exceeds the scored population;
+                or the program id is unknown or unscored.
+        """
+        from revolver.core.exceptions import ValidationError
+
+        raise ValidationError(f"Top-N extraction is not supported on backend '{self.name}'.")
 
     def read_progress(self, run_dir: Path) -> tuple[int | None, float | None]:
         """Cheap live-progress read: ``(iterations_done, best_score)``."""
