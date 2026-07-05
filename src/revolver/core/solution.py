@@ -7,9 +7,10 @@ Implements the domain layer for ``revolver solution`` commands:
 - ``show_solution()`` — read program source code (FR-SOL-003, FR-SOL-004)
 - ``diff_solutions()`` — unified diff between two solutions
 - ``set_alias()`` — unique alias (FR-SOL-006, FR-SOL-007)
-- ``extract_solution()`` — promote program to solution (FR-SOL-011..013)
+- ``extract_solution()`` — promote program to solution (FR-SOL-011..013,
+  FR-SOL-021)
 
-Traceable to: DES-005 §7, DES-006, FR-SOL-001..013.
+Traceable to: DES-005 §7, DES-006, FR-SOL-001..013, FR-SOL-021.
 """
 
 from __future__ import annotations
@@ -329,6 +330,7 @@ def extract_solution(
     alias: str | None = None,
     force: bool = False,
     from_checkpoint: bool = False,
+    program_id: str | None = None,
     project_root: Path | None = None,
 ) -> Solution:
     """Promote a stored program to a new solution DB entry.
@@ -353,23 +355,38 @@ def extract_solution(
     ``best_score``. The default (``from_checkpoint=False``) is unchanged —
     interrupted/failed runs are still rejected.
 
+    Ranks > 1 and ``program_id`` are gated on the run backend's
+    ``capabilities().top_n_extraction`` (FR-SOL-021, ADR-007): a non-capable
+    backend (OpenEvolve — consciously deferred, #299) is rejected with a
+    clear "not supported" error before any other validation.
+
     Args:
         run_id: ID of the run that produced the program.
-        rank: Program rank within the run.
+        rank: Program rank within the run (1 = best). Ranks > 1 require a
+            backend with ``top_n_extraction`` support (FR-SOL-021).
         alias: Optional alias for the new solution.
         force: If ``True``, replace an existing solution for the same
             ``(run_id, rank)`` pair instead of raising an error.
         from_checkpoint: If ``True``, recover the best program from the
             backend's latest checkpoint when the run is interrupted/failed.
+            Recovery is rank-1 only: incompatible with ``rank > 1`` and
+            ``program_id``.
+        program_id: Backend program ID of the population program to promote
+            (FR-SOL-021, top-N-capable backends only). Mutually exclusive
+            with ranks > 1.
         project_root: Explicit project root, or ``None`` to auto-detect.
 
     Returns:
         The newly created :class:`Solution`.
 
     Raises:
-        RevolverError: If the run is not found or the program file does not exist.
-        ValidationError: If rank is <= 0, the run is not completed, or the
-            program file does not exist.
+        RevolverError: If the run is not found or the program file does not
+            exist, or ``program_id`` extraction is requested (the on-demand
+            backend path lands with S18-16).
+        ValidationError: If rank is <= 0, ``program_id`` is combined with a
+            rank > 1 or ``from_checkpoint``, the requested rank/program_id is
+            not supported on the run's backend (FR-SOL-021), the run is not
+            completed, or the program file does not exist.
         CheckpointRecoveryError: ``from_checkpoint`` requested but no usable
             checkpoint exists yet.
         RecoveryNotSupportedError: ``from_checkpoint`` requested on a backend
@@ -379,6 +396,13 @@ def extract_solution(
     """
     if rank <= 0:
         raise ValidationError(f"Rank must be > 0, got {rank}")
+    if program_id is not None and rank != 1:
+        raise ValidationError("rank and program_id are mutually exclusive")
+    if from_checkpoint and (rank != 1 or program_id is not None):
+        raise ValidationError(
+            "--from-checkpoint only recovers the best (rank-1) program; "
+            "it cannot be combined with --rank > 1 or --program-id."
+        )
 
     root = project_root or find_project_root(Path.cwd())
     db_path = root / REVOLVER_DIR / "revolver.db"
@@ -388,6 +412,28 @@ def extract_solution(
         run = get_run(conn, run_id)
         if run is None:
             raise RevolverError(f"Run not found: {run_id}")
+
+        # 1b. FR-SOL-021 top-N gate: promoting a rank > 1 or an arbitrary
+        # program id requires a backend that advertises reliable top-N
+        # extraction (capabilities().top_n_extraction — ADR-007 v0.18
+        # amendment). OpenEvolve consciously stays non-capable in v0.18
+        # (checkpoint-granularity limit + pre-U13 ordering, #299).
+        if rank > 1 or program_id is not None:
+            from revolver.infra.backends.base import get_backend
+
+            backend_name = str(run.get("backend") or "openevolve")
+            if not get_backend(backend_name).capabilities().top_n_extraction:
+                raise ValidationError(
+                    f"Top-N extraction is not supported on backend '{backend_name}'."
+                )
+            if program_id is not None:
+                # Stage 1 (S18-15) ships the CLI surface and the capability
+                # gate; the on-demand backend extraction path
+                # (ShinkaBackend.extract_ranked_program) lands with S18-16.
+                raise RevolverError(
+                    "Extraction by program id is not implemented yet for "
+                    f"backend '{backend_name}'."
+                )
 
         run_dir = root / REVOLVER_DIR / RUNS_DIR / run_id
         program_path = run_dir / "programs" / f"rank-{rank}.py"

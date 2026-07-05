@@ -4,8 +4,11 @@ Tests cover:
 - extract_solution(rank=0): raises ValidationError (rank guard)
 - extract_solution(force=True): atomic delete + insert
 - extract_solution(force=True) with alias collision: alias check before delete
+- the FR-SOL-021 top-N capability gate (rank > 1 / program_id resolve the
+  run backend's ``capabilities().top_n_extraction`` — S18-15)
 
-Traceable to: FR-SOL-011..013, DES-005 section 7, PR #122 review findings.
+Traceable to: FR-SOL-011..013, FR-SOL-021, DES-005 section 7,
+PR #122 review findings, sprint-018 S18-15.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from revolver.core.exceptions import DuplicateNameError, ValidationError
+from revolver.core.exceptions import DuplicateNameError, RevolverError, ValidationError
 from revolver.core.project import init_project
 from revolver.core.solution import extract_solution
 from revolver.infra.db import (
@@ -33,6 +36,7 @@ def _setup_project_with_run(
     run_id: str = "run-test-001",
     status: str = "completed",
     rank: int = 1,
+    backend: str = "openevolve",
 ) -> Path:
     """Initialize a project, create a completed run, and write a program file.
 
@@ -71,6 +75,7 @@ def _setup_project_with_run(
             created_at=datetime.now(UTC),
             status=status,
             generation_time_s=30.0,
+            backend=backend,
         )
     finally:
         conn.close()
@@ -108,6 +113,116 @@ class TestExtractSolutionRankValidation:
             extract_solution(
                 "run-test-001",
                 -1,
+                project_root=root,
+            )
+
+
+class TestExtractSolutionTopNGate:
+    """Tests for the FR-SOL-021 top-N capability gate (S18-15).
+
+    The gate resolves the run's backend and checks
+    ``capabilities().top_n_extraction`` — a static per-backend matrix, so no
+    engine package (and no ``is_available`` probe) is involved.
+    """
+
+    @pytest.mark.unit
+    def test_rank_2_on_openevolve_raises(self, tmp_path: Path) -> None:
+        """rank=2 on an OpenEvolve run raises the capability-gate error."""
+        root = _setup_project_with_run(tmp_path, backend="openevolve")
+        with pytest.raises(
+            ValidationError,
+            match="Top-N extraction is not supported on backend 'openevolve'",
+        ):
+            extract_solution(
+                "run-test-001",
+                2,
+                project_root=root,
+            )
+
+    @pytest.mark.unit
+    def test_program_id_on_openevolve_raises(self, tmp_path: Path) -> None:
+        """program_id on an OpenEvolve run raises the capability-gate error."""
+        root = _setup_project_with_run(tmp_path, backend="openevolve")
+        with pytest.raises(
+            ValidationError,
+            match="Top-N extraction is not supported on backend 'openevolve'",
+        ):
+            extract_solution(
+                "run-test-001",
+                1,
+                program_id="prog-42",
+                project_root=root,
+            )
+
+    @pytest.mark.unit
+    @pytest.mark.shinkaevolve
+    def test_rank_2_on_shinka_passes_gate(self, tmp_path: Path) -> None:
+        """rank=2 on a Shinka run passes the gate and promotes rank-2.
+
+        Stage 1 plumbing: the rank-2 program file already exists on disk
+        (the on-demand materialization from ``programs.sqlite`` is S18-16).
+        """
+        root = _setup_project_with_run(tmp_path, backend="shinka", rank=2)
+        sol = extract_solution(
+            "run-test-001",
+            2,
+            alias="second-best",
+            project_root=root,
+        )
+        assert sol.rank == 2
+        assert sol.run_id == "run-test-001"
+
+    @pytest.mark.unit
+    @pytest.mark.shinkaevolve
+    def test_program_id_on_shinka_stage1_not_implemented(self, tmp_path: Path) -> None:
+        """program_id on a Shinka run passes the gate; Stage-1 stub raises.
+
+        Pinned intermediate contract — replaced by the real
+        ``ShinkaBackend.extract_ranked_program`` path in S18-16.
+        """
+        root = _setup_project_with_run(tmp_path, backend="shinka")
+        with pytest.raises(RevolverError, match="not implemented yet"):
+            extract_solution(
+                "run-test-001",
+                1,
+                program_id="prog-42",
+                project_root=root,
+            )
+
+    @pytest.mark.unit
+    def test_program_id_with_rank_n_raises(self, tmp_path: Path) -> None:
+        """program_id combined with rank != 1 is rejected (mutual exclusion)."""
+        root = _setup_project_with_run(tmp_path)
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            extract_solution(
+                "run-test-001",
+                2,
+                program_id="prog-42",
+                project_root=root,
+            )
+
+    @pytest.mark.unit
+    def test_from_checkpoint_with_rank_n_raises(self, tmp_path: Path) -> None:
+        """from_checkpoint with rank > 1 is rejected (recovery is rank-1 only)."""
+        root = _setup_project_with_run(tmp_path, status="interrupted")
+        with pytest.raises(ValidationError, match="rank-1"):
+            extract_solution(
+                "run-test-001",
+                2,
+                from_checkpoint=True,
+                project_root=root,
+            )
+
+    @pytest.mark.unit
+    def test_from_checkpoint_with_program_id_raises(self, tmp_path: Path) -> None:
+        """from_checkpoint with program_id is rejected (recovery is rank-1 only)."""
+        root = _setup_project_with_run(tmp_path, status="interrupted")
+        with pytest.raises(ValidationError, match="rank-1"):
+            extract_solution(
+                "run-test-001",
+                1,
+                from_checkpoint=True,
+                program_id="prog-42",
                 project_root=root,
             )
 

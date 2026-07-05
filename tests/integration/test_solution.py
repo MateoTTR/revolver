@@ -645,12 +645,15 @@ def _seed_interrupted_run(
     *,
     status: str = "interrupted",
     write_rank1: bool = True,
+    backend: str = "openevolve",
 ) -> Path:
     """Seed a run (default interrupted) and return its dir.
 
     ``write_rank1=False`` skips the placeholder ``programs/rank-1.py`` so a
     test can assert it is *absent* after an aborted --from-checkpoint command
-    (finding #2: no stray file on abort).
+    (finding #2: no stray file on abort). ``backend`` selects the run's
+    recorded backend (the FR-SOL-021 top-N gate resolves capabilities from
+    it).
     """
     _create_problem_version_in_db(tmp_project, "v1.0")
     _create_dataset_in_db(tmp_project, "train-small")
@@ -670,7 +673,7 @@ def _seed_interrupted_run(
             llm_model="gpt-4",
             created_at=datetime.now(UTC),
             status=status,
-            backend="openevolve",
+            backend=backend,
         )
     finally:
         conn.close()
@@ -930,10 +933,12 @@ def test_solution_extract_force(project_with_solutions: Path) -> None:
 
 
 @pytest.mark.integration
-def test_solution_extract_no_rank_flag(project_with_solutions: Path) -> None:
-    """``--rank`` is absent from ``solution extract --help`` output.
+def test_solution_extract_rank_flag_revived(project_with_solutions: Path) -> None:
+    """``--rank`` and ``--program-id`` are present in ``solution extract --help``.
 
-    Validates: S9-07 — rank removed from CLI.
+    Validates: FR-SOL-021 / S18-15 — the ``--rank`` flag removed in S9-07
+    (tasks 197/198) is revived alongside the new ``--program-id`` flag;
+    ``--run`` and ``--force`` are unchanged.
     """
     result = _invoke_with_cwd(
         ["solution", "extract", "--help"],
@@ -941,10 +946,215 @@ def test_solution_extract_no_rank_flag(project_with_solutions: Path) -> None:
     )
     assert result.exit_code == 0  # type: ignore[union-attr]
     output = _get_all_output(result)
-    assert "--rank" not in output
-    # --force and --run should still be present
+    assert "--rank" in output
+    assert "--program-id" in output
     assert "--force" in output
     assert "--run" in output
+
+
+@pytest.mark.integration
+def test_solution_extract_rank_1_explicit_behaves_as_default(tmp_project: Path) -> None:
+    """``solution extract --rank 1`` behaves exactly as the default path.
+
+    Validates: FR-SOL-021 / S18-15 — an explicit ``--rank 1`` on an
+    OpenEvolve run does NOT trigger the top-N capability gate and promotes
+    the rank-1 program exactly as the flagless invocation does.
+    """
+    _seed_interrupted_run(tmp_project, "run-rank1", status="completed")
+
+    result = _invoke_with_cwd(
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-rank1",
+            "--rank",
+            "1",
+            "--alias",
+            "explicit-rank1",
+        ],
+        tmp_project,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "explicit-rank1" in output
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT run_id, rank, alias FROM solutions WHERE run_id = ?",
+            ("run-rank1",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[1] == 1
+    assert row[2] == "explicit-rank1"
+
+
+@pytest.mark.integration
+def test_solution_extract_rank_unsupported_oe(tmp_project: Path) -> None:
+    """``--rank 2`` on an OpenEvolve run exits non-zero with a clear error.
+
+    Validates: FR-SOL-021 / S18-15 — OpenEvolve advertises
+    ``top_n_extraction=False`` (consciously deferred, #299), so ranks > 1
+    are rejected with a clear "not supported on '<backend>'" message.
+    """
+    _seed_interrupted_run(tmp_project, "run-oe-rank2", status="completed")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-oe-rank2", "--rank", "2"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "Top-N extraction is not supported on backend 'openevolve'" in output
+
+    # The gate rejected before any mutation: no solution row was created.
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM solutions WHERE run_id = ?", ("run-oe-rank2",)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is None
+
+
+@pytest.mark.integration
+def test_solution_extract_program_id_unsupported_oe(tmp_project: Path) -> None:
+    """``--program-id`` on an OpenEvolve run hits the same top-N gate.
+
+    Validates: FR-SOL-021 / S18-15.
+    """
+    _seed_interrupted_run(tmp_project, "run-oe-pid", status="completed")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-oe-pid", "--program-id", "prog-42"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "Top-N extraction is not supported on backend 'openevolve'" in output
+
+
+@pytest.mark.integration
+def test_solution_extract_rank_and_program_id_mutually_exclusive(tmp_project: Path) -> None:
+    """``--rank`` and ``--program-id`` together are rejected (FR-SOL-021)."""
+    result = _invoke_with_cwd(
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-any",
+            "--rank",
+            "2",
+            "--program-id",
+            "prog-42",
+        ],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "mutually exclusive" in output
+
+
+@pytest.mark.integration
+def test_solution_extract_from_checkpoint_rejects_rank_n(tmp_project: Path) -> None:
+    """``--from-checkpoint --rank 2`` is rejected: recovery is rank-1 only.
+
+    Validates: S18-15 guard — checkpoint recovery returns the *best*
+    program, so materializing it under an arbitrary rank slot would record
+    a wrong (rank, program) pair.
+    """
+    _seed_interrupted_run(tmp_project, "run-int-rank2")
+
+    result = _invoke_with_cwd(
+        [
+            "solution",
+            "extract",
+            "--run",
+            "run-int-rank2",
+            "--from-checkpoint",
+            "--rank",
+            "2",
+        ],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "rank-1" in output
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_rank_2_passes_gate_on_shinka(tmp_project: Path) -> None:
+    """``--rank 2`` on a Shinka run passes the top-N gate and promotes rank-2.
+
+    Validates: FR-SOL-021 / S18-15 — ShinkaEvolve advertises
+    ``top_n_extraction=True``, so the request reaches the extraction path.
+    Stage 1 plumbing only: with ``programs/rank-2.py`` already on disk the
+    whole path works end-to-end (gate -> file -> DB row with rank=2,
+    coexisting with the rank-1 solution per ``UNIQUE(run_id, rank)``). The
+    on-demand materialization from ``programs.sqlite`` for a *missing*
+    rank-N file is S18-16 (``test_solution_extract_rank_n_shinka``).
+    """
+    run_dir = _seed_interrupted_run(
+        tmp_project, "run-shinka", status="completed", backend="shinka"
+    )
+    (run_dir / "programs" / "rank-2.py").write_text(
+        "def solve(): return 2  # second-best\n", encoding="utf-8"
+    )
+
+    # rank-1 first (default path), then rank-2 — both rows must coexist.
+    result_r1 = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka"],
+        tmp_project,
+    )
+    assert result_r1.exit_code == 0  # type: ignore[union-attr]
+
+    result_r2 = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka", "--rank", "2"],
+        tmp_project,
+    )
+    assert result_r2.exit_code == 0, _get_all_output(result_r2)  # type: ignore[union-attr]
+
+    db_path = tmp_project / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT rank FROM solutions WHERE run_id = ? ORDER BY rank",
+            ("run-shinka",),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in rows] == [1, 2]
+
+
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_solution_extract_program_id_shinka_stage1_not_implemented(tmp_project: Path) -> None:
+    """``--program-id`` on a Shinka run passes the gate; Stage-1 stub errors.
+
+    Pins the S18-15 intermediate contract: the capability gate accepts the
+    request (``top_n_extraction=True``) but the on-demand backend path
+    (``ShinkaBackend.extract_ranked_program``) only lands with S18-16 —
+    until then the command fails with a clear "not implemented" error, NOT
+    the capability-gate message. S18-16 replaces this test with the real
+    ``programs.sqlite`` extraction path.
+    """
+    _seed_interrupted_run(tmp_project, "run-shinka-pid", status="completed", backend="shinka")
+
+    result = _invoke_with_cwd(
+        ["solution", "extract", "--run", "run-shinka-pid", "--program-id", "prog-7"],
+        tmp_project,
+    )
+    assert result.exit_code == 1  # type: ignore[union-attr]
+    output = _get_all_output(result)
+    assert "not implemented yet" in output
+    assert "Top-N extraction is not supported" not in output
 
 
 @pytest.mark.integration
