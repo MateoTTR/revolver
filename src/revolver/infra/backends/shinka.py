@@ -281,6 +281,12 @@ job_config:
 # Evaluation settings (Revolver-specific).
 evaluation:
   timeout_per_instance: 30  # seconds
+  # Timed-out instance policy (v0.18): "penalize" counts the instance at
+  # timeout_score in the fitness mean; "drop" excludes it (pre-0.18
+  # survivor-mean). Note: with a negative timeout_score floor, lower
+  # scores are the penalty — mind negative-is-good metrics.
+  on_timeout: penalize
+  timeout_score: 0.0
 """
 
 
@@ -307,6 +313,7 @@ to --results_dir.
 import argparse
 import json
 import os
+import sqlite3
 import statistics
 import sys
 from pathlib import Path
@@ -317,6 +324,13 @@ from evaluator import evaluate_instance
 
 # Per-instance timeout in seconds (None = no timeout)
 _TIMEOUT_PER_INSTANCE = {timeout_per_instance!r}
+
+# Timed-out instance policy baked at generation time (FR-RUN-054):
+# "penalize" (v0.18 default) counts the instance at _TIMEOUT_SCORE in the
+# fitness mean; "drop" excludes it (pre-0.18 survivor-mean). Validated at
+# the launch point; resume inherits this baked policy with the wrapper.
+_ON_TIMEOUT = {on_timeout!r}
+_TIMEOUT_SCORE = {timeout_score!r}
 
 
 def _call_evaluate_instance(program_path, instance_path):
@@ -357,8 +371,12 @@ def run_experiment(program_path, seed=0):
     """Evaluate *program_path* on every dataset instance (one Shinka run).
 
     Returns the list of per-instance metric dicts. Instances whose
-    evaluation raises are skipped (logged to stderr); when every instance
-    fails a RuntimeError is raised so the run is marked incorrect.
+    evaluation raises are skipped (logged to stderr); a timed-out instance
+    hits a distinct TimeoutError branch (FR-RUN-053) — recorded on the
+    side-channel, then scored per the baked _ON_TIMEOUT policy
+    (FR-RUN-054: penalize -> a _TIMEOUT_SCORE entry, drop -> excluded).
+    When no instance produced an entry a RuntimeError is raised so the
+    run is marked incorrect.
     """
     dataset_dir = os.environ["REVOLVER_DATASET_DIR"]
     instances = sorted(
@@ -366,9 +384,25 @@ def run_experiment(program_path, seed=0):
         if not p.name.startswith(".") and p.is_file()
     )
     per_instance = []
+    valid = 0  # instances that genuinely returned metrics (FR-RUN-053)
     for inst in instances:
         try:
             per_instance.append(_call_evaluate_instance(program_path, str(inst)))
+            valid += 1
+        except TimeoutError as exc:
+            # Distinct timeout branch (FR-RUN-053): timeouts are recorded on
+            # the side-channel, distinguishable from ordinary failures.
+            print(
+                "[revolver] timeout for " + inst.name + ": " + str(exc),
+                file=sys.stderr,
+            )
+            _log_timeout(inst.name)
+            if _ON_TIMEOUT == "penalize":
+                # FR-RUN-054 (v0.18 default): a timed-out instance
+                # contributes the penalty score to the fitness mean
+                # instead of silently vanishing from it.
+                per_instance.append({{"combined_score": _TIMEOUT_SCORE}})
+            # "drop": fall through — survivor-mean (pre-0.18 behavior).
         except Exception as exc:
             print(
                 "[revolver] evaluation failed for " + inst.name + ": " + str(exc),
@@ -376,6 +410,16 @@ def run_experiment(program_path, seed=0):
             )
     if not per_instance:
         raise RuntimeError("all instance evaluations failed")
+    # Coverage bookkeeping (FR-RUN-053): stamped onto every per-instance
+    # entry so it travels WITH the results. run_shinka_eval may execute
+    # run_experiment() in a ProcessPoolExecutor worker (run_workers > 1)
+    # where a module-global would never reach the parent's
+    # aggregate_metrics(); the stamped entries cross the pickle boundary.
+    # The reserved "instances_" prefix keeps the stamps out of the mean.
+    for m in per_instance:
+        if isinstance(m, dict):
+            m["instances_valid"] = float(valid)
+            m["instances_total"] = float(len(instances))
     return per_instance
 
 
@@ -384,6 +428,10 @@ def aggregate_metrics(results):
 
     *results* is the run_shinka_eval results list (one entry per run);
     each entry is the per-instance metrics list from run_experiment().
+
+    The reserved "instances_" coverage prefix is NEVER averaged into the
+    metrics (FR-RUN-053); the coverage keys are read back from the
+    per-instance entries stamped by run_experiment() instead.
     """
     all_metrics = [m for run_result in results for m in run_result]
     aggregated = {{}}
@@ -392,6 +440,8 @@ def aggregate_metrics(results):
         if isinstance(m, dict):
             keys.update(m.keys())
     for key in sorted(keys):
+        if key.startswith("instances_"):
+            continue  # reserved coverage prefix — metadata, never averaged
         values = [
             m[key]
             for m in all_metrics
@@ -405,6 +455,18 @@ def aggregate_metrics(results):
     # to exist; validate_result() independently marks the run incorrect when
     # the user metrics lacked it, so this default never masks a failure.
     aggregated.setdefault("combined_score", 0.0)
+    # Coverage keys: metadata, not fitness (FR-RUN-053) — read back from the
+    # stamped per-instance entries so the values survive a process boundary
+    # (see run_experiment). Every entry within a run carries identical
+    # stamps; across runs the last one wins (same dataset every run).
+    instances_valid = 0.0
+    instances_total = 0.0
+    for m in all_metrics:
+        if isinstance(m, dict) and "instances_total" in m:
+            instances_valid = float(m.get("instances_valid", 0.0))
+            instances_total = float(m["instances_total"])
+    aggregated["instances_valid"] = instances_valid
+    aggregated["instances_total"] = instances_total
     return aggregated
 
 
@@ -419,6 +481,34 @@ def validate_result(per_instance):
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             return False, "missing numeric 'combined_score' in instance metrics"
     return True, None
+
+
+def _log_timeout(instance_id):
+    """Record a timed-out instance on the SQLite side-channel (FR-RUN-053).
+
+    Best-effort channel keyed by $REVOLVER_INSTANCE_LOG (same table shape as
+    the OpenEvolve wrapper), with a status marker row (metric
+    "instances_timeout", value 1.0 — reserved "instances_" prefix, never
+    aggregated) so timed-out instances stay visible per instance.
+    """
+    log_path = os.environ.get("REVOLVER_INSTANCE_LOG")
+    if not log_path:
+        return
+    try:
+        conn = sqlite3.connect(log_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS instance_log "
+            "(instance_id TEXT, metric TEXT, value REAL, pid INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO instance_log VALUES (?, ?, ?, ?)",
+            (instance_id, "instances_timeout", 1.0, os.getpid()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Side-channel is best-effort
 
 
 def _save_results(results_dir, metrics, correct, error):
@@ -1390,6 +1480,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
             wrapper_name=SHINKA_WRAPPER_FILENAME,
             snapshot_dir=str(spec.snapshot_dir),
             timeout_per_instance=spec.timeout_per_instance,
+            on_timeout=spec.on_timeout,
+            timeout_score=spec.timeout_score,
         )
         output_path.write_text(wrapper_code)
         return output_path

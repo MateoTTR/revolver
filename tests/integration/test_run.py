@@ -3342,3 +3342,494 @@ def test_launch_run_completed_message_after_teardown(
         if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
+
+
+# ── FR-RUN-053: wrapper coverage keys + timeout side-channel (S18 / U13 ii) ──
+
+_EVALUATOR_TIMEOUT_MIX = '''\
+"""Evaluator: one instance times out, the others return metrics.
+
+The reserved "instances_user_key" metric probes the FR-RUN-053 rule that
+the "instances_" prefix is never averaged into the aggregate. The timeout
+trigger matches the file NAME only — pytest tmp dirs may contain "timeout"
+in the test-derived directory name.
+"""
+import os
+
+
+def evaluate_instance(program_path: str, instance_path: str) -> dict[str, float]:
+    if "timeout" in os.path.basename(instance_path):
+        raise TimeoutError("simulated per-instance timeout")
+    return {"combined_score": 0.5, "quality": 0.4, "instances_user_key": 9.0}
+'''
+
+# Driver that imports a generated OE wrapper by path and prints the
+# aggregated evaluate() result as JSON (subprocess isolation keeps the
+# wrapper's `from evaluator import ...` out of this process's sys.modules).
+_OE_WRAPPER_DRIVER = """\
+import importlib.util
+import json
+import sys
+
+spec = importlib.util.spec_from_file_location("_wrapper_under_test", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(mod.evaluate(sys.argv[2])))
+"""
+
+
+def _make_timeout_mix_project(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Snapshot + dataset (2 valid instances, 1 timing out) + program file."""
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "evaluator.py").write_text(_EVALUATOR_TIMEOUT_MIX, encoding="utf-8")
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "inst-01.json").write_text("{}", encoding="utf-8")
+    (dataset / "inst-02-timeout.json").write_text("{}", encoding="utf-8")
+    (dataset / "inst-03.json").write_text("{}", encoding="utf-8")
+    program = tmp_path / "program.py"
+    program.write_text("def solve():\n    return 0\n", encoding="utf-8")
+    return snapshot, dataset, program
+
+
+def _assert_coverage_contract(metrics: dict[str, object], log_db: Path) -> None:
+    """Shared FR-RUN-053 assertions for both backends' wrapper output."""
+    # Coverage keys are emitted as metadata...
+    assert metrics["instances_valid"] == pytest.approx(2.0)
+    assert metrics["instances_total"] == pytest.approx(3.0)
+    # ...and never summed/averaged into the score: combined_score is the
+    # FR-RUN-054 default-penalize mean (0.5 + 0.5 + timeout at 0.0) / 3 —
+    # NOT inflated by the coverage keys — and the user's reserved-prefix
+    # metric is excluded from aggregation entirely.
+    assert metrics["combined_score"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+    assert metrics["quality"] == pytest.approx(0.4)
+    assert "instances_user_key" not in metrics
+    # The timed-out instance is recorded on the side-channel (timeout marker
+    # row), distinguishable from ordinary failures.
+    conn = sqlite3.connect(log_db)
+    try:
+        rows = conn.execute(
+            "SELECT instance_id, value FROM instance_log WHERE metric = 'instances_timeout'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("inst-02-timeout.json", 1.0)]
+
+
+def _wrapper_env(dataset: Path, log_db: Path | None) -> dict[str, str]:
+    """Subprocess env for a generated wrapper run over *dataset*."""
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k not in ("REVOLVER_INSTANCE_PATH",)}
+    env["REVOLVER_DATASET_DIR"] = str(dataset)
+    env.pop("REVOLVER_INSTANCE_LOG", None)
+    if log_db is not None:
+        env["REVOLVER_INSTANCE_LOG"] = str(log_db)
+    return env
+
+
+def _run_oe_wrapper(
+    tmp_path: Path,
+    wrapper: Path,
+    program: Path,
+    dataset: Path,
+    log_db: Path | None = None,
+) -> tuple[dict[str, float], str]:
+    """Exec a generated OE wrapper's evaluate() in a subprocess.
+
+    Returns the aggregated metrics dict and the captured stderr.
+    """
+    import subprocess
+    import sys
+
+    driver = tmp_path / "oe_wrapper_driver.py"
+    driver.write_text(_OE_WRAPPER_DRIVER, encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(driver), str(wrapper), str(program)],
+        env=_wrapper_env(dataset, log_db),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout), proc.stderr
+
+
+def _generate_shinka_wrapper(
+    snapshot: Path,
+    run_dir: Path,
+    on_timeout: str = "penalize",
+    timeout_score: float = 0.0,
+) -> Path:
+    """Generate the Shinka wrapper for *snapshot* with the given policy."""
+    from revolver.infra.backends.base import BackendRunSpec
+    from revolver.infra.backends.shinka import ShinkaBackend
+    from revolver.models.llm import LLMEntry
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    spec = BackendRunSpec(
+        snapshot_dir=snapshot,
+        llm=LLMEntry(
+            name="test-llm",
+            source="local",
+            model="test-model",
+            base_url="http://localhost:11434/v1",
+            api_key_env=None,
+            registered_at=datetime.now(UTC),
+        ),
+        run_dir=run_dir,
+        on_timeout=on_timeout,
+        timeout_score=timeout_score,
+    )
+    return ShinkaBackend().generate_wrapper(spec)
+
+
+def _run_shinka_wrapper(
+    wrapper: Path,
+    program: Path,
+    dataset: Path,
+    results_dir: Path,
+    log_db: Path | None = None,
+) -> dict[str, float]:
+    """Run a generated Shinka wrapper (CLI contract) and return metrics.json."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(wrapper),
+            "--program_path",
+            str(program),
+            "--results_dir",
+            str(results_dir),
+        ],
+        env=_wrapper_env(dataset, log_db),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    metrics = json.loads((results_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert isinstance(metrics, dict)
+    return metrics
+
+
+@pytest.mark.integration
+def test_wrapper_coverage_keys_not_in_score(tmp_path: Path) -> None:
+    """Both wrapper templates emit coverage keys that never inflate the score.
+
+    FR-RUN-053 / FR-EVL-021 (S18 / U13 #367 commit ii): over a mixed
+    valid/timed-out dataset, the generated wrapper on BOTH backends emits
+    ``instances_valid``/``instances_total`` alongside the aggregated metrics,
+    excludes the reserved ``instances_`` prefix from the metric mean, and
+    records the timed-out instance on the ``REVOLVER_INSTANCE_LOG``
+    side-channel. The Shinka wrapper runs via its standalone fallback here,
+    so this covers the no-shinka CI env; the run_shinka_eval path is covered
+    by ``test_shinka_wrapper_timeout_branch`` (L2-Shinka).
+    """
+    from revolver.infra.backends.openevolve import generate_wrapper as oe_generate_wrapper
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+
+    # ── OpenEvolve wrapper (module contract: evaluate(program_path)) ────────
+    oe_run_dir = tmp_path / "run-oe"
+    oe_run_dir.mkdir()
+    oe_wrapper = oe_generate_wrapper(snapshot, oe_run_dir)
+    oe_log_db = tmp_path / "instance_log_oe.db"
+
+    oe_metrics, stderr = _run_oe_wrapper(tmp_path, oe_wrapper, program, dataset, oe_log_db)
+
+    _assert_coverage_contract(oe_metrics, oe_log_db)
+    assert "timeout for inst-02-timeout.json" in stderr
+
+    # ── ShinkaEvolve wrapper (CLI contract: --program_path/--results_dir) ───
+    shinka_wrapper = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka")
+    results_dir = tmp_path / "results"
+    shinka_log_db = tmp_path / "instance_log_shinka.db"
+
+    shinka_metrics = _run_shinka_wrapper(
+        shinka_wrapper, program, dataset, results_dir, shinka_log_db
+    )
+
+    _assert_coverage_contract(shinka_metrics, shinka_log_db)
+    correct = json.loads((results_dir / "correct.json").read_text(encoding="utf-8"))
+    assert correct["correct"] is True
+
+
+# ── FR-RUN-054: evaluation.on_timeout policy + validation (S18 / U13 iii) ────
+
+
+@pytest.mark.integration
+def test_on_timeout_penalize_vs_drop(tmp_path: Path) -> None:
+    """penalize (default) scores timeouts at timeout_score; drop restores 0.17.
+
+    FR-RUN-054 (S18 / U13 #367 commit iii), on BOTH wrapper templates over
+    the same mixed valid/timed-out dataset:
+
+    - default ``penalize`` counts the timed-out instance at ``timeout_score``
+      (default 0.0) in the fitness mean — the deliberate v0.18
+      fitness-landscape flip;
+    - ``on_timeout=drop`` restores the 0.17 survivor-mean;
+    - a custom finite ``timeout_score`` is honored;
+    - on a zero-timeout dataset the two policies produce identical scores.
+    """
+    from revolver.infra.backends.openevolve import generate_wrapper as oe_generate_wrapper
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+    survivor_mean = 0.5  # mean over the two valid instances (0.17 behavior)
+    penalized_mean = (0.5 + 0.5 + 0.0) / 3  # timeout counted at 0.0
+
+    # ── OpenEvolve template ──────────────────────────────────────────────────
+    dirs = {name: tmp_path / f"run-oe-{name}" for name in ("pen", "drop", "floor")}
+    for d in dirs.values():
+        d.mkdir()
+    wrapper_pen = oe_generate_wrapper(snapshot, dirs["pen"])  # default: penalize
+    wrapper_drop = oe_generate_wrapper(snapshot, dirs["drop"], on_timeout="drop")
+    wrapper_floor = oe_generate_wrapper(snapshot, dirs["floor"], timeout_score=-1.0)
+
+    pen_metrics, _ = _run_oe_wrapper(tmp_path, wrapper_pen, program, dataset)
+    drop_metrics, _ = _run_oe_wrapper(tmp_path, wrapper_drop, program, dataset)
+    floor_metrics, _ = _run_oe_wrapper(tmp_path, wrapper_floor, program, dataset)
+
+    assert pen_metrics["combined_score"] == pytest.approx(penalized_mean)
+    assert drop_metrics["combined_score"] == pytest.approx(survivor_mean)
+    assert floor_metrics["combined_score"] == pytest.approx((0.5 + 0.5 - 1.0) / 3)
+    # Coverage is policy-independent: the timed-out instance is never "valid".
+    for m in (pen_metrics, drop_metrics, floor_metrics):
+        assert m["instances_valid"] == pytest.approx(2.0)
+        assert m["instances_total"] == pytest.approx(3.0)
+
+    # ── ShinkaEvolve template (standalone fallback) ──────────────────────────
+    shinka_pen = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka-pen")
+    shinka_drop = _generate_shinka_wrapper(
+        snapshot, tmp_path / "run-shinka-drop", on_timeout="drop"
+    )
+
+    shinka_pen_metrics = _run_shinka_wrapper(
+        shinka_pen, program, dataset, tmp_path / "results-pen"
+    )
+    shinka_drop_metrics = _run_shinka_wrapper(
+        shinka_drop, program, dataset, tmp_path / "results-drop"
+    )
+
+    assert shinka_pen_metrics["combined_score"] == pytest.approx(penalized_mean)
+    assert shinka_drop_metrics["combined_score"] == pytest.approx(survivor_mean)
+
+    # ── Zero-timeout dataset: penalize ≡ drop (the policy is a no-op) ────────
+    clean_dataset = tmp_path / "dataset-clean"
+    clean_dataset.mkdir()
+    (clean_dataset / "inst-01.json").write_text("{}", encoding="utf-8")
+    (clean_dataset / "inst-03.json").write_text("{}", encoding="utf-8")
+
+    clean_pen, _ = _run_oe_wrapper(tmp_path, wrapper_pen, program, clean_dataset)
+    clean_drop, _ = _run_oe_wrapper(tmp_path, wrapper_drop, program, clean_dataset)
+
+    assert clean_pen == clean_drop
+    assert clean_pen["combined_score"] == pytest.approx(0.5)
+    assert clean_pen["instances_valid"] == pytest.approx(2.0)
+
+
+@pytest.mark.integration
+def test_evaluation_on_timeout_validation(project_with_prereqs: dict[str, Path]) -> None:
+    """Bad evaluation.* values are rejected at run AND dry-run (FR-RUN-054).
+
+    ``evaluation.*`` is a validated, Revolver-owned config section as of
+    S18 (previously popped/uninspected — typos were silent). An unknown
+    ``on_timeout`` value or a non-finite ``timeout_score`` exits 1 at the
+    shared launch point, before any side effect (no run dir, no DB record);
+    valid values are accepted.
+    """
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    base_args = ["run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"]
+
+    # (a) Unknown on_timeout value -> exit 1 at --dry-run with a clear message.
+    result = _invoke_with_mocks(
+        [*base_args, "--dry-run", "--config-override", "evaluation.on_timeout=bogus"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Invalid evaluation.on_timeout 'bogus'" in output
+    assert "penalize, drop" in output
+
+    # (b) Non-finite timeout_score -> exit 1 at --dry-run.
+    result = _invoke_with_mocks(
+        [*base_args, "--dry-run", "--config-override", "evaluation.timeout_score=.inf"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "evaluation.timeout_score must be a finite number" in output
+
+    # (c) Rejected at a real run too, with no side effect (no run record).
+    result = _invoke_with_mocks(
+        [*base_args, "--config-override", "evaluation.on_timeout=bogus"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 1
+    conn = get_project_db(root / REVOLVER_DIR / "revolver.db")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+    # (d) Valid values pass: drop (the 0.17 escape hatch) dry-runs clean.
+    result = _invoke_with_mocks(
+        [
+            *base_args,
+            "--dry-run",
+            "--config-override",
+            "evaluation.on_timeout=drop",
+            "--config-override",
+            "evaluation.timeout_score=-1.0",
+        ],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+
+
+# Driver that models run_shinka_eval's ProcessPoolExecutor split: the
+# producer module instance runs run_experiment(); a FRESH consumer module
+# instance (which never saw run_experiment run — like the parent process
+# when run_workers > 1) aggregates. A module-global coverage channel would
+# read 0.0/0.0 here; the stamped per-instance entries must not.
+_SHINKA_CROSS_PROCESS_DRIVER = """\
+import importlib.util
+import json
+import sys
+
+
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+producer = _load(sys.argv[1], "_wrapper_producer")
+results = producer.run_experiment(sys.argv[2])
+consumer = _load(sys.argv[1], "_wrapper_consumer")
+print(json.dumps(consumer.aggregate_metrics([results])))
+"""
+
+
+@pytest.mark.integration
+def test_shinka_coverage_survives_process_boundary(tmp_path: Path) -> None:
+    """Coverage keys travel with the results, not via a module-global.
+
+    FR-RUN-053 (S18 / U13 #367 commit ii, PR #257 review): shinka's
+    ``run_shinka_eval`` executes ``run_experiment()`` in a
+    ``ProcessPoolExecutor`` worker when ``run_workers > 1``, so a
+    module-global written by the worker's module instance never reaches
+    the parent's ``aggregate_metrics()``. The coverage keys are therefore
+    stamped onto the per-instance entries and read back from them. This
+    driver aggregates in a fresh module instance that never ran
+    ``run_experiment()`` — coverage must still be correct.
+    """
+    import subprocess
+    import sys
+
+    snapshot, dataset, program = _make_timeout_mix_project(tmp_path)
+    wrapper = _generate_shinka_wrapper(snapshot, tmp_path / "run-shinka")
+
+    driver = tmp_path / "shinka_cross_process_driver.py"
+    driver.write_text(_SHINKA_CROSS_PROCESS_DRIVER, encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(driver), str(wrapper), str(program)],
+        env=_wrapper_env(dataset, None),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    metrics = json.loads(proc.stdout)
+    assert metrics["instances_valid"] == pytest.approx(2.0)
+    assert metrics["instances_total"] == pytest.approx(3.0)
+    # The mean is still the FR-RUN-054 default-penalize mean, uninflated.
+    assert metrics["combined_score"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+    assert "instances_user_key" not in metrics
+
+
+@pytest.mark.integration
+def test_resume_inherits_baked_timeout_policy(
+    tmp_project: Path,
+    dataset_dir: Path,
+    global_db_path: Path,
+) -> None:
+    """Resume reuses the parent's wrapper, so the baked policy persists.
+
+    FR-RUN-054 (S18 / U13 #367 commit iii): ``evaluation.on_timeout`` /
+    ``timeout_score`` are baked into the wrapper at launch; resume copies
+    the parent wrapper instead of regenerating it (FR-RUN-024), so a
+    non-default policy survives the resume without the overrides being
+    re-supplied.
+    """
+    from revolver.core.problem import create_version
+
+    # Instance-mode evaluator: only the generated (non-legacy) wrapper
+    # carries the baked policy constants.
+    fixtures_dir = Path(__file__).parent.parent / "fixtures"
+    shutil.copy2(fixtures_dir / "evaluator_instance.py", tmp_project / "evaluator.py")
+    shutil.copy2(
+        fixtures_dir / "initial_program_simple.py",
+        tmp_project / "initial_program.py",
+    )
+    shutil.copy2(fixtures_dir / "config_simple.yaml", tmp_project / "config.yaml")
+    create_version(tag="v1.0", message="Version v1.0", project_root=tmp_project)
+    _register_dataset(tmp_project, dataset_dir, compatible_with=["v1.0"])
+    _register_llm(global_db_path, base_url="http://localhost:11434/v1")
+
+    result = _invoke_with_mocks(
+        [
+            "--json",
+            "run",
+            "--version",
+            "v1.0",
+            "--llm",
+            "test-llm",
+            "--dataset",
+            "train-small",
+            "--config-override",
+            "evaluation.on_timeout=drop",
+            "--config-override",
+            "evaluation.timeout_score=-0.5",
+        ],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    parent_run_id = _parse_json_output(result)["run_id"]
+
+    parent_run_dir = tmp_project / REVOLVER_DIR / "runs" / parent_run_id
+    parent_wrapper = (parent_run_dir / "_revolver_evaluator.py").read_text(encoding="utf-8")
+    assert "_ON_TIMEOUT = 'drop'" in parent_wrapper
+    assert "_TIMEOUT_SCORE = -0.5" in parent_wrapper
+
+    # Stage a checkpoint so resume can proceed (FR-RUN-024).
+    checkpoint_dir = parent_run_dir / "oe-output" / "checkpoints" / "checkpoint_5"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    result = _invoke_with_mocks(
+        ["--json", "run", "resume", "--run", parent_run_id],
+        cwd=tmp_project,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0, _get_all_output(result)
+    resumed_run_id = _parse_json_output(result)["run_id"]
+
+    resumed_wrapper = (
+        tmp_project / REVOLVER_DIR / "runs" / resumed_run_id / "_revolver_evaluator.py"
+    ).read_text(encoding="utf-8")
+    # Copied verbatim, not regenerated: the baked policy is inherited.
+    assert resumed_wrapper == parent_wrapper

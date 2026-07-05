@@ -529,6 +529,58 @@ def test_shinka_dry_run(project_with_prereqs: dict[str, Path]) -> None:
     assert mock_runner_cls.call_count == 0
 
 
+@pytest.mark.integration
+@pytest.mark.shinkaevolve
+def test_shinka_evaluation_on_timeout_validation(
+    project_with_prereqs: dict[str, Path],
+) -> None:
+    """evaluation.* is validated on the Shinka launch path too (FR-RUN-054).
+
+    The policy parse happens at the shared launch point AFTER the backend's
+    ``build_config``, so this locks two things on the Shinka path: bad
+    values exit 1 at dry-run before the engine is constructed, and the
+    Shinka ``build_config`` preserves the user's ``evaluation.*`` overrides
+    for the parse (valid values dry-run clean).
+    """
+    base = [
+        "run",
+        "--version",
+        "v1.0",
+        "--llm",
+        "test-llm",
+        "--dataset",
+        "train-small",
+        "--backend",
+        "shinka",
+        "--dry-run",
+    ]
+
+    result, mock_runner_cls, _ = _invoke_with_mocks(
+        [*base, "--config-override", "evaluation.on_timeout=bogus"],
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 1, f"Exit {result.exit_code}; output: {output}"
+    assert "Invalid evaluation.on_timeout 'bogus'" in output
+    assert mock_runner_cls.call_count == 0
+
+    result, mock_runner_cls, _ = _invoke_with_mocks(
+        [
+            *base,
+            "--config-override",
+            "evaluation.on_timeout=drop",
+            "--config-override",
+            "evaluation.timeout_score=-1.0",
+        ],
+        project_with_prereqs["root"],
+        project_with_prereqs["global_db_path"],
+    )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert mock_runner_cls.call_count == 0
+
+
 # ── (c) Mocked resume (S14-13, FR-RUN-024/047) ───────────────────────────────
 
 
