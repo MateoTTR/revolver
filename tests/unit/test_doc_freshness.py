@@ -8,10 +8,23 @@ recording the last release the doc was verified against.
 
 Lag rule (same-major minor arithmetic): the stamp may trail
 ``revolver.__version__`` by at most ONE minor version. At a current 0.18.x,
-``v0.18.*`` and ``v0.17.*`` stamps pass and ``v0.16.*`` fails; a stamp from an
-older major always fails, a stamp ahead of the current version never does
-(stamps may be refreshed just before the release bump lands). Refreshing the
-stamps is part of the Release Checklist step 1b in ``CLAUDE.md``.
+``v0.18.*`` and ``v0.17.*`` stamps pass and ``v0.16.*`` fails; a stamp ahead
+of the current version never fails (stamps may be refreshed just before the
+release bump lands). Refreshing the stamps is part of the Release Checklist
+step 1b in ``CLAUDE.md``.
+
+Major-boundary grace: while the current version sits at ``X.0.*`` (the fresh
+major window), stamps from major ``X-1`` still pass — otherwise the very
+commit bumping to ``X.0.0`` would redden CI on every stamp, breaking the
+"the release is never blocked by its own version bump" guarantee. The
+checker cannot know the previous major's last minor, so the whole previous
+major is granted for that one window; from ``X.1`` on, every ``(X-1).*``
+stamp fails. In practice the Release Checklist re-stamps the corpus each
+release, so anything older than one release gets caught at ``X.1`` at the
+latest.
+
+A UTF-8 BOM before the front-matter is tolerated (stripped before matching)
+so an editor that saves with a BOM cannot fake a "missing stamp" failure.
 
 This module runs in the main CI test job (``unit`` marker) and in the
 docs-only ``doc-lint.yml`` workflow, so a stale guide blocks docs-only PRs
@@ -44,7 +57,14 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.")
 def scanned_files() -> list[Path]:
     """The freshness corpus: every guide plus the specs-side E2E walkthrough."""
     guides = sorted((REPO_ROOT / "docs" / "guides").glob("*.md"))
-    return [*guides, REPO_ROOT / "docs" / "specs" / "user-story-e2e.md"]
+    e2e = REPO_ROOT / "docs" / "specs" / "user-story-e2e.md"
+    if not e2e.exists():  # self-explanatory instead of a raw read_text error
+        raise FileNotFoundError(
+            f"expected the E2E walkthrough at {e2e.relative_to(REPO_ROOT).as_posix()} — "
+            "if it moved or was renamed, update scanned_files() in "
+            "tests/unit/test_doc_freshness.py to follow it"
+        )
+    return [*guides, e2e]
 
 
 def read_stamp(text: str) -> tuple[int, int] | None:
@@ -52,7 +72,10 @@ def read_stamp(text: str) -> tuple[int, int] | None:
 
     ``None`` means either no front-matter block at the very top of the file
     or a block without a well-formed ``verified-against: vX.Y.Z`` entry.
+    A leading UTF-8 BOM is stripped so it cannot defeat the top-of-file
+    anchor and misreport a stamped doc as missing its stamp.
     """
+    text = text.removeprefix("\ufeff")
     front_matter = _FRONT_MATTER_RE.match(text)
     if front_matter is None:
         return None
@@ -81,6 +104,10 @@ def check_freshness(text: str, current_version: str, name: str) -> str | None:
         )
     if stamp[0] > current[0]:
         return None  # stamped ahead of the current major: never stale
+    if stamp[0] == current[0] - 1 and current[1] == 0:
+        # Fresh-major window (X.0.*): the previous major still passes, so
+        # the X.0.0 bump commit never reddens CI by itself. Closes at X.1.
+        return None
     behind_major = stamp[0] < current[0]
     if behind_major or current[1] - stamp[1] > 1:
         return (
@@ -149,8 +176,18 @@ class TestFreshnessChecker:
         assert "doc.md" in error and "v0.16.x" in error and "0.18.0" in error
         assert "refresh the stamp to v0.18.z" in error
 
-    def test_stamped_older_major_fails(self) -> None:
-        error = check_freshness(_STAMPED.format(stamp="v0.17.1"), "1.0.0", "doc.md")
+    def test_previous_major_passes_in_fresh_major_window(self) -> None:
+        # X.0.* grace: the 1.0.0 bump commit must not redden CI by itself —
+        # stamps from major 0 still pass while the version sits at 1.0.*.
+        assert check_freshness(_STAMPED.format(stamp="v0.18.2"), "1.0.0", "doc.md") is None
+        assert check_freshness(_STAMPED.format(stamp="v0.17.1"), "1.0.5", "doc.md") is None
+
+    def test_older_major_fails_once_window_closes(self) -> None:
+        # From X.1 on, every previous-major stamp is stale.
+        error = check_freshness(_STAMPED.format(stamp="v0.18.2"), "1.1.0", "doc.md")
+        assert error is not None and "behind" in error
+        # Two majors behind fails even in a fresh-major window.
+        error = check_freshness(_STAMPED.format(stamp="v0.18.2"), "2.0.0", "doc.md")
         assert error is not None and "behind" in error
 
     def test_stamped_ahead_passes(self) -> None:
@@ -172,6 +209,11 @@ class TestFreshnessChecker:
         # A `---` thematic break later in the doc is not front-matter.
         text = "# Guide\n\n---\nverified-against: v0.17.1\n---\n"
         assert read_stamp(text) is None
+
+    def test_bom_prefixed_front_matter_still_reads(self) -> None:
+        # A UTF-8 BOM must not defeat the top-of-file anchor and misreport
+        # a stamped doc as missing its stamp.
+        assert read_stamp("\ufeff" + _STAMPED.format(stamp="v0.17.1")) == (0, 17)
 
     def test_malformed_stamp_value_fails(self) -> None:
         # Missing `v` prefix or truncated version: not a well-formed stamp.
