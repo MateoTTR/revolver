@@ -1,4 +1,4 @@
-# [DRAFT — NOT FILED] Upstream issue for github.com/SakanaAI/ShinkaEvolve
+# [FILED 2026-07-05] Upstream issue — github.com/SakanaAI/ShinkaEvolve/issues/143
 
 **Title**: Unbounded LLM-call stall wedges a run for hours-to-days; stuck-system watchdog cannot see it (repro attached)
 
@@ -50,4 +50,4 @@ shinka 0.0.7, Python 3.12, openai SDK 2.43.0, Linux. Observed originally with a 
 
 ---
 
-*[Internal note — not part of the issue text: minimize the repro script from `docs/analysis/spike-320-repro.py` before filing (drop the `ShinkaBackend._run_engine`-style construction, keep the driver + fake endpoint). File only after Mathieu's validation (R3 arbitration 2026-07-05: GO with pre-publication review).]*
+*[Internal note: FILED as https://github.com/SakanaAI/ShinkaEvolve/issues/143 (2026-07-05, after Mathieu's validation). The repro script was minimized to a Revolver-independent `shinka_stall_repro.py` (embedded in the issue), re-verified against real shinka 0.0.7 before filing (stall mode: WEDGED, exit 0).]*
