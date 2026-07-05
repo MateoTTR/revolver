@@ -199,11 +199,13 @@ def run_launch(
                 )
             else:
                 # Display the RESOLVED backend (explicit --backend >
-                # version-stored backend > default — U4, FR-RUN-047).
+                # version-stored backend > default — U4, FR-RUN-047). The
+                # fallback never surfaces the None sentinel (dry-run always
+                # sets resolved_config today; belt-and-suspenders).
                 resolved_backend = (
                     result.resolved_config.backend
                     if result.resolved_config is not None
-                    else backend
+                    else (backend or core_run.DEFAULT_BACKEND)
                 )
                 render(
                     {
