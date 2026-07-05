@@ -37,7 +37,7 @@ from typing import Any, Literal, cast, get_args
 import yaml
 
 from revolver.core.dataset import resolve_dataset_path, verify_dataset_integrity
-from revolver.core.eval import evaluate_solution
+from revolver.core.eval import compute_aggregates, evaluate_solution
 from revolver.core.exceptions import (
     ActiveRunError,
     ExternalError,
@@ -87,6 +87,8 @@ from revolver.infra.db import (
     delete_run as db_delete_run,
     get_dataset,
     get_dataset_compat,
+    get_eval_instances,
+    get_eval_metadata,
     get_global_db,
     get_latest_run,
     get_llm,
@@ -2314,6 +2316,31 @@ def get_run_info(
             except Exception:
                 logger.debug("run best_score fallback read failed in get_run_info", exc_info=True)
 
+        # 6d. Post-run training-eval aggregate for the rank-1 solution
+        #     (S18 / U11 — FR-RUN-055). Read back the eval persisted by the
+        #     post-run evaluation (FR-RUN-019 via core.eval) on the run's
+        #     training dataset and surface the honest mean of combined_score
+        #     with its coverage (instances in the mean / total instances —
+        #     FR-RUN-053), to be rendered NEXT TO the engine best.
+        post_eval_score: float | None = None
+        post_eval_instances_valid: int | None = None
+        post_eval_instances_total: int | None = None
+        rank1_solution = next((s for s in solutions if s.rank == 1), None)
+        if rank1_solution is not None:
+            try:
+                eval_meta = get_eval_metadata(conn, rank1_solution.id, str(run_data["dataset"]))
+                if eval_meta is not None:
+                    eval_rows = get_eval_instances(conn, eval_meta.eval_id)
+                    agg = compute_aggregates(eval_rows).get("combined_score")
+                    post_eval_instances_total = eval_meta.instance_count
+                    if agg is not None:
+                        post_eval_score = agg.mean
+                        post_eval_instances_valid = agg.count
+                    else:
+                        post_eval_instances_valid = 0
+            except Exception:
+                logger.debug("post-run eval read failed in get_run_info", exc_info=True)
+
         return RunInfo(
             run_id=str(run_data["id"]),
             problem_version=str(run_data["problem_version"]),
@@ -2342,6 +2369,9 @@ def get_run_info(
             programs_extracted=len(programs),
             total_programs=total_programs,
             run_best_score=run_best_score,
+            post_eval_score=post_eval_score,
+            post_eval_instances_valid=post_eval_instances_valid,
+            post_eval_instances_total=post_eval_instances_total,
             resume_chain=chain,
             llm_type=str(run_data.get("llm_type", "single")),
             llm_snapshot=(str(run_data["llm_snapshot"]) if run_data.get("llm_snapshot") else None),

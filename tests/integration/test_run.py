@@ -1366,6 +1366,176 @@ def test_run_info_remote_no_token_caveat(project_with_prereqs: dict[str, Path]) 
     assert "under-report token usage" not in output
 
 
+# ── Test 12e: run info — honest dual-score display (S18 / U11, FR-RUN-055) ──
+
+
+@pytest.mark.integration
+def test_run_info_honest_score_labels(
+    project_with_prereqs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run info` renders the engine best labeled "engine, single eval" NEXT
+    TO the post-run training-eval mean labeled with its coverage
+    (instances_valid/instances_total — FR-RUN-053); the bare engine number
+    never appears without its label; JSON carries both fields (S18-06)."""
+    from revolver.infra.db import insert_eval_instance, insert_eval_metadata
+
+    # Keep the pre-flight eval from emitting the once-per-process
+    # "[revolver] numeric thread cap..." stderr line: its leading '[' breaks
+    # _parse_json_output when this test is the first launch in the process.
+    monkeypatch.setenv("REVOLVER_EVAL_NUM_THREADS", "0")
+
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+
+    # Launch a run (engine best_score=0.95; post-run eval patched out).
+    result = _invoke_with_mocks(
+        ["--json", "run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+        cwd=root,
+        global_db_path=global_db_path,
+    )
+    assert result.exit_code == 0
+    run_data = _parse_json_output(result)
+    run_id = run_data["run_id"]
+    solution_id = run_data["solution"]["solution_id"]
+
+    # Persist a post-run training eval for the rank-1 solution, as the
+    # S18-05 evaluate_solution path would: 2 solved instances contribute to
+    # the mean (0.5, 0.7 -> 0.6), 1 failed instance does not (coverage 2/3).
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_eval_metadata(
+            conn,
+            eval_id="eval-20260705-120000",
+            solution_id=solution_id,
+            dataset_name="train-small",
+            instance_count=3,
+            instances_solved=2,
+            eval_time_s=1.0,
+            user_aggregates=None,
+            evaluated_at=datetime.now(UTC),
+        )
+        for instance_id, value, status, error in (
+            ("instance_001.json", 0.5, "solved", None),
+            ("instance_002.json", 0.7, "solved", None),
+            ("instance_003.json", None, "failed", "boom"),
+        ):
+            insert_eval_instance(
+                conn,
+                eval_id="eval-20260705-120000",
+                instance_id=instance_id,
+                metric_name="combined_score" if value is not None else "_status",
+                value=value,
+                status=status,
+                error_message=error,
+                compute_time_s=0.1,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Human output: both numbers rendered, with distinct labels.
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.cli.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+    ):
+        result = runner.invoke(
+            app, ["run", "info", run_id], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "0.9500 (engine, single eval)" in output
+    assert "0.6000 (mean, 2/3 instances)" in output
+    # The inflated engine number NEVER renders bare (FR-RUN-055).
+    assert re.search(r"0\.9500(?! \(engine, single eval\))", output) is None
+
+    # JSON output carries both fields.
+    with patch("pathlib.Path.cwd", return_value=root):
+        result = runner.invoke(app, ["--json", "run", "info", run_id], catch_exceptions=False)
+    assert result.exit_code == 0
+    info = _parse_json_output(result)
+    assert info["solutions"][0]["best_score"] == 0.95
+    assert info["post_eval_score"] == pytest.approx(0.6)
+    assert info["post_eval_instances_valid"] == 2
+    assert info["post_eval_instances_total"] == 3
+    assert "run_best_score" in info
+
+
+@pytest.mark.integration
+def test_run_info_fallback_engine_label(project_with_prereqs: dict[str, Path]) -> None:
+    """The #306 display-time fallback (rank-1 score <- engine run best) also
+    carries the "engine, single eval" label — the engine number never renders
+    bare — and stays display-only (no DB write; JSON keeps best_score null)."""
+    from revolver.infra.db import insert_run, insert_solution
+    from revolver.infra.store import create_run_dir, write_run_manifest
+
+    root = project_with_prereqs["root"]
+    run_id, solution_id = _next_ids()
+
+    create_run_dir(root, run_id)
+    db_path = root / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    try:
+        insert_run(
+            conn,
+            run_id=run_id,
+            problem_version="v1.0",
+            llm="test-llm",
+            dataset="train-small",
+            iterations=5,
+            problem_hash="hash-v1",
+            dataset_hash="dataset-hash-1",
+            llm_model="gpt-4",
+            created_at=datetime.now(UTC),
+            status="completed",
+        )
+        # Rank-1 solution with NO score (post-run eval skipped/failed).
+        insert_solution(
+            conn,
+            solution_id=solution_id,
+            run_id=run_id,
+            rank=1,
+            best_score=None,
+            alias=None,
+        )
+    finally:
+        conn.close()
+    write_run_manifest(root, run_id, {"run_id": run_id, "programs": []})
+
+    fake_backend = MagicMock()
+    fake_backend.count_total.return_value = None
+    fake_backend.count_evolved_children.return_value = 1
+    fake_backend.read_progress.return_value = (5, 0.87)
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch("revolver.core.run.get_backend", return_value=fake_backend),
+    ):
+        result = runner.invoke(
+            app, ["run", "info", run_id], catch_exceptions=False, env={"COLUMNS": "200"}
+        )
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    # The fallback engine number renders with the label, never bare.
+    assert "0.8700 (engine, single eval)" in output
+    assert re.search(r"0\.8700(?! \(engine, single eval)", output) is None
+
+    # Display-only (#306): the solution score stays null in JSON; the engine
+    # number is carried by the labeled run_best_score field.
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch("revolver.core.run.get_backend", return_value=fake_backend),
+    ):
+        result = runner.invoke(app, ["--json", "run", "info", run_id], catch_exceptions=False)
+    assert result.exit_code == 0
+    info = _parse_json_output(result)
+    assert info["solutions"][0]["best_score"] is None
+    assert info["run_best_score"] == 0.87
+
+
 # ── Test 13: run resume — existing checkpoint (FR-RUN-013, 024) ─────────────
 
 

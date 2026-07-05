@@ -665,6 +665,30 @@ def run_info(
                 data["valid_iterations"] = f"{info.valid_iterations}/{info.iterations} ({pct}%)"
             if info.generation_time_s is not None:
                 data["generation_time_s"] = f"{info.generation_time_s:.1f}"
+            # Honest dual-score display (S18 / U11 — FR-RUN-055): the engine
+            # best is a max over single, survivorship-prone evaluations — it
+            # never renders without its "engine, single eval" label — shown
+            # NEXT TO the post-run training-eval mean labeled with its
+            # coverage (instances_valid/instances_total — FR-RUN-053).
+            engine_best: float | None = next(
+                (s.best_score for s in info.solutions if s.rank == 1 and s.best_score is not None),
+                None,
+            )
+            if engine_best is None:
+                # #306 display-time fallback — labeled the same way, never bare.
+                engine_best = info.run_best_score
+            if engine_best is not None:
+                data["best_score_engine"] = f"{engine_best:.4f} (engine, single eval)"
+            if info.post_eval_instances_total is not None:
+                coverage = (
+                    f"{info.post_eval_instances_valid or 0}/{info.post_eval_instances_total}"
+                )
+                if info.post_eval_score is not None:
+                    data["post_eval_score"] = (
+                        f"{info.post_eval_score:.4f} (mean, {coverage} instances)"
+                    )
+                else:
+                    data["post_eval_score"] = f"no score (mean, {coverage} instances)"
             # Program counters (UX-4 / S16-19): files extracted to programs/
             # plus the backend store total (only when the backend reports it).
             data["programs_extracted"] = info.programs_extracted
@@ -710,16 +734,19 @@ def run_info(
             if info.produced_no_children:
                 sys.stderr.write(f"WARNING: {core_run.UNPRODUCTIVE_RUN_MESSAGE}.\n")
 
-            # Display solutions. When a rank-1 solution has no post-run eval
-            # score, fall back to the engine's run best_score with a
-            # "(from run)" indicator (UX-4 / S16-20).
+            # Display solutions. Solution scores are engine numbers (a max
+            # over single, survivorship-prone evaluations) — they always
+            # carry the "engine, single eval" label (S18 / U11 —
+            # FR-RUN-055). When a rank-1 solution has no score, fall back to
+            # the engine's run best_score, labeled the same way plus a
+            # "from run" indicator (UX-4 / S16-20, #306 — display-only).
             if info.solutions:
                 sol_rows = []
                 for s in info.solutions:
                     if s.best_score is not None:
-                        score_str = f"{s.best_score:.4f}"
+                        score_str = f"{s.best_score:.4f} (engine, single eval)"
                     elif s.rank == 1 and info.run_best_score is not None:
-                        score_str = f"{info.run_best_score:.4f} (from run)"
+                        score_str = f"{info.run_best_score:.4f} (engine, single eval, from run)"
                     else:
                         score_str = "-"
                     sol_rows.append(

@@ -2366,6 +2366,85 @@ def test_get_run_info_no_score_fallback_when_present(
 
 
 @pytest.mark.unit
+def test_get_run_info_post_eval_aggregate(project_with_prereqs: dict) -> None:
+    """get_run_info surfaces the persisted post-run training-eval mean and
+    its instances_valid/instances_total coverage next to the engine best
+    (S18-06, U11 B — FR-RUN-055/FR-RUN-053)."""
+    from revolver.infra.db import insert_eval_instance, insert_eval_metadata
+
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    run_id = "run-20260705-110000"
+    solution_id = "sol-20260705-110000"
+    _insert_completed_run_with_rank1(root, db_path, run_id, solution_id, best_score=0.95)
+    write_run_manifest(root, run_id, {"run_id": run_id, "programs": []})
+
+    conn = get_project_db(db_path)
+    try:
+        insert_eval_metadata(
+            conn,
+            eval_id="eval-20260705-110000",
+            solution_id=solution_id,
+            dataset_name="train-small",
+            instance_count=2,
+            instances_solved=1,
+            eval_time_s=1.0,
+            user_aggregates=None,
+            evaluated_at=datetime.now(UTC),
+        )
+        insert_eval_instance(
+            conn,
+            eval_id="eval-20260705-110000",
+            instance_id="instance1.txt",
+            metric_name="combined_score",
+            value=0.4,
+            status="solved",
+            error_message=None,
+            compute_time_s=0.1,
+        )
+        insert_eval_instance(
+            conn,
+            eval_id="eval-20260705-110000",
+            instance_id="instance2.txt",
+            metric_name="_status",
+            value=None,
+            status="timeout",
+            error_message="timed out",
+            compute_time_s=None,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    info = get_run_info(run_id, project_root=root)
+
+    # Engine best stays on the solution; the honest mean sits next to it.
+    assert info.solutions[0].best_score == 0.95
+    assert info.post_eval_score == pytest.approx(0.4)
+    assert info.post_eval_instances_valid == 1
+    assert info.post_eval_instances_total == 2
+
+
+@pytest.mark.unit
+def test_get_run_info_post_eval_fields_none_without_eval(project_with_prereqs: dict) -> None:
+    """Without a persisted post-run eval, the post_eval_* fields stay None."""
+    root = project_with_prereqs["root"]
+    db_path = project_with_prereqs["db_path"]
+
+    run_id = "run-20260705-113000"
+    solution_id = "sol-20260705-113000"
+    _insert_completed_run_with_rank1(root, db_path, run_id, solution_id, best_score=0.95)
+    write_run_manifest(root, run_id, {"run_id": run_id, "programs": []})
+
+    info = get_run_info(run_id, project_root=root)
+
+    assert info.post_eval_score is None
+    assert info.post_eval_instances_valid is None
+    assert info.post_eval_instances_total is None
+
+
+@pytest.mark.unit
 def test_get_run_info_not_found(tmp_project: Path) -> None:
     """get_run_info must raise RevolverError if run not found."""
     with pytest.raises(RevolverError, match="not found"):
