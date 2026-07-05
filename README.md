@@ -36,7 +36,7 @@ revolver run/run resume                # Launch (--backend openevolve|shinka), t
 revolver run status/list/info/population/cleanup/delete  # Monitor, inspect and clean up runs
 revolver eval/eval results             # Evaluate solutions on datasets
 revolver solution list/info/alias      # Browse and tag solutions
-revolver solution show/extract/delete  # Show, extract solution code (top-N via --rank N / --program-id, ShinkaEvolve-native, gated per backend) or clean up
+revolver solution show/extract/delete  # Show, extract (top-N via --rank N / --program-id on extract, ShinkaEvolve-native, gated per backend) or clean up
 revolver solution export/diff          # Export solutions or compare two solutions
 revolver benchmark/benchmark results   # Compare multiple solutions on same dataset
 revolver benchmark list/export/delete  # Manage and export benchmark results (CSV/JSON)

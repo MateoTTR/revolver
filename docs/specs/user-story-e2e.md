@@ -19,7 +19,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.17.1
+    ✓ revolver         0.18.0
     ✓ openevolve       0.2.0
     ℹ shinkaevolve     not installed (optional). Install with: pip install 'revolver[shinka]'
 
@@ -137,7 +137,7 @@ $ revolver problem test --dataset ./data/instances-small/
 Testing 50 instances from ./data/instances-small/
 ✓ 48/50 instances passed
 ✗ instance_023.json — KeyError: 'duration' in evaluator.py:45
-✗ instance_041.json — Timeout after 300s
+✗ instance_041.json — Timeout after 30s
 Summary: 48 passed, 2 failed, mean time: 1.1s, max time: 4.2s
 ```
 
