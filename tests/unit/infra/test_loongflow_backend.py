@@ -123,3 +123,36 @@ def evaluate_solution(fn):
 
         prog = backend.read_progress(tmp_path / "run")
         assert prog == (2, 100.0)
+
+    @patch("litellm.completion")
+    def test_launch_with_parallel_concurrency(
+        self, mock_completion: MagicMock, tmp_path: Path
+    ) -> None:
+        """Verify parallel execution samples multiple candidates concurrently."""
+        backend = LoongFlowBackend()
+        llm = _make_llm()
+
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir(parents=True)
+        evaluator_code = """
+def evaluate_solution(fn):
+    return 80.0, {"valid": True, "score": 80.0}
+"""
+        (snapshot_dir / "evaluator.py").write_text(evaluator_code, encoding="utf-8")
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = "```python\ndef solve(d):\n    return []\n```"
+        mock_completion.return_value = MagicMock(choices=[mock_choice])
+
+        spec = BackendRunSpec(
+            snapshot_dir=snapshot_dir,
+            run_dir=tmp_path / "run",
+            llm=llm,
+            iterations=1,
+            parallel=3,
+        )
+
+        result = backend.launch(spec, {})
+        assert result.best_score == 80.0
+        # 1 step * 3 parallel workers = 3 calls
+        assert mock_completion.call_count == 3
