@@ -115,6 +115,7 @@ _BACKEND_CHECK_NAMES: dict[str, str] = {
     "openevolve": "openevolve",
     "shinka": "shinkaevolve",
     "loongflow": "loongflow",
+    "agentic": "litellm",
 }
 
 # Distribution names for importlib.metadata version lookup — the check
@@ -124,6 +125,7 @@ _BACKEND_DIST_NAMES: dict[str, str] = {
     "openevolve": "openevolve",
     "shinka": "shinka-evolve",
     "loongflow": "loongflow",
+    "agentic": "litellm",
 }
 
 
