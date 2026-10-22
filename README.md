@@ -1,12 +1,12 @@
 # Revolver
 
-**MLOps CLI platform for LLM-guided evolutionary optimization via a pluggable evolution backend — [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) by default, [ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve) and [LoongFlow](https://github.com/baidu-baige/LoongFlow) optional.**
+**MLOps CLI platform for LLM-guided evolutionary and agentic optimization via pluggable backends — [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) by default, [ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve), [LoongFlow](https://github.com/baidu-baige/LoongFlow), and Agentic Multi-Agent optional.**
 
 Revolver adds the operational layer that evolution backends lack: LLM lifecycle management, problem versioning, dataset registration, solution traceability, and multi-solution benchmarking — all from the command line.
 
 ## Why Revolver?
 
-OpenEvolve, ShinkaEvolve, and LoongFlow provide the core evolutionary loops for LLM-guided code optimization. Revolver wraps these backends with everything a domain expert needs to run reproducible experiments:
+OpenEvolve, ShinkaEvolve, LoongFlow, and Agentic Multi-Agent provide the core optimization loops for LLM-guided code optimization. Revolver wraps these backends with everything a domain expert needs to run reproducible experiments:
 
 | Capability | Backend alone | With Revolver |
 |---|---|---|
@@ -75,6 +75,9 @@ pip install -e ".[shinka]"
 
 # Optional: LoongFlow backend (run --backend loongflow)
 pip install -e ".[loongflow]"
+
+# Optional: Agentic Multi-Agent backend (run --backend agentic)
+pip install litellm
 ```
 
 ### Initialize a project
@@ -164,6 +167,11 @@ revolver run --version v1.0 --llm claude --dataset training-set --backend shinka
 # Tip: initialize with `revolver project init <name> --backend loongflow`
 # to scaffold a LoongFlow-shaped config.yaml (agent/memory/execution).
 revolver run --version v1.0 --llm claude --dataset training-set --backend loongflow
+
+# Or on the Agentic Multi-Agent backend (conversational REPL with subtask tool calling).
+# Tip: initialize with `revolver project init <name> --backend agentic`
+# to scaffold an Agentic config.yaml (agentic: mode: multi_agent / max_turns: 15).
+revolver run --version v1.0 --llm gemini --dataset training-set --backend agentic
 ```
 
 ### Evaluate and benchmark solutions
@@ -214,6 +222,7 @@ REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution <solution-id> --dataset eva
 - **[OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve)** — default evolutionary optimization engine
 - **[ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve)** — optional evolution backend (`pip install 'revolver[shinka]'`, ADR-007)
 - **[LoongFlow](https://github.com/baidu-baige/LoongFlow)** — optional cognitive evolution backend (`pip install 'revolver[loongflow]'`, ADR-007)
+- **Agentic Multi-Agent** — optional conversational tool-calling optimization backend (`pip install litellm`, ADR-007)
 
 ## Development
 
