@@ -25,7 +25,7 @@ from revolver.models.llm import EnsembleEntry, LLMEntry
 from revolver.models.run import ResolvedConfig, TokenUsage
 
 # Names accepted by :func:`get_backend`, in display order.
-AVAILABLE_BACKENDS: tuple[str, ...] = ("openevolve", "shinka")
+AVAILABLE_BACKENDS: tuple[str, ...] = ("openevolve", "shinka", "loongflow", "agentic")
 
 # Timed-out-instance policy baked into generated wrappers (FR-RUN-054,
 # U13/#367). "penalize" is the deliberate v0.18 default; "drop" restores
@@ -807,12 +807,16 @@ def get_backend(name: str) -> EvolutionBackend:
         ValidationError: If *name* is not a registered backend (exit 1).
     """
     # Imported lazily: the implementation modules import this module.
+    from revolver.infra.backends.agentic import AgenticBackend
+    from revolver.infra.backends.loongflow import LoongFlowBackend
     from revolver.infra.backends.openevolve import OpenEvolveBackend
     from revolver.infra.backends.shinka import ShinkaBackend
 
     registry: dict[str, Callable[[], EvolutionBackend]] = {
         "openevolve": OpenEvolveBackend,
         "shinka": ShinkaBackend,
+        "loongflow": LoongFlowBackend,
+        "agentic": AgenticBackend,
     }
     # Guard against the registry and the display constant drifting apart.
     assert set(registry) == set(AVAILABLE_BACKENDS)

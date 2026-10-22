@@ -111,13 +111,15 @@ class TestGetBackend:
             assert name in message
 
     def test_backends_satisfy_protocol(self) -> None:
-        """Both registered backends satisfy the EvolutionBackend protocol."""
+        """All registered backends satisfy the EvolutionBackend protocol."""
         assert isinstance(get_backend("openevolve"), EvolutionBackend)
         assert isinstance(get_backend("shinka"), EvolutionBackend)
+        assert isinstance(get_backend("loongflow"), EvolutionBackend)
+        assert isinstance(get_backend("agentic"), EvolutionBackend)
 
     def test_available_backends_constant(self) -> None:
-        """AVAILABLE_BACKENDS lists both registered backends."""
-        assert AVAILABLE_BACKENDS == ("openevolve", "shinka")
+        """AVAILABLE_BACKENDS lists all registered backends."""
+        assert AVAILABLE_BACKENDS == ("openevolve", "shinka", "loongflow", "agentic")
 
 
 # ── Error type tests ──────────────────────────────────────────────────────────

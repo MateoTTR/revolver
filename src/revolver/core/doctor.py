@@ -111,12 +111,22 @@ _REQUIRED_BACKENDS: frozenset[str] = frozenset({"openevolve"})
 
 # Doctor check names per backend name (package-style, e.g. the doctor
 # entry for the "shinka" backend is "shinkaevolve", matching "openevolve").
-_BACKEND_CHECK_NAMES: dict[str, str] = {"openevolve": "openevolve", "shinka": "shinkaevolve"}
+_BACKEND_CHECK_NAMES: dict[str, str] = {
+    "openevolve": "openevolve",
+    "shinka": "shinkaevolve",
+    "loongflow": "loongflow",
+    "agentic": "litellm",
+}
 
 # Distribution names for importlib.metadata version lookup — the check
 # name is a display name and does NOT always match the PyPI distribution
 # (the "shinka" backend ships as the "shinka-evolve" distribution).
-_BACKEND_DIST_NAMES: dict[str, str] = {"openevolve": "openevolve", "shinka": "shinka-evolve"}
+_BACKEND_DIST_NAMES: dict[str, str] = {
+    "openevolve": "openevolve",
+    "shinka": "shinka-evolve",
+    "loongflow": "loongflow",
+    "agentic": "litellm",
+}
 
 
 def _check_backend(backend_name: str) -> DependencyStatus:

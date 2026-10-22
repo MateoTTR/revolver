@@ -15,16 +15,20 @@ from revolver.infra.backends.base import (
     ProgressInfo,
     get_backend,
 )
+from revolver.infra.backends.agentic import AgenticBackend
+from revolver.infra.backends.loongflow import LoongFlowBackend
 from revolver.infra.backends.openevolve import OpenEvolveBackend
 from revolver.infra.backends.shinka import ShinkaBackend
 
 __all__ = [
     "AVAILABLE_BACKENDS",
+    "AgenticBackend",
     "BackendCapabilities",
     "BackendRunResult",
     "BackendRunSpec",
     "BackendUnavailableError",
     "EvolutionBackend",
+    "LoongFlowBackend",
     "OpenEvolveBackend",
     "ProgressInfo",
     "ShinkaBackend",

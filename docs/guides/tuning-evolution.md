@@ -42,7 +42,7 @@ command shape works on either engine:
 
 | Neutral lever | Flag | OpenEvolve mapping | ShinkaEvolve mapping |
 |---|---|---|---|
-| Backend | `--backend {openevolve,shinka}` | default | opt-in extra |
+| Backend | `--backend {openevolve,shinka,loongflow,agentic}` | default | opt-in extra |
 | Iterations | `--iterations N` | `max_iterations` | `evo_config.num_generations` |
 | Temperature | `--temperature F` (or LLM registry) | `llm.temperature` | `llm_kwargs.temperatures: [F]` |
 | Parallel evaluations | `--parallel N` | `evaluator.parallel_evaluations` | **no effect** (warns) — engine-managed |

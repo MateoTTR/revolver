@@ -24,6 +24,8 @@ dependencies = [
 openevolve = ["openevolve"]
 # ShinkaEvolve backend — opt-in (ADR-007 D6). Never pulled by dev/test extras.
 shinka = ["shinka-evolve>=0.0.7,<0.1"]
+# LoongFlow backend — opt-in (ADR-007 D6).
+loongflow = ["loongflow"]
 dev = [
     "pytest>=8",
     "pytest-cov>=5",
