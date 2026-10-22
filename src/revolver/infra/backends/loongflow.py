@@ -184,10 +184,12 @@ def execute_candidate(code_str: str) -> dict:
 
         wrapper_path = self.generate_wrapper(spec)
 
-        # Dynamic wrapper loader
-        wrapper_module_spec = importlib.util.spec_from_file_location(
-            "_loongflow_eval", wrapper_path
-        )
+        # Dynamic wrapper loader with isolated module name
+        import sys
+
+        sys.modules.pop("evaluator", None)
+        module_name = f"_loongflow_eval_{abs(hash(str(wrapper_path)))}"
+        wrapper_module_spec = importlib.util.spec_from_file_location(module_name, wrapper_path)
         if not wrapper_module_spec or not wrapper_module_spec.loader:
             raise ResourceError(f"Cannot load evaluator wrapper from {wrapper_path}")
         eval_module = importlib.util.module_from_spec(wrapper_module_spec)
@@ -206,6 +208,7 @@ def execute_candidate(code_str: str) -> dict:
         best_score = float(initial_eval.get("fitness", 0.0))
 
         max_iters = spec.iterations or config.get("execution", {}).get("max_cognitive_steps", 10)
+        concurrency = spec.parallel or config.get("execution", {}).get("concurrency", 1)
         history: list[dict[str, Any]] = [
             {"step": 0, "score": best_score, "valid": initial_eval.get("valid", False)}
         ]
@@ -220,45 +223,64 @@ def execute_candidate(code_str: str) -> dict:
             else:
                 api_key = "sk-dummy"
 
+        from concurrent.futures import ThreadPoolExecutor
+
         for step in range(1, max_iters + 1):
             prompt = f"""You are an algorithm designer in a LoongFlow PES optimization loop.
-Objective: Optimize the Python function `solve(data)` to achieve maximum score
-while strictly satisfying all constraints.
+        Objective: Optimize the Python function `solve(data)` to achieve maximum score
+        while strictly satisfying all constraints.
 
-Current Best Fitness: {best_score}
-Current Program:
-```python
-{best_program}
-```
+        Current Best Fitness: {best_score}
+        Current Program:
+        ```python
+        {best_program}
+        ```
 
-Task:
-1. Plan an algorithmic refinement to increase fitness or fix constraint violations.
-2. Provide the complete updated Python code defining `solve(data)`.
-"""
-            try:
-                response = litellm.completion(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    api_base=base_url,
-                    api_key=api_key,
-                    temperature=spec.temperature or 0.7,
+        Task:
+        1. Plan an algorithmic refinement to increase fitness or fix constraint violations.
+        2. Provide the complete updated Python code defining `solve(data)`.
+        """
+
+            def _sample_and_evaluate(
+                cand_id: int,
+                current_step: int = step,
+                current_prompt: str = prompt,
+            ) -> tuple[str, float, bool]:
+                try:
+                    response = litellm.completion(
+                        model=model_name,
+                        messages=[{"role": "user", "content": current_prompt}],
+                        api_base=base_url,
+                        api_key=api_key,
+                        temperature=spec.temperature or 0.7,
+                    )
+                    cand_text = response.choices[0].message.content or ""
+                    cand_code = _extract_code(cand_text)
+                except Exception as exc:
+                    err_msg = (
+                        f"LLM API call failed during LoongFlow step {current_step} "
+                        f"(cand {cand_id}): {exc}"
+                    )
+                    raise ExternalError(err_msg) from exc
+
+                eval_res = eval_fn(cand_code)
+                return (
+                    cand_code,
+                    float(eval_res.get("fitness", 0.0)),
+                    bool(eval_res.get("valid", False)),
                 )
-                candidate_text = response.choices[0].message.content or ""
-                candidate_code = _extract_code(candidate_text)
-            except Exception as exc:
-                raise ExternalError(
-                    f"LLM API call failed during LoongFlow step {step}: {exc}"
-                ) from exc
 
-            eval_res = eval_fn(candidate_code)
-            cand_score = float(eval_res.get("fitness", 0.0))
-            cand_valid = eval_res.get("valid", False)
+            if concurrency > 1:
+                with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                    candidates = list(pool.map(_sample_and_evaluate, range(concurrency)))
+            else:
+                candidates = [_sample_and_evaluate(0)]
 
-            if cand_valid and cand_score > best_score:
-                best_score = cand_score
-                best_program = candidate_code
-
-            history.append({"step": step, "score": cand_score, "valid": cand_valid})
+            for cand_code, cand_score, cand_valid in candidates:
+                if cand_valid and cand_score > best_score:
+                    best_score = cand_score
+                    best_program = cand_code
+                history.append({"step": step, "score": cand_score, "valid": cand_valid})
 
             # Checkpoint updates
             (output_dir / "best_program.py").write_text(best_program, encoding="utf-8")
