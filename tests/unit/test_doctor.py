@@ -384,8 +384,8 @@ def test_run_doctor_all_pass() -> None:
     assert report.overall_status == CheckStatus.OK
     assert report.error_count == 0
     assert report.warning_count == 0
-    # revolver + 5 python deps + openevolve + shinkaevolve + loongflow + ollama + nvidia-smi = 11
-    assert len(report.checks) == 11
+    # revolver + 5 python deps + openevolve + shinkaevolve + loongflow + litellm (agentic) + ollama + nvidia-smi = 12
+    assert len(report.checks) == 12
     shinka_check = next(c for c in report.checks if c.name == "shinkaevolve")
     assert shinka_check.status == CheckStatus.INFO
     loongflow_check = next(c for c in report.checks if c.name == "loongflow")

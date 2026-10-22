@@ -115,10 +115,11 @@ class TestGetBackend:
         assert isinstance(get_backend("openevolve"), EvolutionBackend)
         assert isinstance(get_backend("shinka"), EvolutionBackend)
         assert isinstance(get_backend("loongflow"), EvolutionBackend)
+        assert isinstance(get_backend("agentic"), EvolutionBackend)
 
     def test_available_backends_constant(self) -> None:
         """AVAILABLE_BACKENDS lists all registered backends."""
-        assert AVAILABLE_BACKENDS == ("openevolve", "shinka", "loongflow")
+        assert AVAILABLE_BACKENDS == ("openevolve", "shinka", "loongflow", "agentic")
 
 
 # ── Error type tests ──────────────────────────────────────────────────────────
