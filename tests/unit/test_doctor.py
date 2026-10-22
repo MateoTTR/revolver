@@ -19,6 +19,7 @@ from revolver.core.doctor import (
     _check_revolver,
     run_doctor,
 )
+from revolver.infra.backends.loongflow import LoongFlowBackend
 from revolver.infra.backends.openevolve import OpenEvolveBackend
 from revolver.infra.backends.shinka import ShinkaBackend
 from revolver.infra.gpu import GpuInfo
@@ -355,12 +356,17 @@ def test_run_doctor_all_pass() -> None:
     with (
         patch("revolver.core.doctor.importlib.metadata.version", return_value="1.0.0"),
         patch.object(OpenEvolveBackend, "is_available", return_value=(True, None)),
-        # Pin "shinka absent" so the INFO assertion below holds identically
-        # in a real-shinka env (e.g. shinka-spike).
+        # Pin "shinka and loongflow absent" so the INFO assertion below holds identically
+        # in real environments.
         patch.object(
             ShinkaBackend,
             "is_available",
             return_value=(False, "Install with: pip install 'revolver[shinka]'"),
+        ),
+        patch.object(
+            LoongFlowBackend,
+            "is_available",
+            return_value=(False, "Install with: pip install 'revolver[loongflow]'"),
         ),
         patch("revolver.core.doctor.httpx.get") as mock_get,
         patch("revolver.core.doctor.get_gpu_info", return_value=gpu),
@@ -374,14 +380,16 @@ def test_run_doctor_all_pass() -> None:
 
         report = run_doctor()
 
-    # ShinkaEvolve absent is informational only — overall stays OK
+    # ShinkaEvolve and LoongFlow absent are informational only — overall stays OK
     assert report.overall_status == CheckStatus.OK
     assert report.error_count == 0
     assert report.warning_count == 0
-    # revolver + 5 python deps + openevolve + shinkaevolve + ollama + nvidia-smi = 10
-    assert len(report.checks) == 10
+    # revolver + 5 python deps + openevolve + shinkaevolve + loongflow + ollama + nvidia-smi = 11
+    assert len(report.checks) == 11
     shinka_check = next(c for c in report.checks if c.name == "shinkaevolve")
     assert shinka_check.status == CheckStatus.INFO
+    loongflow_check = next(c for c in report.checks if c.name == "loongflow")
+    assert loongflow_check.status == CheckStatus.INFO
 
 
 @pytest.mark.unit
