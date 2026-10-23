@@ -1,0 +1,74 @@
+name: Bug report
+description: Something does not behave as the specification or the documentation says.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **A security vulnerability is not a bug for this form**: follow [SECURITY.md](https://github.com/MateoTTR/revolver/blob/main/SECURITY.md) instead — never a public issue.
+
+        Public-file rule: no local path (write "a local path"), hostname, private repository name, e-mail address or API key in this report; redact them from the output you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Revolver version
+      description: The output of `revolver --version`, or the commit SHA when running from `develop`.
+      placeholder: "0.19.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Evolution backend
+      options:
+        - Not applicable — the command does not involve a backend
+        - openevolve (default)
+        - shinka
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, operating system, install method (editable install, tag install, …), engine package version when relevant.
+      placeholder: "Python 3.12, Linux, pip install -e \".[dev]\", openevolve 0.2.x"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, in order, from a fresh project when possible. Inline the minimal `config.yaml`, evaluator or instance that triggers the problem.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What the specification (`docs/specs/spec-<group>.md`) or the documentation says should happen; cite the FR id when you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happens instead — message, exit code, state left on disk or in the database.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output and logs
+      description: Relevant stdout / stderr, the `revolver doctor` output, the `--verbose` run when available. Redact anything the public-file rule forbids.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reproduced the problem on the latest release or on `develop`.
+        - label: This report contains no local path, hostname, private repository name, e-mail address or API key.
+          required: true

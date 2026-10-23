@@ -1,0 +1,25 @@
+# Dependabot — weekly dependency updates against `develop` (the integration
+# branch; `main` receives releases only — AGENTS.md, "Git").
+# Minor and patch updates are grouped into one pull request per ecosystem;
+# major updates stay individual so that each one is reviewed on its own.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    groups:
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    groups:
+      actions-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

@@ -1,0 +1,34 @@
+# Code owners — reviews are requested automatically, and the branch rulesets
+# require a code-owner review once the repository is public (AGENTS.md,
+# "Irreversible actions are maintainer-only").
+#
+# Order matters: the last matching pattern wins. The maintainer owns
+# everything by default; the explicit rows below name the governance paths
+# whose review is never delegated.
+
+# Default owner
+*                                   @MateoTTR
+
+# Entry files and tool pointers
+/AGENTS.md                          @MateoTTR
+/CLAUDE.md                          @MateoTTR
+/GEMINI.md                          @MateoTTR
+/CONTRIBUTING.md                    @MateoTTR
+/SECURITY.md                        @MateoTTR
+/CODE_OF_CONDUCT.md                 @MateoTTR
+
+# GitHub configuration: workflows, templates, this file, Dependabot
+/.github/                           @MateoTTR
+
+# Normative documentation
+/docs/architecture/                 @MateoTTR
+/docs/specs/                        @MateoTTR
+/docs/validation/                   @MateoTTR
+/docs/process/                      @MateoTTR
+
+# Backend abstraction and storage layer
+/src/revolver/infra/backends/       @MateoTTR
+/src/revolver/infra/db.py           @MateoTTR
+
+# Packaging, dependencies, tool configuration
+/pyproject.toml                     @MateoTTR

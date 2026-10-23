@@ -1,0 +1,118 @@
+name: New evolution backend
+description: Propose an additional evolution engine behind the pluggable backend abstraction (ADR-007).
+title: "[Backend]: "
+labels: ["enhancement", "backend"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A backend is a feature pull request **plus** the backend checklist of the [Definition of Done § 2](https://github.com/MateoTTR/revolver/blob/develop/docs/process/definition-of-done.md#2-new-evolution-backend), derived from [ADR-007](https://github.com/MateoTTR/revolver/blob/develop/docs/architecture/adr/ADR-007-pluggable-evolution-backend.md) (D1–D6, A1–A5). This issue is the design issue (RFC-lite): the maintainer confirms the paradigm decision and owns the specification, DES, ADR and validation edits before or with the implementation. Read the `EvolutionBackend` protocol in `src/revolver/infra/backends/base.py` and the two existing adapters first.
+
+        Public-file rule: no local path, hostname, private repository name, e-mail address or third-party handle in this issue.
+  - type: input
+    id: engine
+    attributes:
+      label: Engine
+      description: Name, upstream repository URL and license of the engine.
+      placeholder: "<engine> — https://github.com/<org>/<engine> — Apache-2.0"
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: Package and version bound
+      description: The distribution and the bound for the opt-in extra (`[project.optional-dependencies] <name> = ["<package>>=x.y,<z"]` — upper bound required, never in `dev`; ADR-007 D6), and the import probe `is_available()` will use.
+      placeholder: "<name> = [\"<package>>=0.1,<0.2\"]; probe: import <module>"
+    validations:
+      required: true
+  - type: dropdown
+    id: paradigm
+    attributes:
+      label: Paradigm
+      description: Does the engine share the EVOLVE-BLOCK / combined_score conventions of OpenEvolve and ShinkaEvolve? Same paradigm → an in-place amendment of ADR-007; different paradigm → a new ADR (Definition of Done § 2, "Specs, DES, ADR").
+      options:
+        - Same paradigm (EVOLVE-BLOCK markers, combined_score fitness, per-instance evaluator wrapper) — ADR-007 amendment
+        - Different paradigm — a new ADR is needed; describe it below
+    validations:
+      required: true
+  - type: textarea
+    id: engine-model
+    attributes:
+      label: How the engine runs an evolution
+      description: In-process launch or CLI, configuration format, where programs and fitness are stored (checkpoint directory, SQLite, …), how progress can be read, how a run is resumed. This drives `launch`, `resume`, `read_progress`, `parse_population`, `recover_best_from_checkpoint` and `extract_ranked_program`.
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities matrix
+      description: An honest value for every axis of `BackendCapabilities` (ADR-007 D1, A4). "Unknown" is acceptable at proposal time and must be resolved before the pull request.
+      value: |
+        | Axis | Value | Evidence (engine feature or limitation) |
+        |---|---|---|
+        | `global_seed` | true / false | |
+        | `map_elites_cells` | true / false | |
+        | `native_cost_tracking` | true / false | |
+        | `multi_language` | true / false | |
+        | `ensemble_model` | "weighted" / "bandit" / none | |
+        | `top_n_extraction` | true / false | |
+        | `selection_strategies` | ("fixed", …) | |
+        | `per_member_reasoning_effort` | true / false | |
+    validations:
+      required: true
+  - type: dropdown
+    id: tokens
+    attributes:
+      label: Token accounting (ADR-007 D2)
+      options:
+        - OpenAI-compatible HTTP engine — wants_http_proxy() is True and Revolver's proxy counts tokens
+        - Engine-native counts — wants_http_proxy() is False and collect_token_usage() reads them
+        - Unknown yet
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Neutral levers and LLM projection (ADR-007 D4, D5)
+      description: How `build_config()` maps `--iterations`, `--temperature`, `--parallel`, `--rewrite-mode`, `--selection`, `--llm-weight` and `--reasoning-effort` (or warns), what goes to `backend_extras`, and how `LLMEntry` / `EnsembleEntry` (local Ollama and remote providers; environment-variable names only) project into the engine's model syntax.
+    validations:
+      required: true
+  - type: textarea
+    id: test-plan
+    attributes:
+      label: Real-engine test plan
+      description: CI does not run engine tests. State the contract tests you will add (`tests/integration/test_<name>_wrapper.py`, `test_run_<name>.py`, `test_<name>_db.py` or equivalent — module-level `pytest.importorskip`, `@pytest.mark.integration` and `@pytest.mark.<name>`, marker registered in `pyproject.toml`), the L3 scenario in `tests/e2e/` against the fake LLM server, and the environment in which you will run them against the real engine (engine version, Python version). The pull request must report that evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Files to create or modify
+      description: Beyond `src/revolver/infra/backends/<name>.py`; the "Where" column of the Definition of Done § 2 is the checklist.
+      value: |
+        - src/revolver/infra/backends/<name>.py, backends/__init__.py, backends/base.py (AVAILABLE_BACKENDS, get_backend)
+        - src/revolver/core/doctor.py (_BACKEND_CHECK_NAMES / _BACKEND_DIST_NAMES), cli/project.py, cli/problem.py, cli/run.py
+        - pyproject.toml (opt-in extra with an upper bound; pytest marker)
+        - tests/unit/infra/test_backends.py, tests/integration/test_*<name>*.py, tests/conftest.py (no_<name> fixture), tests/fixtures/, tests/e2e/
+        - docs/specs/ (FR-RUN-047/048, FR-SET-002, FR-PRJ-005, FR-PRB-016, FR-SOL-021, NFR-024/061), DES-001, DES-005 § 4.1–4.6 and § 14, DES-006 § 1.3, architecture.md § 1 / § 3 / § 8, ADR-007 amendment or a new ADR
+        - docs/validation/ (validation.md § 3, val-integration-tests.md, val-e2e-tests.md, traceability-matrix.md), docs/guides/, README.md
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable statements beyond the checklist — for example `run --backend <name>` completes a run against the fake LLM server, `doctor` reports the backend, exit code 3 when the backend is selected but absent.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I have read ADR-007 and the backend section of the Definition of Done, and I accept that CI cannot run the engine tests — the pull request will carry the real-engine evidence.
+          required: true
+        - label: The engine's license is compatible with an opt-in dependency of an MIT-licensed project.
+          required: true
+        - label: This issue respects the public-file rule.
+          required: true

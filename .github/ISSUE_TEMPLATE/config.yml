@@ -1,0 +1,15 @@
+# Issue chooser configuration (GitHub issue forms).
+# Blank issues are disabled: every issue starts from one of the forms in this
+# directory, so that it carries the scope, acceptance criteria and references
+# the pull-request workflow relies on (AGENTS.md, "Pull request workflow").
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/MateoTTR/revolver/blob/main/SECURITY.md
+    about: Never in a public issue. Follow SECURITY.md — private vulnerability reporting, or a private message to the maintainer.
+  - name: Code of Conduct
+    url: https://github.com/MateoTTR/revolver/blob/main/CODE_OF_CONDUCT.md
+    about: Our standards, and how to report unacceptable behavior privately.
+  - name: Contributing guide and process checklists
+    url: https://github.com/MateoTTR/revolver/blob/main/CONTRIBUTING.md
+    about: How a change goes from an issue to a merged pull request. Questions about the process start there.
