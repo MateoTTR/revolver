@@ -220,14 +220,13 @@ Key fixtures defined in `tests/conftest.py`:
 ### 6.4 CI Pipeline
 
 ```
-push / PR — ci.yml (code paths; `**.md` and `docs/**` are path-ignored):
-  ├── ruff check + ruff format --check
-  ├── mypy --strict
-  ├── pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"  (Python 3.12 + 3.14 matrix)
-  └── pip install "openevolve>=0.2.26" && pytest tests/integration/test_run_oe.py  (3.12 only, non-blocking)
-
-push / PR — doc-lint.yml (markdown/docs paths: `**.md`, `docs/**` — exactly the set ci.yml ignores):
-  └── pytest tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py  (#354 command-lint + #355 freshness stamps, blocking)
+push / PR — ci.yml (no path filters: every job is a required status check under the branch rulesets,
+                    and a required check that never runs would leave the PR stuck on "Expected"):
+  ├── Lint (ruff + mypy): ruff check + ruff format --check + mypy --strict
+  ├── Test (pytest + coverage): pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"  (Python 3.12 + 3.14 matrix)
+  │     └── pip install "openevolve>=0.2.26" && pytest tests/integration/test_run_oe.py  (3.12 only, non-blocking)
+  └── Doc command-lint (fenced CLI invocations): pytest tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py
+        (#354 command-lint + #355 freshness stamps, blocking; formerly the separate doc-lint.yml workflow)
 
 tag push (v*) — ci.yml version-check:
   └── tag == pyproject.toml version == src/revolver/__init__.py __version__
