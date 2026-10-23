@@ -259,6 +259,20 @@ Detailed documentation lives in `docs/`:
 - [Architecture](docs/architecture/architecture.md) — system design, ADRs, design documents
 - [Validation](docs/validation/validation.md) — test strategy, traceability matrix
 - [Changelog](CHANGELOG.md) — release history, one section per tag
+- [Process checklists](docs/process/README.md) — code / spec / validation / doc review, sprint planning, release, Definition of Done
+- [AGENTS.md](AGENTS.md) — the canonical project guide for humans and AI agents
+- [Contributing](CONTRIBUTING.md) — how a change goes from an issue to a merged pull request
+- [Security policy](SECURITY.md) — supported versions, private vulnerability reporting
+- [Code of Conduct](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) (issue first,
+fork workflow, local gates, review) and [AGENTS.md](AGENTS.md), the canonical project
+guide for humans and AI agents; the review, planning and release procedures are the
+checklists under [docs/process/](docs/process/README.md). This project follows the
+[Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).
 
 ## License
 
