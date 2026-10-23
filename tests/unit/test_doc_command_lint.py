@@ -1,8 +1,10 @@
 """Doc command-lint — fenced-block ``revolver`` invocations resolve in the CLI tree.
 
-S18-21 / backlog #354: every *line-initial* ``revolver`` invocation inside a
-fenced code block of the documentation corpus (``README.md`` + ``docs/**``)
-must resolve against the real Typer command tree (subcommands, flags,
+S18-21 / backlog row 354: every *line-initial* ``revolver`` invocation inside
+a fenced code block of the documentation corpus (the root Markdown files
+listed in :data:`ROOT_DOC_FILES` + ``docs/**``; ``CHANGELOG.md`` is excluded
+because its entries quote historical flags — issue #279) must resolve
+against the real Typer command tree (subcommands, flags,
 positional-argument caps) via the shared walker
 :mod:`revolver.cli._tree`.
 
@@ -168,9 +170,27 @@ def is_prose_line(command: str, tokens: list[str], root: object) -> bool:
 # ── Corpus scan ───────────────────────────────────────────────────────────────
 
 
+# Root-level Markdown files that belong to the corpus (issue #279). CHANGELOG.md
+# is excluded on purpose: its entries quote flags as they were at each release
+# and must never be rewritten to the current CLI surface. Every other root
+# `*.md` must appear in one of the two collections — pinned by
+# TestDocCommandLintCorpus.test_corpus_includes_contributor_docs.
+ROOT_DOC_FILES: tuple[str, ...] = (
+    "README.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+)
+ROOT_DOC_EXCLUDED: frozenset[str] = frozenset({"CHANGELOG.md"})
+
+
 def corpus_files() -> list[Path]:
-    """The linted documentation corpus: ``README.md`` + every ``docs/**/*.md``."""
-    return [REPO_ROOT / "README.md", *sorted((REPO_ROOT / "docs").rglob("*.md"))]
+    """The linted corpus: the root files of ``ROOT_DOC_FILES`` + every ``docs/**/*.md``."""
+    root_docs = [REPO_ROOT / name for name in ROOT_DOC_FILES]
+    return [*root_docs, *sorted((REPO_ROOT / "docs").rglob("*.md"))]
 
 
 def lint_text(text: str, root: object = None) -> list[tuple[int, str, str]]:
@@ -219,6 +239,31 @@ class TestDocCommandLintCorpus:
             len(extract_invocations(path.read_text(encoding="utf-8"))) for path in corpus_files()
         )
         assert total >= 100, f"only {total} fenced invocations extracted from the corpus"
+
+    def test_corpus_includes_contributor_docs(self) -> None:
+        # Pin the corpus composition (issue #279): the contributor-facing root
+        # files are linted, CHANGELOG.md (historical flags) is not, and every
+        # root-level Markdown file is classified one way or the other. Personal
+        # `*.local.md` files are ignored by version control and never linted.
+        corpus = {path.relative_to(REPO_ROOT).as_posix() for path in corpus_files()}
+        for name in ROOT_DOC_FILES:
+            assert name in corpus, f"{name} missing from the doc command-lint corpus"
+            assert (REPO_ROOT / name).is_file(), f"{name} listed in ROOT_DOC_FILES but absent"
+        assert "CHANGELOG.md" not in corpus
+        assert not set(ROOT_DOC_FILES) & ROOT_DOC_EXCLUDED
+        assert all(name.startswith("docs/") for name in corpus - set(ROOT_DOC_FILES))
+        unclassified = sorted(
+            path.name
+            for path in REPO_ROOT.glob("*.md")
+            if path.name not in ROOT_DOC_FILES
+            and path.name not in ROOT_DOC_EXCLUDED
+            and not path.name.endswith(".local.md")
+        )
+        assert not unclassified, (
+            "root-level Markdown files neither linted nor excluded (add them to "
+            "ROOT_DOC_FILES or ROOT_DOC_EXCLUDED in tests/unit/test_doc_command_lint.py): "
+            + ", ".join(unclassified)
+        )
 
 
 # ── Extraction grammar unit cases (S18-24) ───────────────────────────────────
