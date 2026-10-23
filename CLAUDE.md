@@ -45,6 +45,8 @@ At the start of each session, read this file entirely, then follow the "Session 
 | [DES-005](docs/architecture/design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | Draft |
 | [DES-006](docs/architecture/design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | Draft |
 | [DES-007](docs/architecture/design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | Draft |
+| [DES-008](docs/architecture/design/DES-008-loongflow-integration.md) | `LoongFlow` Evolution Backend Integration | Draft |
+| [DES-009](docs/architecture/design/DES-009-agentic-backend.md) | `Agentic` Multi-Agent Optimization Backend | Draft |
 
 ### Validation Documents
 

@@ -1,3 +1,7 @@
+---
+verified-against: v0.18.0
+---
+
 # LoongFlow Backend Guide
 
 LoongFlow (Baidu Baige Team, arXiv:2512.24077) is an evolution backend for Revolver driven by the **Plan-Execute-Summarize (PES)** cognitive paradigm.
