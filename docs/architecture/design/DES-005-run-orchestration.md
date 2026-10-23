@@ -602,7 +602,8 @@ served by `project init`.
 - **Slow local-endpoint timeout (#307, v0.15.0).** When the registered LLM has no explicit
   `timeout_s` and is `source == "local"`, `build_config()` sets `llm.timeout = 600` s
   (`DEFAULT_LOCAL_LLM_TIMEOUT_S`). OpenEvolve's OpenAI client defaults to 60 s, which aborts slow
-  local endpoints (e.g. the claude-ollama-bridge at 50–530 s/call) into a retry storm and a proxy
+  local endpoints (e.g. a subscription-backed local OpenAI-compatible shim at 50–530 s/call) into
+  a retry storm and a proxy
   `BrokenPipeError`. Remote APIs keep OpenEvolve's default. A `config.yaml` `llm.timeout` or
   `--config-override llm.timeout=…` still wins (`setdefault` + overrides applied last).
 - **Default checkpoint cadence (U6 phase 2, S18 — FR-RUN-057).** When `checkpoint_interval` is

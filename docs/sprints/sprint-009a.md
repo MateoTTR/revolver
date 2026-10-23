@@ -8,7 +8,7 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/beamforming/demos/demo-v0.9.0/feedback.md`
+- Demo feedback: `feedback.md` of the beamforming demo v0.9.0 (private demo repository)
 - Predecessor: Sprint 009 (v0.9.0)
 - Delta sprint — scope frozen by user before file creation
 

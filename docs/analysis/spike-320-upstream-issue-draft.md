@@ -50,4 +50,4 @@ shinka 0.0.7, Python 3.12, openai SDK 2.43.0, Linux. Observed originally with a 
 
 ---
 
-*[Internal note: FILED as https://github.com/SakanaAI/ShinkaEvolve/issues/143 (2026-07-05, after Mathieu's validation). The repro script was minimized to a Revolver-independent `shinka_stall_repro.py` (embedded in the issue), re-verified against real shinka 0.0.7 before filing (stall mode: WEDGED, exit 0).]*
+*Status: FILED as https://github.com/SakanaAI/ShinkaEvolve/issues/143 (2026-07-05, after maintainer validation). The repro script was minimized to a Revolver-independent `shinka_stall_repro.py` (embedded in the issue), re-verified against real shinka 0.0.7 before filing (stall mode: WEDGED, exit 0).*

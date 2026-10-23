@@ -8,7 +8,7 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/tsp/demos/demo-v0.7.0/feedback.md`
+- Demo feedback: `feedback.md` of the TSP demo v0.7.0 (private demo repository)
 - Session: 035 (2026-03-20)
 
 ---

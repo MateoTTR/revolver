@@ -304,7 +304,7 @@ _Filled 2026-07-05 (sessions 058 + 059). All 9 planned PRs merged, plus two stre
 
 ### Tests passing
 - **1585 passed / 4 skipped** (no-shinka env; baseline 1471, ~1487+ expected — the extra growth comes from R1/R2, top-N, reap hardening, doc-freshness, and the L1 twins added during reviews). All 16 planned L2 IDs shipped and pass (see the Integration Tests table above — two IDs were renamed at implementation time and are reconciled in the validation docs).
-- **58 `shinkaevolve`-marked tests green on real shinka 0.0.7** (verified in two envs: `revolver-demos` and `shinka-spike`).
+- **58 `shinkaevolve`-marked tests green on real shinka 0.0.7** (verified in two envs: the demo env and `shinka-spike`).
 - Code reviews across the 6 implementation PRs of sessions 058–059: **0 CRITICAL** total; every WARNING was fixed in-PR (notably: PR-1's Shinka coverage keys made process-boundary-safe; PR-5's `--force` re-extract no longer drops the recorded `best_score`; PR-2's programs-table scores labeled).
 
 ### Demo-able features

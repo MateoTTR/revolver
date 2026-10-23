@@ -7,8 +7,8 @@ ShinkaEvolve be **isolated** in a separate venv/subprocess? This determines the 
 and the whole downstream dependency strategy.
 
 **Method:** throwaway conda env `shinka-spike` (Python 3.12.13), Revolver installed from tag
-`v0.12.1`, then `shinka-evolve` (PyPI, `0.0.7`, Apache-2.0) added. Raw logs in
-`~/projects/shinka-spike/logs/` (not committed). Runtime layout (`programs.sqlite`, cost fields)
+`v0.12.1`, then `shinka-evolve` (PyPI, `0.0.7`, Apache-2.0) added. Raw logs kept in a
+local spike directory (not committed). Runtime layout (`programs.sqlite`, cost fields)
 established by **direct DB introspection + source reading** — no live LLM run was needed (and none
 was made: no API key spent).
 

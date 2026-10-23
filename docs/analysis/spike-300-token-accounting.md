@@ -8,13 +8,13 @@
 
 ## Method
 
-Inspected the real on-disk artifacts of the 4 Shinka runs produced during the 2026-06-13 TSP smoke test and the 2026-06-15 bridge validation (`~/projects/revolver-demos/problems/tsp/.revolver/runs/`), i.e. the exact files a `collect_token_usage()` sweep would have to read:
+Inspected the real on-disk artifacts of the 4 Shinka runs produced during the 2026-06-13 TSP smoke test and the 2026-06-15 shim validation (the TSP problem's `.revolver/runs/` directory in the private demo repository), i.e. the exact files a `collect_token_usage()` sweep would have to read:
 
 - `gen_*/attempts/**/metadata.json` (per-patch-attempt records)
 - `gen_*/failure.json` (failed-proposal records)
 - `programs.sqlite` `programs.metadata` (stored/kept programs)
 
-Cross-checked against ShinkaEvolve 0.0.7 installed in the `revolver-demos` conda env.
+Cross-checked against ShinkaEvolve 0.0.7 installed in the demo conda env.
 
 ## Findings
 
@@ -35,7 +35,7 @@ Cross-checked against ShinkaEvolve 0.0.7 installed in the `revolver-demos` conda
 |---|---|---|---|
 | `run-20260613-140245` (productive, 9 children) | gemini-3-flash-preview | 31 617 / 8 416 / **0** | ~500 K (Google console) |
 | `run-20260613-134326` (unproductive, 0 children) | gemini-2.5-pro | 0 / 0 / **0** | billed anyway |
-| `run-20260615-201901` (bridge) | Claude via claude-ollama-bridge | 12 / 45 819 / **0** | n/a (Max subscription) |
+| `run-20260615-201901` (shim) | Claude via a local OpenAI-compatible shim | 12 / 45 819 / **0** | n/a (subscription-backed) |
 
 The ~492 K thinking tokens billed by Google on the productive run are in **no file Revolver can read**. Shinka/litellm never populate `thinking_tokens` for these providers.
 
@@ -49,7 +49,7 @@ The ~492 K thinking tokens billed by Google on the productive run are in **no fi
 2. **Thinking-token capture is impossible** on the current Shinka path; report input/output as stored and add a caveat.
 3. **What is already robust, keep**: stored-program token read (`collect_token_usage()`), and the OE path's HTTP `TokenCountingProxy` (intercepts all calls incl. retries; reads the standard OpenAI `usage`).
 4. **Cost is dropped from output** (user decision, session 051) — vindicated empirically: no realistic cost figure is reachable from disk.
-5. **Future robust option (not S15)**: complete token accounting on Shinka is only reachable at the **wire/proxy level** (as the OE path and the `claude-ollama-bridge` already do), independent of what the engine persists — still capped by what the provider returns in `usage` (Gemini omits thinking tokens even there).
+5. **Future robust option (not S15)**: complete token accounting on Shinka is only reachable at the **wire/proxy level** (as the OE path and the local OpenAI-compatible shim already do), independent of what the engine persists — still capped by what the provider returns in `usage` (Gemini omits thinking tokens even there).
 
 ## Outcome → Sprint 015 Scope A
 

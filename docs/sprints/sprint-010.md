@@ -8,8 +8,8 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/beamforming/demos/demo-v0.9.0/feedback.md`
-- Feedback summary: `/home/mathi/revolver-demos/feedback-summary.md`
+- Demo feedback: `feedback.md` of the beamforming demo v0.9.0 (private demo repository)
+- Feedback summary: `feedback-summary.md` (private demo repository)
 - Predecessor: Sprint 009a (v0.9.1)
 
 ---

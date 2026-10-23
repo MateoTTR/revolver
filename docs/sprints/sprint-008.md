@@ -8,10 +8,10 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/tsp/demos/benchmark-multimodel/feedback.md`
+- Demo feedback: `feedback.md` of the TSP multi-model benchmark demo (private demo repository)
 - Version tested: v0.7.1
 - Date: 2026-03-21
-- B1 repro script: `/home/mathi/revolver-demos/tsp/demos/benchmark-multimodel/repro-b1-hang.py`
+- B1 repro script: `repro-b1-hang.py` (private demo repository)
 
 ---
 

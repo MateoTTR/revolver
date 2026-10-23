@@ -734,10 +734,10 @@ def run_info(
                 )
 
                 # Bridge token under-count caveat (A4 / #316, composes #308):
-                # when the run's LLM is a `--source local` endpoint (e.g. the
-                # claude-ollama-bridge fronting a Claude Max subscription), the
-                # OpenAI `usage` it returns omits the hidden Agent-SDK context
-                # and thinking tokens, so the totals above massively under-count
+                # when the run's LLM is a `--source local` endpoint (e.g. a
+                # subscription-backed, serialized local OpenAI-compatible shim),
+                # the OpenAI `usage` it returns omits the hidden upstream-client
+                # context and thinking tokens, so the totals above under-count
                 # real consumption. Read-only lookup; no change to the stored
                 # TokenUsage fields or the counting path.
                 if _run_llm_is_local(info.llm):

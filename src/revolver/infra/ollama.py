@@ -41,7 +41,7 @@ def normalize_ollama_url(url: str | None) -> tuple[str, str]:
 
     Args:
         url: A base URL in either root or ``/v1`` form (a scheme-less value
-            such as ``sirius:11434`` — as ``OLLAMA_HOST`` is often set — is
+            such as ``gpu-box:11434`` — as ``OLLAMA_HOST`` is often set — is
             treated as ``http://``), or ``None`` to use the local default
             (``http://localhost:11434``).
 
@@ -50,7 +50,7 @@ def normalize_ollama_url(url: str | None) -> tuple[str, str]:
         *api_url* always ends with ``/v1``. Both have trailing slashes removed.
     """
     base = (url or DEFAULT_OLLAMA_ROOT_URL).strip()
-    # Ollama-native env vars (e.g. ``OLLAMA_HOST=sirius:11434``) are commonly
+    # Ollama-native env vars (e.g. ``OLLAMA_HOST=gpu-box:11434``) are commonly
     # set scheme-less; default to ``http://`` so httpx can connect (#313).
     if "://" not in base:
         base = f"http://{base}"

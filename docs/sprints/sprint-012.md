@@ -9,8 +9,8 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/beamforming/demos/demo-v0.11/feedback.md`
-- Feedback summary: `/home/mathi/revolver-demos/feedback-summary.md`
+- Demo feedback: `feedback.md` of the beamforming demo v0.11 (private demo repository)
+- Feedback summary: `feedback-summary.md` (private demo repository)
 - Predecessor: Sprint 011 (v0.11.0) — ~982 tests passing
 
 ---

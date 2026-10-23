@@ -1356,19 +1356,19 @@ def test_llm_add_local_base_url_probe(mock_global_db: Path) -> None:
                 "--source",
                 "local",
                 "--base-url",
-                "http://sirius:11434/v1",
+                "http://gpu-box:11434/v1",
             ],
         )
 
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
     # Probe client built with the network ROOT (no /v1), not localhost.
-    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+    mock_cls.assert_called_once_with(base_url="http://gpu-box:11434")
 
     # Stored entry keeps the OpenAI-compat /v1 form.
     data = json.loads(result.stdout)
-    assert data["base_url"] == "http://sirius:11434/v1"
+    assert data["base_url"] == "http://gpu-box:11434/v1"
     entries = _query_llms(mock_global_db)
-    assert entries[0].base_url == "http://sirius:11434/v1"
+    assert entries[0].base_url == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.integration
@@ -1389,18 +1389,18 @@ def test_llm_add_local_root_base_url_stored_as_v1(mock_global_db: Path) -> None:
                 "--source",
                 "local",
                 "--base-url",
-                "http://sirius:11434",
+                "http://gpu-box:11434",
             ],
         )
 
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
     # Probe uses the root; the stored entry is normalized to the /v1 form so
     # OE's api_base and Shinka's embed resolve.
-    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+    mock_cls.assert_called_once_with(base_url="http://gpu-box:11434")
     data = json.loads(result.stdout)
-    assert data["base_url"] == "http://sirius:11434/v1"
+    assert data["base_url"] == "http://gpu-box:11434/v1"
     entries = _query_llms(mock_global_db)
-    assert entries[0].base_url == "http://sirius:11434/v1"
+    assert entries[0].base_url == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.integration
@@ -1408,8 +1408,8 @@ def test_llm_add_local_schemeless_ollama_host(
     mock_global_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A scheme-less `OLLAMA_HOST` (sirius:11434) probes + stores with http://."""
-    monkeypatch.setenv("OLLAMA_HOST", "sirius:11434")
+    """A scheme-less `OLLAMA_HOST` (gpu-box:11434) probes + stores with http://."""
+    monkeypatch.setenv("OLLAMA_HOST", "gpu-box:11434")
     mock_client = _make_ollama_client_mock()
 
     with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
@@ -1428,11 +1428,11 @@ def test_llm_add_local_schemeless_ollama_host(
         )
 
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
-    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+    mock_cls.assert_called_once_with(base_url="http://gpu-box:11434")
     data = json.loads(result.stdout)
-    assert data["base_url"] == "http://sirius:11434/v1"
+    assert data["base_url"] == "http://gpu-box:11434/v1"
     entries = _query_llms(mock_global_db)
-    assert entries[0].base_url == "http://sirius:11434/v1"
+    assert entries[0].base_url == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.integration
@@ -1441,7 +1441,7 @@ def test_llm_add_local_ollama_host_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`OLLAMA_HOST` is honoured as the probe + stored default when --base-url absent."""
-    monkeypatch.setenv("OLLAMA_HOST", "http://sirius:11434")
+    monkeypatch.setenv("OLLAMA_HOST", "http://gpu-box:11434")
     mock_client = _make_ollama_client_mock()
 
     with patch("revolver.cli.llm.OllamaClient", return_value=mock_client) as mock_cls:
@@ -1461,13 +1461,13 @@ def test_llm_add_local_ollama_host_env(
 
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
     # Probe targets the OLLAMA_HOST root.
-    mock_cls.assert_called_once_with(base_url="http://sirius:11434")
+    mock_cls.assert_called_once_with(base_url="http://gpu-box:11434")
 
     # Stored base_url defaults from OLLAMA_HOST (OpenAI-compat /v1 form).
     data = json.loads(result.stdout)
-    assert data["base_url"] == "http://sirius:11434/v1"
+    assert data["base_url"] == "http://gpu-box:11434/v1"
     entries = _query_llms(mock_global_db)
-    assert entries[0].base_url == "http://sirius:11434/v1"
+    assert entries[0].base_url == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.integration
@@ -1520,14 +1520,14 @@ def test_llm_add_local_network_url_oe_api_base(
                 "--source",
                 "local",
                 "--base-url",
-                "http://sirius:11434/v1",
+                "http://gpu-box:11434/v1",
             ],
         )
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
 
     entry = next(e for e in _query_llms(mock_global_db) if e.name == "gemma-oe")
     config = build_config(problem_config=None, llm=entry)
-    assert config["llm"]["api_base"] == "http://sirius:11434/v1"
+    assert config["llm"]["api_base"] == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.integration
@@ -1550,14 +1550,14 @@ def test_llm_add_local_network_url_shinka_embed(
                 "--source",
                 "local",
                 "--base-url",
-                "http://sirius:11434/v1",
+                "http://gpu-box:11434/v1",
             ],
         )
     assert result.exit_code == 0, f"output: {_get_all_output(result)}"
 
     entry = next(e for e in _query_llms(mock_global_db) if e.name == "gemma-shinka")
     model_string, _ = _project_llm_model(entry)
-    assert model_string.startswith("local/gemma4:latest@http://sirius:11434/v1")
+    assert model_string.startswith("local/gemma4:latest@http://gpu-box:11434/v1")
 
 
 # ── S17-24: per-LLM --reasoning-effort on add / update ────────────────────────

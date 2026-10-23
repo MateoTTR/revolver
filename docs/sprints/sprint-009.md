@@ -8,8 +8,8 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/beamforming/demos/demo-v0.8.1/feedback.md`
-- Consolidated feedback: `/home/mathi/revolver-demos/feedback-summary.md`
+- Demo feedback: `feedback.md` of the beamforming demo v0.8.1 (private demo repository)
+- Consolidated feedback: `feedback-summary.md` (private demo repository)
 - Architecture discussion: session preceding Sprint 009 planning
 - Predecessor: Sprint 008a (v0.8.1)
 
