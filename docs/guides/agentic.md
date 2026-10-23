@@ -1,3 +1,7 @@
+---
+verified-against: v0.18.0
+---
+
 # Agentic Multi-Agent Backend Guide
 
 The **Agentic** backend in Revolver introduces conversational, test-driven optimization (*REPL loop*) with autonomous **Multi-Agent delegation via Tool Calling**.
