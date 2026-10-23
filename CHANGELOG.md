@@ -17,17 +17,17 @@ moves that block under a dated version heading (see the Release Checklist).
 
 ### Added
 
-- `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#275).
+- `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#280, closes #275).
 - MIT `LICENSE` file (#274, closes #272).
 
 ### Changed
 
 - CI runs on GitHub-hosted runners (`ubuntu-latest`) instead of a self-hosted pool; the runner image under `.github/runner/` is removed (#274).
-- Planning is frozen in the repository at the end of Sprint 019: `docs/tasks/backlog.md` and `docs/sprints/` become historical records; from Sprint 020 on, planning lives in GitHub issues and milestones (#275).
+- Planning is frozen in the repository at the end of Sprint 019: `docs/tasks/backlog.md` and `docs/sprints/` become historical records; from Sprint 020 on, planning lives in GitHub issues and milestones (#280).
 
 ### Removed
 
-- The maintainer's session journal (`docs/sessions/*`) leaves the public repository; a `docs/sessions/README.md` pointer remains and the history stays in git (#275).
+- The maintainer's session journal (`docs/sessions/*`) leaves the public repository; a `docs/sessions/README.md` pointer remains and the history stays in git (#280).
 
 ## [0.18.0] - 2026-07-05
 
@@ -45,7 +45,7 @@ Sprint 018 — eval-honesty semantic slice and ShinkaEvolve-native top-N promoti
 - **Behavior change** — timeout handling penalizes by default: an instance that times out during evolution contributes `evaluation.timeout_score` (default `0.0`) to the program's fitness mean instead of being silently dropped. Set `evaluation.on_timeout: drop` (or `--config-override evaluation.on_timeout=drop`) to restore the 0.17 survivor-mean; on negative-is-good metrics set `timeout_score` below your worst valid score (#257).
 - **Behavior change** — default checkpoint cadence: when `checkpoint_interval` is unset, a run checkpoints every `max(1, min(100, iterations // 10))` iterations (previously a flat `100`), so a killed short run has a mid-run checkpoint to resume from; explicit values are never overridden (#265).
 - **Behavior change** — the automatic post-run evaluation persists `eval_metadata`/`eval_instances` through the standard eval path and uses that path's per-instance timeout (previously stderr-only with a hardcoded 300 s timeout) (#261).
-- **Behavior change** — seed-metric pre-flight: a run whose seed program lacks a declared non-builtin `database.feature_dimensions` metric aborts before iteration 0 with a clear message (#265).
+- **Behavior change** — seed-metric pre-flight: a run whose seed program lacks a declared non-builtin `database.feature_dimensions` metric aborts before iteration 0 with a clear message; the builtins `complexity`/`diversity`/`combined_score` are allowed, and runs that previously launched with such a seed no longer do (#265).
 - **Behavior change** — `run info` shows the engine best labeled "(engine, single eval)" next to the coverage-labeled post-eval mean (#261).
 - **Behavior change** — generated evaluator wrappers emit the `instances_valid`/`instances_total` coverage keys; the `instances_` metric prefix is reserved and never summed into the displayed score (#257).
 

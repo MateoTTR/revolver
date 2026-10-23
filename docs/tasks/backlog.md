@@ -2,7 +2,7 @@
 
 > **Frozen at the end of Sprint 019 (v0.19.0).** From Sprint 020 on, planning lives in
 > GitHub issues and milestones (see [`docs/sprints/README.md`](../sprints/README.md)).
-> This file is kept as a historical project record and is no longer updated. The task
+> This file is kept as a historical project record; after that point it is no longer updated. The task
 > numbers in its first column are backlog counters, **not** GitHub issue numbers.
 > Release history: [`CHANGELOG.md`](../../CHANGELOG.md).
 

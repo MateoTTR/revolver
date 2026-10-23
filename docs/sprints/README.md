@@ -2,7 +2,8 @@
 
 The sprint files in this directory (`sprint-001.md` … `sprint-019.md`) are
 **historical planning records**. They are frozen at the end of Sprint 019
-(v0.19.0) and are no longer updated; nothing here is moved or renumbered.
+(v0.19.0); after that point they are no longer updated. Nothing here is moved
+or renumbered.
 
 From Sprint 020 on, planning is GitHub-native:
 

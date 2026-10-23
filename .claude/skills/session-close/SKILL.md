@@ -13,10 +13,9 @@ Close the current session. The user provides session duration as argument: $ARGU
 
 Follow these steps exactly:
 
-## 1. Determine session number
+## 1. Recover the previous session's context
 
-Read the cost tracker in the journal (`<journal>/cost-tracker.md`) to find the last session number. The new session is N+1.
-Read the latest session report in the journal for the previous session's context.
+Read the latest entry under `<journal>/sessions/` for the previous session's context. Session files are named by date and topic (`YYYY-MM-DD-<short-topic>.md`); there is no global session counter.
 
 ## 2. Gather session context
 
@@ -25,10 +24,10 @@ Read `docs/tasks/backlog.md` to identify which tasks were completed.
 
 ## 3. Create session report
 
-Create `<journal>/YYYY-MM-DD-session-NNN.md` with this structure:
+Create `<journal>/sessions/YYYY-MM-DD-<short-topic>.md` with this structure:
 
 ```markdown
-# Session NNN — YYYY-MM-DD
+# Session YYYY-MM-DD — <short topic>
 
 **Phase**: (current phase)
 **Duration**: (from $ARGUMENTS or ask user)
@@ -65,7 +64,7 @@ Edit `<journal>/cost-tracker.md`:
 
 ## 5. Update backlog
 
-Verify `docs/tasks/backlog.md` — ensure all completed tasks are marked `[x]` with the session number. (Until the Sprint 019 freeze; afterwards update the GitHub issues/milestone instead.)
+Verify `docs/tasks/backlog.md` — ensure all completed tasks are marked `[x]` with the session date. (Until the Sprint 019 freeze; afterwards update the GitHub issues/milestone instead.)
 
 ## 6. Confirm with user
 
@@ -74,5 +73,5 @@ Show a summary of what was created/updated and ask for validation before committ
 ## 7. Commit and push
 
 After user validation, commit the repository changes (backlog) and push to remote. The journal files are outside the repository and are never committed.
-Commit message format: `Close session NNN: <brief summary>`
+Commit message format: `Close session YYYY-MM-DD: <brief summary>` (the same format applies when no journal is configured and only the backlog changed)
 Do NOT commit or push without explicit user validation from step 6.
