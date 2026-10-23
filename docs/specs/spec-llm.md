@@ -2,7 +2,6 @@
 
 **Traceable to**: ConOps §4.8 (LLM), §5.1 (Workflow: Setup LLMs), §3.2 (LLM Backends)
 **Status**: Draft
-**See also**: [POC Local LLM](../pocs/poc-local-llm.md)
 
 ---
 

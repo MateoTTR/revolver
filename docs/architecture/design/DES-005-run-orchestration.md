@@ -3,7 +3,7 @@
 **Version**: 0.9.0 — v0.18 eval-honesty semantic slice + top-N promotion (U13/U11/U4/U8/U6p2 + reap hardening: §2.1/§2.3/§2.5/§3.2/§4.1–4.6/§4.8/§7/§7.3/§8/§10/§11/§14.1; FR-RUN-052..057, FR-PRB-016, FR-SOL-021, FR-EVL-021 amended)
 **Date**: 2026-07-05
 **Status**: Draft
-**Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions), [POC #12](../../pocs/poc-openevolve-integration.md)
+**Traceable to**: [spec-run.md](../../specs/spec-run.md), [Architecture](../architecture.md) §4/§6.1, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.5–3.6 (runs, solutions)
 
 ---
 
@@ -579,6 +579,12 @@ served by `project init`.
   `model` → `llm.primary_model`, `api_key_env` → `llm.api_key_env` (the env var **name**, not the
   secret — DD-15). Local (`source == "local"`) entries with no key get an `api_key: "ollama"`
   placeholder (the OpenAI SDK requires a non-empty key).
+- Provider portability (validated by the Phase-3 hosted-API study on OpenEvolve 0.2.26): a hosted
+  provider's OpenAI-compatible endpoint works with stock OpenEvolve and no adapter, and switching
+  provider changes only `name` / `api_base` / `api_key`, so Revolver carries no provider-specific
+  code. Two caveats observed on Anthropic's OpenAI-compatible endpoint: `seed` and
+  `reasoning_effort` are silently ignored, and the endpoint is labelled "not production-recommended"
+  upstream (fallback if it is withdrawn: a native Messages-API adapter).
 - Ensemble mode (`--llm <ensemble>`) emits an `llm.models` array instead of `llm.primary_model`,
   mapping each member to `name`/`api_base`/`api_key`/`weight`/`temperature`/`max_tokens`/
   `reasoning_effort` (the `${ENV}` syntax for keys). OpenEvolve's ensemble sampler is

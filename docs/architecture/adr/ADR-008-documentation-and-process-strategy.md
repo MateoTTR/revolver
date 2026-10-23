@@ -84,7 +84,7 @@ close of Sprint 019 (A2), not with Sprint 020 as first written.
 |---|---|---|
 | **Living / authoritative** | `AGENTS.md`, `README.md`, `CHANGELOG.md`, `docs/architecture/architecture.md`, the ADRs, the DES documents, `docs/guides/`, `docs/process/` | Kept current with every change; the source of truth for what the product and the process are. A fact lives in one of them and is linked from the others. |
 | **Requirements & verification** | `docs/specs/` (FR / NFR with stable ids), `docs/validation/` (strategy, L2 matrix, E2E scenarios, traceability matrix) | Normative; updated before or with the code (spec-before-code cascade). To be **slimmed in a later step**: traceability generated from test markers carrying FR ids, the hand-maintained per-test rows dropped (Consequences, follow-ups). |
-| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal pointer and the analysis notes of Sprints 001–019 — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (A3). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
+| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal pointer and the analysis notes of Sprints 001–019, and the Phase-3 POC reports — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (A3). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
 
 ### D4 — Framework-agnostic process: `AGENTS.md` canonical, `docs/process/` checklists, one-line tool pointers
 
@@ -161,11 +161,14 @@ created again.
 
 The tiers become **living / authoritative** and **requirements & verification**, both in the
 tree and unchanged from D3, plus **git history before v0.19.0**, which is not part of the tree:
-the numbered backlog, the sprint files, the journal pointer and the analysis notes (engine
-comparisons, spikes, the demo-feedback triage, the process analysis behind this ADR). The
-analysis notes were working material behind the ADRs, not a documentation tier: every factual
-finding an ADR relied on is stated in the ADR itself — ADR-007 was made self-contained in the
-same change, and the Context section above keeps the figures of the process analysis — so no
+the numbered backlog, the sprint files, the journal pointer, the analysis notes (engine
+comparisons, spikes, the demo-feedback triage, the process analysis behind this ADR) and the
+Phase-3 POC reports (local LLM deployment, OpenEvolve instance injection, OpenEvolve with a
+hosted LLM API). The analysis notes and the POC reports were working material behind the ADRs
+and the design documents, not a documentation tier: every factual finding an ADR or a DES relied
+on is stated in that document itself —
+ADR-007 was made self-contained in the same change, ADR-001 and ADR-006 when the POC reports
+left the tree, and the Context section above keeps the figures of the process analysis — so no
 living document links into the removed folders. What is in the history is never cited as current
 state.
 
@@ -201,9 +204,9 @@ This decision changes process and documentation only: no functional or non-funct
 - A contributor with no AI tooling can run the pull-request workflow, a code review, a sprint
   planning and a release from `AGENTS.md` and `docs/process/` alone; agents of any kind read the
   same files.
-- The repository tree shrinks by the journal, the planning records and the analysis notes
-  (A1–A3) and stops growing with per-session narrative; the planning records stop duplicating
-  GitHub.
+- The repository tree shrinks by the journal, the planning records, the analysis notes and the
+  POC reports (A1–A3) and stops growing with per-session narrative; the planning records stop
+  duplicating GitHub.
 - Every process fact has one home (`AGENTS.md` or one checklist) and is linked, not copied.
 - Personal data and tool-specific mechanics are kept out of the public record by rule (D5, D6).
 - Release notes are a first-class artifact (`CHANGELOG.md`) instead of a README table plus tag
