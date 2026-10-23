@@ -73,7 +73,10 @@ testpaths = ["tests"]
 # L3 E2E tests are nightly/manual-only (val-e2e-tests.md): deselected by
 # default so a plain `pytest tests/` never runs them, even in an env with
 # the engine extras installed. Run them explicitly with `-m e2e`.
-addopts = "-m 'not e2e'"
+# --strict-markers: an unregistered @pytest.mark.<name> fails collection
+# instead of warning, so every marker (incl. per-backend engine markers)
+# must be listed below (validation.md §6.2; adopted S19-27).
+addopts = "-m 'not e2e' --strict-markers"
 markers = [
     "unit: L1 unit tests",
     "integration: L2 integration tests",
