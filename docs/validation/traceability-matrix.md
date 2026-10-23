@@ -393,7 +393,7 @@ Design: [Architecture §4.2](../architecture/architecture.md)
 | NFR-060 | MUST | Deploy | — | Verified by packaging (pyproject.toml) | — |
 | NFR-061 | MUST | Deploy | — | Verified by packaging (pyproject.toml) | — |
 | #354 doc-lint (no FR) | infra | Docs — CLI-tree lint | L2 | `test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve` | Implemented (S18 / #354 — every **line-initial** fenced `revolver` invocation in the docs resolves in the Typer CLI tree; a renamed/removed flag is caught; deprecated `--tag` denylisted; untagged fences parsed; inline-prose backtick mentions out of scope; L2 by scope but runs under the `unit` CI marker in the blocking selection, sprint-018 S18-21 — validation.md §8.1 marker-vs-level rule) |
-| #355 freshness stamps (no FR) | infra | Docs — verified-against stamps | L1 | `test_doc_freshness::TestDocFreshnessCorpus::test_corpus_is_stamped_and_fresh` | Implemented (S18 / #355 PR #256 — guides + specs-side E2E walkthrough carry `verified-against` front-matter; >1-minor lag or missing stamp fails CI incl. docs-only PRs via doc-lint.yml; fresh-major X.0 grace window) |
+| #355 freshness stamps (no FR) | infra | Docs — verified-against stamps | L1 | `test_doc_freshness::TestDocFreshnessCorpus::test_corpus_is_stamped_and_fresh` | Implemented (S18 / #355 PR #256 — guides + specs-side E2E walkthrough carry `verified-against` front-matter; >1-minor lag or missing stamp fails CI incl. docs-only PRs via the doc-lint job of ci.yml; fresh-major X.0 grace window) |
 
 ### NFRs with indirect coverage
 
