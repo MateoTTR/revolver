@@ -4,8 +4,7 @@ on:
   push:
     branches: [main, develop]
     # Run the version-check job on release tags. The lint/test jobs are
-    # scoped away from tag pushes via per-job `if:` guards below so they do
-    # not spin up conda envs for a tag-only event.
+    # scoped away from tag pushes via per-job `if:` guards below.
     tags: ['v*']
     paths-ignore:
       - '**.md'
@@ -17,15 +16,24 @@ on:
       - '**.md'
       - 'docs/**'
 
+# Least-privilege token: nothing in this workflow writes to the repository.
+# Required once the repository is public (fork PRs run with a read-only token
+# anyway; this makes same-repo runs match).
+permissions:
+  contents: read
+
 # Cancel superseded runs for the same ref (e.g. new push to an open PR).
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# GitHub-hosted runners (ubuntu-latest) replace the self-hosted conda runners:
+# a public repository must not expose a self-hosted runner to fork PRs, and
+# actions/setup-python provides every interpreter in the matrix directly.
 jobs:
   lint:
     name: Lint (ruff + mypy)
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     # Skip on tag pushes (handled by version-check); run on PRs (non-draft) and branch pushes.
     if: >-
       !startsWith(github.ref, 'refs/tags/')
@@ -33,48 +41,26 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Define ephemeral conda env path
-        # Unique per run so parallel jobs on the same runner don't clash.
-        run: echo "CONDA_ENV=${RUNNER_TEMP}/revolver-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-lint" >> "$GITHUB_ENV"
-
-      - name: Make conda/mamba available
-        run: |
-          if command -v mamba >/dev/null 2>&1; then
-            echo "mamba already on PATH: $(command -v mamba)"
-            exit 0
-          fi
-          for base in "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" "/opt/conda"; do
-            if [ -x "$base/condabin/mamba" ]; then
-              echo "$base/condabin" >> "$GITHUB_PATH"
-              echo "Added $base/condabin to PATH"
-              exit 0
-            fi
-          done
-          echo "::error::Could not find mamba/miniforge on the runner" >&2
-          exit 1
-
-      - name: Create ephemeral conda env (Python 3.12)
-        run: mamba create -y -p "$CONDA_ENV" -c conda-forge python=3.12
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
       - name: Install package (dev)
-        run: mamba run -p "$CONDA_ENV" python -m pip install -e ".[dev]"
+        run: python -m pip install -e ".[dev]"
 
       - name: Ruff check
-        run: mamba run -p "$CONDA_ENV" ruff check src/ tests/
+        run: ruff check src/ tests/
 
       - name: Ruff format check
-        run: mamba run -p "$CONDA_ENV" ruff format --check src/ tests/
+        run: ruff format --check src/ tests/
 
       - name: Mypy
-        run: mamba run -p "$CONDA_ENV" mypy
-
-      - name: Remove ephemeral conda env
-        if: always()
-        run: mamba env remove -y -p "$CONDA_ENV" || rm -rf "$CONDA_ENV"
+        run: mypy
 
   version-check:
     name: Version/tag consistency (release tags)
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     # Run ONLY on pushed v* tags. Never blocks normal branch pushes or PRs.
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -121,7 +107,7 @@ jobs:
 
   test:
     name: Test (pytest + coverage)
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     # Skip on tag pushes (handled by version-check); run on PRs (non-draft) and branch pushes.
     if: >-
       !startsWith(github.ref, 'refs/tags/')
@@ -130,52 +116,30 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.14"]
+    env:
+      # Isolate the global DB (~/.revolver) from anything else on the runner;
+      # get_global_db() honours $REVOLVER_HOME.
+      REVOLVER_HOME: ${{ runner.temp }}/revolver-home-${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Define ephemeral conda env + isolated global-DB paths
-        run: |
-          echo "CONDA_ENV=${RUNNER_TEMP}/revolver-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test-${{ matrix.python-version }}" >> "$GITHUB_ENV"
-          # Isolate the global DB (~/.revolver) per job so parallel self-hosted
-          # runners sharing $HOME don't race on schema_version; get_global_db()
-          # honours $REVOLVER_HOME.
-          echo "REVOLVER_HOME=${RUNNER_TEMP}/revolver-home-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test-${{ matrix.python-version }}" >> "$GITHUB_ENV"
-
-      - name: Make conda/mamba available
-        run: |
-          if command -v mamba >/dev/null 2>&1; then
-            echo "mamba already on PATH: $(command -v mamba)"
-            exit 0
-          fi
-          for base in "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" "/opt/conda"; do
-            if [ -x "$base/condabin/mamba" ]; then
-              echo "$base/condabin" >> "$GITHUB_PATH"
-              echo "Added $base/condabin to PATH"
-              exit 0
-            fi
-          done
-          echo "::error::Could not find mamba/miniforge on the runner" >&2
-          exit 1
-
-      - name: Create ephemeral conda env (Python ${{ matrix.python-version }})
-        run: mamba create -y -p "$CONDA_ENV" -c conda-forge python=${{ matrix.python-version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install package (dev)
-        run: mamba run -p "$CONDA_ENV" python -m pip install -e ".[dev]"
+        run: python -m pip install -e ".[dev]"
 
       - name: Clean stale global DB
-        run: rm -rf "${REVOLVER_HOME:-$HOME}/.revolver"
+        run: rm -rf "${REVOLVER_HOME}/.revolver"
 
       - name: Run tests with coverage
-        run: mamba run -p "$CONDA_ENV" pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
+        run: pytest --cov=revolver --cov-report=term-missing --cov-fail-under=80 -m "unit or integration"
 
       - name: Run L2-OE tests (OpenEvolve contract)
         if: matrix.python-version == '3.12'
         continue-on-error: true
         run: |
-          mamba run -p "$CONDA_ENV" python -m pip install "openevolve>=0.2.26"
-          mamba run -p "$CONDA_ENV" pytest tests/integration/test_run_oe.py -v --no-header
-
-      - name: Remove ephemeral conda env
-        if: always()
-        run: mamba env remove -y -p "$CONDA_ENV" || rm -rf "$CONDA_ENV"
+          python -m pip install "openevolve>=0.2.26"
+          pytest tests/integration/test_run_oe.py -v --no-header
