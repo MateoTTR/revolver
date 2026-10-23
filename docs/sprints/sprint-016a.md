@@ -2,8 +2,8 @@
 
 **Status**: Planning
 **Target release**: **v0.16.1** (corrective / patch)
-**Goal**: Triage and fix the anomalies surfaced while validating Revolver **0.16.0** through the `revolver-demos` TSP + beamforming demos (gemma4 on a network Ollama via `sirius`/Tailscale, and Claude Opus/Sonnet via the `claude-ollama-bridge`). Priority on the genuine 🟠 blockers — a successful Shinka run that *looks* failed (A2) and `--parallel >1` on Claude Max turning into a multi-hour hang (A3). The network-Ollama issue (A1) was reframed by the demos update of 2026-06-22 down to a one-line probe fix (storage is already correct).
-**Demo**: a single `revolver llm add --source local --base-url http://sirius:11434/v1` registers a network Ollama usable by **both** OE and Shinka; a `revolver run --backend shinka` returns to the prompt cleanly after `Done: … completed`; a `--source local` OE run on the bridge auto-limits to `parallel_evaluations=1` and no longer cascades into a retry storm.
+**Goal**: Triage and fix the anomalies surfaced while validating Revolver **0.16.0** through the `revolver-demos` TSP + beamforming demos (gemma4 on a network Ollama host, `gpu-box`, and Claude Opus/Sonnet via the `claude-ollama-bridge`). Priority on the genuine 🟠 blockers — a successful Shinka run that *looks* failed (A2) and `--parallel >1` on Claude Max turning into a multi-hour hang (A3). The network-Ollama issue (A1) was reframed by the demos update of 2026-06-22 down to a one-line probe fix (storage is already correct).
+**Demo**: a single `revolver llm add --source local --base-url http://gpu-box:11434/v1` registers a network Ollama usable by **both** OE and Shinka; a `revolver run --backend shinka` returns to the prompt cleanly after `Done: … completed`; a `--source local` OE run on the bridge auto-limits to `parallel_evaluations=1` and no longer cascades into a retry storm.
 **Source**: `revolver-demos/feedback/feedback-v0.16.md` (consolidated demo-validation report, branch `chore/restructure-v0.16`). That report is owned by the demos project; this sprint doc is the Revolver-side response and is **not** written from the demos session.
 **Predecessor**: Sprint 016 (v0.16.0 — technical-debt paydown + CLI/UX polish).
 
@@ -109,7 +109,7 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 
 - **Observed**: `revolver llm add --source local` always probes `http://localhost:11434` and ignores `--base-url`/`OLLAMA_HOST`. The pre-storage probe (`health_check`/`show_model`) fails for a network Ollama → registration aborts *before* the (correct) entry is persisted.
 - **Expected**: the probe targets the `--base-url`/`OLLAMA_HOST` host; one `--source local --base-url <remote>` entry registers and resolves for both backends.
-- **Repro**: register a remote gemma4 (`sirius`) for OE + Shinka in one `--source local` entry → probe hits `localhost:11434` (nothing listening) → fails. Lightest workaround: have *anything* answer on `localhost:11434` during `add` (the bridge's `/api/show` stub, or a `socat` mirror); the real `--base-url` is then stored fine.
+- **Repro**: register a remote gemma4 (`gpu-box`) for OE + Shinka in one `--source local` entry → probe hits `localhost:11434` (nothing listening) → fails. Lightest workaround: have *anything* answer on `localhost:11434` during `add` (the bridge's `/api/show` stub, or a `socat` mirror); the real `--base-url` is then stored fine.
 - **Root cause** (file:line — confirmed by the demos refinement):
   - `cli/llm.py:106`: the probe is `OllamaClient()` with **no argument** → defaults to `http://localhost:11434` (`infra/ollama.py:76`). **Core fix is one line**: `OllamaClient(base_url=…)`.
   - `cli/llm.py:116`: the **stored** entry already passes `base_url=base_url` correctly → the persisted URL is fine; only the pre-storage probe is hardcoded (`core/llm.py:177-196` confirms `--base-url` is honoured for storage; `OLLAMA_HOST` is never read).
@@ -195,8 +195,8 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 | # | Task | Layer | PR | Depends | Acceptance criteria |
 |---|---|---|---|---|---|
 | S16a-01 | Extract a `_normalize_ollama_url(url: str \| None) -> tuple[str, str]` helper in `infra/ollama.py` or `core/llm.py` that returns `(root_url, api_url)` — strips a trailing `/v1` for the root form, appends `/v1` for the API form. | infra | PR-A1 | — | Helper handles `http://host:11434`, `http://host:11434/v1`, and `None` (defaults to `http://localhost:11434`); unit tests cover all three input shapes. |
-| S16a-02 | `cli/llm.py` — when building the probe `OllamaClient`, pass the resolved root URL from `--base-url` (strip `/v1`) or `OLLAMA_HOST` (strip `/v1` if present), defaulting to `http://localhost:11434`. Uses the S16a-01 helper. | cli | PR-A1 | S16a-01 | `llm add --source local --base-url http://sirius:11434/v1` probes `http://sirius:11434`, not `localhost`; `OLLAMA_HOST=http://sirius:11434 llm add --source local` probes `http://sirius:11434`. |
-| S16a-03 | **(optional convenience — storage already honours `--base-url`)** `core/llm.py:add_llm()` — when `--base-url` is absent, default `resolved_base_url` from `OLLAMA_HOST` (append `/v1` if not present) before falling back to `http://localhost:11434/v1`. Uses the S16a-01 helper. Stored entry and probe then agree on the same host. | domain | PR-A1 | S16a-01 | `OLLAMA_HOST=http://sirius:11434 llm add --source local` stores `base_url=http://sirius:11434/v1`; `--base-url http://sirius:11434/v1` stores the same value; no `OLLAMA_HOST` → still stores `http://localhost:11434/v1`. |
+| S16a-02 | `cli/llm.py` — when building the probe `OllamaClient`, pass the resolved root URL from `--base-url` (strip `/v1`) or `OLLAMA_HOST` (strip `/v1` if present), defaulting to `http://localhost:11434`. Uses the S16a-01 helper. | cli | PR-A1 | S16a-01 | `llm add --source local --base-url http://gpu-box:11434/v1` probes `http://gpu-box:11434`, not `localhost`; `OLLAMA_HOST=http://gpu-box:11434 llm add --source local` probes `http://gpu-box:11434`. |
+| S16a-03 | **(optional convenience — storage already honours `--base-url`)** `core/llm.py:add_llm()` — when `--base-url` is absent, default `resolved_base_url` from `OLLAMA_HOST` (append `/v1` if not present) before falling back to `http://localhost:11434/v1`. Uses the S16a-01 helper. Stored entry and probe then agree on the same host. | domain | PR-A1 | S16a-01 | `OLLAMA_HOST=http://gpu-box:11434 llm add --source local` stores `base_url=http://gpu-box:11434/v1`; `--base-url http://gpu-box:11434/v1` stores the same value; no `OLLAMA_HOST` → still stores `http://localhost:11434/v1`. |
 | S16a-04 | **SPIKE**: reproduce the Shinka post-run busy-loop in the `revolver-demos` env; identify the exact lingering entity (asyncio event loop still running / `JobScheduler` pool worker not joined / forked evaluator child process). Record: (a) the exact process state when the loop persists, (b) whether the hang is in the `asyncio.run()` tear-down or in a pool thread, (c) whether it is in Revolver's `_run_engine` or in Shinka internals. Write a spike note in the §Spike Result section below. | investigation | — | — | Spike note written in §Spike Result; exact lingering entity named; fix shape decided (orchestrator teardown / subprocess-reap / upstream issue). |
 | S16a-05 | Implement clean Shinka shutdown per spike findings: add explicit `try/finally` cleanup around `runner.run()` in `_run_engine()` — call the identified teardown method(s) (e.g., `scheduler.shutdown(wait=True, cancel_futures=True)`) before returning. As a backstop, if the cleanup raises or takes >N seconds, terminate the current process once the result has been persisted to `programs.sqlite`. | infra | PR-A2 | S16a-04 (GO) | `revolver run --backend shinka --iterations 5` (mocked or real) returns to the prompt with exit 0 within a bounded time after `Done: … completed`; no `~100% CPU` child survives; `programs.sqlite` result intact; L2 test passes. |
 | S16a-06 | L2 test: Shinka run exits cleanly after completion. Mock the `ShinkaEvolveRunner` to verify that `_run_engine()` cleans up the scheduler/pool; assert exit without a lingering background thread. Auto-skip without `[shinka]` extra. | test | PR-A2 | S16a-05 | Test asserts that the background thread/pool is joined within the timeout; shinka-env regression stays green; no-shinka env auto-skips. |
@@ -391,7 +391,7 @@ Peak parallelism: **4 agents** simultaneously at Wave 1 start (streams A, B, C, 
 
 ### Tests / CI
 - Suite at **1316 passed / 4 skipped** (no-shinka env); ruff + mypy clean; CI green on all merged PRs.
-- Infra: scaled the self-hosted runner pool to **3** (`x1c-mathieu`, `-2`, `-3`) to parallelize the lint + 3.12 + 3.14 matrix. Two transient CI hangs handled by re-trigger — one orphaned job from a runner restart, one intermittent `fork()`-in-multithreaded-process pytest deadlock (candidate hardening: `pytest-timeout` / `spawn` start method).
+- Infra: scaled the self-hosted runner pool to **3** runners to parallelize the lint + 3.12 + 3.14 matrix. Two transient CI hangs handled by re-trigger — one orphaned job from a runner restart, one intermittent `fork()`-in-multithreaded-process pytest deadlock (candidate hardening: `pytest-timeout` / `spawn` start method).
 
 ### A2 carry-over (gate to v0.16.1)
 - Spike (upstream ShinkaEvolve v0.0.7): the post-run busy-loop is leaked per-call async LLM clients (`openai.AsyncOpenAI`/httpx never `aclose()`d) spinning during `asyncio.run()` teardown; the runner's own `_cleanup_async()` already joins the pools. Fix #224 = orchestrator-owned teardown (`_shutdown_runner` wait=False + `_reap_run_children` SIGTERM/SIGKILL), mocked-test green. **Runtime confirmation on the demos shinka env is the gate to merge #224 and cut v0.16.1.** Upstream issue warranted (cf. #159).
@@ -401,7 +401,7 @@ Peak parallelism: **4 agents** simultaneously at Wave 1 start (streams A, B, C, 
 ## Provisional / pending
 
 - **Frequency-planning** has not yet run through Revolver. **Decision (P3): ship A1–A7 now as v0.16.1; do not wait.** When frequency-planning runs, the feedback report will be extended with an **A8+** block → triaged into a **separate `sprint-016b`** (v0.16.2), not appended here.
-- **Beamforming end-to-end** validation is gated on A2 (Shinka hang) and A5 (bridge 502); close it once A2/A3 land and re-run via gemma4-on-`sirius`.
+- **Beamforming end-to-end** validation is gated on A2 (Shinka hang) and A5 (bridge 502); close it once A2/A3 land and re-run via gemma4-on-`gpu-box`.
 - **Backlog rows #313–#319** added to `docs/tasks/backlog.md` (§"Demo-surfaced — `revolver-demos` v0.16.0 validation") on 2026-06-22 (P8).
 
 ---
@@ -427,7 +427,7 @@ _To be filled at sprint end._
 
 ### Demo-able features
 
-- [ ] `revolver llm add --source local --base-url http://sirius:11434/v1` probes `sirius`, not `localhost`; no `socat` needed
+- [ ] `revolver llm add --source local --base-url http://gpu-box:11434/v1` probes `gpu-box`, not `localhost`; no `socat` needed
 - [ ] `revolver run --backend shinka --iterations 5` returns to the prompt after `Done: … completed` (exit 0, no hang)
 - [ ] `revolver run --backend openevolve --llm <bridge-local>` dry-run shows `parallel_evaluations: 1`; `--parallel 3` warns
 - [ ] `run info` on a bridge run shows the token under-count caveat

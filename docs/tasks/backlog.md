@@ -522,7 +522,7 @@ Found while validating the `claude-ollama-bridge` (v0.1.0, separate repo) end-to
 
 ### Demo-surfaced — `revolver-demos` v0.16.0 validation (TSP + beamforming, 2026-06-22)
 
-Found while validating Revolver 0.16.0 through the **TSP + beamforming** demos (gemma4 on a network Ollama via `sirius`/Tailscale; Claude Opus/Sonnet via the `claude-ollama-bridge`). Triaged in [sprint-016a.md](../sprints/sprint-016a.md) → **v0.16.1** corrective. Severities: 🟠 important · 🟡 minor · ⚪ cosmetic. **Decision (session 056): the residual 0.16.x feedback is folded into S18** — no separate `sprint-016b` / v0.16.2, since v0.17.0 already shipped. The frequency-planning demo (items A8+, not yet run through Revolver) and #320 are triaged into Sprint 018 planning.
+Found while validating Revolver 0.16.0 through the **TSP + beamforming** demos (gemma4 on a network Ollama host, `gpu-box`; Claude Opus/Sonnet via the `claude-ollama-bridge`). Triaged in [sprint-016a.md](../sprints/sprint-016a.md) → **v0.16.1** corrective. Severities: 🟠 important · 🟡 minor · ⚪ cosmetic. **Decision (session 056): the residual 0.16.x feedback is folded into S18** — no separate `sprint-016b` / v0.16.2, since v0.17.0 already shipped. The frequency-planning demo (items A8+, not yet run through Revolver) and #320 are triaged into Sprint 018 planning.
 
 | # | Task | Status | Sprint |
 |---|---|---|---|
