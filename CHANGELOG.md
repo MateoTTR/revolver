@@ -25,7 +25,9 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 
 ### Changed
 
-- `pytest` runs with `--strict-markers` (an unregistered marker now fails collection); the tooling sections of `docs/validation/validation.md` match `pyproject.toml` and `ci.yml`, and the never-registered `e2e_gpu` marker is dropped from them (issue #277).
+- CI workflows hardened for branch rulesets: no path filters, the doc-lint job folded into `ci.yml`, actions pinned by commit SHA (#281, refs #278).
+- Pre-publication content cleanup: neutral wording for local paths, hostnames and private repositories in docs and comments (#282).
+- `pytest` runs with `--strict-markers` (an unregistered marker now fails collection); the tooling sections of `docs/validation/validation.md` match `pyproject.toml` and `ci.yml`, and the `e2e_gpu` marker is registered as a reserved marker for the manual GPU track.
 - CI runs on GitHub-hosted runners (`ubuntu-latest`) instead of a self-hosted pool; the runner image under `.github/runner/` is removed (#274).
 - Planning is frozen in the repository at the end of Sprint 019: `docs/tasks/backlog.md` and `docs/sprints/` become historical records; from Sprint 020 on, planning lives in GitHub issues and milestones (#280).
 

@@ -23,9 +23,10 @@ rationale for this layout is
 
 ## Common conventions
 
-Every checklist states what to have open (**inputs**), the **steps** to run, its
-**severity vocabulary**, the **output format** and **where to post** the result;
-headings vary slightly from file to file.
+Each review checklist states what to have open (**inputs**), the **steps** to run,
+its **severity vocabulary**, the **output format** and **where to post** the result;
+the planning, release and Definition-of-Done documents state inputs and outputs
+where applicable.
 
 Two severity vocabularies are used, one per kind of review:
 
@@ -61,6 +62,6 @@ agent definitions (code, spec, validation and doc reviewers, sprint planner)
 and from the release and hotfix sections of the former `CLAUDE.md`, as
 decided in ADR-008 (D4, D5). Each file keeps the original checks. Every point
 that was dropped, reworded or added during the extraction is listed at the
-end of the file under "Changes from the former agent definition", so the
+end of the file under a closing "Changes from …" (or "Provenance") section, so the
 extraction can be audited. One systematic rename: the former prompts wrote
 `OK` for a passed check; these files write `PASS`.

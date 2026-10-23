@@ -60,7 +60,7 @@ earliest sprint that needs them.
 1. **Read** the specs, the validation documents, the architecture and DES files and the open issues; identify the candidate functional increment and the carry-over from the previous planning issue.
 2. **Verify facts in the code** before writing the plan (file-level reconnaissance, cited as `path::symbol`), and record them in the planning issue so that nobody re-derives them.
 3. **Create the milestone** `Sprint NNN — <functional scope>` with the target version `vX.Y.0` in its description.
-4. **Open the planning issue** from the sprint-planning issue template (or with the outline below); assign it to the milestone; label it `sprint-planning`.
+4. **Open the planning issue** from the sprint-planning issue template added by the contributor-process pull request (or with the outline below); assign it to the milestone; label it `sprint-planning`.
 5. **Create or link one issue per pull request** (feature, bug or new-backend template as fits); each carries scope, files, acceptance criteria, test scenarios and spec / DES / ADR references, belongs to the milestone and is linked from the planning issue's task table.
 6. **Analyze parallelization** (below); record the waves, the critical path, the streams and the conflict map in the planning issue.
 7. **Spec-before-code cascade** — when the sprint changes behavior, update the specs / DES / ADR / validation rows first (test ids declared `Planned`), review them with [spec-review.md](spec-review.md) and [validation-review.md](validation-review.md), and commit on `develop` before the implementation pull requests start.

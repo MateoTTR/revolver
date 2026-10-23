@@ -1,6 +1,6 @@
 # Revolver — Validation Overview
 
-**Version**: 0.3 — Tooling sections (§4, §6.1, §6.2, §6.4, §8) aligned with `pyproject.toml` and `ci.yml`; `--strict-markers` adopted; the unregistered `e2e_gpu` marker dropped (S19-27, ADR-008). Previous: 0.2 — Test ID conventions (§8.1) (S18)
+**Version**: 0.3 — Tooling sections (§4, §6.1, §6.2, §6.4, §8) aligned with `pyproject.toml` and `ci.yml`; `--strict-markers` adopted; the `e2e_gpu` marker registered as a reserved marker for the manual GPU track (S19-27, ADR-008). Previous: 0.2 — Test ID conventions (§8.1) (S18)
 **Date**: 2026-10-23
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Architecture](../architecture/architecture.md)
@@ -203,6 +203,7 @@ markers = [
     "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
     "shinkaevolve: L2-Shinka tests requiring the shinka-evolve package (no LLM needed)",
     "e2e: L3 end-to-end tests",
+    "e2e_gpu: L3 end-to-end tests against a real Ollama + GPU (manual only; reserved, no test uses it yet)",
     "slow: long-running tests (always applied to E2E tests)",
 ]
 ```
@@ -231,7 +232,7 @@ Key fixtures defined in `tests/conftest.py`:
 ```
 push / PR — ci.yml (no path filters: every job is a required status check under the branch rulesets,
                     and a required check that never runs would leave the PR stuck on "Expected"):
-  ├── Lint (ruff + mypy): ruff check + ruff format --check + mypy --strict
+  ├── Lint (ruff + mypy): ruff check + ruff format --check + mypy (strict via pyproject)
   ├── Test (pytest + coverage): pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"  (Python 3.12 + 3.14 matrix)
   │     └── pip install "openevolve>=0.2.26" && pytest tests/integration/test_run_oe.py  (3.12 only, non-blocking)
   └── Doc command-lint (fenced CLI invocations): pytest tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py
@@ -242,7 +243,7 @@ tag push (v*) — ci.yml version-check:
 
 manual (no dedicated workflow yet — run by hand on a developer machine):
   ├── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
-  └── the GPU-backed E2E scenarios of val-e2e-tests.md against a local Ollama (manual procedure, no marker)
+  └── the GPU-backed E2E scenarios of val-e2e-tests.md against a local Ollama (`e2e_gpu`, manual; no test uses it yet)
 ```
 
 **CI gate**: the four jobs of the push/PR pipeline (Level 0 + 1 + 2 and the doc command-lint) are the required status checks for merge, on docs-only and code-only changes alike. L2-OE and E2E failures are reported but do not block.

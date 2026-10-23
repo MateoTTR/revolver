@@ -13,7 +13,8 @@ kept with parallel pull requests.
   (updated at each working session), [`CHANGELOG.md`](../../CHANGELOG.md) and
   the design documents under [`docs/architecture/`](../architecture/).
 - **The journal itself** is kept outside the repository. Its location is
-  configured in the git-ignored `CLAUDE.local.md` and is never committed.
+  configured in a git-ignored local file (for example `CLAUDE.local.md`) and is
+  never committed.
   Contributors are not expected to keep one.
 
 The design note formerly stored here (`refactor-run-solution.md`) was not a

@@ -21,8 +21,8 @@ and the process grew around that situation:
   `architecture.md`, the sprint files, the backlog and the validation documents, and kept in sync
   by hand.
 - **Three anti-rot guards as the symptom.** The project had to add a doc command-lint
-  (`tests/unit/test_doc_command_lint.py`, #354), freshness stamps
-  (`tests/unit/test_doc_freshness.py`, #355) and a reviewer cascade (specification → validation →
+  (`tests/unit/test_doc_command_lint.py`, backlog row 354), freshness stamps
+  (`tests/unit/test_doc_freshness.py`, backlog row 355) and a reviewer cascade (specification → validation →
   documentation review) to hold the duplicated prose together — treatments for drift rather than
   its removal.
 - **Tool-specific process.** The process bible (`CLAUDE.md`, 193 lines) mixed project rules with
@@ -82,7 +82,7 @@ constraints, conventions, planning model, pull-request workflow, pointers to the
 procedures themselves — code, specification, validation and documentation review, sprint
 planning, release and hotfix, Definition of Done — are tool-neutral checklists under
 `docs/process/`, each executable by a human with a terminal and a browser (inputs, steps,
-severity vocabulary, output format, where to post). Tool-specific entry files (`CLAUDE.md`,
+severity vocabulary, output format, where to post); the planning, release and Definition-of-Done documents state inputs and outputs where applicable. Tool-specific entry files (`CLAUDE.md`,
 `GEMINI.md`) are one-line pointers to `AGENTS.md`; no tool name is a requirement anywhere in the
 process. The former agent prompts were extracted into these checklists before the tool folders
 left git, and every dropped or reworded rule is marked in the checklist that absorbed it.
@@ -127,6 +127,8 @@ invalidate every pull-request, issue and sprint reference the records rely on.
 
 ## Consequences
 
+This decision changes process and documentation only: no functional or non-functional requirement of the specifications is affected.
+
 ### Positive
 
 - A contributor with no AI tooling can run the pull-request workflow, a code review, a sprint
@@ -155,13 +157,13 @@ invalidate every pull-request, issue and sprint reference the records rely on.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Knowledge lost when the tool folders leave git (an agent rule not carried into `docs/process/`) | Medium | Checklists written first, folders removed last; each checklist lists every dropped or reworded rule |
-| Checklists rot once nobody runs them by hand | Medium | They are the release gate (step 0 of `release.md`) and the review gate of every pull request; the pull-request template mirrors the Definition of Done |
+| Checklists rot once nobody runs them by hand | Medium | They are the release gate (step 0 of `release.md`) and the review gate of every pull request; the pull-request template (added by the contributor-process pull request) mirrors the Definition of Done |
 | The planning issue becomes a wall of text nobody updates | Low | Progress lives on the per-PR issues and the PR Status sections; the planning issue is updated at merges and closed at release |
 | External contributors skip the specification cascade | Medium | Issue-first rule with the RFC-lite design issue; the maintainer owns the formal documents |
 
 ### Follow-ups (documentation shrink, step 2)
 
-Recorded as backlog rows 381–383 and #357 before the freeze, to be migrated to GitHub issues;
+Recorded as backlog rows 381–383 and 357 before the freeze, to be migrated to GitHub issues;
 they become an amendment of this ADR once a concrete mechanism is chosen:
 
 - **Generated traceability** (row 381): pytest markers carrying FR ids and a generator producing
@@ -171,7 +173,7 @@ they become an amendment of this ADR once a concrete mechanism is chosen:
   fixtures and conventions of `val-integration-tests.md` and drop the per-test rows.
 - **Diátaxis reorganisation of the guides** (row 383): tutorial = tested, how-to = tested,
   reference = generated, explanation = reviewed; keeps the `verified-against` stamps.
-- **Executable E2E walkthrough and generated CLI reference** (#357): replay the fenced command
+- **Executable E2E walkthrough and generated CLI reference** (backlog row 357): replay the fenced command
   blocks of `user-story-e2e.md` against the fake LLM server; generate the flag reference from
   the CLI tree so that guides link to it instead of hand-maintaining flag tables.
 

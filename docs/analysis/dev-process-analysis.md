@@ -3,7 +3,7 @@
 > **Sanitized copy (committed at v0.19.0).** This analysis was written on the maintainer's side at v0.18.0, before Sprint 019 restructured the process; it is the evidence behind [ADR-008](../architecture/adr/ADR-008-documentation-and-process-strategy.md). GitHub handles of third parties, hostnames, local paths and personal data were removed; the analysis itself is unchanged apart from the redactions listed in this note. `file:line` citations refer to the v0.18.0 tree — `CLAUDE.md` has since been replaced by `AGENTS.md` and `docs/process/`, the journal left the repository, and `.claude/` is no longer versioned.
 
 **Repo**: branch `develop` at `9fba2cb` (v0.18.0 plus three documentation commits), analysed 2026-10-23 (read-only; GitHub reads only).
-**Purpose**: faithful description of the process, explicit/implicit rules catalog, Definition of Done (feature PR + new evolution backend), gaps for external contributors (Gemini CLI, no Claude agents/hooks). Feeds a future `CONTRIBUTING.md`, PR template and the gap review of PRs #270/#271.
+**Purpose**: faithful description of the process, explicit/implicit rules catalog, Definition of Done (feature PR + new evolution backend), gaps for external contributors (without the maintainer's tooling). Feeds a future `CONTRIBUTING.md`, PR template and the gap review of PRs #270/#271.
 **Citation style**: `file:line` relative to the repo root; `observed in PR #N / sprint-0NN` for practice not written down. Anything not written in a project file is tagged **implicit (observed)**.
 
 ---
@@ -166,7 +166,7 @@ E = explicit (written in a project file); I = implicit (observed in practice, no
 | 2 | **`.github/PULL_REQUEST_TEMPLATE.md`** with the §5 checklist (incl. backend sub-checklist) | S | R5, R8, R10, R16, R23-R25, R40 |
 | 3 | **Issue templates** (`feature.yml`, `new-backend.yml`) mirroring issue #190's shape (Context/Read first/Scope/Out of scope/Acceptance/References) | S | R6 |
 | 4 | **GitHub-hosted CI fallback**: add an `ubuntu-latest` variant of lint + test (3.12) for `pull_request` from non-owner branches, or a `workflow_dispatch`/label trigger; document that self-hosted runners may be offline | M | R10, R11 (reachability) |
-| 5 | **Portable review**: owner runs the code-reviewer manually on external PRs (`Review PR #N`) **and** publish the checklist (code-reviewer/agent.md:30-75) in CONTRIBUTING so Gemini CLI users can self-review; switch reviewer-agent output to English when the PR author is external | S | R8, R12, R13, R37 |
+| 5 | **Portable review**: owner runs the code-reviewer manually on external PRs (`Review PR #N`) **and** publish the checklist (code-reviewer/agent.md:30-75) in CONTRIBUTING so contributors using other tools can self-review; switch reviewer-agent output to English when the PR author is external | S | R8, R12, R13, R37 |
 | 6 | **Generic backend conformance test** parameterized over `AVAILABLE_BACKENDS` (protocol isinstance, 8 capability axes typed, `is_available()` tuple, doctor name maps present, marker registered) replacing the hard-coded tuple at test_backends.py:120 | S | R33, DoD §3b |
 | 7 | **`docs/guides/adding-a-backend.md`** (or DES-005 §4.9) = DoD §3b as prose, stamped `verified-against` | M | DoD §3b |
 | 8 | Add `--strict-markers` to `addopts`; register per-backend markers; make validation.md §4/§6.2 match pyproject | S | R14 |

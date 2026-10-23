@@ -108,7 +108,7 @@ stamps). A stale stamp after a release is **WARN**; a missing stamp is **FAIL**.
 ## Output format
 
 One line per check with its severity, grouped by document, then the summary
-line `N checks, N PASS, N warnings, N failures`.
+line `N checks, N warnings, N failures`.
 
 ## Where to post
 
