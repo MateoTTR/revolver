@@ -19,8 +19,8 @@ At the start of each session, read this file entirely, then follow the "Session 
 | Architecture overview | [docs/architecture/architecture.md](docs/architecture/architecture.md) | System design, components, ADR list |
 | ADR template | [docs/architecture/adr/ADR-000-template.md](docs/architecture/adr/ADR-000-template.md) | Template for new ADRs |
 | Task backlog | [docs/tasks/backlog.md](docs/tasks/backlog.md) | Numbered task list with status |
-| Session reports | [docs/sessions/](docs/sessions/) | One file per session, sorted by date |
-| Session cost tracker | [docs/sessions/cost-tracker.md](docs/sessions/cost-tracker.md) | Cumulative session duration and token usage |
+| Maintainer journal | [docs/sessions/README.md](docs/sessions/README.md) | Private, outside the repository |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) | Release history (Keep a Changelog), one section per tag |
 
 ### Architecture Decision Records (ADRs)
 
@@ -88,12 +88,11 @@ Before starting any work in a session:
 2. Read [docs/tasks/backlog.md](docs/tasks/backlog.md) — identify the current in-progress or next task
 3. Read the relevant ADRs if the task involves an architectural decision
 4. Read [docs/specs/specifications.md](docs/specs/specifications.md) if the task involves a feature
-5. Check the latest session report in [docs/sessions/](docs/sessions/) for context from previous session
+5. Check the latest entry of the maintainer's private journal (location configured in the git-ignored `CLAUDE.local.md`), if one is configured, for context from the previous session
 6. At the end of the session:
-   - Create a session report in `docs/sessions/YYYY-MM-DD-session-NNN.md`
-   - Include **session duration** (start time → end time) and **token count** (if provided by the user) in the report header
-   - Update [docs/sessions/cost-tracker.md](docs/sessions/cost-tracker.md) with the new session row and recalculate totals
-   - Update the backlog
+   - Write the session report and the cost row in the maintainer's private journal, whose location is configured in the git-ignored `CLAUDE.local.md` (nothing is written under `docs/sessions/`)
+   - Update the backlog (until the Sprint 019 freeze; afterwards the GitHub issues/milestone)
+   - Contributors are not expected to write session reports: a long-running PR keeps a short **Status** section in its description, updated at each working session
 
 ---
 
@@ -105,7 +104,7 @@ Before starting any work in a session:
 | Phase 2 | Architecture, tech choices (ADRs), data model | **Done** |
 | Phase 3 | POCs for critical aspects | **Done** (covered by POC #11/12/13) |
 | Phase 4 | Validation strategy, test plan, traceability | **Done** |
-| Phase 5 | Implementation | **In progress** — Sprint 009 complete (v0.9.0 released) |
+| Phase 5 | Implementation | **In progress** — see [CHANGELOG.md](CHANGELOG.md) for the release history |
 
 ---
 
@@ -142,18 +141,18 @@ Before tagging a release (`vX.Y.Z`):
    - *(release steps 1–6 below)*
    - **doc-reviewer** → fix all FAIL/WARN findings → commit + push (runs post-release because it checks version numbers in README/guides)
 1. **Version bump** — Update `version` in **both** `pyproject.toml` and `src/revolver/__init__.py`
-1b. **README update (when the release changes user-facing behavior)** — Refresh `README.md` on `develop` before the merge to `main`: features list, release/sprint table, install instructions (extras), CLI examples, test counts. The post-release doc-reviewer validates it but must not be the first time the README sees the release. Also re-verify the guides (`docs/guides/*.md`) and `docs/specs/user-story-e2e.md` against the release and refresh their `verified-against: vX.Y.Z` front-matter stamps — CI (`tests/unit/test_doc_freshness.py`, also run by doc-lint) fails any stamp more than one minor version behind.
+1b. **README update (when the release changes user-facing behavior)** — Refresh `README.md` on `develop` before the merge to `main`: features list, Releases section, install instructions (extras), CLI examples, test counts. The post-release doc-reviewer validates it but must not be the first time the README sees the release. Also re-verify the guides (`docs/guides/*.md`) and `docs/specs/user-story-e2e.md` against the release and refresh their `verified-against: vX.Y.Z` front-matter stamps — CI (`tests/unit/test_doc_freshness.py`, also run by doc-lint) fails any stamp more than one minor version behind.
+1c. **CHANGELOG** — Move the `[Unreleased]` entries of `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD` and update the compare links at the bottom
 2. **Merge completeness** — Ensure ALL sprint PRs are merged into `develop`
 3. **Commit + push** — Commit the version bump on `develop`, push
 4. **Merge `develop` → `main`** — `git checkout main && git merge develop`
 5. **Tag on `main`** — `git tag vX.Y.Z && git push origin main --tags`
-6. **Verify install** — `pip install "revolver @ git+file:///home/mathi/revolver@vX.Y.Z"` then `revolver --version`
+6. **Verify install** — `pip install "revolver @ git+https://github.com/MateoTTR/revolver@vX.Y.Z"` then `revolver --version`
 7. **Post-release verification** — Before declaring the release complete, run these checks and report any failures:
    - `git tag -l vX.Y.Z` → tag exists
    - `grep 'version' pyproject.toml` and `grep '__version__' src/revolver/__init__.py` → both match `X.Y.Z`
    - `git log main --oneline -1` → tip of main is the merge commit
-   - Session report exists in `docs/sessions/`
-   - `docs/sessions/cost-tracker.md` updated
+   - Journal entry written (private)
    - `docs/tasks/backlog.md` updated
 
 ### Hotfix Process

@@ -9,3 +9,5 @@ build/
 .ruff_cache/
 *.egg
 .claude/worktrees/
+# Maintainer-local instructions (journal location, etc.), never committed
+CLAUDE.local.md

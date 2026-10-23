@@ -223,76 +223,20 @@ ruff format --check src/ tests/
 mypy
 ```
 
-### Project Status
+## Releases
 
-| Sprint | Focus | Version | Status |
-|---|---|---|---|
-| Sprint 001 | Project scaffolding, DB, shared infrastructure | v0.1.0 | Done |
-| Sprint 002 | LLM registration & problem versioning | v0.2.0 | Done |
-| Sprint 003 | Dataset registration & integrity | v0.3.0 | Done |
-| Sprint 004 | Run orchestration (OpenEvolve integration) | v0.4.0 | Done |
-| Sprint 004a | Demo feedback fixes | v0.4.4 | Done |
-| Sprint 004b | Proxy robustness & UX | v0.4.5 | Done |
-| Sprint 005 | Solution management & evaluation loop | v0.5.0 | Done |
-| Sprint 005a | Demo feedback fixes | v0.5.1 | Done |
-| Sprint 006 | Benchmark: multi-solution comparison & export | v0.6.0 | Done |
-| Sprint 006a | Demo feedback fixes | v0.6.1 | Done |
-| Sprint 006b | Demo feedback fixes | v0.6.2 | Done |
-| Sprint 006c | LLM config injection & iteration stats | v0.6.3 | Done |
-| Sprint 007 | Doctor, setup & cross-cutting polish | v0.7.0 | Done |
-| Sprint 007a | Post-demo fixes (global options) | v0.7.1 | Done |
-| Sprint 008 | Reliability & lifecycle management | v0.8.0 | Done |
-| Sprint 008a | Scriptability & UX polish | v0.8.1 | Done |
-| Sprint 009 | Solution UX + Config fluide + Run robustness | v0.9.0 | Done |
-| Sprint 009a | Bugfix delta: Resume, Config validation, UX polish | v0.9.1 | Done |
-| Sprint 010 | Resume, Robustness & UX | v0.10.0 | Done |
-| Sprint 011 | Multi-Model Ensemble Support | v0.11.0 | Done |
-| Sprint 012 | Demo feedback: UX & reliability | v0.12.0 | Done |
-| Hotfix | Typer/click dependency drift + CI conda runner | v0.12.1 | Done |
-| Sprint 013 | Backend abstraction (ADR-007): pluggable evolution backend | v0.13.0 | Done |
-| Sprint 014 | ShinkaEvolve MVP: real `--backend shinka` end-to-end, `[shinka]` extra | v0.14.0 | Done |
-| Sprint 015 | Thinking-model usability, token honesty (cost removed), slow-local-endpoint timeout, shim cleanup | v0.15.0 | Done |
-| Sprint 016 | Tech-debt + UX polish: pricing removal (migration v10), dataset `split=both` (v11), `run info` program counters, Shinka resume clone parity, CI version/tag guard | v0.16.0 | Done |
-| Sprint 016a | Corrective (demo feedback v0.16.0): network-Ollama probe honours `--base-url`/`OLLAMA_HOST`, clean Shinka post-run shutdown, OE local `--parallel` auto-pin, warning-free OE config scaffold, positional `run resume`, bridge token under-count caveat, CI global-DB isolation | v0.16.1 | Done |
-| Sprint 017 | Multi-LLM ensemble validated end-to-end: `--selection {fixed,ucb,ucb1,thompson}`, `--llm-weight`, per-LLM `--reasoning-effort` (capability-gated per backend), B9 no-op `--config-override` warn, correctness slice (OE wrapper numeric guard, teardown, `solution extract --from-checkpoint`), `REVOLVER_HOME`/`--global-db` | v0.17.0 | Done |
-| Sprint 017a | Corrective hotfix (demo feedback v0.17.0): killable eval subprocess (no more leaked eval workers) + BLAS thread caps (`REVOLVER_EVAL_NUM_THREADS`), finalize backstop reap, `--selection-kwarg` value coercion + dry-run fail-fast, OE key-less local ensemble placeholder key, `=`-token CLI hint, snapshot config re-validation at run, checkpoint-interval recoverability warn, dry-run surfacing of resolved bandit kwargs | v0.17.1 | Done |
-| Sprint 018 | Eval-honesty semantic slice: honest timeout penalize + dual-score `run info` display, backend-on-version, seed-metric pre-flight, checkpoint cadence — plus Shinka-native top-N promotion (`solution extract --rank`), reap hardening, doc anti-rot (command lint + freshness stamps), Shinka LLM-request timeout lever | v0.18.0 | Done |
+Latest release: **v0.18.0**. The full release history, one section per tag since
+v0.1.0, is in [CHANGELOG.md](CHANGELOG.md). Behavior changes that affect existing
+configurations (for example the v0.18.0 timeout-penalty and checkpoint-cadence
+defaults) are recorded there under the release that introduced them — see the
+[v0.18.0 entry](CHANGELOG.md#0180---2026-07-05).
 
-### Behavior changes (v0.18)
+To install a specific tagged version straight from GitHub:
 
-v0.18.0 makes **six deliberate default-path changes**. The first two are the
-headline ones for anyone re-running a 0.17 config:
-
-- **Timeout handling now penalizes by default.** An instance that **times out**
-  during evolution contributes a **penalty score** (`evaluation.timeout_score`,
-  default `0.0`) to the program's fitness mean instead of being silently
-  dropped. This is a **fitness-landscape change**: runs may explore differently
-  than on 0.17, and best-scores are lower-but-honest. To restore the previous
-  survivorship-mean behavior, set `evaluation.on_timeout: drop` (config.yaml)
-  or `--config-override evaluation.on_timeout=drop`. Caveat: `timeout_score`
-  is used as a floor — on negative-is-good metrics (e.g. scores are negated
-  costs), the default `0.0` would *reward* timeouts; set it below your worst
-  valid score.
-- **Default checkpoint cadence.** When `checkpoint_interval` is left unset, a
-  run now checkpoints every `max(1, min(100, iterations//10))` iterations
-  (previously a flat `100`), so a killed short run has a mid-run checkpoint to
-  resume from. Explicit `checkpoint_interval` values (config.yaml or
-  `--config-override`) are never overridden. Expect more frequent checkpoint
-  directories on default short runs.
-- **Post-run eval persists.** The automatic post-run evaluation now persists
-  `eval_metadata`/`eval_instances` through the standard eval path and uses that
-  path's per-instance timeout (previously stderr-only, with a hardcoded 300 s
-  timeout).
-- **Seed-metric pre-flight fail-fast.** A run whose seed program lacks a
-  declared non-builtin `database.feature_dimensions` metric now aborts at
-  pre-flight, before iteration 0, with a clear message (the builtins
-  `complexity`/`diversity`/`combined_score` are allowed). Runs that previously
-  launched no longer do.
-- **`run info` dual score.** `run info` now shows the engine best labeled
-  "(engine, single eval)" next to the coverage-labeled post-eval mean.
-- **Reserved coverage keys.** Generated evaluator wrappers emit the
-  `instances_valid`/`instances_total` coverage keys; the `instances_` metric
-  prefix is now reserved (never summed into the displayed score).
+```bash
+pip install "revolver @ git+https://github.com/MateoTTR/revolver@v0.18.0"
+revolver --version
+```
 
 ## Known Issues
 
@@ -314,6 +258,7 @@ Detailed documentation lives in `docs/`:
 - [Specifications](docs/specs/specifications.md) — functional (FR-*) and non-functional (NFR-*) requirements by command group
 - [Architecture](docs/architecture/architecture.md) — system design, ADRs, design documents
 - [Validation](docs/validation/validation.md) — test strategy, traceability matrix
+- [Changelog](CHANGELOG.md) — release history, one section per tag
 
 ## License
 
