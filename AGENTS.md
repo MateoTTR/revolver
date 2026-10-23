@@ -55,7 +55,7 @@ benchmark results with full traceability.
 | [ADR-005](docs/architecture/adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
 | [ADR-006](docs/architecture/adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
 | [ADR-007](docs/architecture/adr/ADR-007-pluggable-evolution-backend.md) | Pluggable evolution backend (OpenEvolve default, ShinkaEvolve optional) | Accepted (amended 2026-07-01, 2026-07-05) |
-| [ADR-008](docs/architecture/adr/ADR-008-documentation-and-process-strategy.md) | Documentation and process strategy | Accepted |
+| [ADR-008](docs/architecture/adr/ADR-008-documentation-and-process-strategy.md) | Documentation and process strategy | Accepted (amended 2026-10-23) |
 
 ### Design Documents (DES)
 
