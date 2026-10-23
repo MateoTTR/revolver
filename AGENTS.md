@@ -144,7 +144,8 @@ path", "a network Ollama host", "a separate demo repository"). See
 - The **backlog** is the GitHub issue list, organised with labels (type / area / priority / backend).
 - A **sprint** is a **milestone** plus a **planning issue** whose body carries the scope, the verified facts, the task table, the PR mapping, the waves, the conflict map and the exit criteria ([docs/process/sprint-planning.md](docs/process/sprint-planning.md)).
 - The **sprint review** is the release section in `CHANGELOG.md` plus the closing comment of the planning issue.
-- Planning lives on GitHub only; no planning file is kept in the repository (ADR-008 D2).
+- Planning lives on GitHub only; no planning file is kept in the repository (ADR-008 D2, amended 2026-10-23 by A2).
+- In documents written before v0.19.0, a number written `#N` that names a task, a spike or a carry-over is a former backlog row, not a GitHub issue or pull request (the two numberings overlap); new text writes "backlog row N" and keeps `#N` for GitHub items (ADR-008 A3 scope note).
 
 ## Pull request workflow
 

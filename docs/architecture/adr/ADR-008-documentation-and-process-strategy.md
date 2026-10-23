@@ -84,7 +84,7 @@ close of Sprint 019 (A2), not with Sprint 020 as first written.
 |---|---|---|
 | **Living / authoritative** | `AGENTS.md`, `README.md`, `CHANGELOG.md`, `docs/architecture/architecture.md`, the ADRs, the DES documents, `docs/guides/`, `docs/process/` | Kept current with every change; the source of truth for what the product and the process are. A fact lives in one of them and is linked from the others. |
 | **Requirements & verification** | `docs/specs/` (FR / NFR with stable ids), `docs/validation/` (strategy, L2 matrix, E2E scenarios, traceability matrix) | Normative; updated before or with the code (spec-before-code cascade). To be **slimmed in a later step**: traceability generated from test markers carrying FR ids, the hand-maintained per-test rows dropped (Consequences, follow-ups). |
-| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal pointer and the analysis notes of Sprints 001–019 — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (D8). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
+| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal pointer and the analysis notes of Sprints 001–019 — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (A3). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
 
 ### D4 — Framework-agnostic process: `AGENTS.md` canonical, `docs/process/` checklists, one-line tool pointers
 
@@ -174,7 +174,10 @@ state.
 Code comments, test docstrings and document prose that cite a former backlog row number, a
 sprint identifier or a sprint-file fact ("sprint-018 fact 6", "S13 carry-over") keep them as
 historical identifiers: they resolve in the git history, not through a link, and no living
-document links into the removed folders. The `CHANGELOG.md` entries before v0.19.0 were
+document links into the removed folders. A number written `#N` in a document dated before
+v0.19.0 that names a task, a spike or a carry-over is a former backlog row, not a GitHub issue
+or pull request (the two numberings overlap); text written from v0.19.0 on says "backlog
+row N" for the former and keeps `#N` for GitHub items. The `CHANGELOG.md` entries before v0.19.0 were
 reconstructed from the planning records, which stay readable in the git history. The
 requirements-and-verification tier and the step-2 follow-ups below are untouched by this
 amendment.
@@ -229,7 +232,8 @@ This decision changes process and documentation only: no functional or non-funct
 ### Follow-ups (documentation shrink, step 2)
 
 Recorded before the v0.19.0 release as rows 381–383 and 357 of the former numbered backlog (git
-history), to be migrated to GitHub issues; they become an amendment of this ADR once a concrete
+history); migrating them — with every other still-relevant row of the former backlog — to GitHub
+issues is exit criterion 5 of the Sprint 019 planning issue (#285). They become an amendment of this ADR once a concrete
 mechanism is chosen:
 
 - **Generated traceability** (row 381): pytest markers carrying FR ids and a generator producing

@@ -841,7 +841,7 @@ The two backends sit at opposite ends:
 - **Per-run**: a fresh proxy is started for each run, including on `resume`.
 
 > **No cost reported (S15 / #300, removal completed S16 / TD-1).** Revolver reports **tokens only**, on both
-> backends. The #300 token-accounting spike confirmed that neither engine persists per-attempt or
+> backends. The token-accounting spike (backlog row 300) confirmed that neither engine persists per-attempt or
 > reasoning/thinking tokens, so no realistic USD figure is reachable; the `TokenUsage` model carries
 > `prompt_tokens` / `completion_tokens` / `total_tokens` and no cost field. The `estimate_cost()`
 > helper and the LLM `--input-cost`/`--output-cost` pricing flags/columns have been **removed**
