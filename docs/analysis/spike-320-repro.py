@@ -35,9 +35,9 @@ Expected observations (see docs/analysis/spike-320-qwen15-deadlock.md):
   logical ``llm.query`` call — 7 backoff-level retries, each preceded by
   the openai SDK's 2 internal retries.)
 
-Usage (needs an env with shinka 0.0.7 installed, e.g. revolver-demos):
+Usage (needs an env with shinka 0.0.7 installed, e.g. the demo environment):
 
-    source ~/miniforge3/etc/profile.d/conda.sh && conda activate revolver-demos
+    conda activate <shinka-env>
     python docs/analysis/spike-320-repro.py                 # stall mode, ~3 min
     python docs/analysis/spike-320-repro.py --mode fast     # cascade, ~4 min
     python docs/analysis/spike-320-repro.py --watch-seconds 120

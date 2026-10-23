@@ -3,8 +3,8 @@
 **Date**: 2026-03-13
 **Status**: Completed
 **Resolves**: Validation that OpenEvolve works with cloud LLM APIs (Anthropic Claude) via the OpenAI-compatible endpoint
-**Full report**: `/home/mathi/revolver-pocs/claude-api/README.md`
-**Handoff prompt**: `/home/mathi/revolver-pocs/claude-api/handoff-prompt.md`
+**Full report**: kept in a private POC repository (this document is the summary)
+**Handoff prompt**: private POC repository
 
 ---
 
@@ -135,5 +135,5 @@ These items are **not currently in our specs or design docs** and need triage:
 
 ## Artifacts
 
-Full benchmark scripts, configs, and results in `/home/mathi/revolver-pocs/claude-api/`:
+Full benchmark scripts, configs, and results are kept in a private POC repository:
 `run_scenario.py`, `measure_tokens.py`, `config_claude_*.yaml`, `config_s6_*.yaml`, `results/S*.json`, `output/S*_*/`

@@ -8,8 +8,8 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/beamforming/demos/demo-v0.9.0/feedback.md` (F3 — Multi-model ensemble)
-- Feedback summary: `/home/mathi/revolver-demos/feedback-summary.md`
+- Demo feedback: `feedback.md` of the beamforming demo v0.9.0 (private demo repository; F3 — Multi-model ensemble)
+- Feedback summary: `feedback-summary.md` (private demo repository)
 - Predecessor: Sprint 010 (v0.10.0) — 965 tests passing
 - POC: Multi-model ensemble OE format validated in `revolver-demos` (2026-03-28)
 

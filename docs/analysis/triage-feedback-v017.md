@@ -1,6 +1,6 @@
 # Triage — revolver-demos feedback v0.17 (U1–U14)
 
-> **Source**: `~/projects/revolver-demos/feedback/feedback-v0.17.md` (execution complete 2026-07-03:
+> **Source**: demo feedback report v0.17 (private demo repository; execution complete 2026-07-03:
 > 2 smoke + 4×100-gen + 1 champion @150, zero run crashes, zero bridge wedges).
 > **Method** (session 057, 2026-07-04): per-item code verification against the released v0.17.0
 > (editable checkout, `develop`) and the `shinka`/`openevolve` packages in the `revolver-demos`

@@ -3,7 +3,7 @@
 **Date**: 2026-03-09
 **Status**: Completed
 **Resolves**: OQ-01 (local LLM backend), OQ-08 (WSL2 + RTX 5090 compatibility)
-**Full report**: `/home/mathi/revolver-pocs/local-llm/README.md`
+**Full report**: kept in a private POC repository (this document is the summary)
 
 ---
 
@@ -139,5 +139,5 @@ Prompt: A* pathfinding implementation, 512 generated tokens, 3 runs averaged.
 
 ## Artifacts
 
-Full benchmark scripts and raw data are in `/home/mathi/revolver-pocs/local-llm/`:
+Full benchmark scripts and raw data are kept in a private POC repository:
 `bench_ollama.py`, `bench_vllm.py`, `bench_lifecycle.py`, `ollama_results.json`, `vllm_results.json`, `lifecycle_results.json`

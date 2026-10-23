@@ -498,7 +498,7 @@ Rationale: guides/tutorials rot **silently** because prose has no failing coupli
 
 ### Demo-surfaced — `revolver-demos` Shinka TSP smoke test (2026-06-13)
 
-Found while running `revolver run --backend shinka` on a real TSP problem against the Gemini API (separate `~/projects/revolver-demos` repo, `ISSUES.md` journal). The smoke test proved the engine works end-to-end (best_score 1.213 = +21% vs baseline) but exposed accounting/UX gaps. Severities: 🔴 critical · 🟠 major · 🟡/⚪ minor.
+Found while running `revolver run --backend shinka` on a real TSP problem against the Gemini API (a private demo repository with its own issues journal). The smoke test proved the engine works end-to-end (best_score 1.213 = +21% vs baseline) but exposed accounting/UX gaps. Severities: 🔴 critical · 🟠 major · 🟡/⚪ minor.
 
 | # | Task | Status | Sprint |
 |---|---|---|---|

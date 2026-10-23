@@ -38,7 +38,7 @@ thread stacks via `SIGUSR1`/faulthandler, then kills the process group.
 ### Run 1 — `stall` mode (real constants, 150 s observation)
 
 ```
-source ~/miniforge3/etc/profile.d/conda.sh && conda activate revolver-demos
+conda activate <shinka-env>
 python docs/analysis/spike-320-repro.py --mode stall --watch-seconds 150
 ```
 
@@ -197,7 +197,7 @@ reap must then handle, per the observed process tree:
 ## 7. Repro instructions (summary)
 
 ```bash
-source ~/miniforge3/etc/profile.d/conda.sh && conda activate revolver-demos  # any env with shinka 0.0.7
+conda activate <shinka-env>  # any env with shinka 0.0.7
 python docs/analysis/spike-320-repro.py                    # stall mode, ~3 min, exit 0 = wedge reproduced
 python docs/analysis/spike-320-repro.py --mode fast        # retry-cascade mode, ~4 min
 ```

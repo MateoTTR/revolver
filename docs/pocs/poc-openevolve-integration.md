@@ -3,8 +3,8 @@
 **Date**: 2026-03-11
 **Status**: Completed
 **Resolves**: OQ-05 (evaluator iteration vs instance injection), OQ-06 (dataset control mechanism)
-**Full report**: `/home/mathi/revolver-pocs/openevolve-integration/README.md`
-**Detailed findings**: `/home/mathi/revolver-pocs/openevolve-integration/results/findings.md`
+**Full report**: kept in a private POC repository (this document is the summary)
+**Detailed findings**: private POC repository
 
 ---
 

@@ -8,7 +8,7 @@
 
 ## Method
 
-Inspected the real on-disk artifacts of the 4 Shinka runs produced during the 2026-06-13 TSP smoke test and the 2026-06-15 bridge validation (`~/projects/revolver-demos/problems/tsp/.revolver/runs/`), i.e. the exact files a `collect_token_usage()` sweep would have to read:
+Inspected the real on-disk artifacts of the 4 Shinka runs produced during the 2026-06-13 TSP smoke test and the 2026-06-15 shim validation (the TSP problem's `.revolver/runs/` directory in the private demo repository), i.e. the exact files a `collect_token_usage()` sweep would have to read:
 
 - `gen_*/attempts/**/metadata.json` (per-patch-attempt records)
 - `gen_*/failure.json` (failed-proposal records)

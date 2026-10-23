@@ -104,7 +104,7 @@ instead of the in-process dual-mode `evaluate()` returning a dict. See DES-006 �
 
 ## References
 
-- [POC #12 — OpenEvolve Integration](../../pocs/poc-openevolve-integration.md) (full report in `/home/mathi/revolver-pocs/openevolve-integration/`)
+- [POC #12 — OpenEvolve Integration](../../pocs/poc-openevolve-integration.md) (full report kept in a private POC repository)
 - [ConOps §4.4](../../conops/conops.md) — Instance Injection Mechanism
 - ConOps OQ-05, OQ-06
 - Architecture AQ-03

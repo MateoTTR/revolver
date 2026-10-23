@@ -8,7 +8,7 @@
 
 ## Source
 
-- Demo feedback: `/home/mathi/revolver-demos/tsp/demos/benchmark-multimodel/feedback.md`
+- Demo feedback: `feedback.md` of the TSP multi-model benchmark demo (private demo repository)
 - CLI consistency audit: session 036 (2026-03-21)
 - Pre-sprint doc audit: session 038 (2026-03-22) — spec-reviewer + manual review
 - Predecessor: Sprint 008 (v0.8.0)
