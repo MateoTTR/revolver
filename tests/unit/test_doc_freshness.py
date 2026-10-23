@@ -99,8 +99,8 @@ def check_freshness(text: str, current_version: str, name: str) -> str | None:
     if stamp is None:
         return (
             f"{name}: missing `{STAMP_KEY}: vX.Y.Z` YAML front-matter stamp — verify the "
-            f"doc against revolver {current_version} and stamp it (CLAUDE.md Release "
-            "Checklist step 1b)"
+            f"doc against revolver {current_version} and stamp it (docs/process/release.md, "
+            "step 2 'README, guides and stamps')"
         )
     if stamp[0] > current[0]:
         return None  # stamped ahead of the current major: never stale
