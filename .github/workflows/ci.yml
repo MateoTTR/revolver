@@ -3,18 +3,19 @@ name: CI
 on:
   push:
     branches: [main, develop]
-    # Run the version-check job on release tags. The lint/test jobs are
-    # scoped away from tag pushes via per-job `if:` guards below.
+    # Run the version-check job on release tags. The lint, test and doc-lint
+    # jobs are scoped away from tag pushes via per-job `if:` guards below.
     tags: ['v*']
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, develop]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+
+# No path filters on purpose: every job below is a required status check under
+# the branch rulesets, and a required check that never runs leaves the pull
+# request stuck on "Expected". Hosted runners make the full pipeline cheap
+# (about two minutes), so docs-only and code-only changes run the same jobs.
+# The doc-lint job (formerly a separate doc-lint.yml with the inverse path
+# filter) lives here for the same reason.
 
 # Least-privilege token: nothing in this workflow writes to the repository.
 # Required once the repository is public (fork PRs run with a read-only token
@@ -39,9 +40,9 @@ jobs:
       !startsWith(github.ref, 'refs/tags/')
       && (github.event.pull_request.draft == false || github.event_name == 'push')
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
           cache: pip
@@ -64,7 +65,7 @@ jobs:
     # Run ONLY on pushed v* tags. Never blocks normal branch pushes or PRs.
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Check tag matches declared version
         run: |
@@ -117,7 +118,7 @@ jobs:
       matrix:
         python-version: ["3.12", "3.14"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Define isolated global-DB path
         # Isolate the global DB (~/.revolver) from anything else on the runner;
@@ -125,7 +126,7 @@ jobs:
         # available in job-level `env`, hence the $GITHUB_ENV step.)
         run: echo "REVOLVER_HOME=${RUNNER_TEMP}/revolver-home-${{ matrix.python-version }}" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -145,3 +146,31 @@ jobs:
         run: |
           python -m pip install "openevolve>=0.2.26"
           pytest tests/integration/test_run_oe.py -v --no-header
+
+  doc-lint:
+    name: Doc command-lint (fenced CLI invocations)
+    runs-on: ubuntu-latest
+    # Skip on tag pushes; run on PRs (non-draft) and branch pushes (same guard as lint/test).
+    if: >-
+      !startsWith(github.ref, 'refs/tags/')
+      && (github.event.pull_request.draft == false || github.event_name == 'push')
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Define isolated global-DB path
+        run: echo "REVOLVER_HOME=${RUNNER_TEMP}/revolver-home-doclint" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package (dev)
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run doc command-lint + freshness check
+        # S18-21 (#354) command-lint of fenced `revolver` invocations across
+        # README.md + docs/**, and S18-23 (#355) `verified-against` stamps.
+        run: >-
+          python -m pytest
+          tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py -q

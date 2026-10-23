@@ -27,8 +27,8 @@ A UTF-8 BOM before the front-matter is tolerated (stripped before matching)
 so an editor that saves with a BOM cannot fake a "missing stamp" failure.
 
 This module runs in the main CI test job (``unit`` marker) and in the
-docs-only ``doc-lint.yml`` workflow, so a stale guide blocks docs-only PRs
-too.
+dedicated doc-lint job of ``ci.yml`` (no path filters, so a stale guide
+blocks docs-only PRs too).
 """
 
 from __future__ import annotations
