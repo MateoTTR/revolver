@@ -3,8 +3,8 @@
 Builds — in a test-provided directory, typically ``tmp_path`` — a SQLite
 file whose schema is byte-compatible with the ``CREATE TABLE programs``
 statement of ``shinka-evolve 0.0.7`` (``shinka/database/dbase.py``,
-verified in the ``shinka-spike`` env, session 049 — see
-``docs/sprints/sprint-014.md`` §"Verified shinka-evolve 0.0.7 schema facts").
+verified against the installed engine in a dedicated spike environment
+during Sprint 014; the verified facts are listed below).
 
 Design decision (documented per issue #190): the fixture DB is **built on
 demand by this factory** rather than checked in as a binary file. This

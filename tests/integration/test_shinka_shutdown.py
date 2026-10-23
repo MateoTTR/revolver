@@ -3,8 +3,8 @@
 After a ShinkaEvolve run prints ``Done: … completed`` (result persisted to
 ``programs.sqlite``), the in-process ``ShinkaEvolveRunner.run()`` could leave
 the orchestrator busy-looping at ~100% CPU (leaked async LLM transports /
-default executor / a surviving evaluator child — see the §A2 spike in
-``docs/sprints/sprint-016a.md``). ``ShinkaBackend._run_engine()`` now wraps
+default executor / a surviving evaluator child — see the §A2 spike of the
+Sprint 016a record). ``ShinkaBackend._run_engine()`` now wraps
 ``runner.run()`` in ``try/finally`` and invokes a defensive teardown.
 
 These tests mock the runner at the ``_engine_classes`` boundary so they run

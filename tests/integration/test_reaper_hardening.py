@@ -1,6 +1,6 @@
 """L2 tests for the hardened ``ChildProcessReaperMixin`` (S18-18/19, #359).
 
-The #320 spike (docs/analysis/spike-320-qwen15-deadlock.md §6) showed the
+The deadlock spike of backlog row 320 (§6 of its analysis) showed the
 process tree the post-run reap must handle: a Shinka eval job is a plain
 ``subprocess.Popen`` direct child whose Revolver wrapper spawns a
 ``multiprocessing.Process`` **grandchild** per dataset instance. A per-PID
