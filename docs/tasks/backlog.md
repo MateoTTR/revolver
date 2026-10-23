@@ -522,7 +522,7 @@ Found while validating a local OpenAI-compatible shim (a subscription-backed, se
 
 ### Demo-surfaced — v0.16.0 demo validation (TSP + beamforming, 2026-06-22)
 
-Found while validating Revolver 0.16.0 through the **TSP + beamforming** demos (gemma4 on a network Ollama host, `gpu-box`; Claude Opus/Sonnet via a local OpenAI-compatible shim). Triaged in [sprint-016a.md](../sprints/sprint-016a.md) → **v0.16.1** corrective. Severities: 🟠 important · 🟡 minor · ⚪ cosmetic. **Decision (session 056): the residual 0.16.x feedback is folded into S18** — no separate `sprint-016b` / v0.16.2, since v0.17.0 already shipped. The frequency-planning demo (items A8+, not yet run through Revolver) and #320 are triaged into Sprint 018 planning.
+Found while validating Revolver 0.16.0 through the **TSP + beamforming** demos (gemma4 on a network Ollama host, `gpu-box`; Claude Opus/Sonnet via a local OpenAI-compatible shim). Triaged in [sprint-016a.md](../sprints/sprint-016a.md) → **v0.16.1** corrective. Severities: 🟠 important · 🟡 minor · ⚪ cosmetic. **Decision (session 056): the residual 0.16.x feedback is folded into S18** — no separate `sprint-016b` / v0.16.2, since v0.17.0 already shipped. The third demo problem (items A8+, not yet run through Revolver) and #320 are triaged into Sprint 018 planning.
 
 | # | Task | Status | Sprint |
 |---|---|---|---|

@@ -8,7 +8,7 @@
 **Predecessor**: Sprint 016 (v0.16.0 — technical-debt paydown + CLI/UX polish).
 
 > **PROVISIONAL SNAPSHOT.** The feedback report is still **OPEN**. The 3rd demo problem
-> **frequency-planning** has **not yet** been run through Revolver (still at the "wire the
+> has **not yet** been run through Revolver (still at the "wire the
 > project + run" stage); its run is expected to add items, after which the report will be
 > extended *before v0.16 is frozen*. This sprint captures the **current** A1–A7 set only.
 > Treat scope, task numbering, and the release cut as subject to a follow-up amendment
@@ -47,7 +47,7 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 |---|---|---|
 | **P1** (A3) | Auto-pin policy for `--source local` | Auto-pin `parallel_evaluations=1` for **all** `--source local` endpoints (incl. genuine multi-GPU local — conservative default) with an easy override via `--parallel`/`--config-override`. Mirrors the Shinka-side pin already shipped in #309. |
 | **P2** (A6) | OE template fix direction | **Rewrite `_CONFIG_TEMPLATE` to OE-schema-correct keys** (`max_iterations`; commented `database.population_size`). **Correction (2026-06-22):** OE's `EvaluatorConfig` field is `timeout`, **not** `timeout_per_instance` — so the wrapper timeout stays under a Revolver-owned `evaluation:` section stripped before strict validation (symmetric with Shinka's `_REVOLVER_SECTIONS`), **not** relocated under `evaluator:`. The validator stays strict for genuine OE keys. *(Implemented PR #222; deviation reviewed + signed off 2026-06-22.)* |
-| **P3** | Sequencing / release | **Ship A1–A7 now as v0.16.1.** Frequency-planning (A8+) becomes a separate **`sprint-016b`** / v0.16.2 once the feedback report is extended — do **not** hold 16a. |
+| **P3** | Sequencing / release | **Ship A1–A7 now as v0.16.1.** The third demo problem (A8+) becomes a separate **`sprint-016b`** / v0.16.2 once the feedback report is extended — do **not** hold 16a. |
 | **P4** (A1) | CLI surface + `OLLAMA_HOST` | **Reuse the existing `--base-url`** (no new `--host` flag); keep `OLLAMA_HOST` as an **optional convenience** default when `--base-url` is absent. |
 | **P5** (A3) | Explicit `--parallel >1` on local | **Warn but honour** the user's value (map-with-warn). |
 | **P6** (A7) | `run resume --run` | Add positional `RUN_ID`; **keep `--run` as a backward-compat alias** (mirror #304 `--tag`). |
@@ -76,7 +76,7 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 | Deferred item | Why deferred |
 |---|---|
 | Top-N extraction (#299) | Largest carry-over from S16; fits a dedicated sprint (S017). |
-| Frequency-planning demo items | Report not yet extended; will be folded in as A8+ before v0.16 is frozen. |
+| Third demo problem items | Report not yet extended; will be folded in as A8+ before v0.16 is frozen. |
 | Shim-side backoff / error mapping (A5 core fix) | External project (the local OpenAI-compatible shim) — not Revolver-core scope. |
 
 ---
@@ -98,7 +98,7 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 
 ### A1 🟠→🟡 — Network/local Ollama probe ignores `--base-url`/`OLLAMA_HOST`
 
-> **Reframed (demos feedback update 2026-06-22, found while wiring frequency-planning).** The
+> **Reframed (demos feedback update 2026-06-22, found while wiring the third demo problem).** The
 > root cause is **purely the validation probe**, not storage. The persisted entry is already
 > correct, and a `--source local --base-url <remote>` registration was **verified to work for
 > both OE and Shinka** once the probe passes (Shinka embed observed: `local/gemma4:latest@http://localhost:11435/v1`).
@@ -400,7 +400,7 @@ Peak parallelism: **4 agents** simultaneously at Wave 1 start (streams A, B, C, 
 
 ## Provisional / pending
 
-- **Frequency-planning** has not yet run through Revolver. **Decision (P3): ship A1–A7 now as v0.16.1; do not wait.** When frequency-planning runs, the feedback report will be extended with an **A8+** block → triaged into a **separate `sprint-016b`** (v0.16.2), not appended here.
+- **The third demo problem** has not yet run through Revolver. **Decision (P3): ship A1–A7 now as v0.16.1; do not wait.** When it runs, the feedback report will be extended with an **A8+** block → triaged into a **separate `sprint-016b`** (v0.16.2), not appended here.
 - **Beamforming end-to-end** validation is gated on A2 (Shinka hang) and A5 (bridge 502); close it once A2/A3 land and re-run via gemma4-on-`gpu-box`.
 - **Backlog rows #313–#319** added to `docs/tasks/backlog.md` (§"Demo-surfaced — v0.16.0 demo validation") on 2026-06-22 (P8).
 
