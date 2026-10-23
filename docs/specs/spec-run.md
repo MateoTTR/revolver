@@ -339,6 +339,7 @@ Deleted run "run-20260310-143000"
 | FR-RUN-039 | MUST | `delete` in JSON mode (`--json`) without `--force` returns an error | NFR-003 |
 | FR-RUN-040 | SHOULD | `--temperature` overrides the LLM sampling temperature in the resolved config (range: 0.0–2.0), mapped to the backend's native parameter (OE: `llm.temperature`; Shinka: per-model `llm_kwargs`) | — |
 | FR-RUN-041 | SHOULD | `--parallel` overrides evaluation parallelism in the resolved config (positive integer), mapped to the backend's native parameter (OE: `evaluator.parallel_evaluations`; Shinka: evaluation job pool, with a warning) | — |
+| FR-RUN-042 | — | **[DELETED]** Never defined (numbering gap since Sprint 013); no behavior owed. | — |
 | FR-RUN-043 | MUST | If the backend completes but post-processing fails, run status is set to `completed_with_errors` (not `interrupted`) | — |
 | FR-RUN-044 | MUST | Run metadata stores `llm_type` (`single` or `ensemble`) indicating whether a single LLM or an ensemble was used | — |
 | FR-RUN-045 | MUST | Run metadata stores `llm_snapshot` (JSON) capturing the full LLM or ensemble configuration at run time for traceability | NFR-020 |

@@ -60,7 +60,7 @@ scope is large, a complete review of the top items plus an explicit
 5. **Cross-DES consistency** — references to other DES documents resolve and do not contradict them.
 6. **POC alignment** — when proof-of-concept findings are recorded in the related ADR (ADR-001, ADR-006) or in the DES itself (DES-005 for the hosted-API study), the design follows them.
 7. **Open-question resolution** — when the DES resolves an AQ-* or OQ-*, the resolution is reflected in `architecture.md` and `conops.md`.
-8. **Headers and numbering** — the `**Version**` / `**Date**` / `**Status**` / `**Traceable to**` header block is present and its version line was bumped for the change; DD numbers are sequential and unique within the document.
+8. **Headers and numbering** — the `**Version**` / `**Date**` / `**Status**` / `**Traceable to**` header block is present and its version line was bumped for the change (an editorial edit that changes no design content — citations, links, wording — may keep the version line); DD numbers are sequential and unique within the document.
 
 ### For ADRs (`docs/architecture/adr/ADR-*.md`)
 

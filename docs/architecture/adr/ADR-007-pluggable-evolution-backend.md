@@ -305,6 +305,6 @@ This is a consumer addition, not a capability change: D1, the capabilities matri
 
 - Preparatory studies — the engine comparison and bottom-up impact study (concept mapping, draft interface, risks), the dependency co-install spike (backlog row 266) and the top-down analysis (backlog row 267: CLI partition, finalized interface, engineering impact, sprint plan) — working notes kept outside the repository; their findings are stated in the Context section, and the finalized interface is `src/revolver/infra/backends/base.py`
 - [ADR-006](ADR-006-openevolve-instance-injection.md) — instance injection (still valid for OE; Shinka reuses the same env-var inputs with a file-based wrapper output)
-- [Specifications](../../specs/specifications.md) — FR-RUN-023/024/028-030, NFR-023, NFR §3.3 (to be revised per this ADR)
-- [DES-005](../design/DES-005-run-orchestration.md), [DES-006](../design/DES-006-eval-loop.md) — to be revised (backend-mediated orchestration, per-backend evaluator contract)
+- [Specifications](../../specs/specifications.md) — FR-RUN-023/024/028-030, NFR-023, NFR §3.3 (revised per this ADR: NFR-024)
+- [DES-005](../design/DES-005-run-orchestration.md), [DES-006](../design/DES-006-eval-loop.md) — revised per this ADR (backend-mediated orchestration, per-backend evaluator contract)
 - ShinkaEvolve: https://github.com/SakanaAI/ShinkaEvolve (Apache-2.0)

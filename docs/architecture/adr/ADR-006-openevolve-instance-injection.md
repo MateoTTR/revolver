@@ -106,7 +106,7 @@ instead of the in-process dual-mode `evaluate()` returning a dict. See DES-006 �
 
 ## References
 
-- The OpenEvolve instance-injection proof of concept (former backlog row 12): the full report is kept in a private POC repository; the findings this record relies on are stated above
+- The OpenEvolve instance-injection proof of concept (former backlog row 12): the report remains readable in the git history before the v0.19.0 tag (ADR-008 A3); the findings this record relies on are stated above
 - [ConOps §4.4](../../conops/conops.md) — Instance Injection Mechanism
 - ConOps OQ-05, OQ-06
 - Architecture AQ-03

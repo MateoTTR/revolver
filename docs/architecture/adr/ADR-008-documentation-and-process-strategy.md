@@ -55,7 +55,7 @@ with the frozen tier).
 
 ## Decision
 
-### D1 — The maintainer journal lives outside the repository
+### D1 — The maintainer journal lives outside the repository (amended 2026-10-23)
 
 Session reports and the cumulative time tracker are the maintainer's private working material.
 They leave the tree at v0.19.0 (no pointer file remains — A1, 2026-10-23; as first written, the
@@ -78,13 +78,13 @@ comment. The numbered backlog and the sprint files of Sprints 001–019 ~~stay i
 by A2 (2026-10-23)**; nothing was moved or renumbered. GitHub-native planning starts with the
 close of Sprint 019 (A2), not with Sprint 020 as first written.
 
-### D3 — Three documentation tiers
+### D3 — Three documentation tiers (amended 2026-10-23)
 
 | Tier | Documents | Rule |
 |---|---|---|
 | **Living / authoritative** | `AGENTS.md`, `README.md`, `CHANGELOG.md`, `docs/architecture/architecture.md`, the ADRs, the DES documents, `docs/guides/`, `docs/process/` | Kept current with every change; the source of truth for what the product and the process are. A fact lives in one of them and is linked from the others. |
 | **Requirements & verification** | `docs/specs/` (FR / NFR with stable ids), `docs/validation/` (strategy, L2 matrix, E2E scenarios, traceability matrix) | Normative; updated before or with the code (spec-before-code cascade). To be **slimmed in a later step**: traceability generated from test markers carrying FR ids, the hand-maintained per-test rows dropped (Consequences, follow-ups). |
-| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal pointer and the analysis notes of Sprints 001–019, and the Phase-3 POC reports — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (A3). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
+| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal and its pointer, and the analysis notes of Sprints 001–019, and the Phase-3 POC reports — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (A3). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
 
 ### D4 — Framework-agnostic process: `AGENTS.md` canonical, `docs/process/` checklists, one-line tool pointers
 
@@ -95,7 +95,7 @@ planning, release and hotfix, Definition of Done — are tool-neutral checklists
 `docs/process/`, each executable by a human with a terminal and a browser. The review checklists
 state inputs, steps, severity vocabulary, output format and where to post; the planning, release
 and Definition-of-Done documents state inputs and outputs where applicable. Tool-specific entry
-files (`CLAUDE.md`, `GEMINI.md`) are one-line pointers to `AGENTS.md`; no tool name is a
+files (`CLAUDE.md`, `GEMINI.md`) are import one-liners of `AGENTS.md` (one import line plus a one-line reminder about the git-ignored personal file; `CONTRIBUTING.md` states the pointer-file rule); no tool name is a
 requirement anywhere in the process. The former agent prompts were extracted into these checklists before the tool folders
 left git, and every dropped or reworded rule is marked in the checklist that absorbed it.
 
@@ -161,7 +161,7 @@ created again.
 
 The tiers become **living / authoritative** and **requirements & verification**, both in the
 tree and unchanged from D3, plus **git history before v0.19.0**, which is not part of the tree:
-the numbered backlog, the sprint files, the journal pointer, the analysis notes (engine
+the numbered backlog, the sprint files, the journal and its pointer, the analysis notes (engine
 comparisons, spikes, the demo-feedback triage, the process analysis behind this ADR) and the
 Phase-3 POC reports (local LLM deployment, OpenEvolve instance injection, OpenEvolve with a
 hosted LLM API). The analysis notes and the POC reports were working material behind the ADRs
@@ -228,7 +228,7 @@ This decision changes process and documentation only: no functional or non-funct
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Knowledge lost when the tool folders leave git (an agent rule not carried into `docs/process/`) | Medium | Checklists written first, folders removed last; each checklist lists every dropped or reworded rule |
-| Checklists rot once nobody runs them by hand | Medium | They are the release gate (step 0 of `release.md`) and the review gate of every pull request; the pull-request template (added by the contributor-process pull request) mirrors the Definition of Done |
+| Checklists rot once nobody runs them by hand | Medium | They are the release gate (step 0 of `release.md`) and the review gate of every pull request; the pull-request template (`.github/PULL_REQUEST_TEMPLATE.md`) mirrors the Definition of Done |
 | The planning issue becomes a wall of text nobody updates | Low | Progress lives on the per-PR issues and the PR Status sections; the planning issue is updated at merges and closed at release |
 | External contributors skip the specification cascade | Medium | Issue-first rule with the RFC-lite design issue; the maintainer owns the formal documents |
 
