@@ -81,10 +81,11 @@ afterwards.
 constraints, conventions, planning model, pull-request workflow, pointers to the procedures. The
 procedures themselves — code, specification, validation and documentation review, sprint
 planning, release and hotfix, Definition of Done — are tool-neutral checklists under
-`docs/process/`, each executable by a human with a terminal and a browser (inputs, steps,
-severity vocabulary, output format, where to post); the planning, release and Definition-of-Done documents state inputs and outputs where applicable. Tool-specific entry files (`CLAUDE.md`,
-`GEMINI.md`) are one-line pointers to `AGENTS.md`; no tool name is a requirement anywhere in the
-process. The former agent prompts were extracted into these checklists before the tool folders
+`docs/process/`, each executable by a human with a terminal and a browser. The review checklists
+state inputs, steps, severity vocabulary, output format and where to post; the planning, release
+and Definition-of-Done documents state inputs and outputs where applicable. Tool-specific entry
+files (`CLAUDE.md`, `GEMINI.md`) are one-line pointers to `AGENTS.md`; no tool name is a
+requirement anywhere in the process. The former agent prompts were extracted into these checklists before the tool folders
 left git, and every dropped or reworded rule is marked in the checklist that absorbed it.
 
 ### D5 — Tooling is private per contributor and not versioned; knowledge lives in neutral documents
