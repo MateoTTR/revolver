@@ -1,7 +1,7 @@
 # Revolver — Integration Tests (Level 2)
 
-**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018): §2.16 semantic-slice block (U13/U11/U4/U8/U6 phase 2), §2.17 migration v14, §2.18 top-N + reap hardening + doc lint; per-command rows in §2.3/§2.5/§2.6/§2.7
-**Date**: 2026-07-05
+**Version**: 0.4 — v0.19.0 pre-release validation review: command count from the CLI-tree walker, §2.8 benchmark delete rows, §2.10/§2.12/§2.18 test ids re-verified, S18 rows Implemented on the 1586-passed baseline, §3 fixture tree and §4 file layout redrawn from the directory, no shared mock fixtures. Previous: 0.3 — S18 sync (§2.16 semantic-slice block, §2.17 migration v14, §2.18 top-N + reap hardening + doc lint)
+**Date**: 2026-10-24
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [Specifications](../specs/specifications.md)
 
@@ -13,7 +13,7 @@ Integration tests exercise each CLI command end-to-end through Typer's `CliRunne
 
 Each `revolver <command> <subcommand>` gets at least one integration test validating the happy path and key error cases.
 
-**33 commands** across 8 command groups + 2 top-level commands (`doctor`, `setup`).
+**47 invocable commands** at v0.19.0: 44 leaf commands — 42 under the 8 command groups (`project`, `llm`, `problem`, `dataset`, `run`, `eval`, `solution`, `benchmark`; `llm` and `problem` each nest a sub-group, `llm ensemble` and `problem version`) plus the 2 top-level commands `doctor` and `setup` — and the 3 groups that run directly (`run`, `eval`, `benchmark`). Counted with the `revolver.cli._tree.walk_commands` walker (the CLI-tree helper of the doc command-lint), which the figure in [validation.md §3](validation.md) also uses.
 
 ### L2-OE: OpenEvolve Contract Tests
 

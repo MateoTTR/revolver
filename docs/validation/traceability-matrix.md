@@ -1,7 +1,7 @@
 # Revolver — Traceability Matrix
 
-**Version**: 0.8 — S18 sync (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018): FR-RUN-052..057, FR-PRB-016, FR-SOL-021 rows added by the cascade, flipped to Implemented at the v0.18.0 release; FR-RUN-019/020, FR-RUN-047, FR-SOL-011/012, FR-EVL-021 amended; migration v14 + reap-hardening + doc-lint + R2 `llm_timeout` + #355 freshness test rows
-**Date**: 2026-07-05
+**Version**: 0.9 — v0.19.0 pre-release validation review: every cited test id re-verified against the test sources (FR-LLM-020..025, FR-RUN-031/040/041/044/045/046, doc-guard ids repointed), FR-BEN-019/020 + FR-RUN-042 + NFR-043 rows added, marker-driven level relabels, §13 recomputed with a stated method. Previous: 0.8 — S18 sync (FR-RUN-052..057, FR-PRB-016, FR-SOL-021 rows; migration v14 + reap-hardening + doc-lint + R2 `llm_timeout` + #355 freshness test rows)
+**Date**: 2026-10-24
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Validation Overview](validation.md)
 
@@ -437,20 +437,28 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 
 | Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
-| spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
-| spec-llm | 26 | 18 | 7 | 0 | 4 | 14 | via Sc.1 | 6 |
-| spec-problem | 16 | 11 | 4 | 1 | 2 | 11 | via Sc.1 | 4 |
-| spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
-| spec-run | 56 | 44 | 11 | 0 | 30 | 28 | via Sc.1 | 12 |
-| spec-eval | 21 | 18 | 2 | 1 | 7 | 10 | via Sc.1 | 5 (incl. 1 deferred) |
-| spec-solution | 21 | 19 | 2 | 0 | 2 | 18 | via Sc.1 | 3 |
-| spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
-| spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
-| NFR (direct) | 28 | 19 | 9 | 0 | 11 | 12 | — | 5 (3 perf manual + 2 planned) |
-| NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **242** | **180** | **55** | **2** | **79** | **148** | **5 scenarios (4 planned)** | **36** |
+| spec-project | 8 | 6 | 2 | 0 | 0 | 8 | 0 (Sc.1 planned) | 0 |
+| spec-llm | 26 | 18 | 7 | 0 | 4 | 15 | 0 (Sc.1/2 planned) | 6 |
+| spec-problem | 16 | 11 | 4 | 1 | 2 | 11 | 0 (Sc.1 planned) | 4 |
+| spec-dataset | 16 | 14 | 2 | 0 | 2 | 13 | 0 (Sc.1 planned) | 1 |
+| spec-run | 57 | 44 | 11 | 0 | 26 | 34 | 2 (Sc.3) | 7 |
+| spec-eval | 21 | 18 | 2 | 1 | 3 | 12 | 0 (Sc.1/5 planned) | 7 (incl. 1 deferred) |
+| spec-solution | 21 | 20 | 1 | 0 | 2 | 16 | 0 (Sc.1 planned) | 3 |
+| spec-benchmark | 20 | 17 | 3 | 0 | 7 | 12 | 0 (Sc.1 planned) | 1 |
+| spec-setup | 17 | 10 | 7 | 0 | 6 | 11 | 1 (Sc.3) | 0 |
+| NFR (direct) | 27 | 20 | 7 | 0 | 6 | 11 | 2 (Sc.3) | 9 (3 perf manual + NFR-060 packaging + 5 Planned) |
+| NFR (indirect) | 14 | 9 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
+| **Total** | **243** | **187** | **51** | **2** | **58** | **143** | **5** (Sc.3 only; Sc.1/2/4/5 planned) | **38** |
+
+Counting method (recomputed at v0.19.0 with a script over the real files; the previous recount dated from v0.17):
+- **Total / MUST / SHOULD / MAY** — the FR rows (`| FR-XXX-NNN | PRI |`) of each `docs/specs/spec-*.md`; the three Removed / deleted rows (FR-LLM-018, FR-RUN-030, FR-RUN-042) count in Total only, hence Total − (MUST + SHOULD + MAY) = 3. NFR priorities come from `specifications.md` §3; "direct" = ids in the §11 main table (27), "indirect" = the §11 indirect table (14) — together all 41 NFRs.
+- **L1 / L2 Tests** — distinct requirement ids of the spec with at least one matrix row whose Status is `Implemented` / `Passing` and whose Level cell contains L1 (resp. L2, L2-OE or L2-Shinka); an id with both levels counts once in each column.
+- **L3 (E2E)** — distinct ids covered by a §12 scenario whose Status is `Implemented` (today only Scenario 3: FR-RUN-047/048, FR-SET-002, NFR-024/061).
+- **Untested** — ids with a priority and no `Implemented` row at any level: Planned-only (28 FRs + 5 NFRs), the deferred MAY FR-EVL-014, the three manual performance NFRs and the packaging-verified NFR-060.
+- Row basis for comparison: 286 rows across §2–§11 — 241 `Implemented`, 36 `Planned`, 9 without a test (Removed / Deleted / Deferred / manual / packaging).
 
 Notes:
+- **Traceability debt (v0.19.0)**: fifteen MUST requirements are still traced to Planned tests only — FR-LLM-005/010/015, FR-PRB-005, FR-DAT-004, FR-RUN-011/015, FR-EVL-003/004/006/011/017, FR-SOL-004/005/010; tracked as issue #297 (traceability debt), to be resolved in Sprint 020.
 - FR-RUN-030 (cost estimation) and FR-LLM-018 (`--input-cost`/`--output-cost` pricing) are both **Removed** (S15 / #300, completed in S16): cost is no longer reported. The `estimate_cost()` helper and the LLM pricing flags/columns were dropped — schema migration v10 removes the two `llms` pricing columns. Both rows carry no test (status **Removed**); their former coverage is dropped from the counts. The renamed test `test_llm_add_remote_with_pricing` → `test_llm_add_remote` is re-pointed to FR-LLM-001.
 - Schema migrations v10 (drop `llms` pricing columns, #300) and v11 (widen `datasets.split` to `both`, UX-3) add 4 new L1 migration-test rows under NFR-013 (`unit/test_db_migration_v10`, `unit/test_db_migration_v11`).
 - **S17 (v0.17 multi-LLM ensemble, ADR-007 Amendment A1–A5)**: FR-RUN-049 (`--selection`, incl. OE-rejects-non-weighted), FR-RUN-050 (`--llm-weight`), FR-RUN-051 (B7 OE best-on-interrupt via `solution extract --from-checkpoint`), FR-LLM-026 (per-LLM `reasoning_effort`, both backends), and FR-EVL-021 (B1 aggregation numeric guard) added. FR-RUN-046 gains a second row targeting the Shinka **bandit** ensemble (`FixedSampler.prior_probs`), superseding the "weights dropped/warned" framing (ADR-007 A2). B2 (OE post-run teardown) gets its own regression row. Schema migrations v12 (`llms.reasoning_effort`) and v13 (`ensemble_members.reasoning_effort`) add 2 L1 migration-test rows under NFR-013. All S17 rows are now **Implemented** (code shipped and passing); the repointed Test IDs reference the real test functions. The new L3 Shinka bandit-ensemble scenario is tracked in §12 (E2E Scenario 4).
@@ -459,5 +467,6 @@ Notes:
 - Benchmark delete (FR-BEN-018) adds 3 new test entries covering confirmation, nonexistent, and force delete.
 - Many FR-level tests cover multiple requirements. The total counts distinct test assignments (some FRs have both L1 and L2 tests).
 - 13 NFRs are covered indirectly by FR-level tests (see §11 indirect coverage table). They are not double-counted in L1/L2 totals.
-- Untested/planned items: 3 performance NFRs (manual validation) + 1 deferred MAY (FR-EVL-014) + 36 rows still Planned (row-based recount at the v0.18.0 pre-release pass: 36 Planned vs 238 Implemented rows across §2–§11). The §13 table above aggregates at the FR level (a different basis than rows) and was last fully recomputed at v0.17.
+- Untested/planned items: 3 performance NFRs (manual validation) + 1 deferred MAY (FR-EVL-014) + 36 rows still Planned (row-based recount at the v0.19.0 pre-release pass: 36 Planned vs 241 Implemented rows across §2–§11). The §13 table above aggregates at the requirement level (a different basis than rows) and was last fully recomputed at v0.19.0 — see "Counting method" above.
+- **v0.19.0 pre-release validation review**: every cited test id was re-verified against the test sources — FR-LLM-020..025 (`integration/test_ensemble`), FR-RUN-031/040/041/044/045/046 and the doc-guard ids (`unit/` prefix) were repointed; FR-BEN-019/020 rows added (FR-BEN-020 with a new test); the `test_evaluator_runner` and `TestRunDeleteCLI` rows are relabelled L2 and FR-RUN-052 L1 to follow the modules' markers (validation.md §8.1); FR-RUN-042 (deleted id) and NFR-043 (indirect, E2E Sc.2) now have rows so that every spec id resolves in the matrix.
 - Compared to v0.1, the majority of entries have been updated from Planned to Implemented based on verification of existing test functions in the `tests/` directory.

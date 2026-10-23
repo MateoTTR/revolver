@@ -1,7 +1,7 @@
 # Revolver — Validation Overview
 
-**Version**: 0.3 — Tooling sections (§4, §6.1, §6.2, §6.4, §8) aligned with `pyproject.toml` and `ci.yml`; `--strict-markers` adopted; the `e2e_gpu` marker registered as a reserved marker for the manual GPU track (S19-27, ADR-008). Previous: 0.2 — Test ID conventions (§8.1) (S18)
-**Date**: 2026-10-23
+**Version**: 0.4 — v0.19.0 pre-release validation review: §6.3 shared-fixture table and §8 directory tree redrawn from the test tree, §6.4 doc guards described, CI gate names the four required checks, §8.1 marker-vs-level rule tightened, command count (§3) from the CLI-tree walker. Previous: 0.3 — Tooling sections aligned with `pyproject.toml` and `ci.yml`; `--strict-markers`; `e2e_gpu` reserved (S19-27, ADR-008)
+**Date**: 2026-10-24
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Architecture](../architecture/architecture.md)
 
@@ -54,12 +54,17 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 | 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Manual (on demand) | [val-e2e-tests.md](val-e2e-tests.md) |
 
 **Backend matrix axis (ADR-007)**: with the pluggable evolution backend, tests split along a new
-axis. **Engine-neutral** tests (~36 of the ~44 commands: `llm`, `dataset`, `solution`, `eval`,
-`benchmark`, `problem`, `run list/info/delete/cleanup`) run **once** — they do not depend on the
-engine. **Engine-coupled** tests (`run` launch, `run resume`, `run status` active-path,
-`run population`, plus the doctor/setup/project-init/version-create shims) are **parameterized per
-backend**: the existing matrices stay as-is for OpenEvolve, with a ShinkaEvolve variant since S14.
-Each backend keeps a dedicated contract-test track (L2-OE, L2-Shinka).
+axis. **Engine-neutral** tests (39 of the 47 invocable commands counted by the
+`revolver.cli._tree` walker at v0.19.0 — `llm` incl. `llm ensemble` (12), `dataset` (5),
+`solution` (8), `eval` + `eval results`, `benchmark` + its 4 subcommands,
+`problem test` / `version list` / `version delete`, `run list/info/delete/cleanup`) run **once** —
+they do not depend on the engine. **Engine-coupled** tests (the other 8: `run` launch,
+`run resume`, `run status` active-path, `run population`, plus the `doctor` / `setup` /
+`project init` / `problem version create` shims) are **parameterized per backend**: the existing
+matrices stay as-is for OpenEvolve, with a ShinkaEvolve variant since S14. Each backend keeps a
+dedicated contract-test track (L2-OE, L2-Shinka). The 47 commands are the 44 leaf commands
+(including the top-level `doctor` and `setup`) plus the three groups that run directly (`run`,
+`eval`, `benchmark`) — [val-integration-tests.md §1](val-integration-tests.md).
 
 ---
 

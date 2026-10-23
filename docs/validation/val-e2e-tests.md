@@ -1,7 +1,7 @@
 # Revolver — End-to-End Tests (Level 3)
 
-**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice): §3.5 Scenario 5 — timeout penalize-vs-drop against the fake server (planned — S19, carry-over from S18)
-**Date**: 2026-07-05
+**Version**: 0.4 — v0.19.0 pre-release validation review: `addopts` quoted as in `pyproject.toml`, Scenarios 3/4 marked manual (not in CI), FR-LLM-018 (Removed) dropped from Scenario 2, `problem version create` steps use the positional `TAG`. Previous: 0.3 — S18 sync: §3.5 Scenario 5 — timeout penalize-vs-drop (planned — S19, carry-over from S18)
+**Date**: 2026-10-24
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [User Story E2E](../specs/user-story-e2e.md)
 
