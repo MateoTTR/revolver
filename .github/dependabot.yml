@@ -4,15 +4,17 @@
 # major updates stay individual so that each one is reviewed on its own.
 version: 2
 updates:
+  # Python: security updates only. The project declares open lower bounds
+  # (`>=`) and no lockfile, so version updates would only raise the floors to
+  # the latest release, which is not what the bounds mean. A limit of 0 keeps
+  # Dependabot security updates (alerts) active while disabling version
+  # pull requests (decision of 2026-10-24, after the first weekly run).
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
     target-branch: "develop"
-    groups:
-      python-minor-and-patch:
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 0
 
   - package-ecosystem: "github-actions"
     directory: "/"
