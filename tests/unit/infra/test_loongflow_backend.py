@@ -1,8 +1,10 @@
-"""Tests for the LoongFlow evolution backend adapter (PR-1)."""
+"""Tests for the LoongFlow evolution backend adapter (PR-1, DES-008)."""
 
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from revolver.infra.backends import (
     AVAILABLE_BACKENDS,
@@ -26,8 +28,9 @@ def _make_llm(**kwargs: object) -> LLMEntry:
     return LLMEntry(**defaults)  # type: ignore[arg-type]
 
 
+@pytest.mark.unit
 class TestLoongFlowBackend:
-    """Test suite for LoongFlowBackend."""
+    """Test suite for LoongFlowBackend with strict CI unit-marking."""
 
     def test_registered_in_available_backends(self) -> None:
         """Ensure loongflow is exposed as an available backend."""
@@ -69,18 +72,28 @@ class TestLoongFlowBackend:
         extracted = _extract_code(raw)
         assert extracted == "def solve(data):\n    return [1, 2]"
 
-    def test_generate_wrapper(self, tmp_path: Path) -> None:
-        """Verify generation of the _loongflow_evaluator.py wrapper."""
+    def test_generate_wrapper_preserves_snapshot_immutability(self, tmp_path: Path) -> None:
+        """Verify generation of wrapper inside run_dir and exposes evaluate_instance."""
         backend = LoongFlowBackend()
         llm = _make_llm()
-        spec = BackendRunSpec(snapshot_dir=tmp_path, llm=llm)
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "evaluator.py").write_text(
+            "def evaluate_solution(f): return 1.0, {}", encoding="utf-8"
+        )
+
+        run_dir = tmp_path / "run"
+        spec = BackendRunSpec(snapshot_dir=snapshot_dir, run_dir=run_dir, llm=llm)
 
         wrapper_file = backend.generate_wrapper(spec)
         assert wrapper_file.exists()
-        assert wrapper_file.name == "_loongflow_evaluator.py"
+        # Invariant check: wrapper must be in run_dir, NOT snapshot_dir!
+        assert wrapper_file.parent == run_dir / "loongflow-output"
+        assert not (snapshot_dir / "_loongflow_evaluator.py").exists()
+
         content = wrapper_file.read_text(encoding="utf-8")
+        assert "evaluate_instance" in content
         assert "execute_candidate" in content
-        assert "solve_func" in content
 
     @patch("litellm.completion")
     def test_launch_with_mocked_llm(self, mock_completion: MagicMock, tmp_path: Path) -> None:
@@ -88,7 +101,6 @@ class TestLoongFlowBackend:
         backend = LoongFlowBackend()
         llm = _make_llm()
 
-        # Create dummy evaluator in project
         snapshot_dir = tmp_path / "snapshot"
         snapshot_dir.mkdir(parents=True)
         evaluator_code = """
@@ -104,9 +116,10 @@ def evaluate_solution(fn):
         mock_choice.message.content = "```python\ndef solve(d):\n    return [42]\n```"
         mock_completion.return_value = MagicMock(choices=[mock_choice])
 
+        run_dir = tmp_path / "run"
         spec = BackendRunSpec(
             snapshot_dir=snapshot_dir,
-            run_dir=tmp_path / "run",
+            run_dir=run_dir,
             llm=llm,
             iterations=2,
         )
@@ -117,11 +130,11 @@ def evaluate_solution(fn):
         assert mock_completion.call_count == 2
 
         # Check recovery and progress reading
-        rec = backend.recover_best_from_checkpoint(tmp_path / "run")
+        rec = backend.recover_best_from_checkpoint(run_dir)
         assert rec.score == 100.0
         assert "def solve" in rec.code
 
-        prog = backend.read_progress(tmp_path / "run")
+        prog = backend.read_progress(run_dir)
         assert prog == (2, 100.0)
 
     @patch("litellm.completion")
@@ -144,9 +157,10 @@ def evaluate_solution(fn):
         mock_choice.message.content = "```python\ndef solve(d):\n    return []\n```"
         mock_completion.return_value = MagicMock(choices=[mock_choice])
 
+        run_dir = tmp_path / "run"
         spec = BackendRunSpec(
             snapshot_dir=snapshot_dir,
-            run_dir=tmp_path / "run",
+            run_dir=run_dir,
             llm=llm,
             iterations=1,
             parallel=3,
@@ -154,5 +168,4 @@ def evaluate_solution(fn):
 
         result = backend.launch(spec, {})
         assert result.best_score == 80.0
-        # 1 step * 3 parallel workers = 3 calls
         assert mock_completion.call_count == 3
