@@ -2,9 +2,9 @@
 
 **Status**: Planning
 **Target release**: **v0.17.1** (defensive hotfix — Hotfix Process per CLAUDE.md; branch `hotfix/v0.17.1` off `develop`)
-**Goal**: Ship the *defensive* slice of the `revolver-demos` v0.17.0 feedback triage (U1–U14). The load-bearing fix is the `infra/evaluator_runner.py` rewrite that closes U12 (post-run-eval `ProcessPoolExecutor` workers abandoned on timeout — one leaked grinder per timed-out instance) **together with** U14 (no BLAS thread-cap → oversubscription → the false 300 s timeouts that feed the leak). Both halves ship in one pass because each is unsafe alone. Around that load-bearing PR, a papercuts PR clears seven low-risk 🟠/🟡 items (U1, U2, U3, U5, U6-warn, U7-residual, U10) plus the U9 doc guidance. **Zero semantic change to scores, fitness, or display.**
+**Goal**: Ship the *defensive* slice of the v0.17.0 demo feedback triage (U1–U14). The load-bearing fix is the `infra/evaluator_runner.py` rewrite that closes U12 (post-run-eval `ProcessPoolExecutor` workers abandoned on timeout — one leaked grinder per timed-out instance) **together with** U14 (no BLAS thread-cap → oversubscription → the false 300 s timeouts that feed the leak). Both halves ship in one pass because each is unsafe alone. Around that load-bearing PR, a papercuts PR clears seven low-risk 🟠/🟡 items (U1, U2, U3, U5, U6-warn, U7-residual, U10) plus the U9 doc guidance. **Zero semantic change to scores, fitness, or display.**
 **Demo**: the reporter's gen142 champion program, re-scored via `revolver eval`, completes **~10/10 instances in 7–116 s each** (was 0/10, 23–68 min survivor grinders); a real `--backend shinka` smoke run confirms **M1 ensemble→bandit / M3 `--llm-weight` / M4 `cost_aware_coef=0` / PID-aware lock** all still work; `revolver run … --dry-run` surfaces resolved `prior_probs`/`cost_aware_coef`; a `--selection-kwarg adaptive_scale=false` is now coerced to `False` (was silently `True`) and a garbage kwarg fails at `--dry-run` instead of at launch.
-**Source**: [triage-feedback-v017.md](../analysis/triage-feedback-v017.md) — §1 (corrected eval-cluster causal graph), §2 (the 0.17.1 defensive slice + per-task patch sketches), the do-not-regress list. Upstream feedback: `revolver-demos/feedback/feedback-v0.17.md` (U1–U14). Scope split arbitrated by Mathieu (session 057).
+**Source**: [triage-feedback-v017.md](../analysis/triage-feedback-v017.md) — §1 (corrected eval-cluster causal graph), §2 (the 0.17.1 defensive slice + per-task patch sketches), the do-not-regress list. Upstream feedback: demo feedback report v0.17 (private demo repository; U1–U14). Scope split arbitrated by Mathieu (session 057).
 **Predecessor**: Sprint 017 (v0.17.0 — multi-LLM ensemble validated end-to-end). This is a corrective patch on top of the *validated* release.
 
 > **Do-not-regress list** (verified working in 0.17.0 — no task below touches these): **M1** Shinka
@@ -175,7 +175,7 @@ Tests from `val-integration-tests.md` (§2.5 `run`, §2.6 `eval`, `problem test`
 | U14 caps | Any pre-set cap var in parent env → Revolver injects nothing | `test_run_instance_thread_cap_respects_user_env` | Planned |
 | U12/U14 contract | `InstanceTestResult` statuses / timeout message / error strings byte-identical | `test_run_instance_result_contract_byte_identical` | Planned |
 | U12 legacy path | Legacy global `evaluate()` aggregation runs through the killable primitive; `user_aggregates` unchanged | `test_global_eval_worker_module_level_killable` | Planned |
-| U12 acceptance (demo) | Reporter's gen142 program re-scored via `revolver eval` → ~10/10 in 7–116 s/instance | manual demo (revolver-demos env) | Planned |
+| U12 acceptance (demo) | Reporter's gen142 program re-scored via `revolver eval` → ~10/10 in 7–116 s/instance | manual demo (demo env) | Planned |
 | U12 backstop | Leaked direct child reaped between post-run eval and lock removal | `test_launch_run_finalize_backstop_reaps_before_lock` | Planned |
 | U12 backstop | "completed" printed only after teardown | `test_launch_run_completed_message_after_teardown` | Planned |
 | U1 | `--selection-kwarg` values coerced (`0.3`→float, `false`→`False`) | `test_selection_kwarg_value_coercion` | Planned |
@@ -277,7 +277,7 @@ Peak parallelism: **2 agents** (Streams A and C) from sprint start. Stream B fol
 The sprint is complete when ALL of the following hold:
 
 1. **U12+U14 (PR-A)** — `run_instance` kills the child (or its process group) at the per-instance deadline with **no surviving worker**, across all five eval paths (post-run eval, `revolver eval`, `benchmark`, `problem test`, preflight); thread caps apply with the documented precedence and respect a user-set cap var; `_global_eval_worker` is module-level and killable; `InstanceTestResult` is byte-identical.
-2. **Demo acceptance** — the reporter's gen142 program re-scored via `revolver eval` completes **~10/10 instances in 7–116 s each** (was 0/10) on the `revolver-demos` env.
+2. **Demo acceptance** — the reporter's gen142 program re-scored via `revolver eval` completes **~10/10 instances in 7–116 s each** (was 0/10) on the demo env.
 3. **U12 backstop (PR-B)** — a leaked direct child is reaped between post-run eval and `remove_run_lock`; the reap never raises; "completed" prints only after teardown; the run result and the PID-aware lock are intact.
 4. **Papercuts (PR-C)** — U1 coerces + fails-fast (bool inversion gone); U2 places the local placeholder key (no ambient-key leak); U3 hints on `=` tokens; U5 re-validates snapshot config warn-only; U6 warns on the unrecoverable interval; U7 warns on the config-path inert `reasoning_efforts`; U10 surfaces the resolved selection kwargs in dry-run.
 5. **Do-not-regress green** — a real `--backend shinka` smoke run confirms **M1 / M3 / M4 / B6 / PID-aware lock / placeholder key** all still work; the full existing suite (~1316+ baseline) passes on the no-shinka env; `ruff`/`mypy` clean; CI green.
@@ -306,7 +306,7 @@ _Session 057 (2026-07-04). All 3 PRs merged: #242 (PR-A), #243 (PR-C), #245 (PR-
 - **20 / 17 planned** new automated tests (L1+L2) merged and green (PR-A 8 + PR-B 3 + PR-C 9 — extra: invalid-env-value cap case, U7 combo warn-once, U1 JSON-array fail-fast); full suite **1471 passed, 4 skipped** on develop after the last merge; `ruff`/`mypy` clean; CI green on all 3 PRs (one CI-only failure caught and fixed en route: the U5 test initially depended on a real openevolve install, absent from the CI main job → mocked `is_available`/`validate_config` + an install-gated twin in `test_run_oe.py`).
 - Code reviews: 0 CRITICAL across the three PRs (PR-A: 1 W + 3 S; PR-B: 0 W + 3 S; PR-C: 1 W + 3 S — all findings addressed and re-pushed before ready).
 - **Demo acceptance (gen142 re-score) PASSED**: `revolver eval --solution beam3-champ-sonnetheavy --dataset beamforming-eval` → **10/10 solved in 810.5 s** (was 0/10 + manual `kill -9`), per-instance `time_s` 7.9–245 s (all < 300 s timeout), cap line `numeric thread cap per eval process: 8` printed, **zero surviving eval workers** after completion. `combined_score` mean **3.29** — reproduces the reporter's thread-capped held-out reference (3.2918, +0.971) without any manual env workaround.
-- **Shinka smoke (do-not-regress gate)**: not run as a live run — the claude-ollama-bridge was down at release time. Compensating coverage: the 49 install-gated Shinka tests re-run against real shinka 0.0.7 (`shinka-spike` env) during PR-C, M1/M3/M4 projection + lock tests in the suite, and the U1/U3/U9/U10 dry-run validations below exercised the real Shinka `build_config` path end-to-end. Live non-regression deferred to the next revolver-demos run on 0.17.1.
+- **Shinka smoke (do-not-regress gate)**: not run as a live run — the claude-ollama-bridge was down at release time. Compensating coverage: the 49 install-gated Shinka tests re-run against real shinka 0.0.7 (`shinka-spike` env) during PR-C, M1/M3/M4 projection + lock tests in the suite, and the U1/U3/U9/U10 dry-run validations below exercised the real Shinka `build_config` path end-to-end. Live non-regression deferred to the next demo run on 0.17.1.
 
 ### Demo-able features
 - [x] gen142 champion re-scored via `revolver eval` → **10/10** in 7.9–245 s (was 0/10; no grinder survivors)
@@ -321,4 +321,4 @@ _Session 057 (2026-07-04). All 3 PRs merged: #242 (PR-A), #243 (PR-C), #245 (PR-
 ### Carry-over
 - v0.18 semantic slice: U13 (367), U11 (368), U4 (369), U8 (370), U6 phase-2 (364 part), `base.py` recursive/killpg reap hardening
 - S18+ / upstream: U9 per-arm bandit prior (371 part)
-- Live Shinka smoke on 0.17.1 → next revolver-demos session
+- Live Shinka smoke on 0.17.1 → next demo session

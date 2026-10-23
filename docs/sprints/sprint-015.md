@@ -172,7 +172,7 @@ The sprint is complete when ALL hold:
 **Complete — released as v0.15.0** (tag on `main`). Scopes B/C shipped in session 051 (PRs #199/#201); F, A, #307, Doc shipped in session 052 (PR #202, grouped single-branch, 4 commits).
 
 ### Tests passing
-- **No-shinka env: 1271 passed, 11 skipped.** Shinka env (`revolver-demos`, shinka 0.0.7): **1311 passed** — all `@shinkaevolve` L2 + e2e Scenario 3 green. `ruff` + `mypy` clean. CI green (Lint + Test 3.12/3.14).
+- **No-shinka env: 1271 passed, 11 skipped.** Shinka env (demo env, shinka 0.0.7): **1311 passed** — all `@shinkaevolve` L2 + e2e Scenario 3 green. `ruff` + `mypy` clean. CI green (Lint + Test 3.12/3.14).
 
 ### Demo-able features
 - [x] `run info` shows tokens only (no cost) + honesty caveat

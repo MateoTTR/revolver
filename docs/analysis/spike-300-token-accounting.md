@@ -14,7 +14,7 @@ Inspected the real on-disk artifacts of the 4 Shinka runs produced during the 20
 - `gen_*/failure.json` (failed-proposal records)
 - `programs.sqlite` `programs.metadata` (stored/kept programs)
 
-Cross-checked against ShinkaEvolve 0.0.7 installed in the `revolver-demos` conda env.
+Cross-checked against ShinkaEvolve 0.0.7 installed in the demo conda env.
 
 ## Findings
 

@@ -1,9 +1,9 @@
-# Triage — revolver-demos feedback v0.17 (U1–U14)
+# Triage — demo feedback v0.17 (U1–U14)
 
 > **Source**: demo feedback report v0.17 (private demo repository; execution complete 2026-07-03:
 > 2 smoke + 4×100-gen + 1 champion @150, zero run crashes, zero bridge wedges).
 > **Method** (session 057, 2026-07-04): per-item code verification against the released v0.17.0
-> (editable checkout, `develop`) and the `shinka`/`openevolve` packages in the `revolver-demos`
+> (editable checkout, `develop`) and the `shinka`/`openevolve` packages in the demo
 > conda env — one verification agent + one independent adversarial counter-review per item, plus
 > an architecture pass on the interacting U11–U14 eval cluster. All 14 counter-reviews concur
 > with the verification verdicts. Raw structured results archived in the session scratchpad.
@@ -168,7 +168,7 @@ coverage-labeled means (reporting). Labels carry the burden.
 - **U12 upstream note**: shinka `launch/local.py` job-level timeout kill is also single-PID
   (secondary orphaning path, only active when `job_config.time` is set) — candidate upstream issue.
 
-## 5. Corrections to send back to revolver-demos
+## 5. Corrections to send back to the demo project
 
 So the demos side can fix their runbook/feedback provenance:
 

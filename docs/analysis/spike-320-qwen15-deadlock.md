@@ -2,7 +2,7 @@
 
 **Sprint 018 PR-7 (S18-20), timeboxed spike — 2026-07-05.**
 Investigates the hang observed **during** a Shinka run with the `qwen15`
-model (A2 eval on `revolver-demos`, 2026-06-23). Distinct from the A2/#314
+model (A2 eval in the demo environment, 2026-06-23). Distinct from the A2/#314
 post-run teardown hang; not covered by PR #224.
 
 **Verdict: REPRODUCED, model-independently.** The "deadlock" is an
@@ -26,7 +26,7 @@ Repro script: [`spike-320-repro.py`](spike-320-repro.py) (same directory).
 | 2 | Patch-apply retry loop (`max_patch_attempts`) | **Contributing multiplier, not the root.** The loop re-queries the LLM on every `None` response (×10 with Revolver's default), multiplying the layer-1..3 stall. It never spins without an LLM call in between. |
 | 3 | Scheduler deadlock | **RULED OUT.** The asyncio event loop stays healthy during the wedge (it services signals and writes logs); the proposal coordinator is idle-waiting for the one occupied proposal slot. No lock cycle. |
 
-## 2. Empirical repro (2026-07-05, `revolver-demos` env, shinka 0.0.7)
+## 2. Empirical repro (2026-07-05, demo env, shinka 0.0.7)
 
 Technique: a fake OpenAI-compatible endpoint that accepts the TCP connection
 and the `POST /v1/chat/completions` request, then **never sends a single
