@@ -171,8 +171,10 @@ state.
 
 ### Scope note
 
-Code comments and test docstrings that cite a former backlog row number or sprint file keep them
-as historical identifiers (no link to resolve). The `CHANGELOG.md` entries before v0.19.0 were
+Code comments, test docstrings and document prose that cite a former backlog row number, a
+sprint identifier or a sprint-file fact ("sprint-018 fact 6", "S13 carry-over") keep them as
+historical identifiers: they resolve in the git history, not through a link, and no living
+document links into the removed folders. The `CHANGELOG.md` entries before v0.19.0 were
 reconstructed from the planning records, which stay readable in the git history. The
 requirements-and-verification tier and the step-2 follow-ups below are untouched by this
 amendment.
