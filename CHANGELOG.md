@@ -17,16 +17,21 @@ moves that block under a dated version heading (see the Release Checklist).
 
 ### Added
 
+- `AGENTS.md` as the canonical, tool-neutral entry file for humans and agents; `CLAUDE.md` and `GEMINI.md` become one-line pointers to it (issue #277).
+- `docs/process/` checklists — code, specification, validation and documentation review, sprint planning, release and hotfix, Definition of Done — extracted from the former agent definitions so that a contributor with no AI tooling can run the process (issue #277).
+- ADR-008 "Documentation and process strategy", with the sanitized development-process analysis committed under `docs/analysis/` as its evidence (issue #277).
 - `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#280, closes #275).
 - MIT `LICENSE` file (#274, closes #272).
 
 ### Changed
 
+- `pytest` runs with `--strict-markers` (an unregistered marker now fails collection); the tooling sections of `docs/validation/validation.md` match `pyproject.toml` and `ci.yml`, and the never-registered `e2e_gpu` marker is dropped from them (issue #277).
 - CI runs on GitHub-hosted runners (`ubuntu-latest`) instead of a self-hosted pool; the runner image under `.github/runner/` is removed (#274).
 - Planning is frozen in the repository at the end of Sprint 019: `docs/tasks/backlog.md` and `docs/sprints/` become historical records; from Sprint 020 on, planning lives in GitHub issues and milestones (#280).
 
 ### Removed
 
+- Tool-specific automation (`.claude/`, `.mcp.json`) leaves git and is ignored: tooling stays private per contributor and its knowledge lives in `docs/process/` (ADR-008 D5) (issue #277).
 - The maintainer's session journal (`docs/sessions/*`) leaves the public repository; a `docs/sessions/README.md` pointer remains and the history stays in git (#280).
 
 ## [0.18.0] - 2026-07-05
