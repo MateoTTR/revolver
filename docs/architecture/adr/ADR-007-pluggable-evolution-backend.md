@@ -20,23 +20,26 @@ per-provider SDKs vs OpenAI-compatible HTTP), persistence (single `programs.sqli
 via a bundled `pricing.csv`; OpenEvolve relies on Revolver's HTTP token-counting proxy). Revolver
 itself reports **tokens only** and surfaces no USD figure (cost removed — #300; see D2).
 
-Three preparatory studies ground this decision:
+Three preparatory studies ground this decision. Their working notes are kept outside the
+repository; every finding this record relies on is stated here:
 
-- **Comparison + bottom-up impact** (session 046): [shinka-vs-openevolve.md](../../analysis/shinka-vs-openevolve.md),
-  [shinka-backend-impact.md](../../analysis/shinka-backend-impact.md) — draft `EvolutionBackend`
-  interface, concept mapping, risks.
-- **Spike #266** (session 047): [shinka-spike-266.md](../../analysis/shinka-spike-266.md) —
-  co-installation of `shinka-evolve 0.0.7` alongside Revolver is **viable** (`pip check` clean;
-  `httpx`/`rich` downgrades stay within Revolver's bounds; +75 transitive deps).
-- **Top-down analysis #267** (session 047): [shinka-topdown-267.md](../../analysis/shinka-topdown-267.md) —
-  only **4 commands are engine-coupled** (`run` launch, `run resume`, `run status` active-path,
-  `run population`) plus 4 single-call shims (`doctor`, `setup`, `project init`,
-  `problem version create`); **~82% of the CLI is engine-neutral**. The post-engine boundary is
-  `launch_run` writing Revolver-owned artifacts (`programs/rank-N.py` + manifest); everything
-  downstream is engine-agnostic by construction.
+- **Engine comparison and bottom-up impact study** — the concept mapping between the two engines
+  (identical `EVOLVE-BLOCK` markers and `combined_score` convention; divergent evaluator contract,
+  LLM access, persistence and token accounting, as summarized above), a draft `EvolutionBackend`
+  interface, and the integration risks (the evaluator-wrapper contract ranked first as the
+  silent-bug source — see Risks).
+- **Spike #266** — co-installation of `shinka-evolve 0.0.7` alongside Revolver is **viable**
+  (`pip check` clean; `httpx`/`rich` downgrades stay within Revolver's bounds; +75 transitive
+  deps).
+- **Top-down analysis #267** — only **4 commands are engine-coupled** (`run` launch, `run resume`,
+  `run status` active-path, `run population`) plus 4 single-call shims (`doctor`, `setup`,
+  `project init`, `problem version create`); **~82% of the CLI is engine-neutral** (~36
+  engine-neutral commands). The post-engine boundary is `launch_run` writing Revolver-owned
+  artifacts (`programs/rank-N.py` + manifest); everything downstream is engine-agnostic by
+  construction. The same analysis fixed the backend interface and the three-sprint roadmap below.
 
-Three open questions from #267 were arbitrated by the user (session 048, 2026-06-11):
-reproducibility scoping, token/cost semantics, and `backend_extras` typing — resolved below.
+Three open questions from #267 were arbitrated by the maintainer on 2026-06-11: reproducibility
+scoping, token/cost semantics, and `backend_extras` typing — resolved below.
 
 ## Decision
 
@@ -50,7 +53,7 @@ implementations: `OpenEvolveBackend` (wraps the existing `infra/openevolve.py` ~
 rewrite) and `ShinkaBackend` (new). `core/run.py` routes launch / resume / live-progress /
 population / token collection through `backend.*`.
 
-Key interface points (full signature in [shinka-topdown-267.md §2.2](../../analysis/shinka-topdown-267.md)):
+Key interface points (the full protocol is `EvolutionBackend` in `src/revolver/infra/backends/base.py`):
 
 - **`capabilities() -> BackendCapabilities`** — declares what the backend can honestly do:
   `global_seed`, `map_elites_cells`, `native_cost_tracking`, `multi_language`, `ensemble_model`
@@ -64,8 +67,8 @@ Key interface points (full signature in [shinka-topdown-267.md §2.2](../../anal
 
 ### D2 — Token/cost tracking: token-primary on both backends
 
-`TokenUsage` stays **token-primary everywhere** (this supersedes the USD-primary recommendation in
-#267 §5.1/Q2, after code verification of `shinka-evolve 0.0.7`):
+`TokenUsage` stays **token-primary everywhere** (this supersedes the USD-primary recommendation of
+the #267 analysis, after code verification of `shinka-evolve 0.0.7`):
 
 - **OpenEvolve**: tokens measured by the HTTP `TokenCountingProxy` (unchanged). (No USD is reported —
   the Revolver-side estimate was removed in #300.)
@@ -74,11 +77,12 @@ Key interface points (full signature in [shinka-topdown-267.md §2.2](../../anal
   (`shinka/core/prompt_evolver.py::_extract_llm_metadata`); no proxy
   (`wants_http_proxy() = False`).
 - **Cost removed in S15 (#300, removal completed in S16 — supersedes the `cost_usd` field below).**
-  Revolver no longer reports any USD figure: the session-051 spike showed neither engine persists
-  per-attempt or reasoning/thinking tokens, so no realistic cost is reachable. Token counts cover
-  stored programs only; the `estimate_cost()` helper and the LLM `--input-cost`/`--output-cost`
-  pricing flags/columns have been **removed** (schema migration v10 drops the `llms` pricing
-  columns). The struck-through paragraphs below describe the original design and are kept for history.
+  Revolver no longer reports any USD figure: the #300 token-accounting spike showed that neither
+  engine persists per-attempt or reasoning/thinking tokens, so no realistic cost is reachable.
+  Token counts cover stored programs only; the `estimate_cost()` helper and the LLM
+  `--input-cost`/`--output-cost` pricing flags/columns have been **removed** (schema migration v10
+  drops the `llms` pricing columns). The struck-through paragraphs below describe the original
+  design and are kept for history.
 - ~~A supplementary **`cost_usd`** field carries native USD on Shinka (computed from its bundled
   `shinka/llm/providers/pricing.csv`, prices per 1M tokens, accessible via
   `pricing.calculate_cost()`) and the Revolver estimate on OE.~~
@@ -142,7 +146,7 @@ availability check / install entry.
 
 ### Implementation roadmap
 
-Three sprints, each independently shippable (detail in #267 §6): **S13** — abstraction refactor,
+Three sprints, each independently shippable (detailed in the #267 analysis): **S13** — abstraction refactor,
 OE-only, exit criterion *zero behavior change* (existing L2/L3 suites stay green); **S14** — Shinka
 MVP (single-LLM, fixed selection, contract tests on the `evaluate.py` wrapper front-loaded);
 **S15** — parity (ensemble→bandit, top-N extraction capability, cost/token columns in `benchmark`,
@@ -158,7 +162,7 @@ The S14 MVP shipped single-LLM **fixed** selection; the weighted→bandit ensemb
 (D5 anticipated it as "lossy", the roadmap placed it in S15). v0.17 **delivers** the multi-LLM ensemble as
 a first-class, honestly-gated feature. This amendment refines D4/D5 and supersedes their "lossy/dropped"
 framing. It is grounded in a source-verified, adversarially-checked study of ShinkaEvolve 0.0.7 and
-OpenEvolve — [v017-multi-llm-research.md](../../analysis/v017-multi-llm-research.md).
+OpenEvolve (working notes kept outside the repository; the verified facts are stated in A2–A5 below).
 
 ### A1 — Ensemble selection is a first-class **neutral run lever**, not `--config-override`
 
@@ -263,7 +267,7 @@ This is a consumer addition, not a capability change: D1, the capabilities matri
 ### Positive
 
 - **Blast radius is contained and proven**: `core/run.py` + `infra/openevolve.py` + 4 small shims;
-  the ~36 engine-neutral commands are untouched (#267 §1).
+  the ~36 engine-neutral commands are untouched (the #267 CLI partition).
 - **OE default unchanged** — S13 exits only when the full existing test suite passes unmodified.
 - **Honest capability reporting** (`capabilities()`) instead of silent divergence: seed, MAP-Elites,
   top-N, ensemble semantics.
@@ -291,18 +295,15 @@ This is a consumer addition, not a capability change: D1, the capabilities matri
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Shinka `evaluate.py` wrapper contract bugs (silent mis-scoring) | High | Front-load contract tests in S14 (fixture `programs.sqlite`, mock runner); the eval contract is the top silent-bug source (impact R4) |
+| Shinka `evaluate.py` wrapper contract bugs (silent mis-scoring) | High | Front-load contract tests in S14 (fixture `programs.sqlite`, mock runner); the eval contract is the top silent-bug source identified by the impact study |
 | `shinka-evolve` 0.0.x API instability | Medium | Pin `>=0.0.7,<0.1` in the extra; backend isolates the integration point |
 | ~~Cost comparability drift (Shinka `pricing.csv` vs Revolver pricing)~~ | ~~Medium~~ | **No longer applicable** — cost reporting was removed (#300); comparison is token-primary only (D2), so there are no USD figures to drift |
 | OE checkpoint-format changes breaking `OpenEvolveBackend` | Low | Unchanged from today; the backend wrapper isolates it |
-| Per-backend test matrix growth (L2-OE + L2-Shinka) | Medium | Only the 4 coupled commands duplicate; neutral tests run once (#267 §5.3) |
+| Per-backend test matrix growth (L2-OE + L2-Shinka) | Medium | Only the 4 coupled commands duplicate; neutral tests run once (#267) |
 
 ## References
 
-- [shinka-vs-openevolve.md](../../analysis/shinka-vs-openevolve.md) — engine comparison (session 046)
-- [shinka-backend-impact.md](../../analysis/shinka-backend-impact.md) — bottom-up impact + draft interface
-- [shinka-spike-266.md](../../analysis/shinka-spike-266.md) — dependency co-install spike (#266)
-- [shinka-topdown-267.md](../../analysis/shinka-topdown-267.md) — CLI partition, finalized interface, engineering impact, sprint plan (#267)
+- Preparatory studies — the engine comparison and bottom-up impact study (concept mapping, draft interface, risks), the dependency co-install spike (#266) and the top-down analysis (#267: CLI partition, finalized interface, engineering impact, sprint plan) — working notes kept outside the repository; their findings are stated in the Context section, and the finalized interface is `src/revolver/infra/backends/base.py`
 - [ADR-006](ADR-006-openevolve-instance-injection.md) — instance injection (still valid for OE; Shinka reuses the same env-var inputs with a file-based wrapper output)
 - [Specifications](../../specs/specifications.md) — FR-RUN-023/024/028-030, NFR-023, NFR §3.3 (to be revised per this ADR)
 - [DES-005](../design/DES-005-run-orchestration.md), [DES-006](../design/DES-006-eval-loop.md) — to be revised (backend-mediated orchestration, per-backend evaluator contract)
