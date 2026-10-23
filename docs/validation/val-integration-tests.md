@@ -394,7 +394,7 @@ Mirror the `unit/test_db_migration_v10` / `v11` structure. Simple additive `ALTE
 
 New scenarios for the v0.18 semantic slice (Sprint 018 integration-test plan; the v0.17 demo-feedback
 triage fixed the strict order U13 → U11 → U4 → U8 → U6 phase 2). All **Implemented** (v0.18.0); the
-full suite stands at 1586 passed / 4 skipped at v0.19.0 (without the engine extras). The
+full suite stands at 1587 passed / 4 skipped at v0.19.0 (without the engine extras). The
 Shinka-gated rows auto-skip via the existing `pytest.importorskip` / marker gating.
 
 | Test | Scenario | Validates | FRs |

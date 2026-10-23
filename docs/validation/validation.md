@@ -350,7 +350,7 @@ the test is a method).
   `test_db_problem.py`, `test_evaluator_loader.py`, `test_models_dataset.py`,
   `test_models_problem.py`, `test_store_dataset.py` — `unit`; `integration/test_shinka_shutdown.py`
   — `integration`) were marked at v0.19.0, so the CI selection now equals the full suite: without
-  the engine extras both collect 1591 tests (1587 passed, 4 skipped, 0 deselected — the four skips
+  the engine extras both collect the same 1587 tests (1587 passed, 4 skipped, 0 deselected — the four skips
   are the import-gated Shinka modules `e2e/test_shinka_backend.py`,
   `integration/test_run_shinka.py`, `test_shinka_db.py` and `test_shinka_wrapper.py`).
 
