@@ -67,8 +67,9 @@ dual-score `run info` labels), U4 backend-on-version resolution (with the mismat
 the migration-v14 test (`problem_versions.backend`); §2.18 adds the top-N extraction gate
 (`solution extract --rank`/`--program-id` on `capabilities().top_n_extraction`, Shinka-native / OE
 consciously deferred), the #359 reap-hardening grandchild test, and the #354 doc command-lint.
-**16 new planned L2 test IDs** on a **1471-passing baseline** (post-017a); all S18 rows enter as
-**Planned**. Per-command scenario rows land in §2.3 (problem), §2.5 (run), §2.6 (eval), and §2.7
+**16 L2 test IDs** added by S18 — all **Implemented** (flipped at the v0.18.0 release); the full
+suite stands at **1586 passed / 4 skipped** at v0.19.0 (without the engine extras). Per-command
+scenario rows land in §2.3 (problem), §2.5 (run), §2.6 (eval), and §2.7
 (solution). (§2.11 remains a pre-existing numbering gap — not filled; the S18 blocks append after
 §2.15 without renumbering.) Test-ID form, the `integration/` prefix rule, the top-level-file
 exception, and the marker-vs-level rule are defined in [validation.md §8.1](validation.md).
@@ -135,7 +136,7 @@ exception, and the marker-vs-level rule are defined in [validation.md §8.1](val
 | `run --llm <ensemble>` | Full run with mocked OE | Run record stores `llm_type=ensemble` and `llm_snapshot` JSON | FR-RUN-044, 045 |
 | `run info` | Ensemble run | Displays ensemble name and member models | FR-RUN-044 |
 | `run resume --llm <ensemble>` | Override LLM on resume | New run uses ensemble config | FR-RUN-046 |
-| `run` | Single LLM (no regression) | Run record stores `llm_type=single` and `llm_snapshot` JSON; `test_shinka_single_llm_config_unchanged` (L2) | FR-RUN-044, 045 |
+| `run` | Single LLM (no regression) | Run record stores `llm_type=single` and `llm_snapshot` JSON; `integration/test_run::test_run_start_single_llm_no_regression`, `::test_run_start_llm_snapshot_single` (L2) | FR-RUN-044, 045 |
 
 ### 2.3 `revolver problem`
 
@@ -196,8 +197,8 @@ exception, and the marker-vs-level rule are defined in [validation.md §8.1](val
 | `run list` | After 2 runs | Both listed with status, filterable | FR-RUN-021 |
 | `run info` | Existing run | Full details: lineage, tokens, solution, stored programs | FR-RUN-022 |
 | `run resume` | Existing checkpoint | New run from parent, wrapper copied | FR-RUN-013, 024 |
-| `run --temperature 0.5` | Temperature injected into OE config | OE config contains temperature=0.5 | FR-RUN-040 |
-| `run --parallel 4` | Parallel evaluations injected into OE config | OE config contains num_parallel=4 | FR-RUN-041 |
+| `run --temperature 0.5` | Temperature injected into OE config | OE config contains temperature=0.5 — `unit/infra/test_openevolve::TestBuildConfig::test_run_temperature_flag` (L1, `build_config()`); the flag's presence on `run resume` is checked by `integration/test_sprint_009a::test_resume_cli_temperature_flag` | FR-RUN-040 |
+| `run --parallel 4` | Parallel evaluations injected into OE config | OE config contains num_parallel=4 — `unit/infra/test_openevolve::TestBuildConfig::test_run_parallel_flag` (L1, `build_config()`); `integration/test_sprint_009a::test_resume_cli_parallel_flag` | FR-RUN-041 |
 | `run` (internal) | Post-processing failure | Status set to `completed_with_errors`, `run-error.log` written | FR-RUN-043, 032 |
 | `run` (internal) | OE failure (regression) | Status set to `failed` | FR-RUN-031 |
 | `run status` / `run population` | Metrics dict carrying `combined_score` plus other numerics | Display/ranking prefers numeric `combined_score` over the sum-of-numeric-metrics; sum is the fallback only without `combined_score`; no crash when absent | FR-RUN-052 |
@@ -279,6 +280,10 @@ exception, and the marker-vs-level rule are defined in [validation.md §8.1](val
 | `benchmark export --format json` | After benchmark | Valid JSON matching ConOps §8.2 schema | FR-BEN-008 |
 | `benchmark export --per-instance` | Raw data export | Per-instance rows for all solutions | FR-BEN-016 |
 | `benchmark list` | After 2 benchmarks | Both listed with date, dataset, solution count | FR-BEN-012 |
+| `benchmark delete` | Existing benchmark, no `--force` | Confirmation prompt; `y` deletes the benchmark and its solution references | FR-BEN-018 |
+| `benchmark delete` | Non-existent ID | Exit code 1, "not found" | FR-BEN-018 |
+| `benchmark delete --force` | Existing benchmark | No prompt; benchmark and `benchmark_solutions` rows removed | FR-BEN-019 |
+| `benchmark delete --json` (no `--force`) | JSON mode | Exit code 1, error naming `--force`; benchmark untouched | FR-BEN-020 |
 
 ### 2.9 `revolver doctor` / `revolver setup`
 
@@ -304,12 +309,13 @@ These tests use real OpenEvolve classes (`Config`, `Controller`) and are located
 | `test_openevolve_runner_init_controller` | `OpenEvolveRunner._init_controller()` with real OpenEvolve | The exact code path that crashed in v0.4.0 works end-to-end | FR-RUN-005, FR-RUN-006 |
 | `test_build_config_local_llm_api_key` | `build_config()` with local LLM | `api_key="ollama"` injected in config | FR-RUN-006 |
 | `test_build_config_cascade_evaluation_default` | `build_config()` default output | `evaluator.cascade_evaluation=false` | FR-RUN-006 |
-| `test_build_config_cascade_evaluation_override` | User config.yaml has `cascade_evaluation: true` | User override preserved in merged config | FR-RUN-006 |
-| `test_best_score_from_program` | Program object with metrics | Score extracted from `Program.metrics` | FR-RUN-008 |
+| `test_build_config_cascade_evaluation_user_override` | User config.yaml has `cascade_evaluation: true` | User override preserved in merged config | FR-RUN-006 |
+
+The test names above are the functions of `TestBuildConfigRoundtrip`, `TestControllerInstantiation` and `TestOpenEvolveRunnerInitController` (ids `integration/test_run_oe::<Class>::<test>`). Best-score extraction from a `Program` object (FR-RUN-008) is **not** an L2-OE test: it is covered at L1 by `unit/infra/test_openevolve::TestExtractBestScore::test_best_score_from_program_object`, which runs without `openevolve` installed.
 
 ### 2.12 L2-Shinka: Bandit Ensemble & Multi-LLM Selection (S17 — ADR-007 Amendment)
 
-New scenarios in `tests/integration/test_run_shinka.py` (Shinka half) and `tests/integration/test_run_oe.py` (OE half), added for the v0.17 multi-LLM ensemble (ADR-007 A1–A5). The Shinka rows use the mocked `ShinkaEvolveRunner` and assert on the **constructed** `evo_config` (`llm_models`, `llm_dynamic_selection`, `llm_dynamic_selection_kwargs`, `llm_kwargs.reasoning_efforts`) plus emitted warnings; the OE rows assert on the built `llm.models` array and CLI exit codes. All auto-skip via the existing `pytest.importorskip` / `@pytest.mark.shinkaevolve` / `@pytest.mark.openevolve` gating.
+New scenarios in `tests/integration/test_run_shinka.py` (Shinka half) and `tests/integration/test_run.py` (OE half — the CLI-level selection rejection and `--llm-weight` scenarios; the OE `reasoning_effort` and `capabilities()` rows are L1, in `tests/unit/test_run_ensemble.py` and `tests/unit/infra/test_backends.py`), added for the v0.17 multi-LLM ensemble (ADR-007 A1–A5). The Shinka rows use the mocked `ShinkaEvolveRunner` and assert on the **constructed** `evo_config` (`llm_models`, `llm_dynamic_selection`, `llm_dynamic_selection_kwargs`, `llm_kwargs.reasoning_efforts`) plus emitted warnings, and auto-skip via the existing `pytest.importorskip` / `@pytest.mark.shinkaevolve` gating; the OE rows assert on the built `llm.models` array and CLI exit codes with OpenEvolve mocked, so they run in the main CI selection.
 
 #### Selection-strategy validation
 
@@ -387,13 +393,13 @@ Mirror the `unit/test_db_migration_v10` / `v11` structure. Simple additive `ALTE
 ### 2.16 S18 Semantic Slice — Eval Honesty (U13 / U11 / U4 / U8 / U6 phase 2)
 
 New scenarios for the v0.18 semantic slice (Sprint 018 integration-test plan; the v0.17 demo-feedback
-triage fixed the strict order U13 → U11 → U4 → U8 → U6 phase 2). All **Planned**; they must pass at
-sprint end on the **1471-passing baseline** (post-017a). The Shinka-gated rows auto-skip via the
-existing `pytest.importorskip` / marker gating.
+triage fixed the strict order U13 → U11 → U4 → U8 → U6 phase 2). All **Implemented** (v0.18.0); the
+full suite stands at 1586 passed / 4 skipped at v0.19.0 (without the engine extras). The
+Shinka-gated rows auto-skip via the existing `pytest.importorskip` / marker gating.
 
 | Test | Scenario | Validates | FRs |
 |---|---|---|---|
-| `test_oe_display_prefers_combined_score` | `run population` / live `run status` on metrics with `combined_score` + other numerics (lands in the existing top-level `tests/test_run_population.py` suite — validation.md §8.1 top-level exception) | `parse_population`/`read_checkpoint_best_score` rank by `combined_score`, not sum-of-metrics; sum fallback only without `combined_score`; no crash when absent | FR-RUN-052 |
+| `test_oe_display_prefers_combined_score` | `run population` / live `run status` on metrics with `combined_score` + other numerics (lands in the existing top-level `tests/test_run_population.py` suite — validation.md §8.1 top-level exception; `unit`-marked and L1 by scope since v0.19.0: it drives `parse_population` / `read_checkpoint_best_score` directly) | `parse_population`/`read_checkpoint_best_score` rank by `combined_score`, not sum-of-metrics; sum fallback only without `combined_score`; no crash when absent | FR-RUN-052 |
 | `test_wrapper_coverage_keys_not_in_score` | Generated wrapper over a mixed valid/timed-out dataset (both backends) | `instances_valid`/`instances_total` emitted; the reserved `instances_` prefix is excluded from the metric mean — coverage never inflates the score | FR-RUN-053, FR-EVL-021 |
 | `test_shinka_wrapper_timeout_branch` | Shinka wrapper instance timeout (L2-Shinka) | The new **distinct `TimeoutError` branch** (previously one catch-all) fires and records the timeout on the side-channel | FR-RUN-053 |
 | `test_on_timeout_penalize_vs_drop` | Same run with a timed-out instance under both policies | Default **penalize** writes `timeout_score` (0.0) into the mean; `evaluation.on_timeout=drop` restores the 0.17 survivor-mean; zero-timeout runs identical under both | FR-RUN-054 |
@@ -410,7 +416,7 @@ existing `pytest.importorskip` / marker gating.
 Mirror §2.13 / the `unit/test_db_migration_v13` structure. One column per migration
 (`problem_versions.backend TEXT NOT NULL DEFAULT 'openevolve'`, project DB only — mirrors the
 `runs.backend` v9 shape); the global DB **no-ops-and-bumps** (table-presence guard, v10/v12/v13
-pattern); lands after the current head v13. Planned.
+pattern); lands after the former head v13. Implemented (v0.18.0).
 
 | Test | Scenario | Validates | FRs |
 |---|---|---|---|
@@ -423,7 +429,8 @@ pattern); lands after the current head v13. Planned.
 | `test_solution_extract_rank_n_shinka` | `solution extract --rank 2` / `--program-id <id>` on a Shinka run | 2nd-best program read from `programs.sqlite` (retroactive on old runs, no run-dir layout change), materialized as `programs/rank-2.py`, promoted; `(run_id, rank)` uniqueness; `--rank 1` behaves exactly as today | FR-SOL-021, FR-SOL-011/012 |
 | `test_solution_extract_rank_unsupported_oe` | `--rank 2` on an OE run | `capabilities().top_n_extraction == False` → exit 1 with a clear "not supported on `<backend>`" message (OE consciously deferred) | FR-SOL-021 |
 | `test_reaper_grandchild_killpg` | Mocked run leaking a **grandchild** process (new suite `tests/integration/test_reaper_hardening.py`, next to the 017a backstops — ID `integration/test_reaper_hardening::test_reaper_grandchild_killpg`) | Recursive-descendant enumeration + `killpg` in `ChildProcessReaperMixin` reap it (not just direct children); single-PID fallback; the 017a backstop tests (`test_openevolve_shutdown.py`/`test_shinka_shutdown.py`) unaffected | — (#359 reap hardening) |
-| `test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve` | Docs corpus with fenced `revolver` invocations (L2 by scope; runs under the `unit` CI marker in the blocking selection, sprint-018 S18-21 — validation.md §8.1 marker-vs-level rule) | Every **line-initial** fenced invocation resolves in the Typer CLI tree (untagged fences parsed); a renamed/removed flag is caught; deprecated `problem version create --tag` denylisted (no false positive); inline-prose backtick mentions out of scope | — (#354 doc anti-rot) |
+| `unit/test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve` | Docs corpus with fenced `revolver` invocations (L2 by scope; lives under `tests/unit/` and runs under the `unit` CI marker in the blocking selection, sprint-018 S18-21 — validation.md §8.1 marker-vs-level rule) | Every **line-initial** fenced invocation resolves in the Typer CLI tree (untagged fences parsed); a renamed/removed flag is caught; deprecated `problem version create --tag` denylisted (no false positive); inline-prose backtick mentions out of scope | — (#354 doc anti-rot) |
+| `unit/test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_includes_contributor_docs` | Corpus composition pin (#290, issue #279; same marker/level note as the row above) | The root Markdown files (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CLAUDE.md`, `GEMINI.md`) are in the corpus and exist; `CHANGELOG.md` is excluded; every *tracked* root `*.md` is either linted or excluded; everything else in the corpus sits under `docs/` | — (#354 doc anti-rot) |
 
 ---
 
