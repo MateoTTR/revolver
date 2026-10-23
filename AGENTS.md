@@ -20,8 +20,11 @@ benchmark results with full traceability.
   `CLAUDE.md` and `GEMINI.md` are one-line **imports** of this file
   (`@AGENTS.md` in Claude Code syntax, `@./AGENTS.md` in Gemini CLI syntax)
   for the two tools that look for those names and do not read `AGENTS.md`
-  by default; no other pointer file exists, and none is added for a tool
-  that reads `AGENTS.md` natively — the pointer-file rule in
+  **by default**: Claude Code reads `CLAUDE.md` first, and recent versions
+  fall back to `AGENTS.md` only when no `CLAUDE.md` exists — the project keeps
+  `CLAUDE.md` because the file also documents the git-ignored personal-file
+  convention. No other pointer file exists, and none is added for a tool that
+  reads `AGENTS.md` by default — the pointer-file rule in
   [CONTRIBUTING.md](CONTRIBUTING.md#working-with-ai-tools-pointer-file-rule).
 - Then read the issue you work on, the relevant specification
   (`docs/specs/`), design document (DES) and ADR, and the checklist under
@@ -45,7 +48,7 @@ benchmark results with full traceability.
 | Process checklists | [docs/process/README.md](docs/process/README.md) | Tool-neutral procedures: code / spec / validation / doc review, sprint planning, release & hotfix, Definition of Done |
 | Contributing guide | [CONTRIBUTING.md](CONTRIBUTING.md) | Lifecycle of a change for a contributor: issue first, fork workflow, local gates, test levels, documentation touchpoints, draft pull request, review; the pointer-file rule for AI tools |
 | Security policy | [SECURITY.md](SECURITY.md) | Supported versions, private vulnerability reporting, scope of a local CLI |
-| Code of Conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1; enforcement through GitHub's private channels |
+| Code of Conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1; reports through the repository's private reporting form |
 | Issue and pull-request templates | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/), [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) | Issue forms (bug, feature, new evolution backend, sprint planning); the pull-request description with the Definition-of-Done checklist and the Status section |
 | Code owners and Dependabot | [.github/CODEOWNERS](.github/CODEOWNERS), [.github/dependabot.yml](.github/dependabot.yml) | Maintainer review on the governance paths; weekly pip and GitHub Actions updates against `develop` |
 

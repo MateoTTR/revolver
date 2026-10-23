@@ -5,11 +5,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/MateoTTR/revolver/blob/main/SECURITY.md
-    about: Never in a public issue. Follow SECURITY.md — private vulnerability reporting, or a private message to the maintainer.
+    url: https://github.com/MateoTTR/revolver/blob/develop/SECURITY.md
+    about: Never in a public issue. Follow SECURITY.md — the private vulnerability reporting form once the repository is public; until then, an issue titled "Contact request" with no details.
   - name: Code of Conduct
-    url: https://github.com/MateoTTR/revolver/blob/main/CODE_OF_CONDUCT.md
-    about: Our standards, and how to report unacceptable behavior privately.
+    url: https://github.com/MateoTTR/revolver/blob/develop/CODE_OF_CONDUCT.md
+    about: Our standards, and how to report unacceptable behavior privately (CODE_OF_CONDUCT.md, Enforcement).
   - name: Contributing guide and process checklists
-    url: https://github.com/MateoTTR/revolver/blob/main/CONTRIBUTING.md
+    url: https://github.com/MateoTTR/revolver/blob/develop/CONTRIBUTING.md
     about: How a change goes from an issue to a merged pull request. Questions about the process start there.

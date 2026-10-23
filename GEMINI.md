@@ -1,3 +1,3 @@
 @./AGENTS.md
 
-Personal, local instructions belong in the git-ignored `GEMINI.local.md` (or `CLAUDE.local.md`), never in this file.
+Personal, local instructions are kept in a git-ignored file such as `GEMINI.local.md` (imported from your user-level Gemini context if you want it loaded), never in this file.

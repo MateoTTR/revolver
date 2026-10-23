@@ -38,6 +38,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import shlex
+import subprocess
 
 import pytest
 
@@ -193,6 +194,28 @@ def corpus_files() -> list[Path]:
     return [*root_docs, *sorted((REPO_ROOT / "docs").rglob("*.md"))]
 
 
+def tracked_root_markdown() -> list[str] | None:
+    """Root-level ``*.md`` files tracked by version control, or ``None`` when unknown.
+
+    A contributor's untracked scratch notes at the repository root must not
+    fail the corpus pin, so the unclassified-file check reads the index rather
+    than the directory listing. Returns ``None`` when ``git`` is unavailable or
+    the tree is not a checkout (an sdist); the caller then skips that check.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--", "*.md"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    # The pathspec `*.md` also matches nested paths; keep the root level only.
+    return [line for line in listing.stdout.splitlines() if "/" not in line]
+
+
 def lint_text(text: str, root: object = None) -> list[tuple[int, str, str]]:
     """Lint *text*, returning ``(lineno, command, error)`` findings."""
     if root is None:
@@ -243,8 +266,8 @@ class TestDocCommandLintCorpus:
     def test_corpus_includes_contributor_docs(self) -> None:
         # Pin the corpus composition (issue #279): the contributor-facing root
         # files are linted, CHANGELOG.md (historical flags) is not, and every
-        # root-level Markdown file is classified one way or the other. Personal
-        # `*.local.md` files are ignored by version control and never linted.
+        # *tracked* root-level Markdown file is classified one way or the other
+        # (untracked local notes are not the repository's business).
         corpus = {path.relative_to(REPO_ROOT).as_posix() for path in corpus_files()}
         for name in ROOT_DOC_FILES:
             assert name in corpus, f"{name} missing from the doc command-lint corpus"
@@ -252,18 +275,18 @@ class TestDocCommandLintCorpus:
         assert "CHANGELOG.md" not in corpus
         assert not set(ROOT_DOC_FILES) & ROOT_DOC_EXCLUDED
         assert all(name.startswith("docs/") for name in corpus - set(ROOT_DOC_FILES))
-        unclassified = sorted(
-            path.name
-            for path in REPO_ROOT.glob("*.md")
-            if path.name not in ROOT_DOC_FILES
-            and path.name not in ROOT_DOC_EXCLUDED
-            and not path.name.endswith(".local.md")
-        )
-        assert not unclassified, (
-            "root-level Markdown files neither linted nor excluded (add them to "
-            "ROOT_DOC_FILES or ROOT_DOC_EXCLUDED in tests/unit/test_doc_command_lint.py): "
-            + ", ".join(unclassified)
-        )
+        tracked = tracked_root_markdown()
+        if tracked is not None:  # a checkout with git available: the index is authoritative
+            unclassified = sorted(
+                name
+                for name in tracked
+                if name not in ROOT_DOC_FILES and name not in ROOT_DOC_EXCLUDED
+            )
+            assert not unclassified, (
+                "tracked root-level Markdown files neither linted nor excluded (add them "
+                "to ROOT_DOC_FILES or ROOT_DOC_EXCLUDED in "
+                "tests/unit/test_doc_command_lint.py): " + ", ".join(unclassified)
+            )
 
 
 # ── Extraction grammar unit cases (S18-24) ───────────────────────────────────

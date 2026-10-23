@@ -3,8 +3,8 @@
 Two checklists: one for any feature pull request, one for the addition of an
 evolution backend (a feature pull request plus the backend-specific items).
 Each item names the repository file or convention that makes it a rule.
-`CONTRIBUTING.md` and the pull-request template, where present, mirror these
-lists.
+`CONTRIBUTING.md` (section 5, documentation touchpoints) and the pull-request
+template `.github/PULL_REQUEST_TEMPLATE.md` mirror these lists.
 
 ## 1. Feature pull request
 

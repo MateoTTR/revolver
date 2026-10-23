@@ -116,8 +116,11 @@ pip install -e ".[shinka]"     && pytest -m shinkaevolve
 CI runs `tests/integration/test_run_oe.py` on Python 3.12 as a non-blocking
 step; nothing in CI runs ShinkaEvolve.
 
-`pytest` runs the L1 and L2 suites by default; the L3 end-to-end tests are
-deselected (`-m 'not e2e'` in `pyproject.toml`) and run with `pytest -m e2e`.
+A plain `pytest` runs every test not marked `e2e` — the historic unmarked
+top-level suites included, and the engine-marked tests once an extra is
+installed (CI narrows the selection to `-m "unit or integration"`); the L3
+end-to-end tests are deselected (`-m 'not e2e'` in `pyproject.toml`) and run
+with `pytest -m e2e`.
 The tests isolate Revolver's global store through `REVOLVER_HOME` (see the
 README); point it at a scratch directory when your own `~/.revolver` must stay
 untouched.
@@ -135,8 +138,11 @@ untouched.
 
 Markers are **strict** (`--strict-markers`): a new marker must be registered
 in `pyproject.toml` under `[tool.pytest.ini_options]`, or collection fails.
-Shared fixtures live in `tests/conftest.py` (`tmp_project`, `cli_runner`, the
-HTTP mocks, the `no_<backend>` fixtures) and test data under `tests/fixtures/`.
+Shared fixtures are few: `tests/conftest.py` defines `tmp_project` (an
+initialized project in a temporary directory) and `no_shinka` (simulates the
+absent engine); `tests/e2e/conftest.py` defines `fake_llm_server`. The L2
+suites instantiate `typer.testing.CliRunner()` at module level and mock
+external calls inside each test module; test data sits under `tests/fixtures/`.
 The validation documents cite tests as `<path-under-tests/>::<test_name>`
 ([validation.md § 8.1](docs/validation/validation.md#81-test-id-conventions)).
 Strategy, coverage targets and conventions:
@@ -146,24 +152,26 @@ Strategy, coverage targets and conventions:
 ## 5. Documentation touchpoints
 
 Documentation is updated **before or with** the code, in the same pull
-request. The [Definition of Done](docs/process/definition-of-done.md) (items 2,
-3 and 7) is the checklist; a change may have to touch:
+request. The rules live in the
+[Definition of Done](docs/process/definition-of-done.md#1-feature-pull-request)
+(items 2, 3 and 7); this list only says which touchpoint applies when:
 
-| Touchpoint | When | Where |
-|---|---|---|
-| Specification | a new or changed CLI option or behavior | `docs/specs/spec-<group>.md`: the Commands-table row, a functional requirement (next free id, `MUST` / `SHOULD` / `MAY`) and an Error Cases row |
-| Design document | a design section no longer matches | the DES section, with its header version bumped |
-| ADR | a decision changes, or a new decision is taken | an in-place dated amendment of the existing ADR, or a new ADR, indexed in `architecture.md` § 9 and `AGENTS.md` |
-| Validation rows | tests added or changed | `docs/validation/val-integration-tests.md` and `traceability-matrix.md`, naming the real test ids (`Planned` while in flight, `Implemented` once merged) |
-| README | a user-facing feature, install step or behavior | `README.md` |
-| Guides and the E2E walkthrough | their content changed, or a release | `docs/guides/*.md` and `docs/specs/user-story-e2e.md`, each with a current `verified-against: vX.Y.Z` front-matter stamp |
-| Doc command-lint | any fenced `revolver …` example | it must resolve against the CLI tree; the `Doc command-lint` CI job tells you which line does not |
-| Changelog | every pull request | **one line** under `[Unreleased]` in `CHANGELOG.md`, flagged **Behavior change** when a default path changes |
-
-The review procedures for the documents are
-[spec-review.md](docs/process/spec-review.md),
-[validation-review.md](docs/process/validation-review.md) and
-[doc-review.md](docs/process/doc-review.md).
+- **Specification** — a new or changed CLI option or behavior updates its
+  `docs/specs/spec-<group>.md` as [DoD item 2](docs/process/definition-of-done.md#1-feature-pull-request)
+  describes; reviewed with [spec-review.md](docs/process/spec-review.md).
+- **Design document and ADR** — a design section or an architectural decision
+  that no longer matches is amended as DoD item 2 describes; same review.
+- **Validation rows** — added or changed tests are declared under
+  `docs/validation/` as [DoD item 3](docs/process/definition-of-done.md#1-feature-pull-request)
+  describes; reviewed with [validation-review.md](docs/process/validation-review.md).
+- **README, guides and the E2E walkthrough** — user-facing changes follow
+  [DoD item 7](docs/process/definition-of-done.md#1-feature-pull-request);
+  reviewed with [doc-review.md](docs/process/doc-review.md).
+- **Doc command-lint and freshness stamps** — DoD item 7; the two guards of
+  section 3 tell you which line fails.
+- **Changelog** — one line under `[Unreleased]` in `CHANGELOG.md` per pull
+  request (DoD item 7); the release moves it
+  ([release.md](docs/process/release.md)).
 
 ## 6. Open a draft pull request
 
@@ -205,13 +213,16 @@ You may use any assistant, or none; nothing in the process depends on one.
   lives there and in the files it links; it is never duplicated into
   tool-specific files.
 - **A tool-specific pointer file is added only when both conditions hold**:
-  the tool cannot read `AGENTS.md` natively, **and** the tool is used by an
-  active contributor. Such a file contains nothing but an import of
+  the tool does not read `AGENTS.md` **by default**, **and** the tool is used
+  by an active contributor. Such a file contains nothing but an import of
   `AGENTS.md`, plus the one-line reminder that personal notes go to a
-  git-ignored `*.local.md`. Today there are two: `CLAUDE.md` (Claude Code
-  import syntax, `@AGENTS.md`) and `GEMINI.md` (Gemini CLI import syntax,
-  `@./AGENTS.md`).
-- **Tools that read `AGENTS.md` natively get no file**: Codex, Cursor,
+  git-ignored file. Today there are two: `CLAUDE.md` (Claude Code import
+  syntax, `@AGENTS.md`) and `GEMINI.md` (Gemini CLI import syntax,
+  `@./AGENTS.md`). Claude Code reads `CLAUDE.md` first, and recent versions
+  fall back to `AGENTS.md` only when no `CLAUDE.md` exists; the project keeps
+  `CLAUDE.md` because the file also documents the git-ignored personal-file
+  convention.
+- **Tools that read `AGENTS.md` by default get no file**: Codex, Cursor,
   Copilot, Jules, Windsurf, Amp, Zed, Aider and the like find it at the
   repository root.
 - **Tooling stays private.** Agent definitions, hooks, skills, MCP
@@ -225,10 +236,10 @@ To point your tool at the project guide:
 
 | Tool | What to do |
 |---|---|
-| Claude Code | Nothing: it reads `CLAUDE.md`, which imports `AGENTS.md` (recent versions also read `AGENTS.md` directly) |
+| Claude Code | Nothing: it reads `CLAUDE.md` first, which imports `AGENTS.md`; recent versions fall back to `AGENTS.md` only when no `CLAUDE.md` exists |
 | Gemini CLI | Nothing: it reads `GEMINI.md`, which imports `AGENTS.md` (alternatively, list `AGENTS.md` in its `context.fileName` setting) |
-| Codex, Cursor, Copilot, Jules, Windsurf, Amp, Zed, Aider, … | Nothing: they read `AGENTS.md` natively |
-| Another tool that cannot read `AGENTS.md` | Open an issue proposing the pointer file under the rule above; until then, give it `AGENTS.md` as context by hand |
+| Codex, Cursor, Copilot, Jules, Windsurf, Amp, Zed, Aider, … | Nothing: they read `AGENTS.md` by default |
+| Another tool that does not read `AGENTS.md` by default | Open an issue proposing the pointer file under the rule above; until then, give it `AGENTS.md` as context by hand |
 | No tool | Read `AGENTS.md`; every command in it and in `docs/process/` is a plain shell or `gh` command |
 
 Whatever produced your change, you are its author: run the gates, do the
@@ -238,7 +249,8 @@ self-review and answer the review yourself.
 
 - Vulnerabilities: [SECURITY.md](SECURITY.md) — private reporting only.
 - Behavior: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) (Contributor Covenant
-  2.1), enforced by the maintainer through GitHub's private channels.
+  2.1); reports go through the repository's private reporting form, as its
+  Enforcement section says.
 
 ## License
 

@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the report. **A security vulnerability is not a bug for this form**: follow [SECURITY.md](https://github.com/MateoTTR/revolver/blob/main/SECURITY.md) instead — never a public issue.
+        Thanks for the report. **A security vulnerability is not a bug for this form**: follow [SECURITY.md](https://github.com/MateoTTR/revolver/blob/develop/SECURITY.md) instead — never a public issue.
 
-        Public-file rule: no local path (write "a local path"), hostname, private repository name, e-mail address or API key in this report; redact them from the output you paste.
+        This report follows the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule); redact API keys from anything you paste.
   - type: input
     id: version
     attributes:
@@ -70,5 +70,5 @@ body:
       label: Checks
       options:
         - label: I reproduced the problem on the latest release or on `develop`.
-        - label: This report contains no local path, hostname, private repository name, e-mail address or API key.
+        - label: This report respects the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule) and contains no API key.
           required: true

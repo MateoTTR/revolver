@@ -8,7 +8,7 @@ body:
       value: |
         A backend is a feature pull request **plus** the backend checklist of the [Definition of Done § 2](https://github.com/MateoTTR/revolver/blob/develop/docs/process/definition-of-done.md#2-new-evolution-backend), derived from [ADR-007](https://github.com/MateoTTR/revolver/blob/develop/docs/architecture/adr/ADR-007-pluggable-evolution-backend.md) (D1–D6, A1–A5). This issue is the design issue (RFC-lite): the maintainer confirms the paradigm decision and owns the specification, DES, ADR and validation edits before or with the implementation. Read the `EvolutionBackend` protocol in `src/revolver/infra/backends/base.py` and the two existing adapters first.
 
-        Public-file rule: no local path, hostname, private repository name, e-mail address or third-party handle in this issue.
+        This issue follows the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule).
   - type: input
     id: engine
     attributes:
@@ -114,5 +114,5 @@ body:
           required: true
         - label: The engine's license is compatible with an opt-in dependency of an MIT-licensed project.
           required: true
-        - label: This issue respects the public-file rule.
+        - label: This issue respects the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule).
           required: true

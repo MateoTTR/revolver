@@ -51,7 +51,7 @@ Mirror of [docs/process/definition-of-done.md § 1](https://github.com/MateoTTR/
 
 - [ ] Self-review against `docs/process/code-review.md` done
 - [ ] Code respects `cli/` → `core/` → `infra/`, the `RevolverError` hierarchy and exit codes 0–4, parameterized SQL, secrets as environment-variable names only
-- [ ] Public-file rule: no local path, hostname, private repository name, e-mail address, personal timing data or third-party handle in the diff or in this description
+- [ ] [Public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule) respected in the diff and in this description
 - [ ] Latest review: 0 CRITICAL; WARNINGs fixed, or carried over here: <list, or "none">
 
 <details>

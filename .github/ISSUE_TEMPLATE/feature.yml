@@ -10,7 +10,7 @@ body:
 
         **Design change from an external contributor?** Tick the RFC-lite box at the bottom: this issue is then the design issue, and the maintainer updates or reviews the formal documents (specification, DES, ADR, validation) before or with the implementation.
 
-        Public-file rule: no local path, hostname, private repository name, e-mail address or third-party handle in this issue.
+        This issue follows the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule).
   - type: dropdown
     id: area
     attributes:
@@ -59,7 +59,7 @@ body:
       description: Observable, checkable statements — CLI output, exit codes, --json fields where relevant.
       placeholder: |
         - [ ] `revolver <group> <command> --<option>` does ... and exits 0
-        - [ ] An invalid value exits 2 with the message "..."
+        - [ ] An invalid argument exits 1 (specifications.md § 4.2) with the message "..."
     validations:
       required: true
   - type: textarea
@@ -104,5 +104,5 @@ body:
       label: Process
       options:
         - label: "RFC-lite: I am an external contributor and this change alters behavior, a CLI surface, a data model or a decision — this issue is the design issue, and I wait for the maintainer's go-ahead before the implementation pull request."
-        - label: I have read CONTRIBUTING.md, and this issue respects the public-file rule.
+        - label: I have read CONTRIBUTING.md, and this issue respects the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule).
           required: true

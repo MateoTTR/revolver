@@ -22,12 +22,13 @@ still present.
 
 **Do not open a public issue or pull request for a vulnerability.**
 
-Report it through **GitHub private vulnerability reporting** on this
-repository ("Security" tab → "Report a vulnerability"), which opens a private
-advisory visible only to you and the maintainer. The feature is enabled when
-the repository becomes public; until then, contact the maintainer with a
-private message on GitHub and ask for a private channel before sharing any
-detail. No e-mail address is published for this project.
+Report it through the repository's **private vulnerability reporting** form
+("Security" tab → "Report a vulnerability"), which opens a private advisory
+visible only to you and the maintainer. The form is enabled when the
+repository becomes public. **Until then**, open an issue titled
+"Contact request" that contains **no detail** of the problem; the maintainer
+replies with a private channel. No e-mail address is published for this
+project.
 
 Please include: the affected version (the output of `revolver --version`), the
 backend in use if relevant, the command or configuration that triggers the
@@ -41,11 +42,16 @@ published once the fix is released.
 
 ## Scope
 
-Revolver runs as a **local CLI** on the user's machine. It exposes **no
-network service** of its own: it reads and writes a local project directory
-and a local SQLite store, and it connects outward to the LLM endpoints the user
-registers (a local Ollama host or a remote API) and to the evolution backend
-installed in the same Python environment.
+Revolver runs as a **local CLI** on the user's machine: it reads and writes a
+local project directory and a local SQLite store, and it connects outward to
+the LLM endpoints the user registers (a local Ollama host or a remote API) and
+to the evolution backend installed in the same Python environment. The one
+listener it starts is the **token-accounting proxy**
+(`src/revolver/infra/token_proxy.py`): during an evolution run on a backend
+that asks for it (`wants_http_proxy()`, ADR-007 D2), a loopback-only HTTP
+server bound to `127.0.0.1` on an ephemeral port sits between the engine and
+the registered LLM endpoint, forwards the requests and counts tokens, and stops
+with the run. Other processes on the same machine can reach it while it runs.
 
 In scope:
 
@@ -53,6 +59,9 @@ In scope:
   injection, unsafe deserialization, path traversal, secrets leaking into
   files, logs or the database, unsafe handling of evaluator and program code
   beyond what the user explicitly runs.
+- The token-accounting proxy: anything that lets a local process other than
+  the engine use it, read the forwarded requests or the credentials they
+  carry, or make it bind beyond the loopback interface.
 - The CI workflows under `.github/workflows/`.
 
 Out of scope, or the user's responsibility:
@@ -70,7 +79,6 @@ Out of scope, or the user's responsibility:
 
 ## Public-file rule
 
-Everything in this repository, its issues and its pull requests is public.
-Keep reports free of local paths, hostnames, private repository names and
-e-mail addresses ([docs/process/README.md](docs/process/README.md#public-file-rule));
-the private advisory is the place for sensitive detail.
+Everything in this repository, its issues and its pull requests is public, and
+the [public-file rule](docs/process/README.md#public-file-rule) applies to
+reports too; the private advisory is the place for sensitive detail.
