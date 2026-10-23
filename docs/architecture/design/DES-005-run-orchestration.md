@@ -579,6 +579,12 @@ served by `project init`.
   `model` → `llm.primary_model`, `api_key_env` → `llm.api_key_env` (the env var **name**, not the
   secret — DD-15). Local (`source == "local"`) entries with no key get an `api_key: "ollama"`
   placeholder (the OpenAI SDK requires a non-empty key).
+- Provider portability (validated by the Phase-3 hosted-API study on OpenEvolve 0.2.26): a hosted
+  provider's OpenAI-compatible endpoint works with stock OpenEvolve and no adapter, and switching
+  provider changes only `name` / `api_base` / `api_key`, so Revolver carries no provider-specific
+  code. Two caveats observed on Anthropic's OpenAI-compatible endpoint: `seed` and
+  `reasoning_effort` are silently ignored, and the endpoint is labelled "not production-recommended"
+  upstream (fallback if it is withdrawn: a native Messages-API adapter).
 - Ensemble mode (`--llm <ensemble>`) emits an `llm.models` array instead of `llm.primary_model`,
   mapping each member to `name`/`api_base`/`api_key`/`weight`/`temperature`/`max_tokens`/
   `reasoning_effort` (the `${ENV}` syntax for keys). OpenEvolve's ensemble sampler is

@@ -164,8 +164,9 @@ tree and unchanged from D3, plus **git history before v0.19.0**, which is not pa
 the numbered backlog, the sprint files, the journal pointer, the analysis notes (engine
 comparisons, spikes, the demo-feedback triage, the process analysis behind this ADR) and the
 Phase-3 POC reports (local LLM deployment, OpenEvolve instance injection, OpenEvolve with a
-hosted LLM API). The analysis notes and the POC reports were working material behind the ADRs,
-not a documentation tier: every factual finding an ADR relied on is stated in the ADR itself —
+hosted LLM API). The analysis notes and the POC reports were working material behind the ADRs
+and the design documents, not a documentation tier: every factual finding an ADR or a DES relied
+on is stated in that document itself —
 ADR-007 was made self-contained in the same change, ADR-001 and ADR-006 when the POC reports
 left the tree, and the Context section above keeps the figures of the process analysis — so no
 living document links into the removed folders. What is in the history is never cited as current

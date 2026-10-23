@@ -754,7 +754,8 @@ def _llm_request_timeout(timeout: Any) -> Iterator[None]:
     shinka 0.0.7 hard-codes the LLM request timeout
     (``shinka/llm/constants.py``: ``TIMEOUT = 1200``) with no config or env
     override, and its four-layer retry stack multiplies a stalled endpoint
-    into an hours-long wedge (deadlock spike of backlog row 320, §3).
+    into an hours-long wedge (§3 of the analysis note of the backlog row 320
+    deadlock spike).
     ``shinka/llm/client.py`` reads the module global **at call time**
     (clients are constructed per query), so setting it before the run
     applies to every LLM request of the run — empirically verified by the

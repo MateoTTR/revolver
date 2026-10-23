@@ -108,7 +108,7 @@ benchmark results with full traceability.
 |---|---|---|
 | Phase 1 | Framing: ConOps + functional specifications | **Done** |
 | Phase 2 | Architecture, technology choices (ADRs), data model | **Done** |
-| Phase 3 | POCs for critical aspects | **Done** (three proof-of-concept studies; findings recorded in ADR-001 and ADR-006) |
+| Phase 3 | POCs for critical aspects | **Done** (three proof-of-concept studies; findings recorded in ADR-001, ADR-006 and DES-005) |
 | Phase 4 | Validation strategy, test plan, traceability | **Done** |
 | Phase 5 | Implementation | **In progress** — see [CHANGELOG.md](CHANGELOG.md) for the release history and the open milestones for the current sprint |
 

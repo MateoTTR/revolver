@@ -28,7 +28,7 @@ documents are fixed in a separate pass.
 - The traceability chain:
 
   ```
-  ConOps (workflows, OQ-*) → Specs (FR-*, NFR-*) → ADRs (technology decisions, with the POC findings that validated them)
+  ConOps (workflows, OQ-*) → Specs (FR-*, NFR-*) → ADRs (technology decisions, with the POC findings that validated them; a POC finding with no ADR is recorded in the DES that relies on it)
                                                   → DES (detailed design, decision notes DD-*)
   ```
 
@@ -58,7 +58,7 @@ scope is large, a complete review of the top items plus an explicit
 3. **DES-001 alignment** — data-model changes (tables, columns, migrations) are consistent with the DES-001 schema.
 4. **Architecture alignment** — components, layers and data flows match `architecture.md`.
 5. **Cross-DES consistency** — references to other DES documents resolve and do not contradict them.
-6. **POC alignment** — when the related ADR records proof-of-concept findings (ADR-001, ADR-006), the design follows them.
+6. **POC alignment** — when proof-of-concept findings are recorded in the related ADR (ADR-001, ADR-006) or in the DES itself (DES-005 for the hosted-API study), the design follows them.
 7. **Open-question resolution** — when the DES resolves an AQ-* or OQ-*, the resolution is reflected in `architecture.md` and `conops.md`.
 8. **Headers and numbering** — the `**Version**` / `**Date**` / `**Status**` / `**Traceable to**` header block is present and its version line was bumped for the change; DD numbers are sequential and unique within the document.
 
