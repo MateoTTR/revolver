@@ -1,7 +1,7 @@
 # Sprint 015 — Thinking-Model Usability + Token Honesty + Bridge Robustness (ADR-007 P3, resserré)
 
 **Status**: Planning (re-scoped 2026-06-17, session 051)
-**Goal**: Make thinking-capable LLMs actually usable on the Shinka backend, make Revolver's token reporting honest (and drop the unachievable cost figure), and fix the slow-local-endpoint timeout that breaks the `claude-ollama-bridge` direction now in active use. Pay down the cheapest, lowest-risk S14 carry-over debt (shim removal, env restore) along the way.
+**Goal**: Make thinking-capable LLMs actually usable on the Shinka backend, make Revolver's token reporting honest (and drop the unachievable cost figure), and fix the slow-local-endpoint timeout that breaks the subscription-backed local OpenAI-compatible endpoint now in active use. Pay down the cheapest, lowest-risk S14 carry-over debt (shim removal, env restore) along the way.
 **Demo**: a Gemini thinking-model Shinka run completes instead of returning empty content (`max_tokens=16384` + `max_patch_attempts=10` defaults); `run info` shows a prompt/completion/total token breakdown with an honest caveat and **no cost line**; a run where every proposal fails reports `status: completed_with_errors` with a visible warning; an OpenEvolve run against a slow local endpoint (bridge, 50–530 s/call) no longer aborts at 60 s; the `infra/openevolve.py` re-export shim is gone.
 **Source**: backlog #300 (re-framed by the session-051 spike), #301, #302, #307; the S14 carry-over cheap items; ADR-007 (P3 phase).
 **Predecessor**: Sprint 014 (v0.14.0) — ShinkaEvolve MVP, real engine E2E.

@@ -655,9 +655,8 @@ console** rather than relying on Revolver's token counts.
 ### Subscription-backed and single-GPU local endpoints
 
 A `--source local` endpoint is often a **serialized** backend: a single GPU
-serving one request at a time, or a subscription bridge (e.g. the
-`claude-ollama-bridge` exposing a Claude Max subscription) that processes one
-call at a time. Fanning out parallel generation requests to such an endpoint
+serving one request at a time, or a subscription-backed local
+OpenAI-compatible shim that processes one call at a time. Fanning out parallel generation requests to such an endpoint
 queues them rather than running them concurrently — and can trip rate limits.
 Pin concurrency to 1:
 
@@ -695,22 +694,22 @@ Pin concurrency to 1:
   A `--dry-run` shows the resolved `max_proposal_jobs` value under the Shinka
   backend extras.
 
-> **Subscription spend is not tracked by Revolver.** When you drive a Claude
-> Max (or similar) subscription through a local bridge, the spend is recorded
-> on the **Anthropic console**, not by Revolver. Revolver does not capture the
-> `total_cost_usd` field returned by the bridge — watch the provider console
-> for subscription usage.
+> **Subscription spend is not tracked by Revolver.** When you drive a provider
+> subscription through a local OpenAI-compatible shim, the spend is recorded
+> on the **provider console**, not by Revolver. Revolver does not capture a
+> non-standard `total_cost_usd` field returned by such a shim — watch the
+> provider console for subscription usage.
 
-> **Token totals under-count on bridge/Agent-SDK endpoints.** Beyond cost, the
-> prompt/completion **token** counts that `run info` reports are also
-> understated for `--source local` bridge endpoints. The bridge returns an
-> OpenAI `usage` block that omits the hidden Claude-Code context the Agent SDK
+> **Token totals under-count on subscription-backed local endpoints.** Beyond
+> cost, the prompt/completion **token** counts that `run info` reports are also
+> understated for `--source local` shim endpoints. Such a shim returns an
+> OpenAI `usage` block that omits the hidden context its upstream client
 > injects per call and the model's thinking tokens, so a call billed as
 > hundreds of real tokens may report only a handful. This is the same family of
 > gap as the reasoning/thinking caveat in
 > [Token accounting](#token-accounting-and-why-there-is-no-cost-figure) above.
 > `run info` prints an explicit caveat for `--source local` runs — track real
-> consumption on the **Anthropic console**, not Revolver's token totals.
+> consumption on the **provider console**, not Revolver's token totals.
 
 ---
 
@@ -886,7 +885,7 @@ revolver run --llm codestral-local --iterations 50 --parallel 1
 On the **OpenEvolve** backend, every LLM call is routed through Revolver's
 HTTP `TokenCountingProxy` (token accounting). OpenEvolve's own OpenAI client
 defaults to a **60-second** request timeout. A slow local endpoint — for
-example the `claude-ollama-bridge` exposing a Claude subscription, where a
+example a subscription-backed local OpenAI-compatible shim, where a
 single call can take 50–530 s — therefore aborts at 60 s, triggers a retry
 storm, and ultimately fails with a proxy `BrokenPipeError` (the late upstream
 response is written into an already-closed connection).

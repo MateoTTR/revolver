@@ -2,8 +2,8 @@
 
 **Status**: Planning
 **Target release**: **v0.16.1** (corrective / patch)
-**Goal**: Triage and fix the anomalies surfaced while validating Revolver **0.16.0** through the TSP + beamforming demos (private demo repository) (gemma4 on a network Ollama host, `gpu-box`, and Claude Opus/Sonnet via the `claude-ollama-bridge`). Priority on the genuine 🟠 blockers — a successful Shinka run that *looks* failed (A2) and `--parallel >1` on Claude Max turning into a multi-hour hang (A3). The network-Ollama issue (A1) was reframed by the demos update of 2026-06-22 down to a one-line probe fix (storage is already correct).
-**Demo**: a single `revolver llm add --source local --base-url http://gpu-box:11434/v1` registers a network Ollama usable by **both** OE and Shinka; a `revolver run --backend shinka` returns to the prompt cleanly after `Done: … completed`; a `--source local` OE run on the bridge auto-limits to `parallel_evaluations=1` and no longer cascades into a retry storm.
+**Goal**: Triage and fix the anomalies surfaced while validating Revolver **0.16.0** through the TSP + beamforming demos (private demo repository) (gemma4 on a network Ollama host, `gpu-box`, and Claude Opus/Sonnet via a local OpenAI-compatible shim). Priority on the genuine 🟠 blockers — a successful Shinka run that *looks* failed (A2) and `--parallel >1` on a subscription-backed local endpoint turning into a multi-hour hang (A3). The network-Ollama issue (A1) was reframed by the demos update of 2026-06-22 down to a one-line probe fix (storage is already correct).
+**Demo**: a single `revolver llm add --source local --base-url http://gpu-box:11434/v1` registers a network Ollama usable by **both** OE and Shinka; a `revolver run --backend shinka` returns to the prompt cleanly after `Done: … completed`; a `--source local` OE run on the shim auto-limits to `parallel_evaluations=1` and no longer cascades into a retry storm.
 **Source**: demo feedback report v0.16 (private demo repository; consolidated demo-validation report). That report is owned by the demos project; this sprint doc is the Revolver-side response and is **not** written from the demos session.
 **Predecessor**: Sprint 016 (v0.16.0 — technical-debt paydown + CLI/UX polish).
 
@@ -26,8 +26,8 @@ Severity scale: 🔴 blocking · 🟠 important · 🟡 minor · ⚪ cosmetic/do
 |---|---|---|---|---|---|
 | **A1** | 🟠→🟡 | Network/local Ollama **probe** ignores `--base-url`/`OLLAMA_HOST` (storage already correct → cosmetic validation bug, per demos refinement 2026-06-22) | Revolver-core | new | #313 |
 | **A2** | 🟠 | Shinka run busy-loops at ~100% CPU after `Done: … completed`, CLI never exits | Revolver-core | new | #314 |
-| **A3** | 🟠 | `--parallel >1` on Claude Max / bridge causes a retry-storm hang on the OE path | Revolver-core | **extends #309** | #315 |
-| **A4** | 🟡 | Bridge under-reports tokens (`usage` 2/4 vs real Agent-SDK spend) | bridge → Revolver impact | **composes #308** | #316 |
+| **A3** | 🟠 | `--parallel >1` on a subscription-backed local endpoint causes a retry-storm hang on the OE path | Revolver-core | **extends #309** | #315 |
+| **A4** | 🟡 | Shim under-reports tokens (`usage` 2/4 vs real upstream spend) | shim → Revolver impact | **composes #308** | #316 |
 | **A5** | 🟡 | Bridge 502 under sustained load (transient) | bridge (external) | new (external) | #317 |
 | **A6** | ⚪ | OE `config.yaml` scaffold triggers its own validator warnings | Revolver-core | new | #318 |
 | **A7** | ⚪ | CLI/doc inconsistencies — `run resume --run` (option) vs sibling positionals; README `--tag` stale | Revolver-core | new | #319 |
@@ -35,7 +35,7 @@ Severity scale: 🔴 blocking · 🟠 important · 🟡 minor · ⚪ cosmetic/do
 **Backlog reuse, not duplication:**
 
 - A3 *extends* #309 (which auto-pinned `max_proposal_jobs=1` for Shinka-local and added OE guidance as **doc-only** in S16-22); A3 turns that OE doc-only guidance into an **auto-pin + warn** in `build_config()`. #309 stays closed; #315 adds the OE code path.
-- A4 *composes* #308 (the "Max-subscription spend is tracked on the Anthropic console" one-liner, shipped in S16-22/PR-UX); A4 reframes it from *cost* (already removed in #300) to *token under-count* on bridge/local endpoints. #308 stays closed; #316 extends its caveat to `run info` output and the tuning guide.
+- A4 *composes* #308 (the "subscription spend is tracked on the provider console" one-liner, shipped in S16-22/PR-UX); A4 reframes it from *cost* (already removed in #300) to *token under-count* on bridge/local endpoints. #308 stays closed; #316 extends its caveat to `run info` output and the tuning guide.
 
 ---
 
@@ -77,7 +77,7 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 |---|---|
 | Top-N extraction (#299) | Largest carry-over from S16; fits a dedicated sprint (S017). |
 | Frequency-planning demo items | Report not yet extended; will be folded in as A8+ before v0.16 is frozen. |
-| Bridge-side backoff / error mapping (A5 core fix) | External repo (`claude-ollama-bridge`) — not Revolver-core scope. |
+| Shim-side backoff / error mapping (A5 core fix) | External project (the local OpenAI-compatible shim) — not Revolver-core scope. |
 
 ---
 
@@ -134,9 +134,9 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
   - If the busy-loop is upstream and unkillable cleanly, file an upstream issue (as #159) and document the subprocess-reap mitigation.
 - **Backlog**: new — **#314**. **Spike-first** (see S16a-04).
 
-### A3 🟠 — `--parallel >1` harmful on Claude Max (OE path)
+### A3 🟠 — `--parallel >1` harmful on a subscription-backed local endpoint (OE path)
 
-- **Observed**: `--parallel 5` + `BRIDGE_CONCURRENCY=5` → 5 calls dispatched together complete staggered ~130s apart (150/269/396/533s), not simultaneously: Anthropic serializes requests per subscription → concurrency yields ~no wall-clock gain. Worse: queued calls exceed the 600s timeout → OE retry storm → `BrokenPipeError` (via `TokenCountingProxy`) → multi-hour hang (run stuck 13:42→15:39, 4/10 iterations before a manual kill). At `--parallel 1` the cascade disappears.
+- **Observed**: `--parallel 5` + `BRIDGE_CONCURRENCY=5` → 5 calls dispatched together complete staggered ~130s apart (150/269/396/533s), not simultaneously: the upstream provider serializes requests per subscription → concurrency yields ~no wall-clock gain. Worse: queued calls exceed the 600s timeout → OE retry storm → `BrokenPipeError` (via `TokenCountingProxy`) → multi-hour hang (run stuck 13:42→15:39, 4/10 iterations before a manual kill). At `--parallel 1` the cascade disappears.
 - **Expected**: a `--source local` (subscription-backed / single-GPU) endpoint defaults to serialized execution; concurrency is opt-in, not a foot-gun.
 - **Repro**: `revolver run --backend openevolve --llm <bridge-local> --parallel 5` on the bridge → staggered calls, timeouts, hang. `--parallel 1` → clean.
 - **Root cause** (file:line):
@@ -149,19 +149,19 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
   - Surface the pinned value in the dry-run output.
 - **Backlog**: extends #309 — new task **#315**. #309 stays closed (Shinka pin + doc); #315 adds the OE auto-pin/warn.
 
-### A4 🟡 — Bridge under-counts tokens *(bridge → Revolver impact)*
+### A4 🟡 — Shim under-counts tokens *(shim → Revolver impact)*
 
-- **Observed**: a 6-token "pong" via the bridge bills ~$0.031 (the Agent SDK injects a large hidden Claude Code context per call); the bridge returns OpenAI `usage` prompt/completion = **2/4** → the token totals Revolver records **massively under-count** real consumption. Evolution calls cost $0.23–0.40.
+- **Observed**: a 6-token "pong" via the shim bills ~$0.031 (the shim's upstream client injects a large hidden context per call); the shim returns OpenAI `usage` prompt/completion = **2/4** → the token totals Revolver records **massively under-count** real consumption. Evolution calls cost $0.23–0.40.
 - **Expected**: Revolver does not present an authoritative-looking token total that is silently wrong on bridge runs; the under-count is disclosed.
-- **Repro**: any `--source local` bridge run → `run info` token totals reflect only the bridge-reported `usage`, not the hidden Agent-SDK context or thinking tokens.
+- **Repro**: any `--source local` bridge run → `run info` token totals reflect only the bridge-reported `usage`, not the hidden upstream-client context or thinking tokens.
 - **Root cause / framing**: cost was already removed from output in #300 (no realistic cost is reachable). The residual is the **token under-count**, which is structurally the same family as the Shinka "thinking/retry tokens not counted" caveat from #300. Neither the OE token path nor `ShinkaBackend.collect_token_usage()` can recover the hidden context tokens without fragile bridge-internal coupling.
-- **Proposed fix** (composes #308): add a **caveat** (mirroring the #300 thinking-token caveat) to `run info` and the tuning guide — *bridge / Agent-SDK endpoints under-report token usage; track real spend on the Anthropic console*. Do not present the under-counted total without that qualifier. No attempt to monkeypatch the bridge usage.
+- **Proposed fix** (composes #308): add a **caveat** (mirroring the #300 thinking-token caveat) to `run info` and the tuning guide — *subscription-backed local endpoints under-report token usage; track real spend on the provider console*. Do not present the under-counted total without that qualifier. No attempt to monkeypatch the bridge usage.
 - **Backlog**: composes #308 — new task **#316**.
 
 ### A5 🟡 — Bridge 502 under sustained load (transient) *(external)*
 
-- **Observed**: during the parallel-5 retry storm the bridge returned repeated `502 Bad Gateway` / `UpstreamError: SDK call failed: … success` on large evolution prompts; small pong calls recovered immediately afterward → transient rate-limiting (not a hard Max cap), surfaced as a confusing/contradictory error.
-- **Attribution**: bridge-side (`claude-ollama-bridge` repo) — clearer error mapping + backoff belong there. **Out of Revolver-core scope.**
+- **Observed**: during the parallel-5 retry storm the bridge returned repeated `502 Bad Gateway` / `UpstreamError: SDK call failed: … success` on large evolution prompts; small pong calls recovered immediately afterward → transient rate-limiting (not a hard subscription cap), surfaced as a confusing/contradictory error.
+- **Attribution**: shim-side (external project) — clearer error mapping + backoff belong there. **Out of Revolver-core scope.**
 - **Revolver mitigation**: the trigger is the A3 retry storm; **A3 auto-pin avoids it**. Revolver's proxy already forwards the upstream status/body (FB-01/#123); verify that a bridge 502 surfaces legibly (not masked as a generic proxy error).
 - **Proposed fix**: tracked, external — file/confirm on the bridge repo (backoff + error mapping). Revolver side: one-line verification that the proxy surfaces the 502 clearly; no code change expected.
 - **Backlog**: new (external) — **#317**, marked *external / monitor*.
@@ -203,7 +203,7 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 | S16a-07 | `infra/backends/openevolve.py` — `build_config()`: when `spec.llm_entry.source == "local"` and `--parallel` was **not** explicitly supplied by the user and `evaluator.parallel_evaluations` is not present in `spec.config_overrides`, inject `parallel_evaluations = 1`. If the user explicitly sets `--parallel >1` on a `--source local` endpoint, emit a `[yellow]Warning[/yellow]` (mirror the Shinka warn-and-honour pattern from S16-21) but honour the value. Surface the injected `parallel_evaluations` value in the dry-run output alongside `build_config()` results. | infra | PR-A3 | — | OE dry-run with `--source local` LLM shows `parallel_evaluations: 1`; explicit `--parallel 3` on local emits a warning and sets `parallel_evaluations: 3`; `--source remote` LLM is unaffected; `--config-override evaluator.parallel_evaluations=2` overrides the auto-pin; L2 test covers all four paths. |
 | S16a-08 | `run info` output: when the run's LLM `source == "local"`, append a caveat line after the token summary — "Note: bridge/Agent-SDK endpoints under-report token usage (hidden context and thinking tokens not counted); track real spend on the Anthropic console." Mirror the phrasing of the #300 thinking-token caveat already present. | cli | PR-DOC | — | `run info` on a `--source local` run shows the caveat line; `--source remote` run shows no caveat; no change to the stored `TokenUsage` fields. |
 | S16a-09 | Tuning guide (`docs/guides/tuning-oe-config.md`): extend the "Subscription-backed and single-GPU local endpoints" section (added in S16-22) with (a) the OE auto-pin behaviour (new in S16a-07, mirrors the existing Shinka auto-pin paragraph) and (b) the token under-count caveat (composing #308 / extending S16-22's one-liner to the token dimension). | doc | PR-DOC | S16a-07, S16a-08 | Guide section describes both Shinka and OE auto-pin; token under-count caveat is present and accurate; doc-reviewer reports 0 FAIL on the touched section. |
-| S16a-10 | Verify that Revolver's `TokenCountingProxy` (FB-01/#123 path) surfaces a bridge `502 Bad Gateway` response as a readable error (status code + body forwarded, not swallowed as a generic proxy error). No code change expected; if a masking bug is found, fix it. File/confirm bridge-side backoff + error mapping in the `claude-ollama-bridge` repo issue tracker. | infra (verify) + external | PR-DOC | — | Manual verification note in §Spike Result or PR description; if code change needed, acceptance test covers the 502 path; external follow-up linked. |
+| S16a-10 | Verify that Revolver's `TokenCountingProxy` (FB-01/#123 path) surfaces a bridge `502 Bad Gateway` response as a readable error (status code + body forwarded, not swallowed as a generic proxy error). No code change expected; if a masking bug is found, fix it. File/confirm shim-side backoff + error mapping in the shim's own issue tracker (external project). | infra (verify) + external | PR-DOC | — | Manual verification note in §Spike Result or PR description; if code change needed, acceptance test covers the 502 path; external follow-up linked. |
 | S16a-11 | Investigate which keys in `_CONFIG_TEMPLATE` (`infra/backends/openevolve.py:1229-1249`) `build_config()` actually reads vs which are decorative comments for the user. Record findings, then rewrite the template to schema-correct keys: `max_iterations` (OE schema key, not `num_iterations`); commented `database: population_size` (not top-level `population_size`); keep the wrapper timeout under a Revolver-owned `evaluation:` section stripped before the strict parse — `EvaluatorConfig` has `timeout`, not `timeout_per_instance`, so it cannot live under `evaluator:`. Verify that the rewrite does not silently change the effective iteration count or population defaults. | infra | PR-A6 | — | `revolver problem version create --backend openevolve` on a freshly-scaffolded project emits **zero** validator warnings; the template's `max_iterations`/`population_size`/`timeout_per_instance` values are preserved or commented-out-safe; L2 test: fresh scaffold + `problem version create` → 0 warnings. |
 | S16a-12 | `cli/run.py` — `run_resume`: add a positional `run_id: str | None = typer.Argument(None, help="Run ID to resume.")`, keep `--run` as a backward-compat option. Resolve: positional wins; raise a clear `ValidationError` if neither is supplied. Mirror the #304 positional-tag pattern from S16-17 (`problem_version_create`). | cli | PR-A7 | — | `revolver run resume <id>` works (positional); `revolver run resume --run <id>` still works (compat alias); `revolver run resume` with no ID prints a clear error and exits 1; `revolver run resume <id> --run <other-id>` uses the positional; L2 test covers all four paths. |
 | S16a-13 | README Quick Start: update `revolver problem version create --tag v1.0` → `revolver problem version create v1.0` (positional, as per S16-17/#304). | doc | PR-DOC | — | README Quick Start matches `revolver problem version create --help`; doc-reviewer reports 0 FAIL. |

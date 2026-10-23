@@ -138,7 +138,7 @@ OE_BUILTIN_FEATURE_DIMENSIONS = frozenset({"complexity", "diversity", "combined_
 # Default LLM request timeout (seconds) injected for ``--source local``
 # endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
 # OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
-# endpoints (e.g. the claude-ollama-bridge at 50-530 s/call) -> a retry
+# endpoints (e.g. a subscription-backed local shim at 50-530 s/call) -> a retry
 # storm and a proxy BrokenPipeError. Remote APIs keep OpenEvolve's default.
 DEFAULT_LOCAL_LLM_TIMEOUT_S = 600
 
