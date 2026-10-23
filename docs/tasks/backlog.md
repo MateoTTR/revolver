@@ -1,5 +1,11 @@
 # Revolver — Task Backlog
 
+> **Frozen at the end of Sprint 019 (v0.19.0).** From Sprint 020 on, planning lives in
+> GitHub issues and milestones (see [`docs/sprints/README.md`](../sprints/README.md)).
+> This file is kept as a historical project record and is no longer updated. The task
+> numbers in its first column are backlog counters, **not** GitHub issue numbers.
+> Release history: [`CHANGELOG.md`](../../CHANGELOG.md).
+
 ## Phase 1 — Cadrage
 
 | # | Task | Status | Session |
@@ -30,7 +36,7 @@
 | 26 | ~~Implement wrapper evaluator generator~~ → moved to Phase 5 (Sprint 004, task S4-03) | — | |
 | 27 | Update ConOps §4.1 directory structure for DD-07 (top-N → separate solution dirs) | [x] | 010 |
 | 28 | Review remaining spec-reviewer WARNs (ER diagram, benchmark JSON rank/run_id) | [x] | 010 |
-| 29 | Refactor: introduce Run entity + Solution as reference (per refactor-run-solution.md) | [x] | 010 |
+| 29 | Refactor: introduce Run entity + Solution as reference (per `docs/analysis/refactor-run-solution.md`) | [x] | 010 |
 | 30 | DES-007 — `revolver benchmark` design (after run/solution refactor) | [x] | 011 |
 | 31 | Review DES-005/006 decisions (D-005-a..h, D-006-a..f) into updated docs | [x] | 010 |
 | 32 | Integrate `problem.md` feature into ConOps, spec-problem, DES-003, DES-005 | [x] | 012 |
