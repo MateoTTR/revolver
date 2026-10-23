@@ -16,6 +16,10 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-24
+
+Sprint 019 — public release: tool-neutral process (`AGENTS.md`, `docs/process/`, ADR-008), frozen records archived out of the tree, contributor files, CI on GitHub-hosted runners hardened for rulesets. No product change.
+
 ### Added
 
 - `AGENTS.md` as the canonical, tool-neutral entry file for humans and agents; `CLAUDE.md` and `GEMINI.md` become one-line pointers to it (issue #277).
@@ -23,7 +27,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - ADR-008 "Documentation and process strategy": journal outside the repository, GitHub-native planning, documentation tiers, tool-neutral process, public-file rule, `CHANGELOG.md` as the release-note vehicle (issue #277); amended on 2026-10-23 so that the frozen tier leaves the tree (issue #284).
 - `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#280, closes #275).
 - MIT `LICENSE` file (#274, closes #272).
-- Contributor process files: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), the pull-request template, issue forms (bug, feature, new evolution backend, sprint planning), `CODEOWNERS`, Dependabot (pip and GitHub Actions, weekly, grouped, against `develop`) and `[project.urls]` in `pyproject.toml`; `CLAUDE.md` and `GEMINI.md` become import one-liners of `AGENTS.md` under the pointer-file rule; the doc command-lint corpus covers the root Markdown files except `CHANGELOG.md` (#290, closes #279).
+- Contributor process files: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), the pull-request template, issue forms (bug, feature, new evolution backend, sprint planning), `CODEOWNERS`, Dependabot (GitHub Actions weekly and grouped, pip security updates only, against `develop`) and `[project.urls]` in `pyproject.toml`; `CLAUDE.md` and `GEMINI.md` become import one-liners of `AGENTS.md` under the pointer-file rule; the doc command-lint corpus covers the root Markdown files except `CHANGELOG.md` (#290, closes #279).
 
 ### Changed
 
@@ -519,7 +523,8 @@ Sprint 001 — foundation: project scaffolding, database, shared infrastructure.
 - Shared infrastructure: SQLite (WAL mode, schema, migrations), hashing, `.revolver/` store, configuration hierarchy, Rich tables and JSON output (#2).
 - `project init <name> [--path <dir>] [--json]` creates a project with `.revolver/`, template files and an initialized database (#4).
 
-[Unreleased]: https://github.com/MateoTTR/revolver/compare/v0.18.0...develop
+[Unreleased]: https://github.com/MateoTTR/revolver/compare/v0.19.0...develop
+[0.19.0]: https://github.com/MateoTTR/revolver/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/MateoTTR/revolver/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/MateoTTR/revolver/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/MateoTTR/revolver/compare/v0.16.1...v0.17.0

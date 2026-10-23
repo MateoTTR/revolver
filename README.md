@@ -212,7 +212,7 @@ REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution <solution-id> --dataset eva
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (1585 passed / 4 skipped, ~35s; +58 shinkaevolve-marked tests need a real-shinka env; L3 e2e tests are deselected by default — run with -m e2e)
+# Run tests (1587 passed / 4 skipped, ~35s; +58 shinkaevolve-marked tests need a real-shinka env; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
 
 # Lint
@@ -225,16 +225,16 @@ mypy
 
 ## Releases
 
-Latest release: **v0.18.0**. The full release history, one section per tag since
+Latest release: **v0.19.0** (public-release sprint: no product change; see the CHANGELOG section). The full release history, one section per tag since
 v0.1.0, is in [CHANGELOG.md](CHANGELOG.md). Behavior changes that affect existing
 configurations (for example the v0.18.0 timeout-penalty and checkpoint-cadence
 defaults) are recorded there under the release that introduced them — see the
-[v0.18.0 entry](CHANGELOG.md#0180---2026-07-05).
+[v0.18.0 entry](CHANGELOG.md#0180---2026-07-05) and the [v0.19.0 entry](CHANGELOG.md#0190---2026-10-24).
 
 To install a specific tagged version straight from GitHub:
 
 ```bash
-pip install "revolver @ git+https://github.com/MateoTTR/revolver@v0.18.0"
+pip install "revolver @ git+https://github.com/MateoTTR/revolver@v0.19.0"
 revolver --version
 ```
 
