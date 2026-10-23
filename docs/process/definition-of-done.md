@@ -16,7 +16,7 @@ lists.
 6. **Local gates green** — `ruff check src/ tests/`, `ruff format --check src/ tests/`, `mypy`, `pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"` (the CI jobs of `.github/workflows/ci.yml`, on Python 3.12 and 3.14); no pre-existing test modified except mechanical changes listed in the pull-request description.
 7. **Documentation** — `README.md` features / install / behavior changes when user-facing; every fenced `revolver …` example resolves (doc command-lint); new or changed guides and `docs/specs/user-story-e2e.md` carry a current `verified-against: vX.Y.Z` stamp (`tests/unit/test_doc_freshness.py`); one line under `[Unreleased]` in `CHANGELOG.md`, flagged **Behavior change** when a default path changes.
 8. **Review and merge** — opened as a draft; self-review and reviewer pass per [code-review.md](code-review.md); **0 CRITICAL**, WARNINGs fixed or carried over; marked ready; the four required checks green; the maintainer merges.
-9. **Public-file rule** respected in every committed file and in the pull-request text ([README.md](README.md#public-file-rule)).
+9. **Public-file rule** respected in every committed file and in the pull-request text ([docs/process/README.md § Public-file rule](README.md#public-file-rule)).
 
 ## 2. New evolution backend
 

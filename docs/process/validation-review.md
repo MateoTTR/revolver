@@ -123,6 +123,7 @@ the matrix. Mismatches are **WARN**.
 
 - The phase table in `AGENTS.md` matches the actual state (latest release in `CHANGELOG.md`, open milestones).
 - Every index row in `AGENTS.md` resolves to an existing file.
+- Open questions or decision placeholders in `AGENTS.md` are closed with a documented decision (an ADR or a CHANGELOG entry), and the phase statuses match the actual progress.
 
 ## Severity vocabulary
 

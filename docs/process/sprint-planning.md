@@ -169,4 +169,5 @@ any more.
 - **(changed)** "Agent assignment" in the work-stream table becomes "assignment" (a contributor or an agent, indifferently).
 - **(changed)** The sprint-review section of the sprint file becomes the CHANGELOG entry plus the planning issue's closing comment.
 - **(changed)** The French communication rule is dropped (English only).
+- **(dropped)** The former sprint-file sections "Command groups included" and "Key FRs covered" have no counterpart in the planning-issue outline: the milestone's issue list (labels) and each pull request's Spec-impact section carry that information.
 - **(added)** Step 7 (spec-before-code cascade) and the "during the sprint" rules (one CHANGELOG line per pull request, the Status section) restate practice from Sprints 017–019 that was not in the agent prompt.

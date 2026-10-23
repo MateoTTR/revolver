@@ -23,8 +23,9 @@ rationale for this layout is
 
 ## Common conventions
 
-Every checklist has the same five parts: **Inputs** (what to have open),
-**Steps**, **Severity vocabulary**, **Output format** and **Where to post**.
+Every checklist states what to have open (**inputs**), the **steps** to run, its
+**severity vocabulary**, the **output format** and **where to post** the result;
+headings vary slightly from file to file.
 
 Two severity vocabularies are used, one per kind of review:
 

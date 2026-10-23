@@ -10,8 +10,8 @@ Lag rule (same-major minor arithmetic): the stamp may trail
 ``revolver.__version__`` by at most ONE minor version. At a current 0.18.x,
 ``v0.18.*`` and ``v0.17.*`` stamps pass and ``v0.16.*`` fails; a stamp ahead
 of the current version never fails (stamps may be refreshed just before the
-release bump lands). Refreshing the stamps is part of the Release Checklist
-step 1b in ``CLAUDE.md``.
+release bump lands). Refreshing the stamps is part of the release procedure
+(``docs/process/release.md``).
 
 Major-boundary grace: while the current version sits at ``X.0.*`` (the fresh
 major window), stamps from major ``X-1`` still pass — otherwise the very

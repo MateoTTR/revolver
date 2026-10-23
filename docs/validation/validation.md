@@ -40,7 +40,7 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 ├─────────────────────────────────────────────────────┤
 │  Level 2-OE — OpenEvolve Contract Tests (pytest)    │  every PR (non-blocking)
 ├─────────────────────────────────────────────────────┤
-│  Level 3 — E2E Tests (pytest or bash)               │  nightly / manual
+│  Level 3 — E2E Tests (pytest or bash)               │  manual (on demand)
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 | 2 — Integration | CLI commands, DB, filesystem | ~seconds to minutes | SQLite (real), filesystem (tmpdir) | Every push + PR | [val-integration-tests.md](val-integration-tests.md) |
 | 2-OE — OpenEvolve | Config roundtrip, controller init | ~seconds | openevolve (pip), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
 | 2-Shinka — ShinkaEvolve *(implemented — S14, ADR-007)* | Config projection, wrapper contract (`metrics.json`), `programs.sqlite` parsing | ~seconds | shinka-evolve (pip extra), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
-| 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Nightly / manual | [val-e2e-tests.md](val-e2e-tests.md) |
+| 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Manual (on demand) | [val-e2e-tests.md](val-e2e-tests.md) |
 
 **Backend matrix axis (ADR-007)**: with the pluggable evolution backend, tests split along a new
 axis. **Engine-neutral** tests (~36 of the ~44 commands: `llm`, `dataset`, `solution`, `eval`,
@@ -209,7 +209,7 @@ markers = [
 
 - `-m 'not e2e'` deselects the L3 E2E tests by default (they are manual — [val-e2e-tests.md](val-e2e-tests.md)), so a plain `pytest tests/` never runs them even with the engine extras installed; run them explicitly with `-m e2e`.
 - `--strict-markers` (adopted at v0.19.0, S19-27) turns an unregistered `@pytest.mark.<name>` into a collection error instead of a warning, so every marker — including the per-backend engine markers — must be registered in the list above. The full suite was verified to collect cleanly under the flag before adoption.
-- The `e2e_gpu` marker formerly listed here is not registered and no test uses it: GPU-backed E2E runs against a real Ollama are a manual procedure described in [val-e2e-tests.md](val-e2e-tests.md), not a marker selection.
+- The `e2e_gpu` marker is registered for the manual GPU track (real Ollama + GPU, see [val-e2e-tests.md](val-e2e-tests.md)); no test uses it yet. Under `--strict-markers` only registered markers are accepted.
 
 ### 6.3 Shared Fixtures
 

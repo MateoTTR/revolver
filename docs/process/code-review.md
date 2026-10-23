@@ -87,7 +87,7 @@ Testing
 
 Public-file rule
 
-- [ ] No local path, hostname, private repository name, e-mail address, personal timing data or third-party handle in the diff ([README.md](README.md#public-file-rule))
+- [ ] No local path, hostname, private repository name, e-mail address, personal timing data or third-party handle in the diff ([docs/process/README.md § Public-file rule](README.md#public-file-rule))
 
 ### 3. Backend pull requests
 

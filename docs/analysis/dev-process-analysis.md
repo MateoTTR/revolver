@@ -1,6 +1,6 @@
 # Revolver — Development Process Analysis (as practiced, v0.18.0)
 
-> **Sanitized copy (committed at v0.19.0).** This analysis was written on the maintainer's side at v0.18.0, before Sprint 019 restructured the process; it is the evidence behind [ADR-008](../architecture/adr/ADR-008-documentation-and-process-strategy.md). GitHub handles of third parties, hostnames, local paths and personal data were removed; the analysis itself is unchanged. `file:line` citations refer to the v0.18.0 tree — `CLAUDE.md` has since been replaced by `AGENTS.md` and `docs/process/`, the journal left the repository, and `.claude/` is no longer versioned.
+> **Sanitized copy (committed at v0.19.0).** This analysis was written on the maintainer's side at v0.18.0, before Sprint 019 restructured the process; it is the evidence behind [ADR-008](../architecture/adr/ADR-008-documentation-and-process-strategy.md). GitHub handles of third parties, hostnames, local paths and personal data were removed; the analysis itself is unchanged apart from the redactions listed in this note. `file:line` citations refer to the v0.18.0 tree — `CLAUDE.md` has since been replaced by `AGENTS.md` and `docs/process/`, the journal left the repository, and `.claude/` is no longer versioned.
 
 **Repo**: branch `develop` at `9fba2cb` (v0.18.0 plus three documentation commits), analysed 2026-10-23 (read-only; GitHub reads only).
 **Purpose**: faithful description of the process, explicit/implicit rules catalog, Definition of Done (feature PR + new evolution backend), gaps for external contributors (Gemini CLI, no Claude agents/hooks). Feeds a future `CONTRIBUTING.md`, PR template and the gap review of PRs #270/#271.
@@ -130,7 +130,7 @@ E = explicit (written in a project file); I = implicit (observed in practice, no
 - **Spec-before-code cascade** is documented only inside sprint files and session reports (sprint-018.md:118-134; sprint-017.md:132) and as release step 0 (CLAUDE.md:139-143) — nothing tells a PR author which docs to touch.
 - **DoD is implicit**: 0 CRITICAL, test IDs in validation docs, `Closes #N`, draft-first, release-note landing — none is written as a contributor rule.
 
-### 4.2 Repository governance (verified via `gh`)
+### 4.2 Repository governance (as verified at v0.18.0 — superseded by Sprint 019: LICENSE, hosted CI, contributor process)
 
 - Repo is **private on GitHub Free**: branch protection returns HTTP 403 ("Upgrade to GitHub Pro or make this repository public"); rulesets are likewise unavailable. Five collaborators: the maintainer as admin, four others with **write** → anyone can push to `develop`/`main`, merge their own PR, or tag.
 - Missing files: `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, and **`LICENSE`** although `pyproject.toml:10` declares `license = "MIT"`.

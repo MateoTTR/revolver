@@ -11,7 +11,7 @@ Entries up to v0.18.0 were reconstructed after the fact from the sprint records
 (`docs/sprints/`), the annotated tag messages and the merged pull requests;
 `(#N)` refers to a pull request. From v0.19.0 on, this file is the release-note
 vehicle: each pull request adds its line under `[Unreleased]`, and the release
-moves that block under a dated version heading (see the Release Checklist).
+moves that block under a dated version heading (see `docs/process/release.md`).
 
 ## [Unreleased]
 

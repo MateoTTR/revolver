@@ -25,7 +25,7 @@ and the process grew around that situation:
   (`tests/unit/test_doc_freshness.py`, #355) and a reviewer cascade (specification → validation →
   documentation review) to hold the duplicated prose together — treatments for drift rather than
   its removal.
-- **Tool-specific process.** The process bible (`CLAUDE.md`, 190 lines) mixed project rules with
+- **Tool-specific process.** The process bible (`CLAUDE.md`, 193 lines) mixed project rules with
   the maintainer's session mechanics: worktree agents, a hook that launched the code reviewer
   after `gh pr create`, "run the reviewers in the foreground", French as the conversation
   language, a session-close ritual writing into `docs/sessions/`. The review checklists existed

@@ -21,7 +21,7 @@ E2E tests validate complete user workflows from CLI input to final output. Unlik
 | **LLM** | Mocked | Not called (dummy API key) | Fake server or real Ollama |
 | **GPU** | Not needed | Not needed | Optional (Ollama) |
 | **External deps** | SQLite, filesystem | openevolve (pip) | Ollama, network |
-| **CI trigger** | Every push + PR | Every PR (non-blocking) | Nightly / manual |
+| **CI trigger** | Every push + PR | Every PR (non-blocking) | Manual (on demand) |
 | **Speed** | ~seconds | ~seconds | ~minutes to hours |
 | **What it catches** | CLI command logic, DB state | Field mapping bugs (dacite), constructor crashes | Full workflow regressions |
 
@@ -66,8 +66,8 @@ The fake server returns a configurable deterministic completion (set per test vi
 
 | Environment | LLM backend | Marker | CI trigger |
 |---|---|---|---|
-| CI (standard runner) | Fake LLM server | `@pytest.mark.e2e` | Nightly |
-| CI (self-hosted + GPU) | Ollama + micro-model (`qwen2.5-coder:0.5b`) | `@pytest.mark.e2e_gpu` | Manual |
+| CI (standard runner) | Fake LLM server | `@pytest.mark.e2e` | Manual |
+| GPU host (manual) | Ollama + micro-model (`qwen2.5-coder:0.5b`) | `@pytest.mark.e2e_gpu` | Manual |
 | Developer workstation | Ollama + any model | `@pytest.mark.e2e_gpu` | Manual |
 
 ---
@@ -225,6 +225,6 @@ penalize/drop aggregation, and the coverage keys.
   - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`
   - `@pytest.mark.e2e_gpu` — runs with real Ollama + GPU
   - `@pytest.mark.slow` — always applied to E2E tests
-- **Not blocking CI on push** — runs nightly or on manual trigger only
+- **Not blocking CI on push** — runs on manual trigger only (no nightly workflow)
 - **Cleanup**: each scenario creates its project in `tmp_path` and cleans up on exit
 - **Assertions**: verify final state (DB contents, exported files, exit codes), not intermediate output formatting
