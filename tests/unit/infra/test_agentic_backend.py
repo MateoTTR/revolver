@@ -1,4 +1,4 @@
-"""Tests for the Agentic (Multi-Agent Tool Calling) evolution backend adapter (PR-2)."""
+"""Tests for the Agentic (Multi-Agent Tool Calling) evolution backend adapter (PR-2, DES-009)."""
 
 from datetime import datetime
 import json
@@ -31,8 +31,9 @@ def _make_llm(**kwargs: object) -> LLMEntry:
     return LLMEntry(**defaults)  # type: ignore[arg-type]
 
 
+@pytest.mark.unit
 class TestAgenticBackend:
-    """Test suite for AgenticBackend."""
+    """Test suite for AgenticBackend with strict CI unit-marking."""
 
     def test_registered_in_available_backends(self) -> None:
         """Ensure agentic is exposed as an available backend."""
@@ -71,6 +72,29 @@ class TestAgenticBackend:
         """Verify Python code extraction from LLM markdown response."""
         raw = "```python\ndef solve(data):\n    return 'optimized'\n```"
         assert _extract_code(raw) == "def solve(data):\n    return 'optimized'"
+
+    def test_generate_wrapper_preserves_snapshot_immutability(self, tmp_path: Path) -> None:
+        """Verify generation of wrapper inside run_dir and exposes evaluate_instance."""
+        backend = AgenticBackend()
+        llm = _make_llm()
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "evaluator.py").write_text(
+            "def evaluate_solution(f): return 1.0, {}", encoding="utf-8"
+        )
+
+        run_dir = tmp_path / "run"
+        spec = BackendRunSpec(snapshot_dir=snapshot_dir, run_dir=run_dir, llm=llm)
+
+        wrapper_file = backend.generate_wrapper(spec)
+        assert wrapper_file.exists()
+        # Invariant check: wrapper must be in run_dir, NOT snapshot_dir!
+        assert wrapper_file.parent == run_dir / "agentic-output"
+        assert not (snapshot_dir / "_agentic_evaluator.py").exists()
+
+        content = wrapper_file.read_text(encoding="utf-8")
+        assert "evaluate_instance" in content
+        assert "execute_candidate" in content
 
     @patch("litellm.completion")
     def test_launch_with_tool_calling_delegation(
@@ -133,9 +157,10 @@ def evaluate_solution(fn):
             MagicMock(choices=[MagicMock(message=turn2_msg)]),  # Lead synthesizes final solution
         ]
 
+        run_dir = tmp_path / "run"
         spec = BackendRunSpec(
             snapshot_dir=snapshot_dir,
-            run_dir=tmp_path / "run",
+            run_dir=run_dir,
             llm=llm,
             iterations=1,
         )

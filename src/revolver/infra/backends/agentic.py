@@ -2,7 +2,7 @@
 
 Enables conversational (REPL) multi-turn code generation with Multi-Agent delegation.
 Supports models from OpenAI, Anthropic (Claude), and Google (Gemini) through LiteLLM.
-Traceable to: ADR-007 (Pluggable Evolution Backend).
+Traceable to: ADR-007, DES-009.
 """
 
 from __future__ import annotations
@@ -156,16 +156,33 @@ agentic:
         )
 
     def generate_wrapper(self, spec: BackendRunSpec) -> Path:
-        """Generate sandboxed evaluation wrapper script."""
-        wrapper_path = spec.snapshot_dir / self.wrapper_filename
+        """Generate evaluation wrapper inside the run directory (NOT snapshot_dir).
+
+        Guarantees snapshot immutability (NFR-MLOPS-001).
+        Exposes both `execute_candidate()` and `evaluate_instance()`.
+        """
+        run_dir = spec.run_dir or (spec.snapshot_dir / "run")
+        wrapper_dir = run_dir / self.default_output_subdir
+        wrapper_dir.mkdir(parents=True, exist_ok=True)
+        wrapper_path = wrapper_dir / self.wrapper_filename
+
         wrapper_code = f'''"""Revolver wrapper for Agentic candidate evaluation."""
 import sys
 from pathlib import Path
+from typing import Any
 
-# Insert snapshot dir for problem evaluator imports
+# Insert snapshot dir for problem evaluator imports (Read-Only)
 sys.path.insert(0, str(Path(r"{spec.snapshot_dir}")))
 
-from evaluator import evaluate_solution
+import evaluator
+
+def evaluate_instance(instance_data: Any) -> tuple[float, dict[str, Any]]:
+    """Standard Revolver evaluator pre-flight contract."""
+    if hasattr(evaluator, "evaluate_instance"):
+        return evaluator.evaluate_instance(instance_data)
+    elif hasattr(evaluator, "evaluate_solution"):
+        return evaluator.evaluate_solution(lambda d: None)
+    return 0.0, {{"valid": False, "error": "No evaluate contract found"}}
 
 def execute_candidate(code_str: str) -> dict:
     """Executes the candidate code string safely and evaluates its performance."""
@@ -177,8 +194,13 @@ def execute_candidate(code_str: str) -> dict:
             err = "Function 'solve(data)' not defined or not callable."
             return {{"fitness": 0.0, "valid": False, "error": err}}
 
-        score, metrics = evaluate_solution(solve_func)
-        return {{"fitness": score, "valid": metrics.get("valid", False), "metrics": metrics}}
+        if hasattr(evaluator, "evaluate_solution"):
+            score, metrics = evaluator.evaluate_solution(solve_func)
+            return {{"fitness": score, "valid": metrics.get("valid", False), "metrics": metrics}}
+        elif hasattr(evaluator, "evaluate_instance"):
+            score, metrics = evaluator.evaluate_instance(solve_func)
+            return {{"fitness": score, "valid": metrics.get("valid", False), "metrics": metrics}}
+        return {{"fitness": 0.0, "valid": False, "error": "No compatible evaluate function"}}
     except Exception as exc:
         return {{"fitness": 0.0, "valid": False, "error": f"Execution error: {{exc}}"}}
 '''
@@ -216,7 +238,7 @@ def execute_candidate(code_str: str) -> dict:
         wrapper_module_spec.loader.exec_module(eval_module)
         eval_fn = eval_module.execute_candidate
 
-        # Load initial program
+        # Load initial program from read-only snapshot
         seed_path = spec.snapshot_dir / "initial_program.py"
         best_program = (
             seed_path.read_text(encoding="utf-8")
@@ -355,7 +377,7 @@ def execute_candidate(code_str: str) -> dict:
 
             history.append({"turn": turn, "score": cand_score, "valid": cand_valid})
 
-            # Checkpoint updates
+            # Checkpoint updates strictly in run_dir
             (output_dir / "best_program.py").write_text(best_program, encoding="utf-8")
             (output_dir / "history.json").write_text(
                 json.dumps(
@@ -408,13 +430,9 @@ def execute_candidate(code_str: str) -> dict:
         parent_run_dir: Path,
         on_progress: Callable[[ProgressInfo], None] | None = None,
     ) -> BackendRunResult:
-        """Resume Agentic conversation from previous run."""
+        """Resume Agentic conversation without touching snapshot_dir."""
         self.resume_precheck(parent_run_dir)
-        best_file = parent_run_dir / self.default_output_subdir / "best_program.py"
-        if best_file.exists():
-            (spec.snapshot_dir / "initial_program.py").write_text(
-                best_file.read_text(encoding="utf-8"), encoding="utf-8"
-            )
+        # Never mutate snapshot_dir/initial_program.py directly!
         return self.launch(spec, config, on_progress)
 
     def recover_best_from_checkpoint(self, run_dir: Path) -> RecoveredProgram:
