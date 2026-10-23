@@ -21,17 +21,15 @@ documents are fixed in a separate pass.
   docs/architecture/architecture.md      — architecture overview, layers, data flows, ADR index (§9), DES index (§10), open questions (AQ-*)
   docs/architecture/adr/ADR-NNN-*.md     — architecture decision records
   docs/architecture/design/DES-NNN-*.md  — detailed design documents (expand on ADRs and specs)
-  docs/pocs/poc-*.md                     — POC summaries (validated decisions, key findings)
   ```
 
 - Discover the documents at run time rather than from memory:
-  `ls docs/specs/spec-*.md docs/architecture/adr/ADR-*.md docs/architecture/design/DES-*.md docs/pocs/poc-*.md`.
+  `ls docs/specs/spec-*.md docs/architecture/adr/ADR-*.md docs/architecture/design/DES-*.md`.
 - The traceability chain:
 
   ```
-  ConOps (workflows, OQ-*) → Specs (FR-*, NFR-*) → ADRs (technology decisions)
+  ConOps (workflows, OQ-*) → Specs (FR-*, NFR-*) → ADRs (technology decisions, with the POC findings that validated them)
                                                   → DES (detailed design, decision notes DD-*)
-                                                  → POCs (validation of critical decisions)
   ```
 
 ## Steps
@@ -60,7 +58,7 @@ scope is large, a complete review of the top items plus an explicit
 3. **DES-001 alignment** — data-model changes (tables, columns, migrations) are consistent with the DES-001 schema.
 4. **Architecture alignment** — components, layers and data flows match `architecture.md`.
 5. **Cross-DES consistency** — references to other DES documents resolve and do not contradict them.
-6. **POC alignment** — when a related POC exists, the design follows its conclusions.
+6. **POC alignment** — when the related ADR records proof-of-concept findings (ADR-001, ADR-006), the design follows them.
 7. **Open-question resolution** — when the DES resolves an AQ-* or OQ-*, the resolution is reflected in `architecture.md` and `conops.md`.
 8. **Headers and numbering** — the `**Version**` / `**Date**` / `**Status**` / `**Traceable to**` header block is present and its version line was bumped for the change; DD numbers are sequential and unique within the document.
 
