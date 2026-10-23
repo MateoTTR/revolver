@@ -44,6 +44,8 @@ All local LLM operations (`revolver llm add/start/stop/status`) are implemented 
 | Load time (7B) | 32s | 136s |
 | Install | `curl \| sh` | conda + pip + HF auth |
 
+Lifecycle checks on Ollama: VRAM was fully recovered after unload with no leak over five load/unload cycles, and a model swap took 2.6–3.1 s (7B ↔ 22B) or 7.9–40 s (7B ↔ 72B); the 72B model (23.7 GB at Q4) ran at 1.9 tok/s, too slow for iterative evolution loops.
+
 ## Consequences
 
 ### Positive
@@ -69,7 +71,6 @@ All local LLM operations (`revolver llm add/start/stop/status`) are implemented 
 
 ## References
 
-- [POC: Local LLM Deployment](../../pocs/poc-local-llm.md) — full benchmark data
 - [spec-llm.md](../../specs/spec-llm.md) — FR-LLM-001 to FR-LLM-017
 - [spec-setup.md](../../specs/spec-setup.md) — FR-SET-003 (Ollama detection in `revolver doctor`)
 - ConOps §3.2 (LLM Backends), §4.8 (LLM Registry)

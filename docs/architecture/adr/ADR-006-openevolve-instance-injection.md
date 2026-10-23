@@ -21,6 +21,8 @@ Three strategies were evaluated in POC #12 (7 scenarios, all PASS):
 - **Strategy B**: SQLite side-channel logging (`REVOLVER_INSTANCE_LOG`)
 - **Strategy C**: Callable evaluator passed to `run_evolution(evaluator=fn)`
 
+The seven scenarios covered a baseline OpenEvolve run against an Ollama endpoint, env-var propagation to the worker processes, dataset switching between runs, concurrent SQLite writes from 4 workers, the callable evaluator, the single-instance eval mode and checkpoint resume with an env-based dataset; all passed on OpenEvolve 0.2.26.
+
 ## Decision
 
 Adopt a **hybrid A+B strategy**:
@@ -104,7 +106,7 @@ instead of the in-process dual-mode `evaluate()` returning a dict. See DES-006 �
 
 ## References
 
-- [POC #12 — OpenEvolve Integration](../../pocs/poc-openevolve-integration.md) (full report in `/home/mathi/revolver-pocs/openevolve-integration/`)
+- The OpenEvolve instance-injection proof of concept (former backlog row 12): the report remains readable in the git history before the v0.19.0 tag (ADR-008 A3); the findings this record relies on are stated above
 - [ConOps §4.4](../../conops/conops.md) — Instance Injection Mechanism
 - ConOps OQ-05, OQ-06
 - Architecture AQ-03

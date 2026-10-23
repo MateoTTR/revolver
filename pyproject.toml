@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "revolver"
-version = "0.18.0"
+version = "0.19.0"
 description = "MLOps CLI platform for LLM-guided evolutionary optimization via a pluggable evolution backend (OpenEvolve, ShinkaEvolve)"
 readme = "README.md"
 license = "MIT"
@@ -34,6 +34,12 @@ dev = [
 
 [project.scripts]
 revolver = "revolver.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/MateoTTR/revolver"
+Source = "https://github.com/MateoTTR/revolver"
+Changelog = "https://github.com/MateoTTR/revolver/blob/main/CHANGELOG.md"
+Issues = "https://github.com/MateoTTR/revolver/issues"
 
 # ── Ruff ──────────────────────────────────────────────────────────────────────
 [tool.ruff]
@@ -70,16 +76,20 @@ mypy_path = "src"
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# L3 E2E tests are nightly/manual-only (val-e2e-tests.md): deselected by
+# L3 E2E tests are manual-only (val-e2e-tests.md; no nightly workflow): deselected by
 # default so a plain `pytest tests/` never runs them, even in an env with
 # the engine extras installed. Run them explicitly with `-m e2e`.
-addopts = "-m 'not e2e'"
+# --strict-markers: an unregistered @pytest.mark.<name> fails collection
+# instead of warning, so every marker (incl. per-backend engine markers)
+# must be listed below (validation.md §6.2; adopted S19-27).
+addopts = "-m 'not e2e' --strict-markers"
 markers = [
     "unit: L1 unit tests",
     "integration: L2 integration tests",
     "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
     "shinkaevolve: L2-Shinka tests requiring the shinka-evolve package (no LLM needed)",
     "e2e: L3 end-to-end tests",
+    "e2e_gpu: L3 end-to-end tests against a real Ollama + GPU (manual only; reserved, no test uses it yet)",
     "slow: long-running tests (always applied to E2E tests)",
 ]
 

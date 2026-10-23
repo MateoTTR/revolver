@@ -273,7 +273,8 @@ def _own_pgid(process: BaseProcess) -> int | None:
     parent too. Returns ``None`` on any ``getpgid`` failure.
 
     Note: ``getpgid``/``killpg`` carry an inherent TOCTOU / PID-reuse
-    window; hardening is deferred to v0.18 (docs/sprints/sprint-017a.md).
+    window; hardening was deferred to v0.18 (Sprint 017a decision) and shipped
+    there as the ``base.py`` reap hardening (backlog row 359).
     """
     pid = process.pid
     if pid is None:

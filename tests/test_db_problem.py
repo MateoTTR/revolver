@@ -17,6 +17,8 @@ from revolver.infra.db import (
 )
 from revolver.models.problem import ProblemVersion
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture()
 def db_conn(tmp_path: Path):

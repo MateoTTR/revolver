@@ -1,5 +1,5 @@
 ---
-verified-against: v0.18.0
+verified-against: v0.19.0
 ---
 
 # Initial Program Structure Guide
@@ -18,7 +18,7 @@ A monolithic program forces the LLM to reason about hundreds of lines at once
 and produce large, fragile diffs — especially problematic for smaller models
 (7B–22B parameters).
 
-**Real-world result**: on the TSP demo with codestral:22b (a 22B local model),
+**Measured result**: on the TSP demo with codestral:22b (a 22B local model),
 a monolithic program produced **0% valid diffs** across all iterations. After
 restructuring into small functions, the same model achieved **100% valid diffs**
 and actual optimization improvements.
@@ -458,7 +458,7 @@ and explicit library hints (`scipy.optimize`). This gave the LLM the
 conceptual framework to propose a solution that diff-based mode with a basic
 problem description could never reach.
 
-**Three factors** were necessary simultaneously for this breakthrough:
+**Three factors** were necessary simultaneously for this qualitative jump:
 
 1. **Full-rewrite mode** — freed the LLM from incremental SEARCH/REPLACE diffs
 2. **Enriched problem.md** — gave the LLM domain vocabulary and solver hints
@@ -527,7 +527,7 @@ Before running OpenEvolve on your program:
 | Baseline already near-optimal | LLM has no room to improve — evolution adds nothing | Start with a simpler baseline (see below) |
 | Restricting scientific libraries | LLM can't use proven solvers for complex math problems | Allow scipy/numpy and document it in `problem.md` |
 
-## Lessons from real-world problems
+## Lessons from the demo problems
 
 The guidance above comes from the TSP demo, where a combinatorial problem maps
 naturally to small Python functions. The beamforming demo (v0.8.1) introduced a
@@ -541,7 +541,7 @@ If your initial program already uses a sophisticated algorithm, the LLM has
 very little room to improve it. Evolution works best when the gap between the
 baseline and the theoretical optimum is wide.
 
-**Real-world example**: the beamforming initial program used a worst-point
+**Demo example**: the beamforming initial program used a worst-point
 boosting algorithm that was already near-optimal. Across 5 models (3 local,
 2 remote), the best improvement was only +0.044 dB — the LLM could tweak
 parameters and add minor refinements (multi-init, soft-min weighting, projected
@@ -569,7 +569,7 @@ cripples its ability to find good solutions. An LLM that can use `scipy.optimize
 or `numpy.linalg` can leverage decades of optimized implementations rather than
 reimplementing them from scratch.
 
-**Real-world example**: in the beamforming demo, the LLM could potentially have
+**Demo example**: in the beamforming demo, the LLM could potentially have
 used SDP solvers (`scipy.optimize`, `cvxpy`) or convex formulations to find
 better beamforming weights. But the evaluator environment did not make these
 available, so the LLM was limited to hand-rolled gradient-style tweaks.

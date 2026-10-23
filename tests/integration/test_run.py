@@ -1268,7 +1268,7 @@ def test_run_info_local_token_caveat(project_with_prereqs: dict[str, Path]) -> N
     root = project_with_prereqs["root"]
     global_db_path = project_with_prereqs["global_db_path"]
 
-    # A local-source LLM (e.g. a claude-ollama-bridge endpoint).
+    # A local-source LLM (e.g. a subscription-backed local OpenAI-compatible shim).
     _register_llm(
         global_db_path,
         name="bridge-local",

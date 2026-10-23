@@ -459,17 +459,17 @@ def test_health_prompt_connect_error() -> None:
 @pytest.mark.unit
 def test_normalize_ollama_url_root_form() -> None:
     """A root URL keeps its host for the probe and gains /v1 for the API."""
-    root, api = normalize_ollama_url("http://sirius:11434")
-    assert root == "http://sirius:11434"
-    assert api == "http://sirius:11434/v1"
+    root, api = normalize_ollama_url("http://gpu-box:11434")
+    assert root == "http://gpu-box:11434"
+    assert api == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.unit
 def test_normalize_ollama_url_v1_form() -> None:
     """A /v1 URL is stripped to the root for the probe; the API form is kept."""
-    root, api = normalize_ollama_url("http://sirius:11434/v1")
-    assert root == "http://sirius:11434"
-    assert api == "http://sirius:11434/v1"
+    root, api = normalize_ollama_url("http://gpu-box:11434/v1")
+    assert root == "http://gpu-box:11434"
+    assert api == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.unit
@@ -484,23 +484,23 @@ def test_normalize_ollama_url_none_defaults_localhost() -> None:
 @pytest.mark.unit
 def test_normalize_ollama_url_strips_trailing_slash() -> None:
     """Trailing slashes are normalized away in both forms."""
-    root, api = normalize_ollama_url("http://sirius:11434/v1/")
-    assert root == "http://sirius:11434"
-    assert api == "http://sirius:11434/v1"
+    root, api = normalize_ollama_url("http://gpu-box:11434/v1/")
+    assert root == "http://gpu-box:11434"
+    assert api == "http://gpu-box:11434/v1"
 
-    root2, api2 = normalize_ollama_url("http://sirius:11434/")
-    assert root2 == "http://sirius:11434"
-    assert api2 == "http://sirius:11434/v1"
+    root2, api2 = normalize_ollama_url("http://gpu-box:11434/")
+    assert root2 == "http://gpu-box:11434"
+    assert api2 == "http://gpu-box:11434/v1"
 
 
 @pytest.mark.unit
 def test_normalize_ollama_url_schemeless_defaults_http() -> None:
     """A scheme-less host (as OLLAMA_HOST is often set) defaults to http://."""
-    root, api = normalize_ollama_url("sirius:11434")
-    assert root == "http://sirius:11434"
-    assert api == "http://sirius:11434/v1"
+    root, api = normalize_ollama_url("gpu-box:11434")
+    assert root == "http://gpu-box:11434"
+    assert api == "http://gpu-box:11434/v1"
 
     # Scheme-less /v1 form is handled too.
-    root2, api2 = normalize_ollama_url("sirius:11434/v1")
-    assert root2 == "http://sirius:11434"
-    assert api2 == "http://sirius:11434/v1"
+    root2, api2 = normalize_ollama_url("gpu-box:11434/v1")
+    assert root2 == "http://gpu-box:11434"
+    assert api2 == "http://gpu-box:11434/v1"

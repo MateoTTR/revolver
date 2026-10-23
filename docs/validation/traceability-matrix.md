@@ -1,7 +1,7 @@
 # Revolver — Traceability Matrix
 
-**Version**: 0.8 — S18 sync (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018): FR-RUN-052..057, FR-PRB-016, FR-SOL-021 rows added by the cascade, flipped to Implemented at the v0.18.0 release; FR-RUN-019/020, FR-RUN-047, FR-SOL-011/012, FR-EVL-021 amended; migration v14 + reap-hardening + doc-lint + R2 `llm_timeout` + #355 freshness test rows
-**Date**: 2026-07-05
+**Version**: 0.9 — v0.19.0 pre-release validation review: every cited test id re-verified against the test sources (FR-LLM-020..025, FR-RUN-031/040/041/044/045/046, doc-guard ids repointed), FR-BEN-019/020 + FR-RUN-042 + NFR-043 rows added, marker-driven level relabels, §13 recomputed with a stated method. Previous: 0.8 — S18 sync (FR-RUN-052..057, FR-PRB-016, FR-SOL-021 rows; migration v14 + reap-hardening + doc-lint + R2 `llm_timeout` + #355 freshness test rows)
+**Date**: 2026-10-24
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Validation Overview](validation.md)
 
@@ -68,12 +68,12 @@ Design: [DES-002](../architecture/design/DES-002-llm-subcommands.md), [DES-001 �
 | FR-LLM-017 | MUST | DES-002, NFR-050 | L1 | `test_db_llm::test_api_key_env_stored_not_value` | Implemented |
 | FR-LLM-018 | ~~SHOULD~~ | DES-002, DES-005 §4.5 | — | — | **Removed** (S16 / #300) — `--input-cost`/`--output-cost` flags and the `llms` pricing columns dropped (migration v10); cost no longer reported. Mirrors FR-RUN-030. |
 | FR-LLM-019 | SHOULD | DES-002, DES-005 | L2 | `integration/test_llm::test_llm_add_temperature` | Implemented |
-| FR-LLM-020 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_create` | Implemented |
-| FR-LLM-021 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_add_member` | Implemented |
-| FR-LLM-022 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_list` | Implemented |
-| FR-LLM-023 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_info` | Implemented |
-| FR-LLM-024 | MUST | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_ensemble_remove_cascade` | Implemented |
-| FR-LLM-025 | SHOULD | DES-002 §ensemble | L2 | `integration/test_llm_ensemble::test_weight_sum_warning` | Implemented |
+| FR-LLM-020 | MUST | DES-002 §ensemble | L2 | `integration/test_ensemble::TestEnsembleCreate::test_create_human`, `::test_create_duplicate` | Implemented |
+| FR-LLM-021 | MUST | DES-002 §ensemble | L2 | `integration/test_ensemble::TestEnsembleAdd::test_add_member_human`, `::test_add_member_llm_not_found` | Implemented |
+| FR-LLM-022 | MUST | DES-002 §ensemble | L2 | `integration/test_ensemble::TestEnsembleList::test_list_human_populated` | Implemented |
+| FR-LLM-023 | MUST | DES-002 §ensemble | L2 | `integration/test_ensemble::TestEnsembleInfo::test_info_human` | Implemented |
+| FR-LLM-024 | MUST | DES-002 §ensemble | L2 | `integration/test_ensemble::TestEnsembleRemove::test_remove_human_force`, `::test_remove_not_found` | Implemented |
+| FR-LLM-025 | SHOULD | DES-002 §ensemble | L1 | `unit/core/test_ensemble::TestAddEnsembleMember::test_weight_sum_warning` | Implemented |
 | FR-LLM-026 | SHOULD | ADR-007 A1/A3, DES-002 §2.1/§2.8 | L1 | `unit/test_db_migration_v12::test_reasoning_effort_round_trips_through_crud`, `unit/test_db_migration_v13::test_fresh_global_db_has_member_reasoning_effort_column` | Implemented (S17 — `reasoning_effort` registry field on `llms` + `ensemble_members`; `llm add`/`update`/`ensemble add --reasoning-effort`) |
 | FR-LLM-026 | SHOULD | ADR-007 A3, DES-002 §5/§6 | L1 | `unit/test_run_ensemble::test_oe_ensemble_reasoning_effort_per_member` | Implemented (S17 — OE maps effort **per member** onto `llm.models[].reasoning_effort`) |
 | FR-LLM-026 | SHOULD | ADR-007 A3, DES-002 §5/§6 | L1 | `unit/infra/test_shinka_backend::test_shinka_reasoning_effort_global_pool`, `::test_shinka_reasoning_effort_disagreement_picks_highest`, `::test_shinka_reasoning_effort_inert_local_warns` | Implemented (S17 — Shinka maps effort to the **single global** `llm_kwargs.reasoning_efforts` pool; highest-effort-wins on member disagreement + warn; inert-for-local warn) |
@@ -180,35 +180,36 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_default` | Implemented |
 | FR-RUN-006 | MUST | DES-005 §config | L2-OE | `integration/test_run_oe::test_build_config_cascade_evaluation_user_override` | Implemented |
 | FR-RUN-008 | MUST | DES-005 §post-run | L1 | `unit/infra/test_openevolve::test_best_score_from_program_object` | Implemented |
-| FR-RUN-031 | MUST | DES-005 | L2 | `integration/test_run::test_run_oe_failure_marks_failed` | Implemented |
+| FR-RUN-031 | MUST | DES-005 | L2 | `test_core_run::test_run_oe_failure_marks_failed` | Implemented (`integration`-marked test in the historic top-level `tests/test_core_run.py` suite) |
 | FR-RUN-043 | MUST | DES-005 §post-run | L1 | `test_core_run::test_launch_run_post_processing_failure_sets_completed_with_errors` | Implemented |
 | FR-RUN-032 | MUST | DES-005 §post-run | L1 | `test_core_run::test_handle_post_run_failure_sets_completed_with_errors` | Implemented |
 | FR-RUN-033 | MUST | DES-005 §extract | L2 | `integration/test_solution::test_extract_accepts_completed_with_errors` | Implemented |
 | FR-RUN-034 | MUST | DES-005 §resume | L1, L2 | `test_core_run::test_resume_run_creates_new_run`, `integration/test_run::test_run_resume` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_delete_run_returns_true` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_delete_run_returns_false_not_found` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_delete_run_cascades_solutions` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_running_run_raises` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_by_id` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_force_skips_prompt` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_not_found` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_json_mode_requires_force` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_json_mode_with_force` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_missing_directory` | Implemented |
-| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::test_run_delete_user_cancels` | Implemented |
-| FR-RUN-036 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_force_skips_prompt` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::TestDeleteRunDB::test_delete_run_returns_true` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::TestDeleteRunDB::test_delete_run_returns_false_not_found` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::TestDeleteRunDB::test_delete_run_cascades_solutions` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L1 | `test_run_delete::TestDeleteRunDB::test_run_delete_running_run_raises` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_by_id` | Implemented (CLI class, `integration`-marked — relabelled L2 at v0.19.0) |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_force_skips_prompt` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_not_found` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_json_mode_requires_force` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_json_mode_with_force` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_missing_directory` | Implemented |
+| FR-RUN-035 | MUST | DES-005 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_user_cancels` | Implemented |
+| FR-RUN-036 | MUST | DES-005 §4.8 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_force_skips_prompt` | Implemented |
 | FR-RUN-036 | MUST | DES-005 §4.8 | L2 | `integration/test_run::test_run_delete_all` | Implemented |
-| FR-RUN-037 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_delete_run_cascades_solutions` | Implemented |
+| FR-RUN-037 | MUST | DES-005 §4.8 | L1 | `test_run_delete::TestDeleteRunDB::test_delete_run_cascades_solutions` | Implemented |
 | FR-RUN-037 | MUST | DES-005 §4.8 | L1 | `test_db_migration_v5::test_cascade_delete_run` | Implemented |
-| FR-RUN-038 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_by_id` | Implemented |
-| FR-RUN-038 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_missing_directory` | Implemented |
-| FR-RUN-039 | MUST | DES-005 §4.8 | L1 | `test_run_delete::test_run_delete_json_mode_requires_force` | Implemented |
+| FR-RUN-038 | MUST | DES-005 §4.8 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_by_id` | Implemented |
+| FR-RUN-038 | MUST | DES-005 §4.8 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_missing_directory` | Implemented |
+| FR-RUN-039 | MUST | DES-005 §4.8 | L2 | `test_run_delete::TestRunDeleteCLI::test_run_delete_json_mode_requires_force` | Implemented |
 | FR-RUN-039 | MUST | DES-005 §4.8 | L2 | `integration/test_run::test_run_delete_all_no_force` | Implemented |
-| FR-RUN-040 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_temperature_flag` | Implemented |
-| FR-RUN-041 | SHOULD | DES-005 | L2 | `integration/test_run::test_run_parallel_flag` | Implemented |
-| FR-RUN-044 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_type_stored` | Implemented |
-| FR-RUN-045 | MUST | DES-005 §4.3.1, DES-001 | L1 | `unit/core/test_run::test_llm_snapshot_stored` | Implemented |
-| FR-RUN-046 | MUST | DES-005 §4.3 | L2 | `integration/test_run::test_run_with_ensemble` | Implemented |
+| FR-RUN-040 | SHOULD | DES-005 | L1, L2 | `unit/infra/test_openevolve::TestBuildConfig::test_run_temperature_flag`, `integration/test_sprint_009a::test_resume_cli_temperature_flag` (flag exposed on `run resume --help`) | Implemented |
+| FR-RUN-041 | SHOULD | DES-005 | L1, L2 | `unit/infra/test_openevolve::TestBuildConfig::test_run_parallel_flag`, `integration/test_sprint_009a::test_resume_cli_parallel_flag` (flag exposed on `run resume --help`) | Implemented |
+| FR-RUN-042 | — | — | — | — | **Deleted** — never defined (numbering gap since Sprint 013; spec-run marks the id `[DELETED]`, no behavior owed) |
+| FR-RUN-044 | MUST | DES-005 §4.3.1, DES-001 | L1, L2 | `unit/test_run_ensemble::TestLlmSnapshot::test_single_llm_snapshot`, `::test_ensemble_snapshot`; `integration/test_run::test_run_start_single_llm_no_regression`, `::test_run_start_with_ensemble` | Implemented |
+| FR-RUN-045 | MUST | DES-005 §4.3.1, DES-001 | L1, L2 | `unit/test_run_ensemble::TestLlmSnapshot::test_single_llm_snapshot`, `::test_ensemble_snapshot`; `integration/test_run::test_run_start_llm_snapshot_single` | Implemented |
+| FR-RUN-046 | MUST | DES-005 §4.3 | L2 | `integration/test_run::test_run_start_with_ensemble` | Implemented |
 | FR-RUN-046 | MUST | ADR-007 A2, DES-005 §4.2 | L2-Shinka | `integration/test_run_shinka::test_shinka_selection_fixed_prior_probs` | Implemented (S17 — Shinka bandit ensemble, weights → `FixedSampler.prior_probs`; supersedes the "weights dropped/warned" framing) |
 | FR-RUN-047 | MUST | ADR-007, DES-005 §14.1, DES-001 §3.5 | L2 | `integration/test_run::test_run_backend_flag_and_default` | Implemented |
 | FR-RUN-047 | MUST | ADR-007, DES-005 §14.1 | L2 | `integration/test_run::test_resume_inherits_parent_backend` | Implemented |
@@ -223,7 +224,7 @@ Design: [DES-005](../architecture/design/DES-005-run-orchestration.md), [DES-001
 | B9 (no FR) | infra | DES-005 §4.2 | L1 | `unit/infra/test_openevolve::test_config_override_noop_key_warns`, `unit/infra/test_shinka_backend::test_config_override_noop_key_warns` | Implemented (S17 / B9 — unrecognized `--config-override` key warns naming the dropped key, not a silent no-op; recognized key does not warn) |
 | FR-RUN-019 + FR-RUN-020 | MUST | DES-005 §7, DES-006 | L2 | `test_core_run::test_post_run_eval_persists_via_evaluate_solution` | Implemented (S18 / U11 #368 commit A — amended: post-run training eval persists via `core.eval.evaluate_solution` into `eval_metadata`/`eval_instances` (no longer stderr-only); the hardcoded 300 s timeout is gone (eval-path timeout); failure stays warn-only; DB-contention guard vs the still-open launch connection; FR-RUN-020's "accessible via `revolver eval results`" becomes literally true) |
 | FR-RUN-047 | MUST | ADR-007, DES-005 §2.1/§14.1, DES-003 §version | L2 | `integration/test_run::test_run_backend_resolution_order_and_mismatch_warn` | Implemented (S18 / U4 #369 — amended: resolution order explicit `--backend` > the version's stored backend (FR-PRB-016) > default `openevolve`, via the `None` sentinel; an explicit mismatch **warns** on stderr (never errors); `--dry-run` resolves identically; resume still inherits the parent run's backend) |
-| FR-RUN-052 | MUST | DES-005 §4.5 | L2 | `test_run_population::test_oe_display_prefers_combined_score` | Implemented (S18 / U13 #367 i — `run status`/`run population`/checkpoint best-score fallback prefer a numeric `combined_score` over the sum-of-numeric-metrics; sum is the fallback only when no `combined_score` exists; no crash on a metrics dict lacking it; lands in the existing top-level `tests/test_run_population.py` suite — unprefixed ID per the validation.md §8.1 top-level exception) |
+| FR-RUN-052 | MUST | DES-005 §4.5 | L1 | `test_run_population::test_oe_display_prefers_combined_score` | Implemented (S18 / U13 #367 i — `run status`/`run population`/checkpoint best-score fallback prefer a numeric `combined_score` over the sum-of-numeric-metrics; sum is the fallback only when no `combined_score` exists; no crash on a metrics dict lacking it; lands in the existing top-level `tests/test_run_population.py` suite — unprefixed ID per the validation.md §8.1 top-level exception. Relabelled L1 at v0.19.0: the test drives `parse_population` / `read_checkpoint_best_score` directly and is `unit`-marked — the suite was unmarked before v0.19.0 and therefore absent from the CI selection) |
 | FR-RUN-053 | MUST | DES-005 §3.2 | L2 | `integration/test_run::test_wrapper_coverage_keys_not_in_score` | Implemented (S18 / U13 #367 ii — generated wrapper on both backends emits `instances_valid`/`instances_total` coverage keys + a timeout side-channel; reserved `instances_` prefix excluded from the metric mean, cross FR-EVL-021) |
 | FR-RUN-053 | MUST | DES-005 §3.2 | L2-Shinka | `integration/test_shinka_wrapper::test_shinka_wrapper_timeout_branch` | Implemented (S18 / U13 #367 ii — the Shinka wrapper's new **distinct `TimeoutError` branch** (previously one catch-all) records the timed-out instance on the side-channel) |
 | FR-RUN-054 | MUST | DES-005 §2.1/§3.2 | L2 | `integration/test_run::test_on_timeout_penalize_vs_drop`, `::test_evaluation_on_timeout_validation` | Implemented (S18 / U13 #367 iii — `evaluation.on_timeout: penalize\|drop` (default **penalize** — release-noted fitness-landscape change) + finite `evaluation.timeout_score` (default 0.0), parsed at the shared launch point on both backends; values validated at run/dry-run (bad value → exit 1); `drop` restores the 0.17 survivor-mean; zero-timeout runs identical under both policies; resume inherits the parent wrapper's baked policy) |
@@ -242,7 +243,7 @@ Design: [DES-006](../architecture/design/DES-006-eval-loop.md), [DES-001 §eval_
 | FR ID | Pri | DES Ref | Level | Test ID | Status |
 |---|---|---|---|---|---|
 | FR-EVL-001 | MUST | DES-006 §loop | L1 | `unit/core/test_eval::test_iterates_all_instances` | Planned |
-| FR-EVL-002 | MUST | DES-006 §env, ADR-006 | L1 | `test_evaluator_runner::test_env_vars_set` | Implemented |
+| FR-EVL-002 | MUST | DES-006 §env, ADR-006 | L2 | `test_evaluator_runner::TestRunInstance::test_env_vars_set` | Implemented (module `integration`-marked, runs the evaluator in a real subprocess — relabelled L2 at v0.19.0) |
 | FR-EVL-003 | MUST | DES-006 §eval | L1 | `unit/core/test_eval::test_uses_version_evaluator` | Planned |
 | FR-EVL-004 | MUST | DES-006 §collect | L1 | `unit/core/test_eval::test_collects_metrics_and_time` | Planned |
 | FR-EVL-005 | MUST | DES-006 §store, DES-001 | L2 | `integration/test_eval::test_stores_per_instance_results` | Implemented |
@@ -253,7 +254,7 @@ Design: [DES-006](../architecture/design/DES-006-eval-loop.md), [DES-001 §eval_
 | FR-EVL-010 | MUST | DES-006 §error | L2 | `integration/test_eval::test_handles_instance_failure` | Implemented |
 | FR-EVL-011 | MUST | DES-006 §error | L1 | `unit/core/test_eval::test_records_unsolved_instances` | Planned |
 | FR-EVL-012 | SHOULD | DES-006 §progress | L2 | `integration/test_eval::test_progress_bar` | Planned |
-| FR-EVL-013 | SHOULD | DES-006 §timeout | L1 | `test_evaluator_runner::test_timeout` | Implemented |
+| FR-EVL-013 | SHOULD | DES-006 §timeout | L2 | `test_evaluator_runner::TestRunInstance::test_timeout` | Implemented (module `integration`-marked — relabelled L2 at v0.19.0) |
 | FR-EVL-014 | MAY | DES-006 | — | — | Deferred (v2) |
 | FR-EVL-015 | MUST | DES-006 §results | L2 | `integration/test_eval::test_results_command` | Implemented |
 | FR-EVL-016 | MUST | DES-006 §results | L2 | `integration/test_eval::test_results_per_instance` | Implemented |
@@ -326,6 +327,8 @@ Design: [DES-007](../architecture/design/DES-007-benchmark-design.md), [DES-001 
 | FR-BEN-018 | MUST | DES-007 | L2 | `integration/test_benchmark::test_benchmark_delete_confirm_prompt` | Implemented |
 | FR-BEN-018 | MUST | DES-007 | L2 | `integration/test_benchmark::test_benchmark_delete_nonexistent` | Implemented |
 | FR-BEN-018 | MUST | DES-007 | L2 | `integration/test_benchmark::test_benchmark_delete_force` | Implemented |
+| FR-BEN-019 | MUST | DES-007 | L2 | `integration/test_benchmark::test_benchmark_delete_force` | Implemented (`delete --force` skips the prompt; benchmark and `benchmark_solutions` rows removed) |
+| FR-BEN-020 | MUST | DES-007, NFR-003 | L2 | `integration/test_benchmark::test_benchmark_delete_json_requires_force` | Implemented (v0.19.0 pre-release review — `--json` without `--force` exits 1 naming `--force`; the benchmark stays) |
 
 ---
 
@@ -392,8 +395,8 @@ Design: [Architecture §4.2](../architecture/architecture.md)
 | NFR-052 | MUST | Security | L1 | `unit/test_core_benchmark::test_no_secrets_in_csv_export` | Implemented |
 | NFR-060 | MUST | Deploy | — | Verified by packaging (pyproject.toml) | — |
 | NFR-061 | MUST | Deploy | — | Verified by packaging (pyproject.toml) | — |
-| #354 doc-lint (no FR) | infra | Docs — CLI-tree lint | L2 | `test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve` | Implemented (S18 / #354 — every **line-initial** fenced `revolver` invocation in the docs resolves in the Typer CLI tree; a renamed/removed flag is caught; deprecated `--tag` denylisted; untagged fences parsed; inline-prose backtick mentions out of scope; L2 by scope but runs under the `unit` CI marker in the blocking selection, sprint-018 S18-21 — validation.md §8.1 marker-vs-level rule) |
-| #355 freshness stamps (no FR) | infra | Docs — verified-against stamps | L1 | `test_doc_freshness::TestDocFreshnessCorpus::test_corpus_is_stamped_and_fresh` | Implemented (S18 / #355 PR #256 — guides + specs-side E2E walkthrough carry `verified-against` front-matter; >1-minor lag or missing stamp fails CI incl. docs-only PRs via doc-lint.yml; fresh-major X.0 grace window) |
+| #354 doc-lint (no FR) | infra | Docs — CLI-tree lint | L1 | `unit/test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, `::test_corpus_includes_contributor_docs` | Implemented (S18 / #354 — every **line-initial** fenced `revolver` invocation in the docs resolves in the Typer CLI tree; a renamed/removed flag is caught; deprecated `--tag` denylisted; untagged fences parsed; inline-prose backtick mentions out of scope; L2 by scope but runs under the `unit` CI marker in the blocking selection, sprint-018 S18-21 — validation.md §8.1 marker-vs-level rule. `test_corpus_includes_contributor_docs` (#290, issue #279) pins the corpus composition: the root Markdown files are linted, `CHANGELOG.md` is excluded, every tracked root `*.md` is classified) |
+| #355 freshness stamps (no FR) | infra | Docs — verified-against stamps | L1 | `unit/test_doc_freshness::TestDocFreshnessCorpus::test_corpus_is_stamped_and_fresh` | Implemented (S18 / #355 PR #256 — guides + specs-side E2E walkthrough carry `verified-against` front-matter; >1-minor lag or missing stamp fails CI incl. docs-only PRs via the doc-lint job of ci.yml; fresh-major X.0 grace window) |
 
 ### NFRs with indirect coverage
 
@@ -406,6 +409,7 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | NFR-040 | MUST | Compat. | CI pipeline | Linux enforced by CI runner OS; WSL2 verified by dev environment |
 | NFR-041 | MUST | Compat. | FR-SET-004 | GPU detection tested via `doctor` checks |
 | NFR-042 | MUST | Compat. | FR-SET-003 | Ollama detection tested via `doctor` checks |
+| NFR-043 | SHOULD | Compat. | E2E Sc.2 (planned) | Graceful degradation without Ollama (remote-only LLMs keep working) — covered by the remote-only E2E scenario once implemented; no dedicated L1/L2 test |
 | NFR-044 | MUST | Compat. | Architecture | Network isolation enforced by mocking in L1/L2; no outbound calls except explicit LLM/Ollama |
 | NFR-062 | MUST | Deploy | FR-SET-006, FR-SET-009 | System deps detected (not managed) — tested via doctor fixable/system classification and setup never-install-system |
 | NFR-063 | MUST | Deploy | FR-SET-001..005 | `doctor` checks all deps — tested per dependency type |
@@ -422,7 +426,7 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | E2E Scenario | FRs Covered | Status |
 |---|---|---|
 | **Scenario 1 — Alice / Job-Shop** | FR-SET-001..005, FR-LLM-001..010, FR-PRJ-001..006, FR-PRB-001..009, FR-DAT-001..007, FR-RUN-001..012, FR-SOL-001..008, FR-EVL-001..007, FR-BEN-001..009 | Planned |
-| **Scenario 2 — Remote-Only (TBD)** | FR-LLM-001/015/017/018, FR-RUN-015/028/029, NFR-043 | Planned |
+| **Scenario 2 — Remote-Only (TBD)** | FR-LLM-001/015/017, FR-RUN-015/028/029, NFR-043 | Planned |
 | **Scenario 3 — ShinkaEvolve Backend Happy Path** | FR-RUN-047/048, NFR-024/061, FR-SET-002 | Implemented (S14) |
 | **Scenario 4 — Shinka Bandit Ensemble** | FR-RUN-046/049/050, FR-LLM-026 | Planned (S17 — 2+ members, `--selection ucb`, adaptive bandit against the fake server) |
 | **Scenario 5 — Timeout Penalize-vs-Drop** | FR-RUN-052/053/054/055, FR-EVL-021 | Planned (S19 carry-over — was S18-optional per sprint-018 §doc-cascade; the penalize/drop semantics are L2-covered by `test_on_timeout_penalize_vs_drop`; this row is the L3 fake-server variant: a hanging instance under default `penalize` vs `--config-override evaluation.on_timeout=drop`) |
@@ -433,27 +437,36 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 
 | Spec File | Total Reqs | MUST | SHOULD | MAY | L1 Tests | L2 Tests | L3 (E2E) | Untested |
 |---|---|---|---|---|---|---|---|---|
-| spec-project | 8 | 6 | 2 | 0 | 0 | 8 | via Sc.1 | 0 |
-| spec-llm | 26 | 18 | 7 | 0 | 4 | 14 | via Sc.1 | 6 |
-| spec-problem | 16 | 11 | 4 | 1 | 2 | 11 | via Sc.1 | 4 |
-| spec-dataset | 16 | 12 | 2 | 0 | 2 | 14 | via Sc.1 | 0 |
-| spec-run | 56 | 44 | 11 | 0 | 30 | 28 | via Sc.1 | 12 |
-| spec-eval | 21 | 18 | 2 | 1 | 7 | 10 | via Sc.1 | 5 (incl. 1 deferred) |
-| spec-solution | 21 | 19 | 2 | 0 | 2 | 18 | via Sc.1 | 3 |
-| spec-benchmark | 20 | 15 | 4 | 0 | 7 | 10 | via Sc.1 | 1 |
-| spec-setup | 17 | 10 | 7 | 0 | 4 | 13 | — | 0 |
-| NFR (direct) | 28 | 19 | 9 | 0 | 11 | 12 | — | 5 (3 perf manual + 2 planned) |
-| NFR (indirect) | 13 | 8 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **242** | **180** | **55** | **2** | **79** | **148** | **5 scenarios (4 planned)** | **36** |
+| spec-project | 8 | 6 | 2 | 0 | 0 | 8 | 0 (Sc.1 planned) | 0 |
+| spec-llm | 26 | 18 | 7 | 0 | 4 | 15 | 0 (Sc.1/2 planned) | 6 |
+| spec-problem | 16 | 11 | 4 | 1 | 2 | 11 | 0 (Sc.1 planned) | 4 |
+| spec-dataset | 16 | 14 | 2 | 0 | 2 | 13 | 0 (Sc.1 planned) | 1 |
+| spec-run | 57 | 44 | 11 | 0 | 26 | 34 | 2 (Sc.3) | 7 |
+| spec-eval | 21 | 18 | 2 | 1 | 3 | 12 | 0 (Sc.1/5 planned) | 7 (incl. 1 deferred) |
+| spec-solution | 21 | 20 | 1 | 0 | 2 | 16 | 0 (Sc.1 planned) | 3 |
+| spec-benchmark | 20 | 17 | 3 | 0 | 7 | 12 | 0 (Sc.1 planned) | 1 |
+| spec-setup | 17 | 10 | 7 | 0 | 6 | 11 | 1 (Sc.3) | 0 |
+| NFR (direct) | 27 | 20 | 7 | 0 | 6 | 11 | 2 (Sc.3) | 9 (3 perf manual + NFR-060 packaging + 5 Planned) |
+| NFR (indirect) | 14 | 9 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
+| **Total** | **243** | **187** | **51** | **2** | **58** | **143** | **5** (Sc.3 only; Sc.1/2/4/5 planned) | **38** |
+
+Counting method (recomputed at v0.19.0 with a script over the real files; the previous recount dated from v0.17):
+- **Total / MUST / SHOULD / MAY** — the FR rows (`| FR-XXX-NNN | PRI |`) of each `docs/specs/spec-*.md`; the three Removed / deleted rows (FR-LLM-018, FR-RUN-030, FR-RUN-042) count in Total only, hence Total − (MUST + SHOULD + MAY) = 3. NFR priorities come from `specifications.md` §3; "direct" = ids in the §11 main table (27), "indirect" = the §11 indirect table (14) — together all 41 NFRs.
+- **L1 / L2 Tests** — distinct requirement ids of the spec with at least one matrix row whose Status is `Implemented` / `Passing` and whose Level cell contains L1 (resp. L2, L2-OE or L2-Shinka); an id with both levels counts once in each column.
+- **L3 (E2E)** — distinct ids covered by a §12 scenario whose Status is `Implemented` (today only Scenario 3: FR-RUN-047/048, FR-SET-002, NFR-024/061).
+- **Untested** — ids with a priority and no `Implemented` row at any level: Planned-only (28 FRs + 5 NFRs), the deferred MAY FR-EVL-014, the three manual performance NFRs and the packaging-verified NFR-060.
+- Row basis for comparison: 286 rows across §2–§11 — 241 `Implemented`, 36 `Planned`, 9 without a test (Removed / Deleted / Deferred / manual / packaging).
 
 Notes:
+- **Traceability debt (v0.19.0)**: fifteen MUST requirements are still traced to Planned tests only — FR-LLM-005/010/015, FR-PRB-005, FR-DAT-004, FR-RUN-011/015, FR-EVL-003/004/006/011/017, FR-SOL-004/005/010; tracked as issue #297 (traceability debt), to be resolved in Sprint 020.
 - FR-RUN-030 (cost estimation) and FR-LLM-018 (`--input-cost`/`--output-cost` pricing) are both **Removed** (S15 / #300, completed in S16): cost is no longer reported. The `estimate_cost()` helper and the LLM pricing flags/columns were dropped — schema migration v10 removes the two `llms` pricing columns. Both rows carry no test (status **Removed**); their former coverage is dropped from the counts. The renamed test `test_llm_add_remote_with_pricing` → `test_llm_add_remote` is re-pointed to FR-LLM-001.
 - Schema migrations v10 (drop `llms` pricing columns, #300) and v11 (widen `datasets.split` to `both`, UX-3) add 4 new L1 migration-test rows under NFR-013 (`unit/test_db_migration_v10`, `unit/test_db_migration_v11`).
 - **S17 (v0.17 multi-LLM ensemble, ADR-007 Amendment A1–A5)**: FR-RUN-049 (`--selection`, incl. OE-rejects-non-weighted), FR-RUN-050 (`--llm-weight`), FR-RUN-051 (B7 OE best-on-interrupt via `solution extract --from-checkpoint`), FR-LLM-026 (per-LLM `reasoning_effort`, both backends), and FR-EVL-021 (B1 aggregation numeric guard) added. FR-RUN-046 gains a second row targeting the Shinka **bandit** ensemble (`FixedSampler.prior_probs`), superseding the "weights dropped/warned" framing (ADR-007 A2). B2 (OE post-run teardown) gets its own regression row. Schema migrations v12 (`llms.reasoning_effort`) and v13 (`ensemble_members.reasoning_effort`) add 2 L1 migration-test rows under NFR-013. All S17 rows are now **Implemented** (code shipped and passing); the repointed Test IDs reference the real test functions. The new L3 Shinka bandit-ensemble scenario is tracked in §12 (E2E Scenario 4).
-- **S18 (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018)**: FR-RUN-052 (display prefers `combined_score`), FR-RUN-053 (wrapper `instances_*` coverage keys + timeout side-channel), FR-RUN-054 (`evaluation.on_timeout` penalize|drop + `timeout_score`, default **penalize**), FR-RUN-055 (dual-score `run info` labels), FR-RUN-056 (`validate_seed_metrics` pre-flight hook), FR-RUN-057 (default checkpoint cadence, SHOULD), FR-PRB-016 (`problem_versions.backend`, migration v14), and FR-SOL-021 (`solution extract --rank N`/`--program-id` gated on `capabilities().top_n_extraction`) added — all rows enter as **Planned** with the sprint-018 L2 test IDs and flip to Implemented as the S18 PRs land (S18 rows were flipped to Implemented in the v0.18.0 pre-release pass). Amended: FR-RUN-019/020 (post-run eval persists via `core.eval.evaluate_solution`), FR-RUN-047 (backend resolution explicit > version > default + mismatch warn), FR-SOL-011/012 (rank-1 default / duplicate per `(run_id, rank)`), FR-EVL-021 (reserved `instances_*` keys excluded from aggregation). Migration v14 adds 1 L1 test row under NFR-013 (v12/v13 precedent). Two no-FR infra rows: #359 reap hardening (`test_reaper_grandchild_killpg`, §6) and #354 doc command-lint (`test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, §11). The new L3 penalize-vs-drop scenario is tracked in §12 (E2E Scenario 5).
+- **S18 (v0.18 eval-honesty semantic slice + top-N flagship, sprint-018)**: FR-RUN-052 (display prefers `combined_score`), FR-RUN-053 (wrapper `instances_*` coverage keys + timeout side-channel), FR-RUN-054 (`evaluation.on_timeout` penalize|drop + `timeout_score`, default **penalize**), FR-RUN-055 (dual-score `run info` labels), FR-RUN-056 (`validate_seed_metrics` pre-flight hook), FR-RUN-057 (default checkpoint cadence, SHOULD), FR-PRB-016 (`problem_versions.backend`, migration v14), and FR-SOL-021 (`solution extract --rank N`/`--program-id` gated on `capabilities().top_n_extraction`) added — all rows enter as **Planned** with the sprint-018 L2 test IDs and flip to Implemented as the S18 PRs land (S18 rows were flipped to Implemented in the v0.18.0 pre-release pass). Amended: FR-RUN-019/020 (post-run eval persists via `core.eval.evaluate_solution`), FR-RUN-047 (backend resolution explicit > version > default + mismatch warn), FR-SOL-011/012 (rank-1 default / duplicate per `(run_id, rank)`), FR-EVL-021 (reserved `instances_*` keys excluded from aggregation). Migration v14 adds 1 L1 test row under NFR-013 (v12/v13 precedent). Two no-FR infra rows: #359 reap hardening (`test_reaper_grandchild_killpg`, §6) and #354 doc command-lint (`unit/test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, §11). The new L3 penalize-vs-drop scenario is tracked in §12 (E2E Scenario 5).
 - Run delete: FR-RUN-035 keeps its 11 entries; FR-RUN-036..039 (previously absorbed under FR-RUN-035) now have **dedicated rows** mapped to `DES-005 §4.8` and the real `test_run_delete::*` / `integration/test_run::test_run_delete_all*` tests.
 - Benchmark delete (FR-BEN-018) adds 3 new test entries covering confirmation, nonexistent, and force delete.
 - Many FR-level tests cover multiple requirements. The total counts distinct test assignments (some FRs have both L1 and L2 tests).
-- 13 NFRs are covered indirectly by FR-level tests (see §11 indirect coverage table). They are not double-counted in L1/L2 totals.
-- Untested/planned items: 3 performance NFRs (manual validation) + 1 deferred MAY (FR-EVL-014) + 36 rows still Planned (row-based recount at the v0.18.0 pre-release pass: 36 Planned vs 238 Implemented rows across §2–§11). The §13 table above aggregates at the FR level (a different basis than rows) and was last fully recomputed at v0.17.
+- 14 NFRs are covered indirectly by FR-level tests (see §11 indirect coverage table). They are not double-counted in L1/L2 totals.
+- Untested/planned items: 3 performance NFRs (manual validation) + 1 deferred MAY (FR-EVL-014) + 36 rows still Planned (row-based recount at the v0.19.0 pre-release pass: 36 Planned vs 241 Implemented rows across §2–§11). The §13 table above aggregates at the requirement level (a different basis than rows) and was last fully recomputed at v0.19.0 — see "Counting method" above.
+- **v0.19.0 pre-release validation review**: every cited test id was re-verified against the test sources — FR-LLM-020..025 (`integration/test_ensemble`), FR-RUN-031/040/041/044/045/046 and the doc-guard ids (`unit/` prefix) were repointed; FR-BEN-019/020 rows added (FR-BEN-020 with a new test); the `test_evaluator_runner` and `TestRunDeleteCLI` rows are relabelled L2 and FR-RUN-052 L1 to follow the modules' markers (validation.md §8.1); FR-RUN-042 (deleted id) and NFR-043 (indirect, E2E Sc.2) now have rows so that every spec id resolves in the matrix.
 - Compared to v0.1, the majority of entries have been updated from Planned to Implemented based on verification of existing test functions in the `tests/` directory.

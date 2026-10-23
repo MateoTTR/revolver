@@ -418,7 +418,8 @@ Commands that require a project context (all except `llm`, `doctor`, `setup`, `p
 | [ADR-004](adr/ADR-004-sqlite-structured-storage.md) | SQLite for structured storage | Accepted |
 | [ADR-005](adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
 | [ADR-006](adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
-| [ADR-007](adr/ADR-007-pluggable-evolution-backend.md) | Pluggable evolution backend (OpenEvolve default, ShinkaEvolve optional) | Accepted (amended 2026-07-01) |
+| [ADR-007](adr/ADR-007-pluggable-evolution-backend.md) | Pluggable evolution backend (OpenEvolve default, ShinkaEvolve optional) | Accepted (amended 2026-07-01, 2026-07-05) |
+| [ADR-008](adr/ADR-008-documentation-and-process-strategy.md) | Documentation and process strategy | Accepted (amended 2026-10-23) |
 
 ---
 
@@ -432,7 +433,7 @@ Detailed design notes expanding on specific architectural areas. Each document t
 | [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Draft |
 | [DES-003](design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | spec-problem, AQ-04 | Draft |
 | [DES-004](design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | spec-dataset, DES-001 | Draft |
-| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — OpenEvolve Orchestration | spec-run, ADR-006, DES-001, DES-003, DES-004, POC #12, POC #13 | Draft |
+| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — Run Orchestration | spec-run, ADR-006, ADR-007, DES-001, DES-003, DES-004 | Draft |
 | [DES-006](design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | spec-eval, ADR-006, DES-001, DES-003, DES-005 | Draft |
 | [DES-007](design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | spec-benchmark, DES-001, DES-005, DES-006 | Draft |
 
@@ -442,6 +443,6 @@ Detailed design notes expanding on specific architectural areas. Each document t
 
 - [x] **AQ-01**: Dataclasses vs Pydantic for data models → **Pydantic v2** (ADR-005)
 - [ ] **AQ-02**: SQLite schema migration strategy (manual SQL scripts vs alembic-like tool)
-- [x] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training → **A+B hybrid strategy**: env var injection (`REVOLVER_DATASET_DIR`) + optional SQLite side-channel (`REVOLVER_INSTANCE_LOG`). Wrapper uses `OpenEvolve` controller class for resume support. Revolver generates the dual-mode evaluator wrapper. (ADR-006, POC #12)
+- [x] **AQ-03**: How to handle OpenEvolve's evaluator iteration vs Revolver's instance injection during training → **A+B hybrid strategy**: env var injection (`REVOLVER_DATASET_DIR`) + optional SQLite side-channel (`REVOLVER_INSTANCE_LOG`). Wrapper uses `OpenEvolve` controller class for resume support. Revolver generates the dual-mode evaluator wrapper. (ADR-006)
 - [x] **AQ-04**: Project/problem versioning strategy → **Internal manifest-based** (DES-003 §9 DD-06)
 - [x] **AQ-05**: Benchmark export format for visualization → **CSV + JSON** (DES-007 DD-03). Parquet not supported in v1 (adds ~150MB dependency for marginal benefit). `--per-instance` export provides raw data for external visualization tools (pandas, matplotlib, Jupyter).

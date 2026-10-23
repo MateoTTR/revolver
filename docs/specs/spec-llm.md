@@ -2,7 +2,6 @@
 
 **Traceable to**: ConOps §4.8 (LLM), §5.1 (Workflow: Setup LLMs), §3.2 (LLM Backends)
 **Status**: Draft
-**See also**: [POC Local LLM](../pocs/poc-local-llm.md)
 
 ---
 
@@ -406,6 +405,11 @@ Ensemble "multi-model-v1" removed (2 members deleted)
 | `llm start` and insufficient VRAM (estimated) | Warning: "Model <name> requires ~X GB VRAM but only Y GB available. Continue? [y/N]" | 0 or 3 |
 | `llm stop` when nothing is loaded | No-op, exit 0 | 0 |
 | `llm remove` with name not found | Error: "LLM '<name>' not found in registry." | 1 |
+| `llm update` with name not found | Error: "LLM '<name>' not found" | 1 |
+| `llm add` / `llm update` / `llm ensemble add` with an invalid `--reasoning-effort` value | Error: "--reasoning-effort must be one of min, low, medium, high, max (got '<value>')"; nothing persisted | 1 |
+| `llm ensemble create` with a name that already exists | Error: "An ensemble named '<name>' already exists" | 1 |
+| `llm ensemble add` with an unknown ensemble or LLM | Error: "Ensemble '<name>' not found" / "LLM '<name>' not found" | 1 |
+| `llm ensemble info` / `llm ensemble remove` with name not found | Error: "Ensemble '<name>' not found" | 1 |
 | `~/.revolver/` does not exist | Auto-create it | — |
 
 ---

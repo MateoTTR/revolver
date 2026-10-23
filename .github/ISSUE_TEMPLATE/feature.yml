@@ -1,0 +1,108 @@
+name: Feature
+description: A new capability or a change to an existing one — the single source of truth for its pull request.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a change. Every pull request closes an issue like this one, and the reviewer checks the pull request against it: be concrete about scope, acceptance criteria and tests ([AGENTS.md § Pull request workflow](https://github.com/MateoTTR/revolver/blob/develop/AGENTS.md#pull-request-workflow), [CONTRIBUTING.md](https://github.com/MateoTTR/revolver/blob/develop/CONTRIBUTING.md)).
+
+        **Design change from an external contributor?** Tick the RFC-lite box at the bottom: this issue is then the design issue, and the maintainer updates or reviews the formal documents (specification, DES, ADR, validation) before or with the implementation.
+
+        This issue follows the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: The command group or layer the change lives in.
+      options:
+        - project
+        - llm
+        - problem
+        - dataset
+        - run
+        - solution
+        - eval
+        - benchmark
+        - doctor / setup
+        - evolution backend (OpenEvolve, ShinkaEvolve)
+        - infra / storage (SQLite, models)
+        - documentation / process
+        - CI / packaging
+        - cross-cutting
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary and motivation
+      description: What should change, for whom, and why. Link the ConOps workflow or the user story when there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope — files to create or modify
+      description: The modules, documents and tests the change touches; out-of-scope items are worth naming too.
+      placeholder: |
+        - src/revolver/cli/<group>.py — new option --<name>
+        - src/revolver/core/<module>.py — ...
+        - docs/specs/spec-<group>.md — Commands row, FR-<GROUP>-NNN, Error Cases row
+        - tests/integration/test_<group>.py — ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable, checkable statements — CLI output, exit codes, --json fields where relevant.
+      placeholder: |
+        - [ ] `revolver <group> <command> --<option>` does ... and exits 0
+        - [ ] An invalid argument exits 1 (specifications.md § 4.2) with the message "..."
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test scenarios
+      description: The L1 (unit) and L2 (integration) tests that will prove the criteria, as `<path-under-tests/>::<test_name>` with their markers; engine tests when applicable (`openevolve` / `shinkaevolve`, run outside CI).
+      placeholder: |
+        - integration/test_<group>::test_<command>_<scenario> (integration)
+        - unit/core/test_<module>::test_<function>_<scenario> (unit)
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Specification, DES and ADR references
+      description: The FR / NFR ids, DES sections and ADRs the change implements or must amend (`docs/specs/specifications.md` indexes them).
+      placeholder: |
+        - FR-RUN-0NN (spec-run.md § ...), NFR-0NN
+        - DES-005 § 4.x — ...
+        - ADR-007 — amendment needed? yes / no
+    validations:
+      required: true
+  - type: dropdown
+    id: spec-impact
+    attributes:
+      label: Spec impact
+      description: Which formal documents change (spec-before-code). Select all that apply.
+      multiple: true
+      options:
+        - None — no behavior, option or design change
+        - Specification rows (Commands table, FR, Error Cases)
+        - DES section (header version bumped)
+        - ADR amendment (in-place, dated)
+        - New ADR (new decision)
+        - Validation rows (L2 matrix, traceability)
+    validations:
+      required: true
+  - type: checkboxes
+    id: process
+    attributes:
+      label: Process
+      options:
+        - label: "RFC-lite: I am an external contributor and this change alters behavior, a CLI surface, a data model or a decision — this issue is the design issue, and I wait for the maintainer's go-ahead before the implementation pull request."
+        - label: I have read CONTRIBUTING.md, and this issue respects the [public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule).
+          required: true

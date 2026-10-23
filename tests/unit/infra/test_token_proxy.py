@@ -333,7 +333,7 @@ class TestProxyErrorForwarding:
     def test_proxy_forwards_502_status(self) -> None:
         """Proxy forwards an upstream 502 status and body verbatim (A5 / #317).
 
-        A subscription bridge (e.g. claude-ollama-bridge) under sustained load
+        A subscription-backed local OpenAI-compatible shim under sustained load
         can return ``502 Bad Gateway``. Because urllib raises ``HTTPError`` for
         5xx, this exercises the FB-01 forwarding branch — the client must see
         the real 502 + body, not a generic proxy error that masks the cause.

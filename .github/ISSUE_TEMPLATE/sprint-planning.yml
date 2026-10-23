@@ -1,0 +1,137 @@
+name: Sprint planning (maintainer)
+description: The planning issue of a sprint — one per milestone; it replaces the former sprint file.
+title: "Sprint NNN — <functional scope>: planning issue"
+labels: ["sprint-planning"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Maintainer use. Procedure and full outline: [docs/process/sprint-planning.md](https://github.com/MateoTTR/revolver/blob/develop/docs/process/sprint-planning.md). A sprint is a **milestone** plus this issue: assign the issue to the milestone and link one issue per pull request from the scope table. Progress lives on the per-PR issues and on the pull requests' **Status** sections; this issue is updated at each merge and closed at release, with the sprint review as its closing comment (tests passing versus planned, demo-able features, carry-over, deviations). The `CHANGELOG.md` section of the release is the other half of the review.
+  - type: input
+    id: milestone
+    attributes:
+      label: Milestone and target release
+      placeholder: "Sprint 020 — <functional scope> · v0.20.0"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal, demo and source
+      description: What the sprint delivers (one or two sentences); what can be demonstrated at sprint end; where the scope comes from (owner decisions, analyses, carry-over from the previous planning issue — link it).
+      value: |
+        **Goal**: <what this sprint delivers>
+        **Demo**: <what can be shown at sprint end>
+        **Source**: carry-over from #<previous planning issue>; owner decisions of <date>
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and status
+      description: One row per story / pull request, kept up to date at each merge; then what is decided (not open), and what is explicitly out of scope with its target and rationale.
+      value: |
+        ### In scope
+        | Story | Issue | Pull request | Status |
+        |---|---|---|---|
+        | <story> | #N | PR-A | planned / in progress / merged |
+
+        ### Decided (not open)
+        - <decision>
+
+        ### Explicitly out of scope
+        | Deferred item | Target | Rationale |
+        |---|---|---|
+        | <item> | <sprint or version> | <why> |
+    validations:
+      required: true
+  - type: textarea
+    id: facts
+    attributes:
+      label: Verified facts driving the plan
+      description: Checked in the code before planning — cite `path::symbol` and the `develop` SHA they were checked at — so that nobody re-derives them.
+      value: |
+        Checked on `develop` at `<sha>`:
+        1. <fact — path::symbol>
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks and pull-request mapping
+      description: The task table (layer infra / domain / cli / test / doc / ci / ops, dependencies, acceptance criteria) and which pull request carries which tasks and primary files.
+      value: |
+        ### Tasks
+        | # | Task | Layer | Issue | PR | Depends on | Acceptance criteria |
+        |---|---|---|---|---|---|---|
+        | S<NN>-01 | <task> | <layer> | #N | PR-A | — | <criteria> |
+
+        ### PR mapping
+        | PR | Issue | Tasks | Files (primary) | Wave |
+        |---|---|---|---|---|
+        | PR-A | #N | S<NN>-01 | <files> | 1 |
+    validations:
+      required: true
+  - type: textarea
+    id: order
+    attributes:
+      label: Order, waves and conflict map
+      description: Dependency graph, waves with the gate that opens each, the critical path, the parallel streams, and the files or areas touched by several pull requests with the agreed merge order.
+      value: |
+        ### Dependency graph
+        ```
+        PR-A ──> PR-B
+             └─> PR-C   (parallel with PR-B)
+        ```
+
+        ### Waves
+        | Wave | Content | Gate to open |
+        |---|---|---|
+        | 1 | PR-A | — |
+
+        ### Critical path
+        - <longest sequential chain>
+
+        ### Conflict map
+        | File or area | Touched by | Resolution (merge order) |
+        |---|---|---|
+        | `CHANGELOG.md` `[Unreleased]` | every PR | one line each; rebase on conflict |
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Integration tests (L2) planned
+      description: The scenarios that validate the sprint, with their test ids and status (Planned / Implemented / Passing); the validation rows are declared `Planned` in the spec-before-code cascade.
+      value: |
+        | Area | Scenario | Test ID | Status |
+        |---|---|---|---|
+        | <area> | <scenario> | integration/test_<command>::test_<scenario> | Planned |
+  - type: textarea
+    id: exit
+    attributes:
+      label: Exit criteria
+      description: Numbered and checkable at the sprint review, including the zero-regression line.
+      value: |
+        1. <criterion>
+        2. Zero regression — full suite at the baseline, ruff / mypy clean, CI green.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and release note
+      description: Risks with severity and mitigation; the `CHANGELOG.md` lines this sprint must produce, default-path changes flagged **Behavior change**.
+      value: |
+        ### Risks
+        | Risk | Severity | Mitigation |
+        |---|---|---|
+        | <risk> | Low / Medium / High | <mitigation> |
+
+        ### Release note
+        - <CHANGELOG line>
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Open decisions (maintainer)
+      description: Decisions still to take during the sprint; record each outcome as a comment on this issue — scope changes are never silent.
