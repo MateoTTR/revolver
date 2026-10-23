@@ -252,7 +252,7 @@ manual (no dedicated workflow yet — run by hand on a developer machine):
 
 **Doc guards** (the `Doc command-lint` job; both modules are `unit`-marked, so they also run in the main test job):
 
-- `tests/unit/test_doc_command_lint.py` — **command-lint**: every *line-initial* `revolver` invocation inside a fenced block of the documentation corpus must resolve against the real Typer CLI tree (`revolver.cli._tree`: subcommands, flags, positional-argument caps; untagged fences parsed; inline-prose mentions out of scope). The corpus is the root files `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CLAUDE.md`, `GEMINI.md` (`ROOT_DOC_FILES`) plus `docs/**/*.md`; `CHANGELOG.md` is excluded because its entries quote historical flags. `TestDocCommandLintCorpus::test_corpus_includes_contributor_docs` pins that composition: every *tracked* root `*.md` is either linted or explicitly excluded.
+- `tests/unit/test_doc_command_lint.py` — **command-lint**: every *line-initial* `revolver` invocation inside a fenced block of the documentation corpus must resolve against the real Typer CLI tree (`revolver.cli._tree`: subcommands, flags, positional-argument caps; untagged fences parsed; inline-prose mentions out of scope). The corpus is the root files `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CLAUDE.md`, `GEMINI.md` (`ROOT_DOC_FILES`) plus `docs/**/*.md`; `CHANGELOG.md` is excluded because its entries quote historical flags. `unit/test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_includes_contributor_docs` pins that composition: every *tracked* root `*.md` is either linted or explicitly excluded.
 - `tests/unit/test_doc_freshness.py` — **freshness**: `docs/guides/*.md` and `docs/specs/user-story-e2e.md` must open with a YAML front-matter `verified-against: vX.Y.Z` stamp at most one minor version behind `revolver.__version__`; a stamp ahead of the current version never fails; during the fresh-major window (current version `X.0.*`) stamps from major `X-1` still pass; a UTF-8 BOM before the front-matter is tolerated. Refreshing the stamps is part of the release procedure (`docs/process/release.md`).
 
 **No Shinka job in CI**: ci.yml runs **no** ShinkaEvolve step — the main test job's `-m "unit or integration"` selection runs without the `[shinka]` extra installed (Shinka-gated modules auto-skip via `pytest.importorskip`), and only the OpenEvolve contract tests get a dedicated non-blocking step. The L2-Shinka contract suites are selected by the `-m shinkaevolve` marker (five modules carry it at v0.19.0: the three S14 contract suites `test_run_shinka.py`, `test_shinka_db.py`, `test_shinka_wrapper.py` plus the Shinka-gated tests of `tests/integration/test_solution.py` and `tests/unit/core/test_solution.py`) and run manually in a shinka-enabled environment (e.g. before a release); adding a Shinka-env CI step remains aspirational.
@@ -323,7 +323,8 @@ The `conftest.py`, `fixtures/` and `e2e/` entries and the three contract suites 
 The validation documents ([val-integration-tests.md](val-integration-tests.md), the
 [traceability matrix](traceability-matrix.md)) reference tests by an ID of the form
 `<path-under-tests/>::<test_name>` — e.g. `integration/test_llm::test_llm_add_remote` or
-`unit/core/test_problem::test_warns_missing_combined_score`.
+`unit/core/test_ensemble::TestAddEnsembleMember::test_weight_sum_warning` (class-qualified when
+the test is a method).
 
 - **Canonical L2 home**: new integration suites live in `tests/integration/test_<command>.py`
   and their IDs carry the `integration/` prefix.
