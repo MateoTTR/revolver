@@ -16,6 +16,8 @@ from revolver.infra.store import (
     write_dataset_manifest,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:

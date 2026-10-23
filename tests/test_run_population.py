@@ -1,7 +1,9 @@
 """Tests for ``revolver run population`` command (S10-16).
 
 L1 unit tests for ``parse_population()`` and ``get_population()``,
-plus L2 integration tests for the CLI command.
+plus L2 integration tests for the CLI command. Each class (and the
+module-level FR-RUN-052 test) carries its own ``unit`` / ``integration``
+marker so the CI selection (``-m "unit or integration"``) runs the suite.
 
 Traceable to: issue #156, val-integration-tests.md.
 """
@@ -170,6 +172,8 @@ def _setup_project_with_run(
 class TestParsePopulation:
     """Unit tests for ``infra.openevolve.parse_population()``."""
 
+    pytestmark = pytest.mark.unit
+
     def test_empty_programs_dir(self, tmp_path: Path) -> None:
         """Returns empty list when programs/ directory exists but is empty."""
         programs_dir = tmp_path / "programs"
@@ -281,9 +285,10 @@ class TestParsePopulation:
         assert result[0]["id"] == "prog_x"
 
 
-# ── L2: FR-RUN-052 display guard (S18 / U13 #367 i) ──────────────────────────
+# ── L1: FR-RUN-052 display guard (S18 / U13 #367 i) ──────────────────────────
 
 
+@pytest.mark.unit
 def test_oe_display_prefers_combined_score(tmp_path: Path) -> None:
     """Display/ranking prefers a numeric combined_score over the metric sum.
 
@@ -331,6 +336,8 @@ def test_oe_display_prefers_combined_score(tmp_path: Path) -> None:
 
 class TestParsePopulationCellIndices:
     """Unit tests for MAP-Elites cell indices in ``parse_population()``."""
+
+    pytestmark = pytest.mark.unit
 
     def test_single_island_cell_indices(self, tmp_path: Path) -> None:
         """Programs found in metadata get correct cell_indices and island."""
@@ -437,6 +444,8 @@ class TestParsePopulationCellIndices:
 class TestGetPopulation:
     """Unit tests for ``core.run.get_population()``."""
 
+    pytestmark = pytest.mark.unit
+
     def test_run_not_found(self, tmp_path: Path) -> None:
         """Raises RevolverError when run does not exist in DB."""
         init_project_store(tmp_path)
@@ -486,6 +495,8 @@ class TestGetPopulation:
 
 class TestRunPopulationCLI:
     """L2 integration tests for ``revolver run population`` CLI command."""
+
+    pytestmark = pytest.mark.integration
 
     def test_run_population_shows_table(self, tmp_path: Path) -> None:
         """Displays a table with program entries, scores, and metrics."""
@@ -635,6 +646,8 @@ class TestRunPopulationCLI:
 class TestReadCheckpointBestScore:
     """Unit tests for ``infra.openevolve.read_checkpoint_best_score()``."""
 
+    pytestmark = pytest.mark.unit
+
     def test_no_metadata_file(self, tmp_path: Path) -> None:
         """Returns None when metadata.json does not exist."""
         assert read_checkpoint_best_score(tmp_path) is None
@@ -738,6 +751,8 @@ def _write_recovery_checkpoint(
 
 class TestRecoverBestFromCheckpoint:
     """Unit tests for ``infra.openevolve.recover_best_from_checkpoint()`` (B7)."""
+
+    pytestmark = pytest.mark.unit
 
     def test_score_is_combined_score_not_sum(self, tmp_path: Path) -> None:
         """The recovered score is combined_score alone, NOT the sum of metrics.

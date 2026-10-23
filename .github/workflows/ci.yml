@@ -169,8 +169,10 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Run doc command-lint + freshness check
-        # S18-21 (#354) command-lint of fenced `revolver` invocations across
-        # README.md + docs/**, and S18-23 (#355) `verified-against` stamps.
+        # Backlog row 354 (S18-21): command-lint of fenced `revolver` invocations
+        # across the root Markdown files (README, AGENTS, CONTRIBUTING, SECURITY,
+        # CODE_OF_CONDUCT, CLAUDE, GEMINI; CHANGELOG.md excluded) + docs/**, and
+        # backlog row 355 (S18-23): `verified-against` stamps on the guides.
         run: >-
           python -m pytest
           tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py -q

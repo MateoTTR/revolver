@@ -15,6 +15,8 @@ from revolver.models.problem import (
     TestResult,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestFileSnapshot:
     """Tests for FileSnapshot model."""

@@ -17,6 +17,8 @@ from revolver.models.dataset import (
     IntegrityReport,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestDatasetInstance:
     """Tests for DatasetInstance model."""

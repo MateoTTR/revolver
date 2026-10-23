@@ -1,7 +1,7 @@
 # Revolver — End-to-End Tests (Level 3)
 
-**Version**: 0.3 — S18 sync (v0.18 eval-honesty semantic slice): §3.5 Scenario 5 — timeout penalize-vs-drop against the fake server (planned — S19, carry-over from S18)
-**Date**: 2026-07-05
+**Version**: 0.4 — v0.19.0 pre-release validation review: `addopts` quoted as in `pyproject.toml`, Scenarios 3/4 marked manual (not in CI), FR-LLM-018 (Removed) dropped from Scenario 2, `problem version create` steps use the positional `TAG`. Previous: 0.3 — S18 sync: §3.5 Scenario 5 — timeout penalize-vs-drop (planned — S19, carry-over from S18)
+**Date**: 2026-10-24
 **Status**: Draft
 **Traceable to**: [Validation Overview](validation.md), [User Story E2E](../specs/user-story-e2e.md)
 
@@ -88,7 +88,7 @@ Derived from [user-story-e2e.md](../specs/user-story-e2e.md). Tests the canonica
 | 4 | Copy test evaluator + initial_program + instances into project | Files in place |
 | 5 | `revolver problem test --instance instances/instance_001.json` | Metrics returned, exit 0 |
 | 6 | `revolver problem test --dataset instances/` | 3/3 passed |
-| 7 | `revolver problem version create --tag v1.0 --message "E2E test version"` | Snapshot created, hash computed |
+| 7 | `revolver problem version create v1.0 --message "E2E test version"` | Snapshot created, hash computed |
 | 8 | `revolver dataset add e2e-train --path instances/ --split train --compatible-with v1.0` | Dataset registered, 3 instances |
 | 9 | `revolver dataset add e2e-eval --path instances/ --split eval --compatible-with v1.0` | Second dataset registered |
 | 10 | `revolver run --version v1.0 --llm fake-llm --dataset e2e-train --iterations 2 --alias e2e-run` | Run completes, solution created, tokens tracked |
@@ -122,7 +122,7 @@ A scenario validating Revolver behavior without Ollama or GPU. Defined during Ph
 - Graceful degradation: `revolver doctor` reports Ollama/GPU as WARN, not FAIL
 - `revolver llm status` shows remote LLM as `ready`
 
-**FRs covered**: FR-LLM-001/015/017/018, FR-RUN-015/028/029, NFR-043, NFR-067
+**FRs covered**: FR-LLM-001/015/017, FR-RUN-015/028/029, NFR-043, NFR-067
 
 **CI suitability**: runs on any runner (no GPU required).
 
@@ -142,9 +142,9 @@ auto-skip when not installed (no dedicated marker). Runtime ≈ 6 s.
 **FRs covered**: FR-RUN-047/048, NFR-024 (seed warning), NFR-061 (extra install), FR-SET-002
 (doctor reports ShinkaEvolve availability as informational)
 
-**CI suitability**: runs on any runner (no GPU required); non-blocking like L2-Shinka. E2E tests
-are **deselected by default** (`addopts = "-m 'not e2e'"` in pyproject) — run explicitly with
-`pytest -m e2e`.
+**CI suitability**: runs on any runner (no GPU required) but is manual, not in CI (like L2-Shinka).
+E2E tests are **deselected by default** (`addopts = "-m 'not e2e' --strict-markers"` in pyproject)
+— run explicitly with `pytest -m e2e`.
 
 ### 3.4 Scenario 4 — Shinka Bandit Ensemble (**planned — S17**, ADR-007 Amendment)
 
@@ -161,7 +161,7 @@ mapping end-to-end (ADR-007 A2), not just single-LLM `fixed` selection.
 | 2 | `revolver llm add member-a -s local --model <name> --base-url http://localhost:<port>/v1` | First member registered against the fake server |
 | 3 | `revolver llm add member-b -s local --model <name2> --base-url http://localhost:<port>/v1` | Second member registered |
 | 4 | `revolver llm ensemble create bandit-ens` + `ensemble add bandit-ens member-a --weight 0.7` + `ensemble add bandit-ens member-b --weight 0.3` | Ensemble with 2 weighted members |
-| 5 | `revolver problem version create --tag v1.0 ...` | Snapshot created |
+| 5 | `revolver problem version create v1.0 ...` | Snapshot created |
 | 6 | `revolver dataset add ... --split train` | Dataset registered |
 | 7 | `revolver run --backend shinka --llm bandit-ens --selection ucb --iterations 2 --rewrite-mode --alias bandit-run` | Run completes; both members projected to `evo_config.llm_models` (length 2); `llm_dynamic_selection == "ucb"`; a warning surfaced that the registry weights are ignored under the adaptive bandit (FACT B); no `prior_probs` sent to the sampler (no `TypeError`) |
 | 8 | inspect `programs/rank-1.py` | Exists and is **not** the initial program; manifest + run record carry `backend: shinka`; native token accounting > 0 (ADR-007 D2) |
@@ -180,7 +180,7 @@ Requires the `revolver[shinka]` extra; gated by `@pytest.mark.e2e` plus
 Shinka-fixed vs warned on bandit), FR-LLM-026 (per-member `reasoning_effort` — global-pool mapping if
 exercised); complements FR-RUN-047/048 from Scenario 3.
 
-**CI suitability**: runs on any runner (no GPU required); non-blocking like Scenario 3.
+**CI suitability**: runs on any runner (no GPU required); manual, not in CI, like Scenario 3.
 
 ### 3.5 Scenario 5 — Timeout Penalize-vs-Drop (**planned — S19 (carry-over from S18)**, U13 #367)
 
@@ -197,7 +197,7 @@ penalize/drop aggregation, and the coverage keys.
 |---|---|---|
 | 1 | `revolver project init ...` + register the fake LLM | Scaffold + LLM ready |
 | 2 | Copy evaluator (1 fast instance + 1 hanging instance) + set a short per-instance timeout | Fixtures in place |
-| 3 | `revolver problem version create --tag v1.0 ...` + `dataset add ... --split train` | Version + 2-instance dataset registered |
+| 3 | `revolver problem version create v1.0 ...` + `dataset add ... --split train` | Version + 2-instance dataset registered |
 | 4 | `revolver run --version v1.0 --llm fake-llm --dataset ... --iterations 2` (default policy) | Run completes; the timed-out instance contributes `timeout_score` (0.0) to the mean (**penalize**); metrics carry `instances_valid=1`/`instances_total=2`, never summed into the score (FR-RUN-052/053) |
 | 5 | `revolver run ... --config-override evaluation.on_timeout=drop` | Survivor-mean restored (0.17 behavior) — the `drop` score is strictly higher than the `penalize` score on the same dataset |
 | 6 | `revolver run info <run>` | Engine best labeled "engine, single eval" next to the coverage-labeled post-eval mean; JSON output carries both fields (FR-RUN-055) |
@@ -206,7 +206,7 @@ penalize/drop aggregation, and the coverage keys.
 **FRs covered**: FR-RUN-052/053/054/055, FR-EVL-021 (read-path `instances_*` exclusion).
 
 **CI suitability**: runs on any runner (no GPU required); deselected by default like all E2E
-(`addopts = "-m 'not e2e'"`), run explicitly with `pytest -m e2e`.
+(`addopts = "-m 'not e2e' --strict-markers"`), run explicitly with `pytest -m e2e`.
 
 ---
 
@@ -222,7 +222,7 @@ penalize/drop aggregation, and the coverage keys.
   └── test_timeout_penalize_drop.py # Scenario 5 (planned — S19, carry-over from S18, U13 #367)
   ```
 - **Markers**:
-  - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e'"`), run with `pytest -m e2e`
+  - `@pytest.mark.e2e` — runs with fake LLM server (no GPU); **deselected by default** (`addopts = "-m 'not e2e' --strict-markers"`), run with `pytest -m e2e`
   - `@pytest.mark.e2e_gpu` — runs with real Ollama + GPU
   - `@pytest.mark.slow` — always applied to E2E tests
 - **Not blocking CI on push** — runs on manual trigger only (no nightly workflow)

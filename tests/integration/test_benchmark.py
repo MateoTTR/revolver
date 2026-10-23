@@ -1314,3 +1314,44 @@ def test_benchmark_delete_force(bench_project: dict[str, object]) -> None:
         assert count == 0, "benchmark_solutions rows should have been deleted"
     finally:
         conn2.close()
+
+
+@pytest.mark.integration
+def test_benchmark_delete_json_requires_force(bench_project: dict[str, object]) -> None:
+    """JSON mode without --force exits 1 and leaves the benchmark in place.
+
+    Validates: FR-BEN-020 — no interactive prompt is possible in JSON mode,
+    so ``--json`` without ``--force`` is rejected with a clear error.
+    """
+    root = bench_project["root"]
+    db_path = bench_project["db_path"]
+    assert isinstance(root, Path)
+    assert isinstance(db_path, Path)
+
+    from revolver.infra.db import get_benchmark, insert_benchmark, insert_benchmark_solutions
+
+    conn = get_project_db(db_path)
+    try:
+        insert_benchmark(
+            conn,
+            benchmark_id="bench-json-test",
+            alias=None,
+            dataset_name="eval-bench",
+            created_at=datetime.now(UTC),
+        )
+        insert_benchmark_solutions(conn, "bench-json-test", ["sol-001"])
+    finally:
+        conn.close()
+
+    result = _invoke_with_cwd(["--json", "benchmark", "delete", "bench-json-test"], root)
+
+    assert result.exit_code == 1, f"Exit code {result.exit_code}"
+    output = _get_all_output(result)
+    assert "--force" in output
+
+    # Nothing was deleted.
+    conn2 = get_project_db(db_path)
+    try:
+        assert get_benchmark(conn2, "bench-json-test") is not None
+    finally:
+        conn2.close()

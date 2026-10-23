@@ -116,11 +116,12 @@ pip install -e ".[shinka]"     && pytest -m shinkaevolve
 CI runs `tests/integration/test_run_oe.py` on Python 3.12 as a non-blocking
 step; nothing in CI runs ShinkaEvolve.
 
-A plain `pytest` runs every test not marked `e2e` — the historic unmarked
-top-level suites included, and the engine-marked tests once an extra is
-installed (CI narrows the selection to `-m "unit or integration"`); the L3
-end-to-end tests are deselected (`-m 'not e2e'` in `pyproject.toml`) and run
-with `pytest -m e2e`.
+A plain `pytest` runs every test not marked `e2e`, including the engine-marked
+tests once an extra is installed (CI narrows the selection to
+`-m "unit or integration"`; since v0.19.0 every test outside `tests/e2e/`
+carries one of those two markers, so without the extras both selections
+collect the same tests); the L3 end-to-end tests are deselected (`-m 'not e2e'`
+in `pyproject.toml`) and run with `pytest -m e2e`.
 The tests isolate Revolver's global store through `REVOLVER_HOME` (see the
 README); point it at a scratch directory when your own `~/.revolver` must stay
 untouched.
@@ -130,7 +131,7 @@ untouched.
 | Level | What | Where | Markers | In CI |
 |---|---|---|---|---|
 | 0 — Static | ruff, mypy | — | — | `Lint (ruff + mypy)` |
-| 1 — Unit | functions and classes of `core/` and `infra/`, everything external mocked | `tests/unit/` (mirrors `src/revolver/`) | `unit` | `Test (pytest + coverage)` |
+| 1 — Unit | functions and classes of `core/` and `infra/`, everything external mocked | `tests/unit/` (mirrors `src/revolver/`; historic suites also at `tests/test_*.py`) | `unit` | `Test (pytest + coverage)` |
 | 2 — Integration | CLI commands through `CliRunner`, real SQLite in a temporary project | `tests/integration/test_<command>.py` (a few historic suites sit at `tests/test_*.py`) | `integration` | `Test (pytest + coverage)` |
 | 2-OE — OpenEvolve contract | config round-trip, controller init; no LLM | `tests/integration/test_run_oe.py` | `integration` + `openevolve`, module-level `pytest.importorskip` | non-blocking step, Python 3.12 |
 | 2-Shinka — ShinkaEvolve contract | config projection, wrapper and database contracts; no LLM | `tests/integration/test_run_shinka.py`, `tests/integration/test_shinka_*.py` | `integration` + `shinkaevolve`, module-level `pytest.importorskip` | not run — manual |
