@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "github": {
-      "command": ".claude/scripts/github-mcp.sh",
-      "args": []
-    }
-  }
-}
