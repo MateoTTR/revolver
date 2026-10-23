@@ -68,7 +68,7 @@ the migration-v14 test (`problem_versions.backend`); §2.18 adds the top-N extra
 (`solution extract --rank`/`--program-id` on `capabilities().top_n_extraction`, Shinka-native / OE
 consciously deferred), the #359 reap-hardening grandchild test, and the #354 doc command-lint.
 **16 L2 test IDs** added by S18 — all **Implemented** (flipped at the v0.18.0 release); the full
-suite stands at **1586 passed / 4 skipped** at v0.19.0 (without the engine extras). Per-command
+suite stands at **1587 passed / 4 skipped** at v0.19.0 (without the engine extras). Per-command
 scenario rows land in §2.3 (problem), §2.5 (run), §2.6 (eval), and §2.7
 (solution). (§2.11 remains a pre-existing numbering gap — not filled; the S18 blocks append after
 §2.15 without renumbering.) Test-ID form, the `integration/` prefix rule, the top-level-file
