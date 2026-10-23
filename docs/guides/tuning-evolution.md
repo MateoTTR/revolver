@@ -1282,8 +1282,8 @@ run.
 > timeout instead of 20-minute cliffs — but shinka 0.0.7 bakes its retry
 > backoff budget (`max_time=6000` s) at import time, so the **total** worst
 > case across the full retry stack stays hours-long until upstream exposes
-> the request timeout and retry budget as configuration (spike #320
-> analysis: `docs/analysis/spike-320-qwen15-deadlock.md`).
+> the request timeout and retry budget as configuration (the stall spike, backlog row 320; filed
+> upstream as [SakanaAI/ShinkaEvolve#143](https://github.com/SakanaAI/ShinkaEvolve/issues/143)).
 
 ### Novelty rejection
 

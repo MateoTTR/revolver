@@ -54,9 +54,10 @@ audit ([release.md](release.md), step 0).
 ## Provenance
 
 Both lists were implicit practice, reconstructed at v0.19.0 from the
-repository files cited above and from the Sprint 013–014 backend precedent
-(see [dev-process-analysis.md](../analysis/dev-process-analysis.md) §3).
+repository files cited above and from the first backend integration
+(ShinkaEvolve, Sprints 013–014).
 **(changed)** The former post-merge steps "backlog row closed with the PR
 number, sprint-file task ticked" are replaced by the issue closure
 (`Closes #N`) and the planning issue's task table, since the backlog and
-sprint files are frozen (ADR-008 D2).
+sprint files are no longer in the repository (ADR-008 D2, amended
+2026-10-23).

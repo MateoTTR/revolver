@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Revolver is pre-1.0: a minor version may change default behavior; such changes
 are flagged **Behavior change** in the entry that introduces them.
 
-Entries up to v0.18.0 were reconstructed after the fact from the sprint records
-(`docs/sprints/`), the annotated tag messages and the merged pull requests;
+Entries up to v0.18.0 were reconstructed after the fact from the project's
+planning records (sprint files and numbered backlog, kept in the git history
+before v0.19.0), the annotated tag messages and the merged pull requests;
 `(#N)` refers to a pull request. From v0.19.0 on, this file is the release-note
 vehicle: each pull request adds its line under `[Unreleased]`, and the release
 moves that block under a dated version heading (see `docs/process/release.md`).
@@ -19,7 +20,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 
 - `AGENTS.md` as the canonical, tool-neutral entry file for humans and agents; `CLAUDE.md` and `GEMINI.md` become one-line pointers to it (issue #277).
 - `docs/process/` checklists — code, specification, validation and documentation review, sprint planning, release and hotfix, Definition of Done — extracted from the former agent definitions so that a contributor with no AI tooling can run the process (issue #277).
-- ADR-008 "Documentation and process strategy", with the sanitized development-process analysis committed under `docs/analysis/` as its evidence (issue #277).
+- ADR-008 "Documentation and process strategy": journal outside the repository, GitHub-native planning, documentation tiers, tool-neutral process, public-file rule, `CHANGELOG.md` as the release-note vehicle (issue #277); amended on 2026-10-23 so that the frozen tier leaves the tree (issue #284).
 - `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#280, closes #275).
 - MIT `LICENSE` file (#274, closes #272).
 
@@ -29,12 +30,13 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - Pre-publication content cleanup: neutral wording for local paths, hostnames and private repositories in docs and comments (#282).
 - `pytest` runs with `--strict-markers` (an unregistered marker now fails collection); the tooling sections of `docs/validation/validation.md` match `pyproject.toml` and `ci.yml`, and the `e2e_gpu` marker is registered as a reserved marker for the manual GPU track.
 - CI runs on GitHub-hosted runners (`ubuntu-latest`) instead of a self-hosted pool; the runner image under `.github/runner/` is removed (#274).
-- Planning is frozen in the repository at the end of Sprint 019: `docs/tasks/backlog.md` and `docs/sprints/` become historical records; from Sprint 020 on, planning lives in GitHub issues and milestones (#280).
+- Planning is GitHub-native from the close of Sprint 019: the backlog is the labelled GitHub issue list, a sprint is a milestone plus a planning issue, and the sprint review is the `CHANGELOG.md` section plus the planning issue's closing comment (#280; ADR-008 D2 as amended under issue #284).
 
 ### Removed
 
 - Tool-specific automation (`.claude/`, `.mcp.json`) leaves git and is ignored: tooling stays private per contributor and its knowledge lives in `docs/process/` (ADR-008 D5) (issue #277).
-- The maintainer's session journal (`docs/sessions/*`) leaves the public repository; a `docs/sessions/README.md` pointer remains and the history stays in git (#280).
+- The maintainer's session journal leaves the public repository; the history stays in git and no pointer file remains (#280, issue #284).
+- The file-based planning records of Sprints 001–019 (sprint files and numbered backlog) and the analysis notes (engine studies, spikes, the development-process analysis) leave the tree; they remain in the git history before v0.19.0, and the living documents — ADR-007, ADR-008, `AGENTS.md`, the process checklists — stand on their own without linking into them (issue #284).
 
 ## [0.18.0] - 2026-07-05
 

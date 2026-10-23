@@ -44,7 +44,7 @@ Before tagging `vX.Y.Z`:
    - `grep 'version' pyproject.toml` and `grep '__version__' src/revolver/__init__.py` → both read `X.Y.Z`;
    - `git log main --oneline -1` → the tip of `main` is the merge commit;
    - `CHANGELOG.md` has the `## [X.Y.Z]` section and an empty `[Unreleased]`;
-   - the sprint's planning issue has its closing comment and is closed with its milestone (GitHub-native planning, Sprint 020 onward);
+   - the sprint's planning issue has its closing comment and is closed with its milestone (GitHub-native planning, ADR-008 D2);
    - optionally, a GitHub Release for the tag with the CHANGELOG section as body.
 10. **Post-release documentation review** — the last item of step 0: run [doc-review.md](doc-review.md), fix the findings, commit on `develop`, push.
 
@@ -69,6 +69,6 @@ documentation review findings as described in [doc-review.md](doc-review.md).
 ## Changes from the former `CLAUDE.md` checklist
 
 - **(changed)** Steps 0–7 and the hotfix process are those of the former `CLAUDE.md` "Release Checklist" and "Hotfix Process" sections, renumbered (the old 1b / 1c become steps 2–3) and with the three reviewer *agents* replaced by the three review *checklists* of this directory.
-- **(changed)** The post-release checks "journal entry written" and "`docs/tasks/backlog.md` updated" are replaced by the CHANGELOG-section check and the planning-issue closing comment: the journal is private and the backlog file is frozen (ADR-008 D1, D2).
+- **(changed)** The post-release checks "journal entry written" and "backlog file updated" are replaced by the CHANGELOG-section check and the planning-issue closing comment: the journal is private and the backlog file left the repository (ADR-008 D1, D2).
 - **(changed)** The tag command is written as an annotated tag (`git tag -a … -m …`), which is what the project's release tags are; the former text showed a plain `git tag vX.Y.Z`.
 - **(added)** The `version-check` CI job reference, the "wait for CI green" wording in step 5 and the CHANGELOG line in hotfix step 2 restate existing practice (`.github/workflows/ci.yml`, the `CHANGELOG.md` header).

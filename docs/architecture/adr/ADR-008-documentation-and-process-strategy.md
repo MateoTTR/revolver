@@ -1,8 +1,11 @@
 # ADR-008 — Documentation and Process Strategy
 
 **Date**: 2026-10-23
-**Status**: Accepted
+**Status**: Accepted (amended 2026-10-23)
 **Deciders**: the project maintainer (owner decisions of 2026-10-23, Sprint 019)
+**Amended**: 2026-10-23 — the frozen documentation tier leaves the tree (see the *Amendment* section
+below; supersedes parts of D1, D2 and D3 — the journal pointer, the in-tree freeze and the third tier
+row — and the Context / References links into the removed folders).
 
 ---
 
@@ -13,9 +16,9 @@ was developed by one maintainer with a single AI-assisted toolchain, and both th
 and the process grew around that situation:
 
 - **Volume.** At v0.18.0 the Markdown under `docs/` weighed ≈ 28.8k lines against ≈ 24.0k lines
-  of Python under `src/`. The maintainer's session journal (`docs/sessions/`, 62 files, ≈ 4.9k
-  lines) and the sprint files (`docs/sprints/`, ≈ 6.0k lines) together made up ≈ 38 % of it —
-  per-session and per-sprint narrative that describes the work, not the product.
+  of Python under `src/`. The maintainer's session journal (62 files, ≈ 4.9k lines) and the
+  sprint files (≈ 6.0k lines) together made up ≈ 38 % of it — per-session and per-sprint
+  narrative that describes the work, not the product.
 - **Redundancy and hand-maintained cross-references.** The same facts (ADR / DES indexes, phase
   status, test counts, release tables, test ids) were repeated across `CLAUDE.md`, `README.md`,
   `architecture.md`, the sprint files, the backlog and the validation documents, and kept in sync
@@ -28,12 +31,13 @@ and the process grew around that situation:
 - **Tool-specific process.** The process bible (`CLAUDE.md`, 193 lines) mixed project rules with
   the maintainer's session mechanics: worktree agents, a hook that launched the code reviewer
   after `gh pr create`, "run the reviewers in the foreground", French as the conversation
-  language, a session-close ritual writing into `docs/sessions/`. The review checklists existed
-  only inside the prompts of five agent definitions under `.claude/agents/`, the traceability
-  check inside a skill, the GitHub access inside `.mcp.json`. A contributor without that
-  toolchain had no review checklist, no release procedure and no planning procedure to follow;
-  the first two external pull requests arrived with no issue, no review and no specification or
-  validation edits because nothing in the repository told their authors what was expected.
+  language, a session-close ritual writing a journal entry into the tree. The review
+  checklists existed only inside the prompts of five agent definitions under `.claude/agents/`,
+  the traceability check inside a skill, the GitHub access inside `.mcp.json`. A contributor
+  without that toolchain had no review checklist, no release procedure and no planning procedure
+  to follow; the first two external pull requests arrived with no issue, no review and no
+  specification or validation edits because nothing in the repository told their authors what
+  was expected.
 - **Exposure.** Going public exposes the full history. The pre-publication audit found no
   secrets, but it found local filesystem paths, machine names, private repository names and
   personal timing data in the journal and in several living documents.
@@ -42,30 +46,37 @@ The owner principle governing the switch: **"Everything in the GitHub project mu
 self-contained and clear for humans and AI agents alike, without assumptions about any
 contributor's own development means (with or without AI, Claude Code or other)."**
 
-The as-practiced analysis behind this record — lifecycle, rules catalog, Definition of Done,
-gaps for external contributors, ranked recommendations — is committed in sanitized form as
-[dev-process-analysis.md](../../analysis/dev-process-analysis.md).
+The evidence behind this record is an as-practiced process analysis — lifecycle, rules catalog,
+Definition of Done, gaps for external contributors, ranked recommendations — kept outside the
+repository with the maintainer's other working material. The figures and the reasoning above are
+taken from it; its surviving conclusions live in `AGENTS.md`, `docs/process/` and this ADR
+(amended 2026-10-23, A3: the analysis was first committed in sanitized form and left the tree
+with the frozen tier).
 
 ## Decision
 
 ### D1 — The maintainer journal lives outside the repository
 
 Session reports and the cumulative time tracker are the maintainer's private working material.
-They leave the tree at v0.19.0 (`docs/sessions/` keeps a README pointer only); the journal's
-location is configured in a git-ignored local file and is never committed. Contributors are not
-expected to keep one: continuity is carried by the GitHub issues, a short **Status** section in
-the description of long-running pull requests, `CHANGELOG.md` and the design documents.
-Historical "session NNN" references in frozen records are left as they are.
+They leave the tree at v0.19.0 (no pointer file remains — A1, 2026-10-23; as first written, the
+former journal folder kept a README pointer only); the journal's location is configured in a
+git-ignored local file and is never committed. Contributors are not expected to keep one:
+continuity is carried by the GitHub issues, a short **Status** section in the description of
+long-running pull requests, `CHANGELOG.md` and the design documents.
+~~Historical "session NNN" references in frozen records are left as they are.~~ **Superseded by
+A1** — the records that carried such references are no longer in the tree.
 
-### D2 — Planning is GitHub-native from Sprint 020; the file-based records are frozen
+### D2 — Planning is GitHub-native from the close of Sprint 019; the file-based records leave the tree (amended 2026-10-23)
 
 The backlog is the labelled GitHub issue list. A sprint is a **milestone** plus a **planning
 issue** whose body carries what a sprint file carried (scope, verified facts, tasks, PR mapping,
 waves, conflict map, exit criteria — [sprint-planning.md](../../process/sprint-planning.md)).
 The sprint review is the `CHANGELOG.md` release section plus the planning issue's closing
-comment. `docs/tasks/backlog.md` and `docs/sprints/*` stay in the repository as **frozen
-records** of Sprints 001–019 (freeze banners, nothing moved or renumbered) and are not updated
-afterwards.
+comment. The numbered backlog and the sprint files of Sprints 001–019 ~~stay in the repository as
+**frozen records** (freeze banners, nothing moved or renumbered) and are not updated afterwards~~
+**left the tree at v0.19.0 and remain readable in the git history before that tag — superseded
+by A2 (2026-10-23)**; nothing was moved or renumbered. GitHub-native planning starts with the
+close of Sprint 019 (A2), not with Sprint 020 as first written.
 
 ### D3 — Three documentation tiers
 
@@ -73,7 +84,7 @@ afterwards.
 |---|---|---|
 | **Living / authoritative** | `AGENTS.md`, `README.md`, `CHANGELOG.md`, `docs/architecture/architecture.md`, the ADRs, the DES documents, `docs/guides/`, `docs/process/` | Kept current with every change; the source of truth for what the product and the process are. A fact lives in one of them and is linked from the others. |
 | **Requirements & verification** | `docs/specs/` (FR / NFR with stable ids), `docs/validation/` (strategy, L2 matrix, E2E scenarios, traceability matrix) | Normative; updated before or with the code (spec-before-code cascade). To be **slimmed in a later step**: traceability generated from test markers carrying FR ids, the hand-maintained per-test rows dropped (Consequences, follow-ups). |
-| **Frozen history** | `docs/tasks/backlog.md`, `docs/sprints/*`, past analyses in `docs/analysis/` | Records. Never edited except for public-file-rule cleanups; never cited as current state. |
+| **Git history before v0.19.0** (not part of the tree) | The numbered backlog, the sprint files, the journal pointer and the analysis notes of Sprints 001–019 — readable with `git log` / `git show` on the commits before the `v0.19.0` tag | Records, not documents. Never cited as current state; the living documents stand on their own without linking into them (A3). *Amended 2026-10-23 (A3): this row first read "Frozen history" — the numbered backlog, the sprint files and past analyses kept in the tree as records, never edited except for public-file-rule cleanups.* |
 
 ### D4 — Framework-agnostic process: `AGENTS.md` canonical, `docs/process/` checklists, one-line tool pointers
 
@@ -116,6 +127,61 @@ Files removed from the tree (the journal, cleaned lines) remain reachable in the
 repository is public. This exposure is accepted: the audit found no secrets, and a rewrite would
 invalidate every pull-request, issue and sprint reference the records rely on.
 
+## Amendment — The frozen tier leaves the tree (2026-10-23)
+
+Owner decision of 2026-10-23, taken within Sprint 019 before the public switch and revising D1,
+D2 and D3 as first written. The original record kept the file-based planning records in the
+public tree as a "frozen history" tier and left a README pointer where the journal had been.
+Those files are maintainer-side working material: a public reader gains nothing from a frozen
+task counter, from sprint plans whose outcome `CHANGELOG.md` already records, or from working
+notes whose conclusions the ADRs state; and every living document that linked into them would
+have had to explain the freeze. The alternative — keeping the tier in the tree behind freeze
+banners — is what D2/D3 first decided; it is withdrawn in favour of the git history (D8), which
+keeps every file reachable without a rewrite.
+
+### A1 — No journal pointer in the tree (refines D1)
+
+The journal is simply outside the repository. The README that pointed to it leaves with its
+folder; the journal's location stays in a git-ignored local file. Continuity for contributors is
+unchanged (GitHub issues, the **Status** section of long-running pull requests, `CHANGELOG.md`,
+the design documents). Living documents carry no session reference: the records that carried
+them are no longer in the tree, and none is introduced.
+
+### A2 — The planning records leave the tree; GitHub-native planning starts with the close of Sprint 019 (supersedes the D2 freeze)
+
+The numbered backlog and the sprint files of Sprints 001–019 are removed with a plain `git rm`
+(no history rewrite, nothing moved or renumbered — D8). GitHub-native planning — the labelled
+issue list as backlog, a milestone plus a planning issue per sprint, the `CHANGELOG.md` section
+plus the planning issue's closing comment as sprint review — starts with the **close of Sprint
+019** rather than with Sprint 020: the `v0.19.0` milestone and the Sprint 019 planning issue
+(#285) already exist, and the Sprint 019 review is posted there. No file of the former kinds is
+created again.
+
+### A3 — Two tiers in the tree; the third is the git history (supersedes the D3 "Frozen history" row)
+
+The tiers become **living / authoritative** and **requirements & verification**, both in the
+tree and unchanged from D3, plus **git history before v0.19.0**, which is not part of the tree:
+the numbered backlog, the sprint files, the journal pointer and the analysis notes (engine
+comparisons, spikes, the demo-feedback triage, the process analysis behind this ADR). The
+analysis notes were working material behind the ADRs, not a documentation tier: every factual
+finding an ADR relied on is stated in the ADR itself — ADR-007 was made self-contained in the
+same change, and the Context section above keeps the figures of the process analysis — so no
+living document links into the removed folders. What is in the history is never cited as current
+state.
+
+### Scope note
+
+Code comments, test docstrings and document prose that cite a former backlog row number, a
+sprint identifier or a sprint-file fact ("sprint-018 fact 6", "S13 carry-over") keep them as
+historical identifiers: they resolve in the git history, not through a link, and no living
+document links into the removed folders. A number written `#N` in a document dated before
+v0.19.0 that names a task, a spike or a carry-over is a former backlog row, not a GitHub issue
+or pull request (the two numberings overlap); text written from v0.19.0 on says "backlog
+row N" for the former and keeps `#N` for GitHub items. The `CHANGELOG.md` entries before v0.19.0 were
+reconstructed from the planning records, which stay readable in the git history. The
+requirements-and-verification tier and the step-2 follow-ups below are untouched by this
+amendment.
+
 ## Alternatives Considered
 
 | Alternative | Pros | Cons |
@@ -124,7 +190,7 @@ invalidate every pull-request, issue and sprint reference the records rely on.
 | **New public repository from a filtered clone** | Guarantees that removed files never appear in the public history | Breaks every pull-request, issue and commit reference used by the backlog, the sprint records and the CHANGELOG; loses the review history that is part of the project's value; the residual exposure of the existing repository is a commit reachable only by SHA |
 | **Keep `.claude/` in git as shared, optional tooling** | Contributors with the same tool get the automation for free | Makes one vendor's format the de-facto process definition; the checklists would stay buried in prompts; every other tool's users remain second-class; tooling churn lands in the project history |
 | **One complete instruction file per tool** (`CLAUDE.md`, `GEMINI.md`, … all full) | Each tool finds its native file | N copies of the same rules to keep in sync — the duplication problem again |
-| **Planning stays file-based** (`docs/sprints/`, `docs/tasks/backlog.md`) in the public repository | Familiar; one place for history and plan | Global task counter and session numbers do not compose across parallel contributors; every PR touches the same two files; the records keep swelling the tree; GitHub already provides issues, labels and milestones with cross-references |
+| **Planning stays file-based** (sprint files and a numbered backlog) in the public repository | Familiar; one place for history and plan | Global task counter and session numbers do not compose across parallel contributors; every PR touches the same two files; the records keep swelling the tree; GitHub already provides issues, labels and milestones with cross-references |
 
 ## Consequences
 
@@ -135,8 +201,9 @@ This decision changes process and documentation only: no functional or non-funct
 - A contributor with no AI tooling can run the pull-request workflow, a code review, a sprint
   planning and a release from `AGENTS.md` and `docs/process/` alone; agents of any kind read the
   same files.
-- The repository tree shrinks by the journal and stops growing with per-session narrative; the
-  planning records stop duplicating GitHub.
+- The repository tree shrinks by the journal, the planning records and the analysis notes
+  (A1–A3) and stops growing with per-session narrative; the planning records stop duplicating
+  GitHub.
 - Every process fact has one home (`AGENTS.md` or one checklist) and is linked, not copied.
 - Personal data and tool-specific mechanics are kept out of the public record by rule (D5, D6).
 - Release notes are a first-class artifact (`CHANGELOG.md`) instead of a README table plus tag
@@ -164,8 +231,10 @@ This decision changes process and documentation only: no functional or non-funct
 
 ### Follow-ups (documentation shrink, step 2)
 
-Recorded as backlog rows 381–383 and 357 before the freeze, to be migrated to GitHub issues;
-they become an amendment of this ADR once a concrete mechanism is chosen:
+Recorded before the v0.19.0 release as rows 381–383 and 357 of the former numbered backlog (git
+history); migrating them — with every other still-relevant row of the former backlog — to GitHub
+issues is exit criterion 5 of the Sprint 019 planning issue (#285). They become an amendment of this ADR once a concrete
+mechanism is chosen:
 
 - **Generated traceability** (row 381): pytest markers carrying FR ids and a generator producing
   the FR → test mapping, replacing the hand-maintained test-id columns of
@@ -180,10 +249,10 @@ they become an amendment of this ADR once a concrete mechanism is chosen:
 
 ## References
 
-- [dev-process-analysis.md](../../analysis/dev-process-analysis.md) — the as-practiced process analysis at v0.18.0 (lifecycle, rules catalog, Definition of Done, gaps, recommendations)
+- An as-practiced process analysis at v0.18.0 (lifecycle, rules catalog, Definition of Done, gaps, recommendations) — kept outside the repository; its figures and reasoning are in the Context section, its conclusions in `AGENTS.md`, `docs/process/` and this ADR (A3)
 - [AGENTS.md](../../../AGENTS.md) — the canonical entry file (D4)
 - [docs/process/README.md](../../process/README.md) — the checklists and the public-file rule (D4, D6)
-- [docs/sessions/README.md](../../sessions/README.md), [docs/sprints/README.md](../../sprints/README.md) — the journal pointer and the sprint-records freeze banner (D1, D2)
+- ~~The journal pointer and the sprint-records freeze banner (D1, D2)~~ — removed with the frozen tier (A1, A2)
 - [CHANGELOG.md](../../../CHANGELOG.md) — the release-note vehicle (D7)
 - [ADR-007](ADR-007-pluggable-evolution-backend.md) — the amendment style this ADR follows and the source of the backend Definition of Done
-- Sprint 019 record (`docs/sprints/sprint-019.md`) — the owner decisions, the verified facts and the task breakdown that implemented this ADR
+- The Sprint 019 planning record (in the git history before the `v0.19.0` tag) and the Sprint 019 planning issue (#285, milestone v0.19.0) — the owner decisions, the verified facts and the task breakdown that implemented this ADR and its amendment

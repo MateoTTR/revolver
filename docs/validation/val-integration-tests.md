@@ -385,8 +385,8 @@ Mirror the `unit/test_db_migration_v10` / `v11` structure. Simple additive `ALTE
 
 ### 2.16 S18 Semantic Slice — Eval Honesty (U13 / U11 / U4 / U8 / U6 phase 2)
 
-New scenarios for the v0.18 semantic slice ([sprint-018.md](../sprints/sprint-018.md) §Integration
-Tests; triage §3 strict order U13 → U11 → U4 → U8 → U6 phase 2). All **Planned**; they must pass at
+New scenarios for the v0.18 semantic slice (Sprint 018 integration-test plan; the v0.17 demo-feedback
+triage fixed the strict order U13 → U11 → U4 → U8 → U6 phase 2). All **Planned**; they must pass at
 sprint end on the **1471-passing baseline** (post-017a). The Shinka-gated rows auto-skip via the
 existing `pytest.importorskip` / marker gating.
 

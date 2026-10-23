@@ -1,10 +1,9 @@
 # Sprint planning procedure
 
-From Sprint 020 on, planning is GitHub-native (ADR-008 D2): the backlog is the
+Planning is GitHub-native (ADR-008 D2, amended 2026-10-23): the backlog is the
 labelled issue list, a sprint is a **milestone** plus a **planning issue**, and
 the sprint review is the release entry in `CHANGELOG.md` plus the closing
-comment of the planning issue. `docs/tasks/backlog.md` and `docs/sprints/*`
-are frozen records of Sprints 001–019 and are no longer updated.
+comment of the planning issue. No planning file is kept in the repository.
 
 Use this procedure at sprint boundaries: to plan a sprint, to review it, and
 to groom the backlog between sprints.
@@ -160,12 +159,11 @@ S1-01 (infra: DB schema) ──┬──> S1-02 (domain: project service) → S1
 
 Planning produces the milestone and the planning issue (body and task table);
 the review produces the closing comment and the CHANGELOG section. Everything
-is posted on GitHub; nothing is written under `docs/sprints/` or `docs/tasks/`
-any more.
+is posted on GitHub; no planning file is written in the repository.
 
 ## Changes from the former agent definition
 
-- **(changed)** The former scrum-master agent wrote `docs/sprints/sprint-NNN.md` and updated `docs/tasks/backlog.md`; both are frozen (ADR-008 D2). Its sprint-file format becomes the planning-issue outline above, extended with the sections the later sprint files had grown (Verified facts, PR mapping, Waves, Conflict map, Exit criteria, Risks, Release note — the Sprint 018/019 shape).
+- **(changed)** The former scrum-master agent wrote a per-sprint planning file and updated a numbered backlog file; both kinds of file left the repository at v0.19.0 and remain in the git history (ADR-008 D2, amended 2026-10-23). Its sprint-file format becomes the planning-issue outline above, extended with the sections the later sprint files had grown (Verified facts, PR mapping, Waves, Conflict map, Exit criteria, Risks, Release note — the Sprint 018/019 shape).
 - **(changed)** "Agent assignment" in the work-stream table becomes "assignment" (a contributor or an agent, indifferently).
 - **(changed)** The sprint-review section of the sprint file becomes the CHANGELOG entry plus the planning issue's closing comment.
 - **(changed)** The French communication rule is dropped (English only).

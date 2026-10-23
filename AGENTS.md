@@ -39,10 +39,6 @@ benchmark results with full traceability.
 | ADR template | [docs/architecture/adr/ADR-000-template.md](docs/architecture/adr/ADR-000-template.md) | Template for new ADRs |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) | Release history (Keep a Changelog), one section per tag; `[Unreleased]` collects the current sprint |
 | Process checklists | [docs/process/README.md](docs/process/README.md) | Tool-neutral procedures: code / spec / validation / doc review, sprint planning, release & hotfix, Definition of Done |
-| Analyses | [docs/analysis/](docs/analysis/) | Spikes, studies and the process analysis that ground the ADRs |
-| Task backlog (frozen) | [docs/tasks/backlog.md](docs/tasks/backlog.md) | Numbered task list up to Sprint 019 — historical record; the live backlog is the GitHub issue list |
-| Sprint records (frozen) | [docs/sprints/README.md](docs/sprints/README.md) | Sprint files 001–019 — historical records; from Sprint 020 a sprint is a milestone + planning issue |
-| Maintainer journal | [docs/sessions/README.md](docs/sessions/README.md) | Private, kept outside the repository |
 
 ### Architecture Decision Records (ADRs)
 
@@ -55,7 +51,7 @@ benchmark results with full traceability.
 | [ADR-005](docs/architecture/adr/ADR-005-pydantic-data-models.md) | Pydantic for data models | Accepted |
 | [ADR-006](docs/architecture/adr/ADR-006-openevolve-instance-injection.md) | Strategy A+B hybrid for OpenEvolve instance injection | Accepted |
 | [ADR-007](docs/architecture/adr/ADR-007-pluggable-evolution-backend.md) | Pluggable evolution backend (OpenEvolve default, ShinkaEvolve optional) | Accepted (amended 2026-07-01, 2026-07-05) |
-| [ADR-008](docs/architecture/adr/ADR-008-documentation-and-process-strategy.md) | Documentation and process strategy | Accepted |
+| [ADR-008](docs/architecture/adr/ADR-008-documentation-and-process-strategy.md) | Documentation and process strategy | Accepted (amended 2026-10-23) |
 
 ### Design Documents (DES)
 
@@ -134,8 +130,7 @@ path", "a network Ollama host", "a separate demo repository"). See
 
 ### File naming
 
-- ADRs: `ADR-NNN-short-title.md`; design documents: `DES-NNN-short-title.md` (zero-padded 3-digit numbers); specifications: `spec-<group>.md`; analyses: `docs/analysis/<topic>.md`; ConOps: `conops.md` (single living document).
-- `sprint-NNN.md` and the numbered backlog are frozen record formats: no new files of those kinds are created.
+- ADRs: `ADR-NNN-short-title.md`; design documents: `DES-NNN-short-title.md` (zero-padded 3-digit numbers); specifications: `spec-<group>.md`; ConOps: `conops.md` (single living document).
 
 ### Git
 
@@ -144,12 +139,13 @@ path", "a network Ollama host", "a separate demo repository"). See
 - CI (`.github/workflows/ci.yml`) runs on pushes and non-draft pull requests to `main` and `develop`. The four required checks are `Lint (ruff + mypy)`, `Test (pytest + coverage) (3.12)`, `Test (pytest + coverage) (3.14)` and `Doc command-lint (fenced CLI invocations)`; a `version-check` job runs on `v*` tags only. Coverage must stay ≥ 80 %.
 - **Irreversible actions are maintainer-only**: merging into `main`, tags, version bumps, repository visibility and settings. Contributors never run `gh pr merge`, `git merge` into `main`, `git tag` or bump versions; they open the pull request or propose the action and wait for the maintainer.
 
-## Planning model (GitHub-native from Sprint 020)
+## Planning model (GitHub-native)
 
 - The **backlog** is the GitHub issue list, organised with labels (type / area / priority / backend).
 - A **sprint** is a **milestone** plus a **planning issue** whose body carries the scope, the verified facts, the task table, the PR mapping, the waves, the conflict map and the exit criteria ([docs/process/sprint-planning.md](docs/process/sprint-planning.md)).
 - The **sprint review** is the release section in `CHANGELOG.md` plus the closing comment of the planning issue.
-- `docs/tasks/backlog.md` and `docs/sprints/*` are frozen records of Sprints 001–019 and are not updated; "session NNN" references inside them point to the maintainer's private journal.
+- Planning lives on GitHub only; no planning file is kept in the repository (ADR-008 D2, amended 2026-10-23 by A2).
+- In documents written before v0.19.0, a number written `#N` that names a task, a spike or a carry-over is a former backlog row, not a GitHub issue or pull request (the two numberings overlap); new text writes "backlog row N" and keeps `#N` for GitHub items (ADR-008 A3 scope note).
 
 ## Pull request workflow
 
