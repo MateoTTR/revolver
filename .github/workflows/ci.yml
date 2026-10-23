@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -116,14 +116,16 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.14"]
-    env:
-      # Isolate the global DB (~/.revolver) from anything else on the runner;
-      # get_global_db() honours $REVOLVER_HOME.
-      REVOLVER_HOME: ${{ runner.temp }}/revolver-home-${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - name: Define isolated global-DB path
+        # Isolate the global DB (~/.revolver) from anything else on the runner;
+        # get_global_db() honours $REVOLVER_HOME. (The `runner` context is not
+        # available in job-level `env`, hence the $GITHUB_ENV step.)
+        run: echo "REVOLVER_HOME=${RUNNER_TEMP}/revolver-home-${{ matrix.python-version }}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip

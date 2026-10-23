@@ -37,13 +37,15 @@ jobs:
     # Run on branch pushes and non-draft PRs (same guard as ci.yml jobs).
     if: >-
       github.event.pull_request.draft == false || github.event_name == 'push'
-    env:
-      # Same isolation as the ci.yml test job.
-      REVOLVER_HOME: ${{ runner.temp }}/revolver-home-doclint
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - name: Define isolated global-DB path
+        # Same isolation as the ci.yml test job (set via $GITHUB_ENV because the
+        # `runner` context is not available in job-level `env`).
+        run: echo "REVOLVER_HOME=${RUNNER_TEMP}/revolver-home-doclint" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
