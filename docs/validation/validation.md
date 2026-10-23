@@ -171,7 +171,7 @@ Unit tests cover individual functions and classes in the **domain layer** (`revo
 
 - **File layout**: `tests/unit/` mirrors `src/revolver/` structure
 - **Naming**: `test_<function_or_behavior>` (e.g., `test_hash_directory_deterministic`)
-- **Fixtures**: shared fixtures in `tests/conftest.py` and `tests/unit/conftest.py`
+- **Fixtures**: shared fixtures live in `tests/conftest.py` (`tmp_project`, `no_shinka`) and, for L3, `tests/e2e/conftest.py` (`fake_llm_server`); there is no `tests/unit/conftest.py` — see §6.3
 - **No real I/O**: all filesystem access via `tmp_path`, all DB via `:memory:`, all HTTP mocked
 - **Fast**: full unit suite must run in under 30 seconds
 
@@ -214,18 +214,15 @@ markers = [
 
 ### 6.3 Shared Fixtures
 
-Key fixtures defined in `tests/conftest.py`:
+Shared fixtures are deliberately few:
 
-| Fixture | Scope | Provides |
-|---|---|---|
-| `tmp_project` | function | Initialized Revolver project in `tmp_path` with `.revolver/`, DB, default files |
-| `cli_runner` | function | `CliRunner` instance configured for the test project |
-| `memory_db` | function | SQLite `:memory:` connection with schema applied |
-| `sample_instances` | session | Path to `tests/fixtures/instances/` |
-| `simple_evaluator` | session | Path to `tests/fixtures/evaluator_simple.py` |
-| `mock_ollama` | function | Mocked Ollama HTTP responses (httpx mock) |
-| `mock_openevolve` | function | Mocked OpenEvolve that returns deterministic results |
-| `fake_llm_server` | session | Local HTTP server exposing OpenAI-compatible `/v1/chat/completions` (E2E only) |
+| Fixture | Scope | Defined in | Provides |
+|---|---|---|---|
+| `tmp_project` | function | `tests/conftest.py` | `tmp_path` with an initialized `.revolver/` store (`init_project_store`). Suites that need the project DB or the template files define a local `tmp_project` that shadows it (e.g. `tests/test_core_run.py`, `tests/test_run_delete.py`, `tests/integration/test_run.py`, `tests/integration/test_solution.py`) |
+| `no_shinka` | function | `tests/conftest.py` | Makes `shinka` (and `shinka.core` / `.database` / `.launch`) un-importable via `sys.modules[...] = None`, so "shinka not installed" tests pass identically with or without the `[shinka]` extra |
+| `fake_llm_server` | function | `tests/e2e/conftest.py` | A started `tests.fixtures.fake_llm_server.FakeLLMServer` on a random port (OpenAI-compatible `/v1/chat/completions` plus the minimal Ollama endpoints), stopped on teardown; tests script replies via `response_content` (L3 only) |
+
+There is no shared CLI-runner or database fixture. L2 suites instantiate `typer.testing.CliRunner()` at module level. Ollama, OpenEvolve, ShinkaEvolve and HTTP are mocked inside each module with `unittest.mock.patch` at the `revolver.infra` / `revolver.core.run` seams (the Ollama client at its `revolver.cli.llm.OllamaClient` import site). Test data lives in `tests/fixtures/` and is referenced by path.
 
 ### 6.4 CI Pipeline
 
@@ -246,9 +243,14 @@ manual (no dedicated workflow yet — run by hand on a developer machine):
   └── the GPU-backed E2E scenarios of val-e2e-tests.md against a local Ollama (`e2e_gpu`, manual; no test uses it yet)
 ```
 
-**CI gate**: the four jobs of the push/PR pipeline (Level 0 + 1 + 2 and the doc command-lint) are the required status checks for merge, on docs-only and code-only changes alike. L2-OE and E2E failures are reported but do not block.
+**CI gate**: the four required checks (`Lint (ruff + mypy)`, `Test (pytest + coverage) (3.12)`, `Test (pytest + coverage) (3.14)`, `Doc command-lint (fenced CLI invocations)`) produced by the three push/PR jobs (Level 0 + 1 + 2 and the doc guards) are the required status checks for merge, on docs-only and code-only changes alike. L2-OE and E2E failures are reported but do not block.
 
-**No Shinka job in CI**: ci.yml runs **no** ShinkaEvolve step — the main test job's `-m "unit or integration"` selection runs without the `[shinka]` extra installed (Shinka-gated modules auto-skip via `pytest.importorskip`), and only the OpenEvolve contract tests get a dedicated non-blocking step. The L2-Shinka contract suites are selected by the `-m shinkaevolve` marker (6+ modules — no longer the historic 3-file list) and run manually in a shinka-enabled environment (e.g. before a release); adding a Shinka-env CI step remains aspirational.
+**Doc guards** (the `Doc command-lint` job; both modules are `unit`-marked, so they also run in the main test job):
+
+- `tests/unit/test_doc_command_lint.py` — **command-lint**: every *line-initial* `revolver` invocation inside a fenced block of the documentation corpus must resolve against the real Typer CLI tree (`revolver.cli._tree`: subcommands, flags, positional-argument caps; untagged fences parsed; inline-prose mentions out of scope). The corpus is the root files `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CLAUDE.md`, `GEMINI.md` (`ROOT_DOC_FILES`) plus `docs/**/*.md`; `CHANGELOG.md` is excluded because its entries quote historical flags. `TestDocCommandLintCorpus::test_corpus_includes_contributor_docs` pins that composition: every *tracked* root `*.md` is either linted or explicitly excluded.
+- `tests/unit/test_doc_freshness.py` — **freshness**: `docs/guides/*.md` and `docs/specs/user-story-e2e.md` must open with a YAML front-matter `verified-against: vX.Y.Z` stamp at most one minor version behind `revolver.__version__`; a stamp ahead of the current version never fails; during the fresh-major window (current version `X.0.*`) stamps from major `X-1` still pass; a UTF-8 BOM before the front-matter is tolerated. Refreshing the stamps is part of the release procedure (`docs/process/release.md`).
+
+**No Shinka job in CI**: ci.yml runs **no** ShinkaEvolve step — the main test job's `-m "unit or integration"` selection runs without the `[shinka]` extra installed (Shinka-gated modules auto-skip via `pytest.importorskip`), and only the OpenEvolve contract tests get a dedicated non-blocking step. The L2-Shinka contract suites are selected by the `-m shinkaevolve` marker (five modules carry it at v0.19.0: the three S14 contract suites `test_run_shinka.py`, `test_shinka_db.py`, `test_shinka_wrapper.py` plus the Shinka-gated tests of `tests/integration/test_solution.py` and `tests/unit/core/test_solution.py`) and run manually in a shinka-enabled environment (e.g. before a release); adding a Shinka-env CI step remains aspirational.
 
 **Draft PRs**: the lint, test and doc-lint jobs are skipped for draft PRs to save CI minutes; they run once the PR is marked ready.
 
@@ -270,29 +272,46 @@ manual (no dedicated workflow yet — run by hand on a developer machine):
 
 ```
 tests/
-├── conftest.py                 # Shared fixtures
-├── fixtures/                   # Test data (committed to repo)
-│   ├── evaluator_simple.py
+├── __init__.py
+├── conftest.py                 # shared fixtures: tmp_project, no_shinka (§6.3)
+├── fixtures/                   # test data, referenced by path (+ two importable factories)
+│   ├── __init__.py
+│   ├── config_simple.yaml
+│   ├── evaluator_simple.py     # + evaluator_legacy / _instance / _both / _neither /
+│   │                           #   _dualmode / _mixed_metrics.py
 │   ├── initial_program_simple.py
 │   ├── problem_simple.md
-│   ├── config_simple.yaml
-│   ├── fake_llm_server.py      # OpenAI-compatible fake server for E2E
-│   ├── instances/
-│   └── instance_bad.json
-├── unit/                       # Level 1
-│   ├── conftest.py
-│   ├── core/
-│   │   └── test_<module>.py
-│   ├── infra/
-│   │   └── test_<module>.py
-│   └── models/
-│       └── test_<module>.py
-├── integration/                # Level 2
-│   └── test_<command>.py
+│   ├── instances/              # instance_001..003.json
+│   ├── instance_bad.json
+│   ├── fake_llm_server.py      # OpenAI-compatible fake server for L3 (val-e2e-tests.md §2.2)
+│   ├── programs_sqlite.py      # ShinkaEvolve programs.sqlite factory (L2-Shinka)
+│   └── shinka_evaluate_py.py   # reference Shinka evaluate.py wrapper (L2-Shinka)
+├── test_*.py                   # historic L1/L2 suites, marker-classified (§8.1) — e.g.
+│                               #   test_core_run.py, test_run_delete.py, test_run_population.py,
+│                               #   test_project_integration.py, test_db*.py, test_models*.py
+├── unit/                       # Level 1 (canonical home)
+│   ├── __init__.py
+│   ├── core/                   # test_<module>.py mirroring revolver.core
+│   ├── infra/                  # test_<module>.py mirroring revolver.infra
+│   ├── test_*.py               # flat L1 suites that predate the core/ + infra/ split — e.g.
+│   │                           #   test_db_migration_v9..v14.py, test_core_benchmark.py,
+│   │                           #   test_run_ensemble.py, test_doctor.py, test_setup.py
+│   ├── test_doc_command_lint.py  # doc guards (§6.4): unit-marked, L2 by scope (§8.1)
+│   └── test_doc_freshness.py
+├── integration/                # Level 2 (canonical home); file list in val-integration-tests.md §4
+│   ├── __init__.py
+│   ├── test_<command>.py       # one suite per command group (+ test_ensemble.py,
+│   │                           #   test_cross_cutting.py, test_workspace_detection.py, ...)
+│   ├── test_run_oe.py          # L2-OE contract suite
+│   └── test_run_shinka.py, test_shinka_wrapper.py, test_shinka_db.py   # L2-Shinka contract suites
 └── e2e/                        # Level 3
-    ├── test_alice_jobshop.py
-    └── test_remote_only.py
+    ├── __init__.py
+    ├── conftest.py             # fake_llm_server fixture
+    └── test_shinka_backend.py  # Scenario 3 — the only E2E suite in the tree; Scenarios 1/2/4/5
+                                #   are planned (val-e2e-tests.md §4)
 ```
+
+The `conftest.py`, `fixtures/` and `e2e/` entries and the three contract suites are exact at v0.19.0; the `test_*.py`, `unit/` and `integration/` entries are illustrative (patterns plus a few examples — `find tests -maxdepth 2` gives the current layout, and [val-integration-tests.md §4](val-integration-tests.md) lists the integration files).
 
 ### 8.1 Test ID Conventions
 
@@ -309,18 +328,22 @@ The validation documents ([val-integration-tests.md](val-integration-tests.md), 
   Their IDs are referenced without a prefix — still relative to `tests/`. Tests added to one of
   these existing top-level suites keep the file's unprefixed form (e.g. the S18
   `test_run_population::test_oe_display_prefers_combined_score`). A **new** top-level file is
-  admissible only when its CI marker must diverge from the directory convention (e.g. the S18
-  `test_doc_command_lint`, a `unit`-marked lint suite — see the next bullet); otherwise new L2
-  suites go under `tests/integration/`.
+  admissible only when its CI marker must diverge from the directory convention; otherwise new
+  L2 suites go under `tests/integration/` and new L1 suites under `tests/unit/`.
 - **Marker vs. level**: the documentary level (L1/L2/L3) classifies a test's *scope*; the pytest
   marker (`unit` / `integration` / …, §6.2) drives *CI selection*. The two usually coincide but
-  may deliberately differ — e.g. the #354 doc command-lint
-  (`test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, S18) is tracked as an L2
-  scenario (it exercises the real Typer CLI tree against the whole docs corpus) but runs under
-  the `unit` marker so it executes in the blocking CI selection (sprint-018 S18-21). Where marker
-  and level differ, the validation docs say so on the row. Note that historic top-level suites
-  without any marker fall outside a marker-filtered CI selection and run via a plain
-  `pytest tests/`.
+  may deliberately differ — e.g. the backlog-row-354 doc command-lint
+  (`unit/test_doc_command_lint::TestDocCommandLintCorpus::test_corpus_invocations_resolve`, S18)
+  is an L2-scope test (it exercises the real Typer CLI tree against the whole docs corpus) that
+  lives under `tests/unit/` and runs under the `unit` marker so it executes in the blocking CI
+  selection (sprint-018 S18-21). Where marker and level deliberately differ, the validation docs
+  say so on the row; where they disagree without such a note, the marker is the truth and the
+  row is relabelled (v0.19.0 pre-release review). Note that suites without any marker fall
+  outside a marker-filtered CI selection and run only via a plain `pytest tests/`:
+  `test_run_population.py` was marked at v0.19.0; seven unmarked suites remain
+  (`test_db_dataset.py`, `test_db_problem.py`, `test_evaluator_loader.py`,
+  `test_models_dataset.py`, `test_models_problem.py`, `test_store_dataset.py`,
+  `integration/test_shinka_shutdown.py`).
 
 **Running tests**:
 

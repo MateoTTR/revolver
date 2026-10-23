@@ -130,7 +130,7 @@ untouched.
 | Level | What | Where | Markers | In CI |
 |---|---|---|---|---|
 | 0 — Static | ruff, mypy | — | — | `Lint (ruff + mypy)` |
-| 1 — Unit | functions and classes of `core/` and `infra/`, everything external mocked | `tests/unit/` (mirrors `src/revolver/`) | `unit` | `Test (pytest + coverage)` |
+| 1 — Unit | functions and classes of `core/` and `infra/`, everything external mocked | `tests/unit/` (mirrors `src/revolver/`; historic suites also at `tests/test_*.py`) | `unit` | `Test (pytest + coverage)` |
 | 2 — Integration | CLI commands through `CliRunner`, real SQLite in a temporary project | `tests/integration/test_<command>.py` (a few historic suites sit at `tests/test_*.py`) | `integration` | `Test (pytest + coverage)` |
 | 2-OE — OpenEvolve contract | config round-trip, controller init; no LLM | `tests/integration/test_run_oe.py` | `integration` + `openevolve`, module-level `pytest.importorskip` | non-blocking step, Python 3.12 |
 | 2-Shinka — ShinkaEvolve contract | config projection, wrapper and database contracts; no LLM | `tests/integration/test_run_shinka.py`, `tests/integration/test_shinka_*.py` | `integration` + `shinkaevolve`, module-level `pytest.importorskip` | not run — manual |

@@ -23,7 +23,7 @@ L2-OE tests catch field-mapping bugs (e.g., `base_url` vs `api_base`) that are s
 
 ### L2-Shinka: ShinkaEvolve Contract Tests (**implemented — S14**, ADR-007)
 
-A mirror track for the ShinkaEvolve backend, delivered in S14 across three files:
+A mirror track for the ShinkaEvolve backend, delivered in S14 across three contract suites (the `shinkaevolve` marker is also carried by the Shinka-gated tests of `tests/integration/test_solution.py` and `tests/unit/core/test_solution.py` — five modules in all at v0.19.0, [validation.md §6.4](validation.md)):
 
 - `tests/integration/test_shinka_wrapper.py` — the generated `evaluate.py` wrapper contract
   (`metrics.json`/`correct.json` output — the top silent-bug risk of the backend initiative):
@@ -37,7 +37,8 @@ A mirror track for the ShinkaEvolve backend, delivered in S14 across three files
   `ShinkaEvolveRunner` (launch, dry-run, resume inheritance, token storage, population, and the
   zero-scored-programs regression guarding against bogus solution collection).
 
-Auto-skip via `pytest.importorskip("shinka.database")`; non-blocking CI step like L2-OE. The
+Auto-skip via `pytest.importorskip("shinka.database")`; run manually in a shinka-enabled
+environment (no CI step — [validation.md §6.4](validation.md)). The
 "shinka not installed" tests force un-importability via the shared `no_shinka` conftest fixture,
 so the whole suite passes identically with or without the `[shinka]` extra installed.
 
@@ -432,19 +433,25 @@ Integration tests use a **minimal test fixture set** stored in `tests/fixtures/`
 
 ```
 tests/fixtures/
-├── evaluator_simple.py         # Trivial evaluator: returns {"combined_score": len(solution) / 100}
+├── __init__.py                 # Makes the two factories below importable as tests.fixtures.*
+├── evaluator_simple.py         # Trivial evaluator: score from the program's source length
 ├── evaluator_legacy.py         # Legacy evaluator with evaluate() (global mode) for FR-EVL-019
-├── initial_program_simple.py   # Trivial program with EVOLVE-BLOCK markers
-├── problem_simple.md           # Minimal problem description
-├── config_simple.yaml          # OpenEvolve config with 1 iteration
-├── instances/                  # 3-5 tiny JSON instances
-│   ├── instance_001.json       # {"jobs": [[1,2],[3,4]], "machines": 2}
-│   ├── instance_002.json       # {"jobs": [[5,6]], "machines": 1}
-│   └── instance_003.json       # {"jobs": [[1],[2],[3]], "machines": 3}
 ├── evaluator_instance.py       # Evaluator with only evaluate_instance() function
 ├── evaluator_both.py           # Evaluator with both evaluate() and evaluate_instance()
 ├── evaluator_neither.py        # Evaluator with neither function (triggers error)
-└── instance_bad.json           # Malformed: missing "jobs" key → triggers KeyError
+├── evaluator_dualmode.py       # Evaluator supporting both per-instance and aggregated modes
+├── evaluator_mixed_metrics.py  # Emits numeric + non-numeric metrics (B1 / FR-EVL-021 wrapper aggregation)
+├── initial_program_simple.py   # Trivial program with EVOLVE-BLOCK markers
+├── problem_simple.md           # Minimal problem description
+├── config_simple.yaml          # OpenEvolve config with 1 iteration
+├── instances/                  # 3 tiny JSON instances
+│   ├── instance_001.json
+│   ├── instance_002.json
+│   └── instance_003.json
+├── instance_bad.json           # Malformed: missing "jobs" key → triggers KeyError
+├── fake_llm_server.py          # OpenAI-compatible fake LLM server for L3 (val-e2e-tests.md §2.2)
+├── programs_sqlite.py          # Factory for a ShinkaEvolve programs.sqlite (L2-Shinka, schema of shinka-evolve 0.0.7)
+└── shinka_evaluate_py.py       # Reference Shinka evaluate.py wrapper + required markers (L2-Shinka)
 ```
 
 **Principles**:
@@ -457,28 +464,34 @@ tests/fixtures/
 
 ## 4. Conventions
 
-- **File layout**: `tests/integration/` organized by command group
+- **File layout**: `tests/integration/` organized by command group (exact at v0.19.0; the `project init` suite is the historic top-level `tests/test_project_integration.py` — [validation.md §8.1](validation.md))
   ```
   tests/integration/
-  ├── test_project.py
+  ├── __init__.py
   ├── test_llm.py
+  ├── test_ensemble.py          # `llm ensemble` subcommands (S17)
   ├── test_problem.py
   ├── test_dataset.py
-  ├── test_run.py
+  ├── test_run.py               # `run` incl. the OE-side ensemble selection / `--llm-weight` scenarios (§2.12)
   ├── test_eval.py
-  ├── test_solution.py
+  ├── test_solution.py          # incl. the Shinka-gated top-N extraction tests (`shinkaevolve` marker)
   ├── test_benchmark.py
   ├── test_doctor.py
   ├── test_setup.py
   ├── test_cross_cutting.py
+  ├── test_workspace_detection.py  # workspace guard: commands outside a `.revolver/` project exit 1 (S9)
+  ├── test_sprint_009a.py       # S9a: checkpoint_interval guard, config validation, resume flags, dry-run
+  ├── test_run_oe.py            # L2-OE contract (§2.10; `openevolve` marker, importorskip)
   ├── test_run_shinka.py        # L2-Shinka CLI scenarios (S14; extended S17 — bandit ensemble/selection)
   ├── test_shinka_wrapper.py    # L2-Shinka wrapper contract (implemented — S14)
   ├── test_shinka_db.py         # L2-Shinka programs.sqlite contract (implemented — S14)
-  └── test_openevolve_shutdown.py  # B2 OE post-run teardown regression (new — S17, mirrors test_shinka_shutdown.py)
+  ├── test_openevolve_shutdown.py  # B2 OE post-run teardown regression (S17, mirrors test_shinka_shutdown.py)
+  ├── test_shinka_shutdown.py   # A2 Shinka post-run teardown regression (S16a; runner mocked, no extra needed)
+  └── test_reaper_hardening.py  # #359 grandchild reap (S18)
   ```
 - **Pattern**: each test creates a temporary project via `tmp_project` fixture, runs CLI commands through `CliRunner`, asserts on stdout/stderr/exit code and DB state
 - **Markers**: `@pytest.mark.integration` — allows running unit-only or integration-only via `-m`
 - **Speed**: full integration suite must run in under 2 minutes
-- **No network**: all HTTP calls (Ollama, LLM APIs) are mocked via `mock_ollama` / `mock_openevolve` fixtures
+- **No network**: all HTTP calls (Ollama, LLM APIs) and the engines are mocked with `unittest.mock.patch` inside each test module (no shared mock fixtures — [validation.md §6.3](validation.md))
 - **L2-OE tests**: use `pytest.importorskip("openevolve.config")` at module level for auto-skip when `openevolve` is not installed. Marked with `@pytest.mark.openevolve` in addition to `@pytest.mark.integration`. A dummy `OPENAI_API_KEY` is set via `monkeypatch` for tests that instantiate the OpenEvolve controller (it requires an API key even though no LLM call is made).
 - **L2-Shinka tests** (implemented — S14): use `pytest.importorskip("shinka.database")` at module level for auto-skip when the `shinka` extra is not installed. Marked with `@pytest.mark.shinkaevolve` in addition to `@pytest.mark.integration`.
