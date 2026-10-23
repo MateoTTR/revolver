@@ -23,6 +23,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - ADR-008 "Documentation and process strategy": journal outside the repository, GitHub-native planning, documentation tiers, tool-neutral process, public-file rule, `CHANGELOG.md` as the release-note vehicle (issue #277); amended on 2026-10-23 so that the frozen tier leaves the tree (issue #284).
 - `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#280, closes #275).
 - MIT `LICENSE` file (#274, closes #272).
+- Contributor process files: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), the pull-request template, issue forms (bug, feature, new evolution backend, sprint planning), `CODEOWNERS`, Dependabot (pip and GitHub Actions, weekly, grouped, against `develop`) and `[project.urls]` in `pyproject.toml`; `CLAUDE.md` and `GEMINI.md` become import one-liners of `AGENTS.md` under the pointer-file rule; the doc command-lint corpus covers the root Markdown files except `CHANGELOG.md` (#290, closes #279).
 
 ### Changed
 

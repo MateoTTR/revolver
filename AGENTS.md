@@ -17,8 +17,15 @@ benchmark results with full traceability.
 
 - **Read this file first**, whether you are a person or an agent. It is the
   canonical entry point; everything else is reached from the index below.
-  `CLAUDE.md` and `GEMINI.md` are one-line pointers to this file for tools
-  that look for those names.
+  `CLAUDE.md` and `GEMINI.md` are one-line **imports** of this file
+  (`@AGENTS.md` in Claude Code syntax, `@./AGENTS.md` in Gemini CLI syntax)
+  for the two tools that look for those names and do not read `AGENTS.md`
+  **by default**: Claude Code reads `CLAUDE.md` first, and recent versions
+  fall back to `AGENTS.md` only when no `CLAUDE.md` exists — the project keeps
+  `CLAUDE.md` because the file also documents the git-ignored personal-file
+  convention. No other pointer file exists, and none is added for a tool that
+  reads `AGENTS.md` by default — the pointer-file rule in
+  [CONTRIBUTING.md](CONTRIBUTING.md#working-with-ai-tools-pointer-file-rule).
 - Then read the issue you work on, the relevant specification
   (`docs/specs/`), design document (DES) and ADR, and the checklist under
   `docs/process/` for what you are about to do.
@@ -39,6 +46,11 @@ benchmark results with full traceability.
 | ADR template | [docs/architecture/adr/ADR-000-template.md](docs/architecture/adr/ADR-000-template.md) | Template for new ADRs |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) | Release history (Keep a Changelog), one section per tag; `[Unreleased]` collects the current sprint |
 | Process checklists | [docs/process/README.md](docs/process/README.md) | Tool-neutral procedures: code / spec / validation / doc review, sprint planning, release & hotfix, Definition of Done |
+| Contributing guide | [CONTRIBUTING.md](CONTRIBUTING.md) | Lifecycle of a change for a contributor: issue first, fork workflow, local gates, test levels, documentation touchpoints, draft pull request, review; the pointer-file rule for AI tools |
+| Security policy | [SECURITY.md](SECURITY.md) | Supported versions, private vulnerability reporting, scope of a local CLI |
+| Code of Conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1; reports through the repository's private reporting form |
+| Issue and pull-request templates | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/), [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) | Issue forms (bug, feature, new evolution backend, sprint planning); the pull-request description with the Definition-of-Done checklist and the Status section |
+| Code owners and Dependabot | [.github/CODEOWNERS](.github/CODEOWNERS), [.github/dependabot.yml](.github/dependabot.yml) | Maintainer review on the governance paths; weekly pip and GitHub Actions updates against `develop` |
 
 ### Architecture Decision Records (ADRs)
 
@@ -149,9 +161,9 @@ path", "a network Ollama host", "a separate demo repository"). See
 
 ## Pull request workflow
 
-1. **Issue first.** Every pull request closes a GitHub issue that states the scope, the files to touch, the acceptance criteria, the test scenarios and the spec / DES / ADR references. The issue is the single source of truth for the change. External contributors proposing a design change open a **design issue** first (RFC-lite): the maintainer then updates — or reviews the contributor's edits to — the formal specification, DES, ADR and validation documents.
+1. **Issue first.** Every pull request closes a GitHub issue — opened from one of the issue forms under `.github/ISSUE_TEMPLATE/` — that states the scope, the files to touch, the acceptance criteria, the test scenarios and the spec / DES / ADR references. The issue is the single source of truth for the change. External contributors proposing a design change open a **design issue** first (RFC-lite): the maintainer then updates — or reviews the contributor's edits to — the formal specification, DES, ADR and validation documents.
 2. **Branch** from `develop`: `feature/<topic>`.
-3. **Draft pull request** against `develop`, as soon as the branch exists: the first line of the description is `Closes #N`; a short **Status** section is kept up to date at each working session (what is done, what is next, what blocks). Drafts do not run CI.
+3. **Draft pull request** against `develop`, as soon as the branch exists, from the pull-request template (`.github/PULL_REQUEST_TEMPLATE.md`): the first line of the description is `Closes #N`; a short **Status** section is kept up to date at each working session (what is done, what is next, what blocks). Drafts do not run CI.
 4. **Local gates** before asking for review, on Python 3.12 (and 3.14 when available), after `pip install -e ".[dev]"`:
    `ruff check src/ tests/` · `ruff format --check src/ tests/` · `mypy` · `pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"`.
    Engine-specific tests (`-m openevolve`, `-m shinkaevolve`) are not run by CI: state in the pull request how they were run.
@@ -168,3 +180,4 @@ conflict map says which order).
 - Release and hotfix: [docs/process/release.md](docs/process/release.md).
 - Definition of Done (feature; new evolution backend): [docs/process/definition-of-done.md](docs/process/definition-of-done.md).
 - Review procedures (code, specification, validation, documentation) and sprint planning: the other files of [docs/process/](docs/process/README.md).
+- Contributor lifecycle (fork workflow, roles, AI tools and the pointer-file rule): [CONTRIBUTING.md](CONTRIBUTING.md); security: [SECURITY.md](SECURITY.md); conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
