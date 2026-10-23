@@ -42,6 +42,8 @@ from revolver.core.exceptions import ExternalError
 from revolver.infra.backends.base import BackendRunSpec
 from revolver.infra.backends.shinka import SHINKA_WRAPPER_FILENAME, ShinkaBackend
 
+pytestmark = [pytest.mark.integration]
+
 
 def _make_spec(tmp_path: Path) -> BackendRunSpec:
     """Build a minimal spec whose snapshot/wrapper files exist on disk."""

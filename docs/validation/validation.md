@@ -344,12 +344,15 @@ the test is a method).
   lives under `tests/unit/` and runs under the `unit` marker so it executes in the blocking CI
   selection (sprint-018 S18-21). Where marker and level deliberately differ, the validation docs
   say so on the row; where they disagree without such a note, the marker is the truth and the
-  row is relabelled (v0.19.0 pre-release review). Note that suites without any marker fall
-  outside a marker-filtered CI selection and run only via a plain `pytest tests/`:
-  `test_run_population.py` was marked at v0.19.0; seven unmarked suites remain
-  (`test_db_dataset.py`, `test_db_problem.py`, `test_evaluator_loader.py`,
-  `test_models_dataset.py`, `test_models_problem.py`, `test_store_dataset.py`,
-  `integration/test_shinka_shutdown.py`).
+  row is relabelled (v0.19.0 pre-release review). A suite without any marker would fall
+  outside a marker-filtered CI selection and run only via a plain `pytest tests/`; none is left:
+  `test_run_population.py` and the seven suites that carried no marker (`test_db_dataset.py`,
+  `test_db_problem.py`, `test_evaluator_loader.py`, `test_models_dataset.py`,
+  `test_models_problem.py`, `test_store_dataset.py` — `unit`; `integration/test_shinka_shutdown.py`
+  — `integration`) were marked at v0.19.0, so the CI selection now equals the full suite: without
+  the engine extras both collect 1591 tests (1587 passed, 4 skipped, 0 deselected — the four skips
+  are the import-gated Shinka modules `e2e/test_shinka_backend.py`,
+  `integration/test_run_shinka.py`, `test_shinka_db.py` and `test_shinka_wrapper.py`).
 
 **Running tests**:
 

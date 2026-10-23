@@ -32,7 +32,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - `pytest` runs with `--strict-markers` (an unregistered marker now fails collection); the tooling sections of `docs/validation/validation.md` match `pyproject.toml` and `ci.yml`, and the `e2e_gpu` marker is registered as a reserved marker for the manual GPU track.
 - CI runs on GitHub-hosted runners (`ubuntu-latest`) instead of a self-hosted pool; the runner image under `.github/runner/` is removed (#274).
 - Planning is GitHub-native from the close of Sprint 019: the backlog is the labelled GitHub issue list, a sprint is a milestone plus a planning issue, and the sprint review is the `CHANGELOG.md` section plus the planning issue's closing comment (#280; ADR-008 D2 as amended under issue #284).
-- Validation documents re-synchronized with the test suite before v0.19.0: shared-fixture table and test layout match the code, every cited test id resolves, FR-BEN-019/020 rows added (FR-BEN-020 with a new test), coverage counts recomputed, `tests/test_run_population.py` marked so CI runs it; the remaining MUST requirements traced to Planned tests are tracked as #297.
+- Validation documents re-synchronized with the test suite before v0.19.0: shared-fixture table and test layout match the code, every cited test id resolves, FR-BEN-019/020 rows added (FR-BEN-020 with a new test), coverage counts recomputed, `tests/test_run_population.py` marked so CI runs it; the remaining MUST requirements traced to Planned tests are tracked as #297; the seven test modules that carried no marker now run in CI.
 
 ### Removed
 

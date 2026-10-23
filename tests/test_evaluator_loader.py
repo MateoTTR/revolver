@@ -9,6 +9,8 @@ import pytest
 from revolver.core.exceptions import EvaluatorLoadError
 from revolver.infra.evaluator_loader import load_evaluator
 
+pytestmark = pytest.mark.unit
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
