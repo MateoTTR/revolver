@@ -11,22 +11,29 @@ Entries up to v0.18.0 were reconstructed after the fact from the sprint records
 (`docs/sprints/`), the annotated tag messages and the merged pull requests;
 `(#N)` refers to a pull request. From v0.19.0 on, this file is the release-note
 vehicle: each pull request adds its line under `[Unreleased]`, and the release
-moves that block under a dated version heading (see the Release Checklist).
+moves that block under a dated version heading (see `docs/process/release.md`).
 
 ## [Unreleased]
 
 ### Added
 
+- `AGENTS.md` as the canonical, tool-neutral entry file for humans and agents; `CLAUDE.md` and `GEMINI.md` become one-line pointers to it (issue #277).
+- `docs/process/` checklists — code, specification, validation and documentation review, sprint planning, release and hotfix, Definition of Done — extracted from the former agent definitions so that a contributor with no AI tooling can run the process (issue #277).
+- ADR-008 "Documentation and process strategy", with the sanitized development-process analysis committed under `docs/analysis/` as its evidence (issue #277).
 - `CHANGELOG.md` as the release-note vehicle, seeded with every release since v0.1.0 (#280, closes #275).
 - MIT `LICENSE` file (#274, closes #272).
 
 ### Changed
 
+- CI workflows hardened for branch rulesets: no path filters, the doc-lint job folded into `ci.yml`, actions pinned by commit SHA (#281, refs #278).
+- Pre-publication content cleanup: neutral wording for local paths, hostnames and private repositories in docs and comments (#282).
+- `pytest` runs with `--strict-markers` (an unregistered marker now fails collection); the tooling sections of `docs/validation/validation.md` match `pyproject.toml` and `ci.yml`, and the `e2e_gpu` marker is registered as a reserved marker for the manual GPU track.
 - CI runs on GitHub-hosted runners (`ubuntu-latest`) instead of a self-hosted pool; the runner image under `.github/runner/` is removed (#274).
 - Planning is frozen in the repository at the end of Sprint 019: `docs/tasks/backlog.md` and `docs/sprints/` become historical records; from Sprint 020 on, planning lives in GitHub issues and milestones (#280).
 
 ### Removed
 
+- Tool-specific automation (`.claude/`, `.mcp.json`) leaves git and is ignored: tooling stays private per contributor and its knowledge lives in `docs/process/` (ADR-008 D5) (issue #277).
 - The maintainer's session journal (`docs/sessions/*`) leaves the public repository; a `docs/sessions/README.md` pointer remains and the history stays in git (#280).
 
 ## [0.18.0] - 2026-07-05

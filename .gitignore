@@ -8,6 +8,9 @@ build/
 .mypy_cache/
 .ruff_cache/
 *.egg
-.claude/worktrees/
 # Maintainer-local instructions (journal location, etc.), never committed
 CLAUDE.local.md
+GEMINI.local.md
+# Tool-specific automation stays private per contributor — see ADR-008 D5
+.claude/
+.mcp.json

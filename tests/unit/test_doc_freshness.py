@@ -10,8 +10,8 @@ Lag rule (same-major minor arithmetic): the stamp may trail
 ``revolver.__version__`` by at most ONE minor version. At a current 0.18.x,
 ``v0.18.*`` and ``v0.17.*`` stamps pass and ``v0.16.*`` fails; a stamp ahead
 of the current version never fails (stamps may be refreshed just before the
-release bump lands). Refreshing the stamps is part of the Release Checklist
-step 1b in ``CLAUDE.md``.
+release bump lands). Refreshing the stamps is part of the release procedure
+(``docs/process/release.md``).
 
 Major-boundary grace: while the current version sits at ``X.0.*`` (the fresh
 major window), stamps from major ``X-1`` still pass — otherwise the very
@@ -99,8 +99,8 @@ def check_freshness(text: str, current_version: str, name: str) -> str | None:
     if stamp is None:
         return (
             f"{name}: missing `{STAMP_KEY}: vX.Y.Z` YAML front-matter stamp — verify the "
-            f"doc against revolver {current_version} and stamp it (CLAUDE.md Release "
-            "Checklist step 1b)"
+            f"doc against revolver {current_version} and stamp it (docs/process/release.md, "
+            "step 2 'README, guides and stamps')"
         )
     if stamp[0] > current[0]:
         return None  # stamped ahead of the current major: never stale

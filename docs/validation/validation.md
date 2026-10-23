@@ -1,7 +1,7 @@
 # Revolver — Validation Overview
 
-**Version**: 0.2 — Test ID conventions (§8.1): canonical `integration/` prefix for L2 IDs, the historic top-level-file exception, and the marker-vs-level rule (S18)
-**Date**: 2026-07-05
+**Version**: 0.3 — Tooling sections (§4, §6.1, §6.2, §6.4, §8) aligned with `pyproject.toml` and `ci.yml`; `--strict-markers` adopted; the `e2e_gpu` marker registered as a reserved marker for the manual GPU track (S19-27, ADR-008). Previous: 0.2 — Test ID conventions (§8.1) (S18)
+**Date**: 2026-10-23
 **Status**: Draft
 **Traceable to**: [Specifications](../specs/specifications.md), [Architecture](../architecture/architecture.md)
 
@@ -40,7 +40,7 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 ├─────────────────────────────────────────────────────┤
 │  Level 2-OE — OpenEvolve Contract Tests (pytest)    │  every PR (non-blocking)
 ├─────────────────────────────────────────────────────┤
-│  Level 3 — E2E Tests (pytest or bash)               │  nightly / manual
+│  Level 3 — E2E Tests (pytest or bash)               │  manual (on demand)
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ Integration tests (Level 2) and E2E tests (Level 3) are described in detail in t
 | 2 — Integration | CLI commands, DB, filesystem | ~seconds to minutes | SQLite (real), filesystem (tmpdir) | Every push + PR | [val-integration-tests.md](val-integration-tests.md) |
 | 2-OE — OpenEvolve | Config roundtrip, controller init | ~seconds | openevolve (pip), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
 | 2-Shinka — ShinkaEvolve *(implemented — S14, ADR-007)* | Config projection, wrapper contract (`metrics.json`), `programs.sqlite` parsing | ~seconds | shinka-evolve (pip extra), no LLM/GPU | Every PR (non-blocking) | [val-integration-tests.md](val-integration-tests.md) |
-| 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Nightly / manual | [val-e2e-tests.md](val-e2e-tests.md) |
+| 3 — E2E | Full workflows | ~minutes to hours | Ollama, GPU, network (optional) | Manual (on demand) | [val-e2e-tests.md](val-e2e-tests.md) |
 
 **Backend matrix axis (ADR-007)**: with the pluggable evolution backend, tests split along a new
 axis. **Engine-neutral** tests (~36 of the ~44 commands: `llm`, `dataset`, `solution`, `eval`,
@@ -73,8 +73,9 @@ Each backend keeps a dedicated contract-test track (L2-OE, L2-Shinka).
 
 ```toml
 [tool.ruff]
-target-version = "py311"
-line-length = 100
+target-version = "py312"
+src = ["src"]
+line-length = 99
 
 [tool.ruff.lint]
 select = [
@@ -82,17 +83,21 @@ select = [
     "W",    # pycodestyle warnings
     "F",    # pyflakes
     "I",    # isort
-    "N",    # pep8-naming
     "UP",   # pyupgrade
     "B",    # flake8-bugbear
     "SIM",  # flake8-simplify
-    "RUF",  # ruff-specific rules
+    "RUF",  # ruff-specific
 ]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+force-single-line = false
+combine-as-imports = true
 ```
 
 **Usage**:
 - `ruff check src/ tests/` — lint
-- `ruff format src/ tests/` — format
+- `ruff format --check src/ tests/` — formatting check (what CI runs); `ruff format src/ tests/` applies it
 - CI gate: both must pass with zero errors
 
 ### 4.2 Mypy (type checking)
@@ -107,17 +112,16 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "openevolve.*"
-ignore_missing_imports = true
+packages = ["revolver"]
+mypy_path = "src"
 ```
 
 **Rationale for `strict = true`**:
 - Pydantic v2 models (ADR-005) benefit heavily from strict typing
 - The codebase is greenfield — strict mode is easier to adopt from day one than to retrofit
-- `openevolve` is excluded as a third-party dependency without type stubs
+- The engine packages (`openevolve`, `shinka`) ship no type stubs and are optional at runtime: the backend adapters import them lazily inside functions with targeted `# type: ignore[import-not-found,import-untyped]` comments, so no per-module override is needed and `mypy` passes without the engines installed
+
+**Usage**: `mypy` with no path argument — the targets come from `packages` / `mypy_path` in `pyproject.toml` (this is what CI runs).
 
 **CI gate**: zero errors.
 
@@ -179,28 +183,34 @@ Unit tests cover individual functions and classes in the **domain layer** (`revo
 
 | Tool | Purpose | Version |
 |---|---|---|
-| **pytest** | Test runner, fixtures, markers, parametrize | >= 8.0 |
-| **pytest-cov** | Coverage measurement and enforcement | >= 5.0 |
-| **ruff** | Linting and formatting | >= 0.8 |
-| **mypy** | Static type checking | >= 1.13 |
+| **pytest** | Test runner, fixtures, markers, parametrize | >= 8 |
+| **pytest-cov** | Coverage measurement and enforcement | >= 5 |
+| **ruff** | Linting and formatting | >= 0.9 |
+| **mypy** | Static type checking | >= 1.14 (+ `types-PyYAML` stubs) |
 | **typer.testing.CliRunner** | CLI integration testing | (bundled with Typer) |
+
+Versions are those of the `dev` extra in `pyproject.toml` (`pip install -e ".[dev]"`).
 
 ### 6.2 Pytest Configuration
 
 ```toml
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not e2e' --strict-markers"
 markers = [
     "unit: L1 unit tests",
-    "integration: L2 integration tests (real DB + filesystem, mocked externals)",
+    "integration: L2 integration tests",
     "openevolve: L2-OE tests requiring the openevolve package (no LLM needed)",
     "shinkaevolve: L2-Shinka tests requiring the shinka-evolve package (no LLM needed)",
-    "e2e: end-to-end tests with fake LLM server (no GPU required)",
-    "e2e_gpu: end-to-end tests requiring Ollama + GPU",
-    "slow: tests that take more than 10 seconds",
+    "e2e: L3 end-to-end tests",
+    "e2e_gpu: L3 end-to-end tests against a real Ollama + GPU (manual only; reserved, no test uses it yet)",
+    "slow: long-running tests (always applied to E2E tests)",
 ]
-addopts = "--strict-markers -v"
 ```
+
+- `-m 'not e2e'` deselects the L3 E2E tests by default (they are manual — [val-e2e-tests.md](val-e2e-tests.md)), so a plain `pytest tests/` never runs them even with the engine extras installed; run them explicitly with `-m e2e`.
+- `--strict-markers` (adopted at v0.19.0, S19-27) turns an unregistered `@pytest.mark.<name>` into a collection error instead of a warning, so every marker — including the per-backend engine markers — must be registered in the list above. The full suite was verified to collect cleanly under the flag before adoption.
+- The `e2e_gpu` marker is registered for the manual GPU track (real Ollama + GPU, see [val-e2e-tests.md](val-e2e-tests.md)); no test uses it yet. Under `--strict-markers` only registered markers are accepted.
 
 ### 6.3 Shared Fixtures
 
@@ -222,7 +232,7 @@ Key fixtures defined in `tests/conftest.py`:
 ```
 push / PR — ci.yml (no path filters: every job is a required status check under the branch rulesets,
                     and a required check that never runs would leave the PR stuck on "Expected"):
-  ├── Lint (ruff + mypy): ruff check + ruff format --check + mypy --strict
+  ├── Lint (ruff + mypy): ruff check + ruff format --check + mypy (strict via pyproject)
   ├── Test (pytest + coverage): pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"  (Python 3.12 + 3.14 matrix)
   │     └── pip install "openevolve>=0.2.26" && pytest tests/integration/test_run_oe.py  (3.12 only, non-blocking)
   └── Doc command-lint (fenced CLI invocations): pytest tests/unit/test_doc_command_lint.py tests/unit/test_doc_freshness.py
@@ -231,18 +241,16 @@ push / PR — ci.yml (no path filters: every job is a required status check unde
 tag push (v*) — ci.yml version-check:
   └── tag == pyproject.toml version == src/revolver/__init__.py __version__
 
-nightly (standard runner):
-  └── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
-
-manual (self-hosted + GPU):
-  └── pytest tests/e2e/ -m e2e_gpu  (Ollama + real model)
+manual (no dedicated workflow yet — run by hand on a developer machine):
+  ├── pytest tests/e2e/ -m e2e  (fake LLM server, no GPU)
+  └── the GPU-backed E2E scenarios of val-e2e-tests.md against a local Ollama (`e2e_gpu`, manual; no test uses it yet)
 ```
 
-**CI gate**: push/PR pipeline must pass (Level 0 + 1 + 2) for merge; the doc-lint workflow is blocking on docs-only changes. L2-OE and E2E failures are reported but do not block.
+**CI gate**: the four jobs of the push/PR pipeline (Level 0 + 1 + 2 and the doc command-lint) are the required status checks for merge, on docs-only and code-only changes alike. L2-OE and E2E failures are reported but do not block.
 
 **No Shinka job in CI**: ci.yml runs **no** ShinkaEvolve step — the main test job's `-m "unit or integration"` selection runs without the `[shinka]` extra installed (Shinka-gated modules auto-skip via `pytest.importorskip`), and only the OpenEvolve contract tests get a dedicated non-blocking step. The L2-Shinka contract suites are selected by the `-m shinkaevolve` marker (6+ modules — no longer the historic 3-file list) and run manually in a shinka-enabled environment (e.g. before a release); adding a Shinka-env CI step remains aspirational.
 
-**Draft PRs**: lint and test jobs are skipped for draft PRs to save CI minutes.
+**Draft PRs**: the lint, test and doc-lint jobs are skipped for draft PRs to save CI minutes; they run once the PR is marked ready.
 
 ---
 
@@ -326,17 +334,14 @@ pytest tests/unit/
 # Integration only
 pytest tests/integration/ -m integration
 
-# E2E with fake LLM (no GPU needed)
+# E2E with fake LLM (no GPU needed); GPU-backed runs are the manual procedure of val-e2e-tests.md
 pytest tests/e2e/ -m e2e
 
-# E2E with real Ollama + GPU
-pytest tests/e2e/ -m e2e_gpu
+# With coverage (what CI runs)
+pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"
 
-# With coverage
-pytest tests/unit/ tests/integration/ --cov=src/revolver --cov-fail-under=80
-
-# Static analysis
+# Static analysis (what CI runs; mypy targets come from pyproject.toml)
 ruff check src/ tests/
 ruff format --check src/ tests/
-mypy src/
+mypy
 ```
