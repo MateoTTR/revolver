@@ -656,7 +656,8 @@ console** rather than relying on Revolver's token counts.
 
 A `--source local` endpoint is often a **serialized** backend: a single GPU
 serving one request at a time, or a subscription-backed local
-OpenAI-compatible shim that processes one call at a time. Fanning out parallel generation requests to such an endpoint
+OpenAI-compatible shim that processes one call at a time. Fanning out parallel generation requests
+to such an endpoint
 queues them rather than running them concurrently — and can trip rate limits.
 Pin concurrency to 1:
 

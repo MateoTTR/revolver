@@ -2,7 +2,7 @@
 
 **Status**: Planning
 **Target release**: **v0.16.1** (corrective / patch)
-**Goal**: Triage and fix the anomalies surfaced while validating Revolver **0.16.0** through the TSP + beamforming demos (private demo repository) (gemma4 on a network Ollama host, `gpu-box`, and Claude Opus/Sonnet via a local OpenAI-compatible shim). Priority on the genuine 🟠 blockers — a successful Shinka run that *looks* failed (A2) and `--parallel >1` on a subscription-backed local endpoint turning into a multi-hour hang (A3). The network-Ollama issue (A1) was reframed by the demos update of 2026-06-22 down to a one-line probe fix (storage is already correct).
+**Goal**: Triage and fix the anomalies surfaced while validating Revolver **0.16.0** through the TSP + beamforming demos of the private demo repository (gemma4 on a network Ollama host, `gpu-box`, and Claude Opus/Sonnet via a local OpenAI-compatible shim). Priority on the genuine 🟠 blockers — a successful Shinka run that *looks* failed (A2) and `--parallel >1` on a subscription-backed local endpoint turning into a multi-hour hang (A3). The network-Ollama issue (A1) was reframed by the demos update of 2026-06-22 down to a one-line probe fix (storage is already correct).
 **Demo**: a single `revolver llm add --source local --base-url http://gpu-box:11434/v1` registers a network Ollama usable by **both** OE and Shinka; a `revolver run --backend shinka` returns to the prompt cleanly after `Done: … completed`; a `--source local` OE run on the shim auto-limits to `parallel_evaluations=1` and no longer cascades into a retry storm.
 **Source**: demo feedback report v0.16 (private demo repository; consolidated demo-validation report). That report is owned by the demos project; this sprint doc is the Revolver-side response and is **not** written from the demos session.
 **Predecessor**: Sprint 016 (v0.16.0 — technical-debt paydown + CLI/UX polish).
@@ -153,9 +153,9 @@ Arbitrated with the user after the demos 2026-06-22 A1 refinement. These resolve
 
 - **Observed**: a 6-token "pong" via the shim bills ~$0.031 (the shim's upstream client injects a large hidden context per call); the shim returns OpenAI `usage` prompt/completion = **2/4** → the token totals Revolver records **massively under-count** real consumption. Evolution calls cost $0.23–0.40.
 - **Expected**: Revolver does not present an authoritative-looking token total that is silently wrong on bridge runs; the under-count is disclosed.
-- **Repro**: any `--source local` bridge run → `run info` token totals reflect only the bridge-reported `usage`, not the hidden upstream-client context or thinking tokens.
+- **Repro**: any `--source local` shim run → `run info` token totals reflect only the shim-reported `usage`, not the hidden upstream-client context or thinking tokens.
 - **Root cause / framing**: cost was already removed from output in #300 (no realistic cost is reachable). The residual is the **token under-count**, which is structurally the same family as the Shinka "thinking/retry tokens not counted" caveat from #300. Neither the OE token path nor `ShinkaBackend.collect_token_usage()` can recover the hidden context tokens without fragile bridge-internal coupling.
-- **Proposed fix** (composes #308): add a **caveat** (mirroring the #300 thinking-token caveat) to `run info` and the tuning guide — *subscription-backed local endpoints under-report token usage; track real spend on the provider console*. Do not present the under-counted total without that qualifier. No attempt to monkeypatch the bridge usage.
+- **Proposed fix** (composes #308): add a **caveat** (mirroring the #300 thinking-token caveat) to `run info` and the tuning guide — *subscription-backed local endpoints under-report token usage; track real spend on the provider console*. Do not present the under-counted total without that qualifier. No attempt to monkeypatch the shim usage.
 - **Backlog**: composes #308 — new task **#316**.
 
 ### A5 🟡 — Bridge 502 under sustained load (transient) *(external)*
