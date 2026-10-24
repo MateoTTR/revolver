@@ -6,7 +6,7 @@ verified-against: v0.19.0
 
 Practical guide for tuning evolution runs through the Revolver CLI, on both
 supported backends: **OpenEvolve** (default) and **ShinkaEvolve**
-(`--backend shinka`, opt-in via `pip install revolver[shinka]`).
+(`--backend shinka`, opt-in via `pip install 'revolver[shinka]'`).
 
 ## Overview
 

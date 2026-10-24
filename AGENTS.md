@@ -50,7 +50,7 @@ benchmark results with full traceability.
 | Security policy | [SECURITY.md](SECURITY.md) | Supported versions, private vulnerability reporting, scope of a local CLI |
 | Code of Conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1; reports through the repository's private reporting form |
 | Issue and pull-request templates | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/), [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) | Issue forms (bug, feature, new evolution backend, sprint planning); the pull-request description with the Definition-of-Done checklist and the Status section |
-| Code owners and Dependabot | [.github/CODEOWNERS](.github/CODEOWNERS), [.github/dependabot.yml](.github/dependabot.yml) | Maintainer review on the governance paths; weekly pip and GitHub Actions updates against `develop` |
+| Code owners and Dependabot | [.github/CODEOWNERS](.github/CODEOWNERS), [.github/dependabot.yml](.github/dependabot.yml) | Maintainer review on the governance paths; weekly GitHub Actions updates and pip security-only updates against `develop` |
 
 ### Architecture Decision Records (ADRs)
 

@@ -97,7 +97,7 @@ Revolver follows a **three-layer architecture** separating CLI presentation, dom
 |---|---|---|---|
 | **CLI** | `revolver.cli` | Parse arguments (Typer), validate input, format output (human/JSON), exit codes | Domain |
 | **Domain** | `revolver.core` | Business logic, orchestration, invariants (immutability, integrity, lineage) | Infrastructure |
-| **Infrastructure** | `revolver.infra` | File I/O, SQLite, hashing, Ollama HTTP client, OpenEvolve wrapper, config loading | External libs |
+| **Infrastructure** | `revolver.infra` | File I/O, SQLite, hashing, Ollama HTTP client, evolution backends (OpenEvolve, ShinkaEvolve), config loading | External libs |
 
 **Dependency rule**: each layer depends only on the layer below it. The CLI layer never accesses SQLite directly; the domain layer never formats output.
 
@@ -146,11 +146,11 @@ src/revolver/
 │   ├── ollama.py            # Ollama HTTP client (pull, start, stop, status, models)
 │   ├── gpu.py               # nvidia-smi wrapper (GPU name, VRAM usage/total)
 │   ├── evaluator_loader.py  # Dynamic Python module loading for evaluator (DES-003)
-│   ├── backends/            # Evolution backend adapters (ADR-007 — introduced in S13)
+│   ├── backends/            # Evolution backend adapters (ADR-007)
 │   │   ├── base.py          # EvolutionBackend protocol, BackendCapabilities, get_backend()
-│   │   ├── openevolve.py    # OpenEvolveBackend (absorbs infra/openevolve.py)
+│   │   ├── openevolve.py    # OpenEvolveBackend
 │   │   └── shinka.py        # ShinkaBackend (optional — requires revolver[shinka])
-│   ├── openevolve.py        # OpenEvolve wrapper (migrates into backends/openevolve.py in S13)
+│   ├── evaluator_runner.py  # Isolated evaluator subprocess runner (timeouts, process-group reaping)
 │   └── token_proxy.py      # Transparent HTTP proxy for token usage tracking (DES-005 DD-14; OpenEvolve backend only)
 │
 └── models/                  # Shared data models (dataclasses / Pydantic)

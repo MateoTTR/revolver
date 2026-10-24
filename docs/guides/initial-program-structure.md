@@ -5,7 +5,9 @@ verified-against: v0.19.0
 # Initial Program Structure Guide
 
 Best practices for structuring initial programs that OpenEvolve can optimize
-effectively.
+effectively. Written for the OpenEvolve backend (the default); the decomposition
+and `problem.md` advice is backend-neutral, while engine-specific markers and
+config keys are covered in the [tuning guide](tuning-evolution.md).
 
 ## Why structure matters
 

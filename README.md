@@ -48,7 +48,7 @@ revolver benchmark list/export/delete  # Manage and export benchmark results (CS
 src/revolver/
 ├── cli/           # Typer CLI commands (user-facing layer)
 ├── core/          # Domain logic (orchestration, validation)
-├── infra/         # Infrastructure (SQLite, Ollama client, hashing, I/O)
+├── infra/         # Infrastructure (SQLite, Ollama client, evolution backends, hashing, I/O)
 └── models/        # Pydantic data models (frozen, type-safe)
 ```
 
@@ -85,13 +85,13 @@ This creates:
 - `.revolver/` — project database and versioned snapshots
 - `initial_program.py` — starting code with `EVOLVE-BLOCK` markers
 - `evaluator.py` — evaluator template (per-instance + legacy modes)
-- `config.yaml` — OpenEvolve configuration
+- `config.yaml` — engine configuration (OpenEvolve shape by default; `--backend shinka` scaffolds the ShinkaEvolve shape)
 
 ### Register LLMs
 
 ```bash
 # Remote API (Anthropic, OpenAI, Google)
-revolver llm add claude --provider anthropic --model claude-sonnet-4-6-20250514 \
+revolver llm add claude --provider anthropic --model claude-sonnet-4-6 \
     --api-key-env ANTHROPIC_API_KEY
 
 # Local model via Ollama
@@ -211,6 +211,7 @@ REVOLVER_EVAL_NUM_THREADS=0 revolver eval --solution <solution-id> --dataset eva
 ```bash
 # Install dev dependencies
 pip install -e ".[dev]"
+# The exact CI gates (coverage threshold, marker selection) are in CONTRIBUTING.md § 3
 
 # Run tests (1587 passed / 4 skipped, ~35s; +58 shinkaevolve-marked tests need a real-shinka env; L3 e2e tests are deselected by default — run with -m e2e)
 python -m pytest tests/
