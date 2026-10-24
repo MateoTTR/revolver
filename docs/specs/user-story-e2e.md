@@ -19,7 +19,7 @@ $ revolver doctor
 Revolver dependency check:
 
   Python packages:
-    ✓ revolver         0.18.0
+    ✓ revolver         0.19.0
     ✓ openevolve       0.2.0
     ℹ shinkaevolve     not installed (optional). Install with: pip install 'revolver[shinka]'
 
@@ -104,7 +104,7 @@ scheduling-optimizer/
 │   └── runs/
 ├── initial_program.py      # template with EVOLVE-BLOCK markers
 ├── evaluator.py            # template with dual-mode pattern
-├── config.yaml             # OpenEvolve defaults
+├── config.yaml             # engine defaults (OpenEvolve shape by default)
 ├── project.yaml            # project metadata
 └── problem.md              # created manually in Phase 2 (project init does NOT scaffold it)
 ```
@@ -450,7 +450,7 @@ Resumed run completed: run-20260310-201000 (from run-20260310-143000, ...)
 
 If a run is interrupted or fails before its solution is promoted, Alice can
 still recover the best program found so far from the backend's latest
-checkpoint with `solution extract --from-checkpoint` (OpenEvolve; B7).
+checkpoint with `solution extract --from-checkpoint` (OpenEvolve).
 
 ```bash
 $ revolver solution extract --run run-20260310-143000 --from-checkpoint --alias recovered-v1
