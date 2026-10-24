@@ -6,8 +6,9 @@ verified-against: v0.19.0
 
 Best practices for structuring initial programs that OpenEvolve can optimize
 effectively. Written for the OpenEvolve backend (the default); the decomposition
-and `problem.md` advice is backend-neutral, while engine-specific markers and
-config keys are covered in the [tuning guide](tuning-evolution.md).
+and `problem.md` advice is backend-neutral. The EVOLVE-BLOCK markers are
+described below; engine-specific config keys are covered in the
+[tuning guide](tuning-evolution.md).
 
 ## Why structure matters
 
@@ -240,7 +241,7 @@ def _improve_tour(tour):
 
 ## Example: monolithic vs decomposed (TSP)
 
-The same nearest-neighbour TSP program, in two versions, shows how structure
+The same nearest-neighbor TSP program, in two versions, shows how structure
 decides whether an LLM can produce valid diffs at all.
 
 ### v1 — Monolithic
@@ -343,7 +344,7 @@ functions with hint comments. The LLM can now:
 - Leave `_dist` alone if it doesn't need changing
 
 With this structure the same model produces a valid diff on every iteration
-and improves on the nearest-neighbour baseline.
+and improves on the nearest-neighbor baseline.
 
 ## Problem.md as key lever
 
@@ -351,8 +352,9 @@ and improves on the nearest-neighbour baseline.
 
 `problem.md` is a markdown file in your problem directory that describes the
 optimization problem to the LLM. When you run `revolver run`, Revolver
-injects the contents of `problem.md` into the system prompt sent to
-OpenEvolve. The LLM reads this description to understand *what* to optimize
+injects the contents of `problem.md` into the system prompt the evolution
+backend sends to the LLM (OpenEvolve `prompt.system_message`, ShinkaEvolve
+`task_sys_msg`). The LLM reads this description to understand *what* to optimize
 and *how* to approach it.
 
 A minimal `problem.md` might just state the objective:
@@ -420,7 +422,7 @@ Depending on your problem's complexity, consider adding:
   ```markdown
   ## Constraints
   - Hard: normalization g(x) = 1 (re-normalize after each step)
-  - Soft: smoothness or width penalties added to the objective
+  - Soft: smoothness or bound penalties added to the objective
   ```
 
 - **Input/output format details.** Specify what the program receives and
@@ -531,7 +533,7 @@ baseline and the theoretical optimum is wide.
 When the baseline already implements a near-optimal algorithm, the LLM can
 only tweak parameters and add minor refinements (multi-start, a smoother
 objective, a projected gradient step); it cannot change the approach. A naive
-nearest-neighbour TSP baseline, by contrast, leaves plenty of room to discover
+nearest-neighbor TSP baseline, by contrast, leaves plenty of room to discover
 2-opt, or-opt and other local search strategies.
 
 **Guideline**: start with the simplest correct algorithm, not the best one you
