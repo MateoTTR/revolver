@@ -20,10 +20,9 @@ A monolithic program forces the LLM to reason about hundreds of lines at once
 and produce large, fragile diffs — especially problematic for smaller models
 (7B–22B parameters).
 
-**Measured result**: on the TSP demo with codestral:22b (a 22B local model),
-a monolithic program produced **0% valid diffs** across all iterations. After
-restructuring into small functions, the same model achieved **100% valid diffs**
-and actual optimization improvements.
+With a mid-sized local model, a monolithic TSP program yields **no valid diff
+at all**, while the same program restructured into small functions yields a
+valid diff **on every iteration** and real optimization improvements.
 
 ## Function decomposition
 
@@ -239,12 +238,12 @@ def _improve_tour(tour):
 4. **Don't start empty.** A program with `pass` or `return []` everywhere
    will score 0. The LLM needs a working foundation.
 
-## Real example: TSP v1 vs v2
+## Example: monolithic vs decomposed (TSP)
 
-The Revolver TSP demo illustrates the impact of program structure on
-optimization success.
+The same nearest-neighbour TSP program, in two versions, shows how structure
+decides whether an LLM can produce valid diffs at all.
 
-### v1 — Monolithic (0% valid diffs with codestral:22b)
+### v1 — Monolithic
 
 ```python
 def solve(cities):
@@ -276,10 +275,10 @@ def solve(cities):
 ```
 
 One big block, one big function. The LLM must produce a SEARCH/REPLACE diff
-that exactly matches a large chunk of this code. codestral:22b failed on every
-attempt — the diffs never matched.
+that exactly matches a large chunk of this code; smaller local models fail on
+every attempt because the diffs never match.
 
-### v2 — Decomposed (100% valid diffs with codestral:22b)
+### v2 — Decomposed
 
 ```python
 def solve(cities):
@@ -343,8 +342,8 @@ functions with hint comments. The LLM can now:
 - Modify `_build_tour` to try multiple starting cities (targeted change)
 - Leave `_dist` alone if it doesn't need changing
 
-**Results with codestral:22b**: 100% valid diffs (15/15 iterations), best score
-improved from 1.0 (baseline) to 1.037 (3.7% better than nearest-neighbor).
+With this structure the same model produces a valid diff on every iteration
+and improves on the nearest-neighbour baseline.
 
 ## Problem.md as key lever
 
@@ -388,9 +387,9 @@ Depending on your problem's complexity, consider adding:
 
   ```markdown
   ## Objective
-  Minimize the worst-case sidelobe level:
-    min_w max_{θ ∈ sidelobe_region} |w^H a(θ)|²
-  subject to w^H a(θ₀) = 1 (unit gain at look direction)
+  Minimize the worst case of a family of smooth functions:
+    min_x max_{i ∈ I} f_i(x)
+  subject to g(x) = 1 (normalization constraint)
   ```
 
 - **Known approaches from literature.** Name specific algorithms and
@@ -398,10 +397,10 @@ Depending on your problem's complexity, consider adding:
 
   ```markdown
   ## Known approaches
-  - Gradient descent with softmin relaxation of the max operator
-  - Semidefinite programming (SDP) relaxation
-  - Iterative worst-point boosting (Capon-style)
-  - Continuation methods: start with smooth approximation, anneal toward hard max
+  - Gradient descent on a softmin relaxation of the max operator
+  - Convex relaxation of the problem, solved with a standard solver
+  - Iterative worst-case boosting (re-weight the currently worst index)
+  - Continuation methods: start with a smooth approximation, anneal toward the hard max
   ```
 
 - **Domain-specific hints.** Mention relevant libraries, useful techniques,
@@ -410,9 +409,9 @@ Depending on your problem's complexity, consider adding:
   ```markdown
   ## Implementation hints
   - Use `scipy.optimize.minimize` with L-BFGS-B for smooth objectives
-  - Use `numpy.linalg` for array operations (steering vectors, covariance)
+  - Use `numpy.linalg` for vector and matrix operations
   - Softmin via log-sum-exp: `softmin(x, α) = -log(Σ exp(-α·xᵢ)) / α`
-  - Multi-start: try several initial weight vectors to avoid local optima
+  - Multi-start: try several initial vectors to avoid local optima
   ```
 
 - **Constraint descriptions.** Distinguish hard constraints (must satisfy)
@@ -420,8 +419,8 @@ Depending on your problem's complexity, consider adding:
 
   ```markdown
   ## Constraints
-  - Hard: unit gain at look direction (normalize weights after optimization)
-  - Soft: mainlobe width (penalize if -3dB width exceeds 2× theoretical minimum)
+  - Hard: normalization g(x) = 1 (re-normalize after each step)
+  - Soft: smoothness or width penalties added to the objective
   ```
 
 - **Input/output format details.** Specify what the program receives and
@@ -438,34 +437,21 @@ Not every problem needs a detailed `problem.md`. Use this decision guide:
 | Domain-specific (signal processing, physics) | High | Domain vocabulary, known techniques, library suggestions |
 | Research/novel problems | High | Literature references, known baselines, evaluation criteria |
 
-### Evidence: beamforming POC (v0.9.0)
+### What enrichment changes
 
-The impact of `problem.md` enrichment was demonstrated concretely in the
-beamforming POC. Two configurations were compared:
+On a continuous problem with a strong analytic baseline, the two ends of the
+spectrum behave very differently:
 
-- **Basic problem.md + diff mode** (Flash Lite, 300 iterations): the LLM
-  produced only parameter tweaks to the existing worst-point boosting
-  algorithm. Result: +0.030 dB improvement — equivalent to simply increasing
-  the number of internal iterations in the baseline.
+- **Minimal `problem.md`, diff mode**: the LLM only tweaks parameters of the
+  existing algorithm; the gain is what a longer run of the baseline would give.
+- **Enriched `problem.md`, full-rewrite mode, capable model**: the LLM reaches
+  for a standard solver-based approach (a `scipy.optimize` routine on a smooth
+  relaxation, with a continuation schedule), the same strategy an expert would
+  write by hand.
 
-- **Enriched problem.md + full-rewrite mode** (Gemini Pro, 5 iterations):
-  the LLM discovered `scipy.optimize.minimize` with L-BFGS-B, softmin
-  log-sum-exp relaxation, and alpha continuation — a fundamentally different
-  and more powerful approach. In just 5 iterations, it independently arrived
-  at the same algorithmic strategy as a manually-written expert solver.
-
-The enriched `problem.md` included the mathematical formulation (steering
-vectors, softmin aggregation), known approaches (SDP, continuation methods),
-and explicit library hints (`scipy.optimize`). This gave the LLM the
-conceptual framework to propose a solution that diff-based mode with a basic
-problem description could never reach.
-
-**Three factors** were necessary simultaneously for this qualitative jump:
-
-1. **Full-rewrite mode** — freed the LLM from incremental SEARCH/REPLACE diffs
-2. **Enriched problem.md** — gave the LLM domain vocabulary and solver hints
-3. **Powerful model** (Gemini Pro) — had the reasoning capacity to formulate
-   the mathematical optimization correctly
+Three factors are needed together for that qualitative jump: full-rewrite mode
+(no incremental SEARCH/REPLACE diffs), the enriched `problem.md` (vocabulary
+and solver hints) and a model able to formulate the optimization correctly.
 
 ### Don't over-specify
 
@@ -485,17 +471,17 @@ expand the LLM's solution space, not to dictate the implementation.
 
 ```markdown
 ## Algorithm
-1. Initialize w = a(θ₀) / ||a(θ₀)||²
+1. Initialize x from the normalized problem data
 2. For α in [5, 50, 500]:
-   a. Define f(w) = -softmin(-|w^H a(θ)|², α) for θ in sidelobe grid
-   b. Call scipy.optimize.minimize(f, w, method='L-BFGS-B', maxiter=2000)
-   c. Normalize: w = w / (w^H a(θ₀))
-3. Return w
+   a. Define f(x) = -softmin(-f_i(x), α) over the constraint set
+   b. Call scipy.optimize.minimize(f, x, method='L-BFGS-B', maxiter=2000)
+   c. Re-normalize x
+3. Return x
 ```
 
 The first version lets the LLM discover the right alpha schedule, iteration
 count, and initialization strategy on its own. The second version turns
-OpenEvolve into a copy-paste tool — if you already know the exact algorithm,
+evolution into a copy-paste exercise — if you already know the exact algorithm,
 you don't need evolutionary optimization.
 
 ---
@@ -529,13 +515,12 @@ Before running OpenEvolve on your program:
 | Baseline already near-optimal | LLM has no room to improve — evolution adds nothing | Start with a simpler baseline (see below) |
 | Restricting scientific libraries | LLM can't use proven solvers for complex math problems | Allow scipy/numpy and document it in `problem.md` |
 
-## Lessons from the demo problems
+## Baseline strength, libraries and difficulty
 
-The guidance above comes from the TSP demo, where a combinatorial problem maps
-naturally to small Python functions. The beamforming demo (v0.8.1) introduced a
-harder optimization problem — phased-array antenna beamforming — and surfaced
-three additional lessons about how the initial program's strength and the
-evaluator's constraints shape evolution outcomes.
+Combinatorial problems such as the TSP map naturally to small Python functions.
+Continuous optimization problems with a strong baseline raise three further
+points about how the initial program's strength and the evaluator's constraints
+shape evolution outcomes.
 
 ### Stronger baseline = less improvement margin
 
@@ -543,19 +528,15 @@ If your initial program already uses a sophisticated algorithm, the LLM has
 very little room to improve it. Evolution works best when the gap between the
 baseline and the theoretical optimum is wide.
 
-**Demo example**: the beamforming initial program used a worst-point
-boosting algorithm that was already near-optimal. Across 5 models (3 local,
-2 remote), the best improvement was only +0.044 dB — the LLM could tweak
-parameters and add minor refinements (multi-init, soft-min weighting, projected
-gradient), but it could not fundamentally change the algorithmic approach.
-
-By contrast, the TSP initial program used a simple nearest-neighbor heuristic,
-leaving plenty of room for the LLM to discover 2-opt, or-opt, and other
-local search strategies.
+When the baseline already implements a near-optimal algorithm, the LLM can
+only tweak parameters and add minor refinements (multi-start, a smoother
+objective, a projected gradient step); it cannot change the approach. A naive
+nearest-neighbour TSP baseline, by contrast, leaves plenty of room to discover
+2-opt, or-opt and other local search strategies.
 
 **Guideline**: start with the simplest correct algorithm, not the best one you
-know. If you already know the optimal approach, OpenEvolve is not the right
-tool. OpenEvolve excels at exploring the space between "naive" and "expert."
+know. If you already know the optimal approach, evolution is not the right
+tool. It excels at exploring the space between "naive" and "expert."
 
 | Baseline strength | Typical initial score | Evolution outcome |
 |---|---|---|
@@ -570,11 +551,6 @@ or other domains with mature libraries, restricting the LLM to pure Python
 cripples its ability to find good solutions. An LLM that can use `scipy.optimize`
 or `numpy.linalg` can leverage decades of optimized implementations rather than
 reimplementing them from scratch.
-
-**Demo example**: in the beamforming demo, the LLM could potentially have
-used SDP solvers (`scipy.optimize`, `cvxpy`) or convex formulations to find
-better beamforming weights. But the evaluator environment did not make these
-available, so the LLM was limited to hand-rolled gradient-style tweaks.
 
 **Guideline**: document allowed libraries explicitly in your `problem.md`.
 Ensure they are installed in the evaluator environment. The evaluator wrapper
@@ -602,9 +578,7 @@ whether evolution will succeed. Calibrate difficulty before launching a long run
 **Too easy** (initial score > 0.9):
 
 The baseline already solves the problem well. The LLM can only find marginal
-improvements, and even those may not generalize to held-out data. This was the
-situation in the beamforming demo — worst-point boosting already scored 0.100
-on a scale where gains are measured in hundredths of dB.
+improvements, and even those may not generalize to held-out data.
 
 Signs: best evolved program is barely better than baseline; most iterations
 produce no improvement; LLM diffs are cosmetic (variable renames, minor

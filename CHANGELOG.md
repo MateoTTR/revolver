@@ -19,6 +19,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 ### Changed
 
 - CI actions bumped and SHA-pinned: `actions/checkout` 7.0.1 and `actions/setup-python` 7.0.0 (#291, #292, Dependabot).
+- The initial-program guide states its guidance without the narrative of the project's own demonstration problems: generic minimax examples in the `problem.md` sections, no model names, version numbers or gain figures, backend-neutral wording (closes #299).
 - Post-release documentation review of v0.19.0 (50 checks, 2 warnings, 0 failures): the E2E walkthrough's `doctor` transcript shows 0.19.0, the Dependabot index row says pip is security-only, README and the guides name the evolution backends where the text still read as OpenEvolve-only, and `architecture.md` drops the pre-ADR-007 source-tree entries.
 
 ## [0.19.0] - 2026-10-24
