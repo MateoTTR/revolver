@@ -24,11 +24,8 @@ still present.
 
 Report it through the repository's **private vulnerability reporting** form
 ("Security" tab → "Report a vulnerability"), which opens a private advisory
-visible only to you and the maintainer. The form is enabled when the
-repository becomes public. **Until then**, open an issue titled
-"Contact request" that contains **no detail** of the problem; the maintainer
-replies with a private channel. No e-mail address is published for this
-project.
+visible only to you and the maintainer. No e-mail address is published for
+this project.
 
 Please include: the affected version (the output of `revolver --version`), the
 backend in use if relevant, the command or configuration that triggers the
