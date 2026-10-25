@@ -183,7 +183,7 @@ pool. The Shinka-side concurrency lever is `job_config.max_proposal_jobs`
 
 On both backends, Revolver pins LLM-facing concurrency to 1 for `--source
 local` endpoints unless you opt out — see
-[Subscription-backed and single-GPU local endpoints](#subscription-backed-and-single-gpu-local-endpoints).
+[Serialized local endpoints](#serialized-local-endpoints).
 
 ### Full-rewrite mode
 
@@ -552,7 +552,7 @@ run); ShinkaEvolve accepts `fixed | ucb | ucb1 | thompson`. Omitting
    pool with no per-member setting (ADR-007 A3.2), so Revolver collapses
    the members' efforts into one value: identical efforts merge silently;
    *disagreeing* efforts pick the **highest** level (never under-think)
-   **with a warning**. On local/bridge members the setting is inert and is
+   **with a warning**. On local-source members the setting is inert and is
    flagged as such. If per-member effort matters to your run, use the
    OpenEvolve backend.
 
@@ -652,13 +652,12 @@ Cost was removed because no realistic figure is reachable from the persisted
 data and API pricing drifts. For thinking-model spend, **watch the provider
 console** rather than relying on Revolver's token counts.
 
-### Subscription-backed and single-GPU local endpoints
+### Serialized local endpoints
 
 A `--source local` endpoint is often a **serialized** backend: a single GPU
-serving one request at a time, or a subscription-backed local
-OpenAI-compatible shim that processes one call at a time. Fanning out parallel generation requests
-to such an endpoint
-queues them rather than running them concurrently — and can trip rate limits.
+serving one request at a time, or a gateway that processes one call at a
+time. Fanning out parallel generation requests to such an endpoint queues
+them rather than running them concurrently — and can trip rate limits.
 Pin concurrency to 1:
 
 - **OpenEvolve path** — Revolver **auto-pins** `evaluator.parallel_evaluations`
@@ -694,23 +693,6 @@ Pin concurrency to 1:
 
   A `--dry-run` shows the resolved `max_proposal_jobs` value under the Shinka
   backend extras.
-
-> **Subscription spend is not tracked by Revolver.** When you drive a provider
-> subscription through a local OpenAI-compatible shim, the spend is recorded
-> on the **provider console**, not by Revolver. Revolver does not capture a
-> non-standard `total_cost_usd` field returned by such a shim — watch the
-> provider console for subscription usage.
-
-> **Token totals under-count on subscription-backed local endpoints.** Beyond
-> cost, the prompt/completion **token** counts that `run info` reports are also
-> understated for `--source local` shim endpoints. Such a shim returns an
-> OpenAI `usage` block that omits the hidden context its upstream client
-> injects per call and the model's thinking tokens, so a call billed as
-> hundreds of real tokens may report only a handful. This is the same family of
-> gap as the reasoning/thinking caveat in
-> [Token accounting](#token-accounting-and-why-there-is-no-cost-figure) above.
-> `run info` prints an explicit caveat for `--source local` runs — track real
-> consumption on the **provider console**, not Revolver's token totals.
 
 ---
 
@@ -885,9 +867,8 @@ revolver run --llm codestral-local --iterations 50 --parallel 1
 
 On the **OpenEvolve** backend, every LLM call is routed through Revolver's
 HTTP `TokenCountingProxy` (token accounting). OpenEvolve's own OpenAI client
-defaults to a **60-second** request timeout. A slow local endpoint — for
-example a subscription-backed local OpenAI-compatible shim, where a
-single call can take 50–530 s — therefore aborts at 60 s, triggers a retry
+defaults to a **60-second** request timeout. A slow local endpoint, where a
+single call can take several minutes, therefore aborts at 60 s, triggers a retry
 storm, and ultimately fails with a proxy `BrokenPipeError` (the late upstream
 response is written into an already-closed connection).
 
@@ -902,10 +883,10 @@ the LLM entry's `--timeout` → `--config-override llm.timeout=…`.
 
 ```bash
 # Override the per-call timeout on a slow local endpoint explicitly:
-revolver llm update my-bridge --timeout 600
+revolver llm update my-local-llm --timeout 600
 
 # Or for a single run, via config override:
-revolver run --version v1.0 --llm my-bridge --dataset train \
+revolver run --version v1.0 --llm my-local-llm --dataset train \
   --config-override llm.timeout=900
 ```
 
@@ -1185,7 +1166,7 @@ revolver run --backend shinka --llm alphevo --iterations 300 \
 ```
 
 > **`cost_aware_coef` defaults to 0 in Revolver** (ShinkaEvolve's own default
-> is 0.5): with a flat-rate subscription or a local bridge, per-model cost is
+> is 0.5): with a flat-rate plan or a local endpoint, per-model cost is
 > undifferentiated and cost-aware arm scoring would be noise. Set
 > `--selection-kwarg cost_aware_coef=0.5` explicitly to restore the engine's
 > cost-aware behavior on metered API fleets.
@@ -1237,7 +1218,7 @@ ensemble members — this is the deep difference from OpenEvolve's per-member
   the **highest** level with a warning. Do not set `reasoning_efforts`
   directly in config.yaml: the registry projection owns the key, and Revolver
   warns when a config-path value ends up inert. Also note the setting is a
-  **no-op for local/bridge models**, which Shinka classes as non-reasoning.
+  **no-op for local models**, which Shinka classes as non-reasoning.
 
 ### Proposal concurrency (`max_proposal_jobs`)
 
@@ -1317,7 +1298,7 @@ revolver run --backend shinka --llm my-llm \
 | Patch attempts | `evo_config.max_patch_attempts` | 10 | Engine default is 1 |
 | Max tokens | `evo_config.llm_kwargs.max_tokens` | 16384 | Thinking models need the headroom |
 | Temperature | `--temperature F` → `llm_kwargs.temperatures=[F]` | Engine pool `[0.0,0.5,1.0]` when unset | |
-| Reasoning effort | registry `--reasoning-effort` → `llm_kwargs.reasoning_efforts` | Model default | Global pool; highest wins on disagreement; inert for local/bridge |
+| Reasoning effort | registry `--reasoning-effort` → `llm_kwargs.reasoning_efforts` | Model default | Global pool; highest wins on disagreement; inert for local models |
 | Proposal jobs | `job_config.max_proposal_jobs` | Engine default 6; auto-pinned to 1 for `--source local` | `--parallel` is a no-op here |
 | Per-call LLM timeout | registry `--timeout` → `llm_timeout` | Engine default 1200 s | Ensemble: max over set member timeouts; caps the per-attempt stall only (#320) |
 | Timeout policy (Revolver) | `evaluation.on_timeout` / `evaluation.timeout_score` | `penalize` / `0.0` since v0.18 | `drop` restores pre-0.18 survivor-mean; backend-neutral (see Operational levers) |

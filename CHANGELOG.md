@@ -24,6 +24,10 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - Post-release documentation review of v0.19.0 (50 checks, 2 warnings, 0 failures): the E2E walkthrough's `doctor` transcript shows 0.19.0, the Dependabot index row says pip is security-only, README and the guides name the evolution backends where the text still read as OpenEvolve-only, and `architecture.md` drops the pre-ADR-007 source-tree entries.
 - The seven design documents DES-001 … DES-007 move from `Draft` to `Accepted` in their header and in the DES index tables of `AGENTS.md` and `architecture.md`; the Deciders lines of ADR-001/002/003/006/007 take ADR-008's neutral wording, `the project maintainer` (#313, open decisions of the Sprint 020 planning issue #312).
 
+### Removed
+
+- The `run info` note claiming that local OpenAI-compatible endpoints under-report token usage: it described one specific endpoint setup, not local endpoints in general (an Ollama endpoint reports its usage accurately). The generic "token counts cover stored programs only" note stays (#313).
+
 ## [0.19.0] - 2026-10-24
 
 Sprint 019 — public release: tool-neutral process (`AGENTS.md`, `docs/process/`, ADR-008), frozen records archived out of the tree, contributor files, CI on GitHub-hosted runners hardened for rulesets. No product change.
@@ -122,7 +126,7 @@ Sprint 016a — corrective release after the v0.16.0 demo feedback.
 
 - OpenEvolve runs on a `--source local` LLM auto-pin `parallel_evaluations` to 1; an explicit `--parallel` above 1 warns (#222).
 - `run resume <run-id>` accepts the run id positionally (`--run <id>` still works) (#219).
-- `run info` carries a token under-count caveat for runs served through a local OpenAI-compatible shim; CI isolates the global DB per job (#221, #225).
+- `run info` printed a token under-count note for `--source local` runs (note removed in a later release); CI isolates the global DB per job (#221, #225).
 
 ### Fixed
 

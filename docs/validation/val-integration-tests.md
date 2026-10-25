@@ -345,7 +345,7 @@ New scenarios in `tests/integration/test_run_shinka.py` (Shinka half) and `tests
 |---|---|---|---|---|
 | `run --backend openevolve --llm <ensemble>` (per-member effort) | Per-member effort onto OE | `llm.models[].reasoning_effort` matches each member's effective effort | `test_oe_ensemble_reasoning_effort_per_member` | FR-LLM-026 |
 | `run --backend shinka --llm <ensemble>` (uniform / disagreeing effort) | Global pool + highest-wins on disagreement | Uniform → `llm_kwargs.reasoning_efforts` set silently; disagreeing → warning + the **highest** effort chosen (order `min < low < medium < high < max`) | `test_shinka_reasoning_effort_global_pool`, `test_shinka_reasoning_effort_disagreement_picks_highest` | FR-LLM-026 |
-| `run --backend shinka --llm <local-source ensemble>` (effort set) | Local/bridge inert warning | Warning that `reasoning_effort` is inert for `local`/bridge members (Shinka `is_reasoning_model=False`) | `test_shinka_reasoning_effort_inert_local_warns` | FR-LLM-026 |
+| `run --backend shinka --llm <local-source ensemble>` (effort set) | Local-source inert warning | Warning that `reasoning_effort` is inert for `local`-sourced members (Shinka `is_reasoning_model=False`) | `test_shinka_reasoning_effort_inert_local_warns` | FR-LLM-026 |
 
 #### `capabilities()` axes
 

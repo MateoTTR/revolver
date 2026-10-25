@@ -376,7 +376,7 @@ Ensemble "multi-model-v1" removed (2 members deleted)
 | FR-LLM-023 | MUST | Show ensemble details including members, weights, and per-member overrides | — |
 | FR-LLM-024 | MUST | Remove an ensemble with cascade deletion of its members | — |
 | FR-LLM-025 | SHOULD | Warn if member weights do not sum to approximately 1.0 when adding a member | — |
-| FR-LLM-026 | SHOULD | Store a per-LLM `reasoning_effort` (`min`/`low`/`medium`/`high`/`max`) in the registry, settable via `llm add --reasoning-effort`, `llm update --reasoning-effort`, and per-member via `ensemble add --reasoning-effort` (member override wins over the LLM's registry value). Projected per backend at run time: OpenEvolve maps it **per member** (`LLMModelConfig.reasoning_effort`); ShinkaEvolve maps it to a **single global** pool (`llm_kwargs.reasoning_efforts`). When ensemble members disagree on ShinkaEvolve, Revolver aligns on the **highest** effort (total order `min < low < medium < high < max`, a conservative default that never under-thinks) and **warns** that per-member effort is not honored. Also inert (warned) for local/bridge models, which ShinkaEvolve classes as non-reasoning (ADR-007 A1/A3.2). | — |
+| FR-LLM-026 | SHOULD | Store a per-LLM `reasoning_effort` (`min`/`low`/`medium`/`high`/`max`) in the registry, settable via `llm add --reasoning-effort`, `llm update --reasoning-effort`, and per-member via `ensemble add --reasoning-effort` (member override wins over the LLM's registry value). Projected per backend at run time: OpenEvolve maps it **per member** (`LLMModelConfig.reasoning_effort`); ShinkaEvolve maps it to a **single global** pool (`llm_kwargs.reasoning_efforts`). When ensemble members disagree on ShinkaEvolve, Revolver aligns on the **highest** effort (total order `min < low < medium < high < max`, a conservative default that never under-thinks) and **warns** that per-member effort is not honored. Also inert (warned) for local models, which ShinkaEvolve classes as non-reasoning (ADR-007 A1/A3.2). | — |
 
 > **Note — per-backend projection (ADR-007 D5, amended by the v0.17 Amendment)**: the registry stores backend-agnostic data; each
 > evolution backend projects it at run time. On ShinkaEvolve: local entries map to
@@ -389,7 +389,7 @@ Ensemble "multi-model-v1" removed (2 members deleted)
 > weights seed the bandit **only under `fixed`** — under `ucb`/`ucb1`/`thompson` the arms start uniform
 > and weights are **ignored with a warning**; (2) per-member `reasoning_effort` is **OpenEvolve-only** —
 > ShinkaEvolve has a single global `reasoning_efforts` pool, so on disagreement Revolver aligns on the
-> **highest** effort and warns (also inert for local/bridge models). The registry gains a
+> **highest** effort and warns (also inert for local models). The registry gains a
 > `reasoning_effort` field for both `llms` and `ensemble_members` (FR-LLM-026; DB migrations v12/v13).
 
 ---

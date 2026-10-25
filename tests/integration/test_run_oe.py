@@ -215,7 +215,7 @@ class TestBuildConfigRoundtrip:
 class TestLocalParallelAutoPin:
     """A3/#315: --source local auto-pins evaluator.parallel_evaluations.
 
-    A "local" source LLM is typically a serialized subscription or single-GPU
+    A "local" source LLM is typically a serialized single-GPU
     endpoint; fanning out parallel evaluations starves it -> staggered calls,
     timeouts, a retry storm and a multi-hour hang. build_config() pins
     parallel_evaluations=1 for local endpoints unless the user opts out, and

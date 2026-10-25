@@ -608,8 +608,7 @@ served by `project init`.
 - **Slow local-endpoint timeout (#307, v0.15.0).** When the registered LLM has no explicit
   `timeout_s` and is `source == "local"`, `build_config()` sets `llm.timeout = 600` s
   (`DEFAULT_LOCAL_LLM_TIMEOUT_S`). OpenEvolve's OpenAI client defaults to 60 s, which aborts slow
-  local endpoints (e.g. a subscription-backed local OpenAI-compatible shim at 50–530 s/call) into
-  a retry storm and a proxy
+  local endpoints (a single call can take several minutes) into a retry storm and a proxy
   `BrokenPipeError`. Remote APIs keep OpenEvolve's default. A `config.yaml` `llm.timeout` or
   `--config-override llm.timeout=…` still wins (`setdefault` + overrides applied last).
 - **Default checkpoint cadence (U6 phase 2, S18 — FR-RUN-057).** When `checkpoint_interval` is
@@ -650,8 +649,8 @@ served by `project init`.
   - **`--selection-kwarg k=v` branched per sampler (ADR-007 A5).** Shinka spreads
     `llm_dynamic_selection_kwargs` **verbatim** into the *selected* sampler's constructor, so a wrong
     key raises `TypeError`. Revolver routes kwargs per sampler and never sends a union:
-    `cost_aware_coef` is valid **only for `ucb`/`ucb1`** (Revolver default **0** — the flat-rate/
-    bridge case, M4 — not Shinka's own `0.5`; inert anyway when per-model cost is undifferentiated);
+    `cost_aware_coef` is valid **only for `ucb`/`ucb1`** (Revolver default **0** — the flat-rate or
+    local case, M4 — not Shinka's own `0.5`; inert anyway when per-model cost is undifferentiated);
     a kwarg not accepted by the selected sampler is dropped with a warning (would be silently ignored
     by `FixedSampler`, or `TypeError` under `ThompsonSampler`).
   - **`reasoning_efforts` is a single global pool (FACT A).** Per-member effort is **OE-only**;
@@ -660,7 +659,7 @@ served by `project init`.
     agree it writes `llm_kwargs.reasoning_efforts = [<value>]`; if members **disagree** it applies
     the **highest-effort-wins** disagreement policy (total order `min < low < medium < high < max`,
     a conservative default that never under-thinks) **and warns** that Shinka cannot honor per-member
-    effort. It additionally warns (once) that effort is **inert for `local`/bridge-sourced members**
+    effort. It additionally warns (once) that effort is **inert for `local`-sourced members**
     (Shinka classes them `is_reasoning_model=False` → effort forced to `"disabled"`).
 - Revolver injects safer defaults than Shinka's own: `llm_kwargs.max_tokens` defaults to 16384
   (Shinka's 4096 starves thinking-capable models, which return empty content) and
@@ -683,7 +682,7 @@ served by `project init`.
 
 > **`--source local` concurrency on Shinka (UX-5, planned S16).** `ShinkaBackend.build_config()`
 > additionally pins `job_config.max_proposal_jobs = 1` for a `source == "local"` LLM unless the user
-> overrides it — a serialized subscription/single-GPU endpoint cannot honor Shinka's default
+> overrides it — a serialized single-GPU endpoint cannot honor Shinka's default
 > fan-out. The OpenEvolve equivalent is `--parallel 1`. See [tuning-evolution.md](../../guides/tuning-evolution.md).
 
 ### 4.3 Wrapper Generation Tier
