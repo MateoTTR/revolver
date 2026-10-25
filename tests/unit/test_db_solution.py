@@ -373,6 +373,7 @@ class TestGetSolutionDetail:
         assert result["llm_model"] == "test-model"
         # Eval metadata
         assert result["eval_id"] == "eval-1"
+        assert result["eval_dataset"] == "train-small"
         assert result["instances_solved"] == 8
         assert result["instance_count"] == 10
 

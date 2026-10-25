@@ -23,10 +23,15 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - The initial-program guide states its guidance without the narrative of the project's own demonstration problems: generic minimax examples in the `problem.md` sections, no model names, version numbers or gain figures, backend-neutral wording (closes #299).
 - Post-release documentation review of v0.19.0 (50 checks, 2 warnings, 0 failures): the E2E walkthrough's `doctor` transcript shows 0.19.0, the Dependabot index row says pip is security-only, README and the guides name the evolution backends where the text still read as OpenEvolve-only, and `architecture.md` drops the pre-ADR-007 source-tree entries.
 - The seven design documents DES-001 … DES-007 move from `Draft` to `Accepted` in their header and in the DES index tables of `AGENTS.md` and `architecture.md`; the Deciders lines of ADR-001/002/003/006/007 take ADR-008's neutral wording, `the project maintainer` (#313, open decisions of the Sprint 020 planning issue #312).
+- Traceability debt of v0.19.0 resolved (#297): the fourteen MUST requirements traced only to Planned tests now cite real tests — six re-pointed to existing tests, eight covered by new L1/L2 tests (`unit/core/test_eval`, per-instance JSON export, remote-LLM parallel launch, remote `ready` status, evaluator return-value validation, program path derivation, `solution info` evaluation results); the recount also flipped two stale Planned rows already covered elsewhere (FR-RUN-020, FR-EVL-001), each with a direct test; FR-LLM-005 (Ollama model digest) is recorded as not implemented and tracked by #315; traceability matrix § 13 recomputed; the validation review's check 3 grades such an acknowledged, tracked gap as a warning.
 
 ### Removed
 
 - The `run info` note claiming that local OpenAI-compatible endpoints under-report token usage: it described one specific endpoint setup, not local endpoints in general (an Ollama endpoint reports its usage accurately). The generic "token counts cover stored programs only" note stays (#313).
+
+### Fixed
+
+- `solution info` shows the most recent evaluation (id, dataset, solved/total) in the human-readable output when one exists; previously only `--json` carried the counts, and the join could return an arbitrary evaluation once a solution had both a post-run training evaluation and an eval-split evaluation (FR-SOL-005, #297). `--json` gains the `eval_dataset` key.
 
 ## [0.19.0] - 2026-10-24
 

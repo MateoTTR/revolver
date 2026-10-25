@@ -143,6 +143,7 @@ exception, and the marker-vs-level rule are defined in [validation.md §8.1](val
 | Command | Scenario | Validates | FRs |
 |---|---|---|---|
 | `problem test --instance` | Valid evaluator + single instance | Metrics output (`dict[str, float]` with `combined_score`), exit code 0 | FR-PRB-001, 005 |
+| `problem test --instance` | Evaluator returns a `dict[str, float]` without `combined_score` | Exit code 0, non-blocking warning naming the missing key (`test_problem_test_warns_without_combined_score`; the `dict[str, float]` type check itself is L1 — `test_evaluator_runner::TestRunInstance::test_non_dict_return_is_fail` / `test_non_float_metric_is_fail`) | FR-PRB-005, 013 |
 | `problem test --dataset` | Valid evaluator + 3 instances | Summary with pass/fail counts | FR-PRB-002 |
 | `problem test` | Evaluator raises exception | Exit code 4, error displayed, Revolver does not crash | FR-PRB-003 |
 | `problem test` | Instance exceeds timeout | Timeout reported per instance | FR-PRB-004 |
@@ -224,7 +225,7 @@ exception, and the marker-vs-level rule are defined in [validation.md §8.1](val
 | `eval` | Split=train (not eval) | Warning on stderr | FR-EVL-009 |
 | `eval` | Results already exist | Confirmation required; `--force` skips | FR-EVL-018 |
 | `eval results` | After eval, human mode | Aggregates + per-instance breakdown | FR-EVL-015, 016 |
-| `eval results --json` | After eval, JSON mode | Full raw per-instance data | FR-EVL-017 |
+| `eval results --per-instance --json` | After eval, JSON mode | Full raw per-instance data: id, status, metrics dict, compute time per instance; no aggregate block (`test_results_per_instance_json`) | FR-EVL-017 |
 | `eval` | Legacy evaluator (`evaluate()`) | Global aggregation call, `user_aggregates` stored | FR-EVL-019, 020 |
 | `eval` | Evaluator with only `evaluate_instance()` | Per-instance function called correctly | FR-EVL-001, 002 |
 | `eval` | Evaluator with only `evaluate()` (legacy) | Legacy global function called correctly | FR-EVL-019 |
@@ -237,7 +238,7 @@ exception, and the marker-vs-level rule are defined in [validation.md §8.1](val
 |---|---|---|---|
 | `solution list` | After 2 runs | Solutions listed with ID, alias, version, LLM, score, rank | FR-SOL-001 |
 | `solution list --version v1.0` | Filter by version | Only matching solutions | FR-SOL-002 |
-| `solution info` | Existing solution | Full lineage (via run JOIN), program path, eval results if available | FR-SOL-003..005 |
+| `solution info` | Existing solution | Full lineage (via run JOIN), program path, eval results if available — eval id and solved/total in both `--json` and the human-readable output (`test_info_shows_eval_results`) | FR-SOL-003..005 |
 | `solution info` | Solution with siblings | Other solutions from same run shown | FR-SOL-009 |
 | `solution alias` | Set alias | DB updated, alias unique | FR-SOL-006, 007 |
 | `solution alias` | Duplicate alias | Exit code 1 | FR-SOL-007 |

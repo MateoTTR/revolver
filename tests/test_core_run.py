@@ -801,6 +801,86 @@ def test_launch_run_local_llm_sequential(project_with_prereqs: dict) -> None:
 
 
 @pytest.mark.unit
+def test_launch_run_remote_llm_parallel(project_with_prereqs: dict) -> None:
+    """A remote-LLM run launches while other runs hold live locks.
+
+    FR-RUN-015: the sequential rule of FR-RUN-014 constrains local-LLM
+    launches only. With an active remote-LLM lock AND an active local-LLM
+    lock in place, a new remote-LLM run proceeds to completion and leaves
+    both locks untouched (a local-LLM launch would be rejected by the
+    local lock — ``test_launch_run_local_llm_sequential``).
+    """
+    root = project_with_prereqs["root"]
+    config = RunConfig(
+        problem_version="v1.0",
+        llm_name="test-llm",
+        dataset_name="train-small",
+        iterations=5,
+    )
+
+    from revolver.models.dataset import IntegrityReport
+    from revolver.models.llm import LLMEntry
+    from revolver.models.problem import InstanceTestResult
+
+    llm = LLMEntry(
+        name="test-llm",
+        model="gpt-4",
+        source="remote",
+        base_url="https://api.example.com/v1",
+        registered_at=datetime.now(UTC),
+    )
+    good_integrity = IntegrityReport(is_valid=True, checked_at=datetime.now(UTC))
+    preflight_ok = InstanceTestResult(
+        instance_id="instance1.txt",
+        status="pass",
+        metrics={"combined_score": 0.5},
+        time_s=0.1,
+    )
+
+    # Another remote-LLM run and a local-LLM run are active (live PID).
+    for active_id, source in (("run-remote-active", "remote"), ("run-local-active", "local")):
+        write_run_lock(
+            root,
+            active_id,
+            {"run_id": active_id, "pid": os.getpid(), "llm_source": source},
+        )
+
+    with (
+        patch("revolver.core.run.get_global_db") as mock_global_db,
+        patch("revolver.core.run.resolve_llm_or_ensemble", return_value=llm),
+        patch("revolver.core.run.get_llm", return_value=llm),
+        patch("revolver.core.run.verify_dataset_integrity", return_value=good_integrity),
+        patch(
+            "revolver.core.run.resolve_dataset_path",
+            return_value=project_with_prereqs["dataset_dir"],
+        ),
+        patch("revolver.infra.backends.openevolve.OpenEvolveRunner") as mock_oe_cls,
+        patch("revolver.core.run.TokenCountingProxy") as mock_proxy_cls,
+        patch("revolver.core.run._post_run_evaluation"),
+        patch("revolver.core.run.eval_run_instance", return_value=preflight_ok),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=5),
+    ):
+        mock_global_db.return_value = MagicMock()
+        mock_proxy = MagicMock()
+        mock_proxy.start.return_value = "http://127.0.0.1:9999"
+        mock_proxy.stop.return_value = ProxyTokenUsage(prompt_tokens=10, completion_tokens=5)
+        mock_proxy_cls.return_value = mock_proxy
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = RunOutput(
+            best_score=0.95, best_program="some_program", output_dir=None
+        )
+        mock_oe_cls.return_value = mock_runner
+
+        result = launch_run(config, project_root=root)
+
+    assert result.run_id.startswith("run-")
+    locks_dir = root / REVOLVER_DIR / "runs" / "locks"
+    assert (locks_dir / "run-remote-active.lock").exists()
+    assert (locks_dir / "run-local-active.lock").exists()
+    assert not (locks_dir / f"{result.run_id}.lock").exists()
+
+
+@pytest.mark.unit
 def test_launch_run_openevolve_failure(project_with_prereqs: dict) -> None:
     """launch_run must set status to failed on OpenEvolve failure."""
     root = project_with_prereqs["root"]

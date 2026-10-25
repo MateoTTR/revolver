@@ -32,6 +32,7 @@ from revolver.infra.db import (
 )
 from revolver.infra.store import REVOLVER_DIR
 from revolver.infra.token_proxy import TokenUsage as ProxyTokenUsage
+from revolver.models.problem import InstanceTestResult
 
 runner = CliRunner()
 
@@ -1055,6 +1056,88 @@ def test_run_post_run_evaluation(project_with_prereqs: dict[str, Path]) -> None:
     call_kwargs = mock_eval.call_args
     # Should be called with proj_conn, run_id, solution_id, etc.
     assert call_kwargs is not None
+
+
+# ── Test 10b: training results accessible via eval results (FR-RUN-020) ─────
+
+
+@pytest.mark.integration
+def test_train_results_accessible_via_eval(
+    project_with_prereqs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The post-run training evaluation is persisted through the FR-RUN-019
+    eval path and readable with ``eval results --solution <id> --dataset <train>``.
+
+    Validates: FR-RUN-020 (U11 / #368). The engine is mocked; the post-run
+    evaluation runs for real with ``core.eval.run_instance`` stubbed.
+    """
+    # Keep the pre-flight eval's once-per-process thread-cap line off stderr.
+    monkeypatch.setenv("REVOLVER_EVAL_NUM_THREADS", "0")
+    root = project_with_prereqs["root"]
+    global_db_path = project_with_prereqs["global_db_path"]
+    run_id, sol_id = _next_ids()
+    run_dir = root / REVOLVER_DIR / "runs" / run_id
+
+    def _run_and_write_best(*args: object, **kwargs: object) -> RunOutput:
+        # The engine leaves its best program in the output dir; the
+        # orchestrator collects it as programs/rank-1.py (post-run eval input).
+        best_dir = run_dir / "oe-output" / "best"
+        best_dir.mkdir(parents=True, exist_ok=True)
+        (best_dir / "best_program.py").write_text("def solve(): pass\n")
+        return RunOutput(best_score=0.95, best_program="def solve(): pass", output_dir=None)
+
+    mock_runner = _make_mock_runner()
+    mock_runner.run.side_effect = _run_and_write_best
+
+    def _passing(
+        evaluator_path: Path,
+        program_path: Path,
+        instance_path: Path,
+        timeout_s: float = 300.0,
+    ) -> InstanceTestResult:
+        return InstanceTestResult(
+            instance_id=instance_path.name,
+            status="pass",
+            metrics={"combined_score": 0.6},
+            time_s=0.01,
+        )
+
+    with (
+        patch("pathlib.Path.cwd", return_value=root),
+        patch(
+            "revolver.core.run.get_global_db",
+            side_effect=lambda: get_global_db_at(global_db_path),
+        ),
+        patch(
+            "revolver.infra.backends.openevolve.OpenEvolveRunner",
+            MagicMock(return_value=mock_runner),
+        ),
+        patch("revolver.core.run.TokenCountingProxy", MagicMock(return_value=_make_mock_proxy())),
+        patch("revolver.core.eval.run_instance", side_effect=_passing),
+        patch("revolver.core.eval._run_legacy_global_aggregation", return_value=None),
+        patch("revolver.core.run.generate_run_id", return_value=run_id),
+        patch("revolver.core.run.generate_solution_id", return_value=sol_id),
+        patch("revolver.infra.backends.openevolve.count_valid_programs", return_value=10),
+    ):
+        result = runner.invoke(
+            app,
+            ["run", "--version", "v1.0", "--llm", "test-llm", "--dataset", "train-small"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0, _get_all_output(result)
+
+    result2 = _invoke_with_cwd(
+        ["--json", "eval", "results", "--solution", sol_id, "--dataset", "train-small"],
+        root,
+    )
+    assert result2.exit_code == 0, _get_all_output(result2)  # type: ignore[attr-defined]
+    data = _parse_json_output(result2)
+    assert isinstance(data, dict)
+    assert data["metadata"]["solution_id"] == sol_id
+    assert data["metadata"]["dataset_name"] == "train-small"
+    assert data["metadata"]["instance_count"] > 0
+    assert data["metadata"]["instances_solved"] == data["metadata"]["instance_count"]
+    assert data["aggregates"]["combined_score"]["mean"] == pytest.approx(0.6)
 
 
 # ── Test 11: run list — after 2 runs, both listed, filterable (FR-RUN-021) ──
