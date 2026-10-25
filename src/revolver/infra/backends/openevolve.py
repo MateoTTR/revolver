@@ -775,7 +775,7 @@ def build_config(
         if llm.source == "local" and parallel > 1:
             sys.stderr.write(
                 f"Warning: --parallel {parallel} on a --source local endpoint. Local "
-                "endpoints (single-GPU or otherwise serialized) usually serialize "
+                "endpoints (often a single GPU) usually serialize "
                 "requests, so concurrency yields no speedup and can trigger timeouts "
                 "and a retry storm. Honouring your value; pass --parallel 1 to pin.\n"
             )
