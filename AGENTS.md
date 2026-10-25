@@ -170,7 +170,7 @@ path", "a network Ollama host", "a separate demo repository"). See
 5. **Self-review** against [docs/process/code-review.md](docs/process/code-review.md) and the [Definition of Done](docs/process/definition-of-done.md); add the line under `[Unreleased]` in `CHANGELOG.md`.
 6. **Ready** (`gh pr ready <N>`) is the author's call once the local gates are green, the self-review is done and the CHANGELOG line is in: the four required checks run on that commit. A red check is fixed before anything else.
 7. **Review** on a green build: a reviewer applies the same checklist and posts a pull-request review. The author answers in every review thread, pushes the fixes (the checks run again) and resolves the threads; a re-review is needed only after a CRITICAL fix.
-8. **The maintainer merges** on GitHub when the four checks are green, the latest review carries **0 CRITICAL**, every WARNING is fixed or explicitly carried over in the description, every thread is resolved and the CHANGELOG line is in. Maintainer pull requests pass the ruleset's approval rule through its admin bypass; the rule protects external contributions.
+8. **The maintainer merges** on GitHub when the four checks are green, the latest review carries **0 CRITICAL**, every WARNING is fixed or explicitly carried over in the description and every thread is resolved. Maintainer pull requests pass the ruleset's approval rule through its admin bypass; the rule protects external contributions.
 
 Independent pull requests proceed in parallel; a pull request that depends on
 another waits for it to be merged into `develop` (the planning issue's

@@ -53,10 +53,10 @@ Before tagging `vX.Y.Z`:
 For a critical bug discovered after a release:
 
 1. **Branch** — `git checkout -b hotfix/vX.Y.Z develop` (Z = previous patch + 1).
-2. **Fix + tests** — apply the fix with its regression test; run the local gates (`ruff check src/ tests/`, `ruff format --check src/ tests/`, `mypy`, `pytest -m "unit or integration"`); add a `### Fixed` line under `[Unreleased]` in `CHANGELOG.md`.
+2. **Fix + tests** — apply the fix with its regression test; run the local gates (`ruff check src/ tests/`, `ruff format --check src/ tests/`, `mypy`, `pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"`); add a `### Fixed` line under `[Unreleased]` in `CHANGELOG.md`.
 3. **Draft pull request** — `gh pr create --draft --base develop` with `Closes #N` (open the bug issue first when none exists).
-4. **Code review** — apply [code-review.md](code-review.md); address the findings (0 CRITICAL).
-5. **Ready + merge** — `gh pr ready`; the maintainer merges on GitHub once the four required checks are green.
+4. **Ready** — `gh pr ready` once the gates are green and the CHANGELOG line is in; the four required checks run.
+5. **Code review + merge** — on the green build, apply [code-review.md](code-review.md); address the findings, answer and resolve every thread; the maintainer merges on GitHub with 0 CRITICAL in the latest review and the checks green.
 6. **Release** — follow the release checklist above (bump to the patch version, CHANGELOG, `develop` → `main`, tag, install check, post-release checks); step 0 is skipped for a hotfix.
 
 ## Output and where to post

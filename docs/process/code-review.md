@@ -1,7 +1,6 @@
 # Code review checklist
 
-Review every pull request against this checklist once it is marked ready and its CI checks are green; the author walks it first, as a self-review, before marking the pull request ready.
-The author runs it first (self-review); a second reviewer runs it again. The
+Review every pull request against this checklist once it is marked ready and its CI checks are green; the author walks it first, as a self-review, before marking the pull request ready. The
 review is posted on the pull request as a GitHub review with inline comments.
 
 ## Inputs
