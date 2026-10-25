@@ -802,11 +802,13 @@ def test_launch_run_local_llm_sequential(project_with_prereqs: dict) -> None:
 
 @pytest.mark.unit
 def test_launch_run_remote_llm_parallel(project_with_prereqs: dict) -> None:
-    """A remote-LLM run launches while another remote-LLM run holds a live lock.
+    """A remote-LLM run launches while other runs hold live locks.
 
-    FR-RUN-015: the sequential rule of FR-RUN-014 applies to local LLM runs
-    only; with an active remote-LLM lock in place, a new remote-LLM run
-    proceeds to completion and leaves the other lock untouched.
+    FR-RUN-015: the sequential rule of FR-RUN-014 constrains local-LLM
+    launches only. With an active remote-LLM lock AND an active local-LLM
+    lock in place, a new remote-LLM run proceeds to completion and leaves
+    both locks untouched (a local-LLM launch would be rejected by the
+    local lock — ``test_launch_run_local_llm_sequential``).
     """
     root = project_with_prereqs["root"]
     config = RunConfig(
@@ -835,12 +837,13 @@ def test_launch_run_remote_llm_parallel(project_with_prereqs: dict) -> None:
         time_s=0.1,
     )
 
-    # Another remote-LLM run is active (live PID).
-    write_run_lock(
-        root,
-        "run-remote-active",
-        {"run_id": "run-remote-active", "pid": os.getpid(), "llm_source": "remote"},
-    )
+    # Another remote-LLM run and a local-LLM run are active (live PID).
+    for active_id, source in (("run-remote-active", "remote"), ("run-local-active", "local")):
+        write_run_lock(
+            root,
+            active_id,
+            {"run_id": active_id, "pid": os.getpid(), "llm_source": source},
+        )
 
     with (
         patch("revolver.core.run.get_global_db") as mock_global_db,
@@ -873,6 +876,7 @@ def test_launch_run_remote_llm_parallel(project_with_prereqs: dict) -> None:
     assert result.run_id.startswith("run-")
     locks_dir = root / REVOLVER_DIR / "runs" / "locks"
     assert (locks_dir / "run-remote-active.lock").exists()
+    assert (locks_dir / "run-local-active.lock").exists()
     assert not (locks_dir / f"{result.run_id}.lock").exists()
 
 

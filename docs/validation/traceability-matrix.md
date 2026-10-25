@@ -280,7 +280,7 @@ Design: [DES-005 §post-run](../architecture/design/DES-005-run-orchestration.md
 | FR-SOL-002 | MUST | DES-001 | L2 | `integration/test_solution::test_list_filters` | Implemented |
 | FR-SOL-003 | MUST | DES-001, DES-005 | L2 | `integration/test_solution::test_info_full_lineage` | Implemented |
 | FR-SOL-004 | MUST | DES-005 §storage | L1, L2 | `unit/core/test_solution::TestGetSolutionInfoProgramPath::test_program_path_derived_from_run_dir_and_rank`, `integration/test_solution::test_info_full_lineage` | Implemented |
-| FR-SOL-005 | MUST | DES-001, DES-006 | L2 | `integration/test_solution::test_info_shows_eval_results` | Implemented (the human-readable output shows the eval id and solved/total since Sprint 020 — #297) |
+| FR-SOL-005 | MUST | DES-001, DES-006 | L2 | `integration/test_solution::test_info_shows_eval_results` | Implemented (since Sprint 020 — #297 — the human-readable output shows the most recent evaluation: id, dataset, solved/total) |
 | FR-SOL-006 | MUST | DES-001 | L2 | `integration/test_solution::test_alias_set` | Implemented |
 | FR-SOL-007 | MUST | DES-001 | L2 | `integration/test_solution::test_alias_unique` | Implemented |
 | FR-SOL-008 | MUST | DES-001 | L2 | `integration/test_solution::test_reference_by_alias` | Implemented |
@@ -443,12 +443,12 @@ The following MUST NFRs are not tested independently — they are satisfied by F
 | spec-dataset | 16 | 14 | 2 | 0 | 2 | 14 | 0 (Sc.1 planned) | 0 |
 | spec-run | 57 | 44 | 11 | 0 | 28 | 35 | 2 (Sc.3) | 4 |
 | spec-eval | 21 | 18 | 2 | 1 | 6 | 14 | 0 (Sc.1/5 planned) | 2 (incl. 1 deferred) |
-| spec-solution | 21 | 20 | 1 | 0 | 4 | 18 | 0 (Sc.1 planned) | 0 |
+| spec-solution | 21 | 20 | 1 | 0 | 4 | 19 | 0 (Sc.1 planned) | 0 |
 | spec-benchmark | 20 | 17 | 3 | 0 | 7 | 12 | 0 (Sc.1 planned) | 1 |
 | spec-setup | 17 | 10 | 7 | 0 | 6 | 11 | 1 (Sc.3) | 0 |
 | NFR (direct) | 27 | 20 | 7 | 0 | 6 | 11 | 2 (Sc.3) | 9 (3 perf manual + NFR-060 packaging + 5 Planned) |
 | NFR (indirect) | 14 | 9 | 5 | 0 | — | — | — | 0 (covered by FR tests) |
-| **Total** | **243** | **187** | **51** | **2** | **66** | **152** | **5** (Sc.3 only; Sc.1/2/4/5 planned) | **23** |
+| **Total** | **243** | **187** | **51** | **2** | **66** | **153** | **5** (Sc.3 only; Sc.1/2/4/5 planned) | **23** |
 
 Counting method (recomputed at v0.19.0 with a script over the real files, then updated row by row for the sixteen rows flipped by #297 in Sprint 020; the previous recount dated from v0.17):
 - **Total / MUST / SHOULD / MAY** — the FR rows (`| FR-XXX-NNN | PRI |`) of each `docs/specs/spec-*.md`; the three Removed / deleted rows (FR-LLM-018, FR-RUN-030, FR-RUN-042) count in Total only, hence Total − (MUST + SHOULD + MAY) = 3. NFR priorities come from `specifications.md` §3; "direct" = ids in the §11 main table (27), "indirect" = the §11 indirect table (14) — together all 41 NFRs.

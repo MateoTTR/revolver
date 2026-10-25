@@ -488,7 +488,7 @@ def test_llm_status_remote_ready_when_env_set(
     mock_global_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A remote LLM is ``ready`` when its ``api_key_env`` is set, ``unconfigured`` otherwise."""
-    runner.invoke(
+    added = runner.invoke(
         app,
         [
             "llm",
@@ -504,6 +504,7 @@ def test_llm_status_remote_ready_when_env_set(
             "REVOLVER_TEST_REMOTE_KEY",
         ],
     )
+    assert added.exit_code == 0, f"output: {_get_all_output(added)}"
 
     def _remote_status() -> str:
         with (

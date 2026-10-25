@@ -26,7 +26,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 
 ### Fixed
 
-- `solution info` shows the evaluation id and the solved/total counts in the human-readable output when an evaluation exists; previously only `--json` carried them (FR-SOL-005, #297).
+- `solution info` shows the most recent evaluation (id, dataset, solved/total) in the human-readable output when one exists; previously only `--json` carried the counts, and the join could return an arbitrary evaluation once a solution had both a post-run training evaluation and an eval-split evaluation (FR-SOL-005, #297). `--json` gains the `eval_dataset` key.
 
 ## [0.19.0] - 2026-10-24
 
