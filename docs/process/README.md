@@ -51,9 +51,9 @@ Everything committed to this repository is public. No committed file may
 contain a local filesystem path, a machine or runner hostname, a private
 repository name, an e-mail address, personal timing data, GitHub handles of
 third parties, or business-domain vocabulary. Use neutral wording ("a local
-path", "a network Ollama host", "a separate demo repository", "a third-party
-endpoint shim"). The rule applies to pull-request descriptions, issue bodies
-and review comments as well, since they are part of the public record.
+path", "a network Ollama host", "a separate demo repository"). The rule
+applies to pull-request descriptions, issue bodies and review comments as
+well, since they are part of the public record.
 
 ## Provenance
 

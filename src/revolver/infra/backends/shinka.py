@@ -176,8 +176,8 @@ _SHINKA_SAMPLER_KWARG_KEYS: dict[str, frozenset[str]] = {
 _SHINKA_SAMPLER_KWARG_KEYS["ucb1"] = _SHINKA_SAMPLER_KWARG_KEYS["ucb"]
 
 # Revolver's own default for the cost-aware coefficient on ucb/ucb1: 0 (flat-rate
-# / bridge case), NOT ShinkaEvolve's own 0.5. Inert when per-model cost is
-# undifferentiated (all-local/bridge) but must default correctly (M4, ADR-007 A5).
+# or local case), NOT ShinkaEvolve's own 0.5. Inert when per-model cost is
+# undifferentiated (all-local) but must default correctly (M4, ADR-007 A5).
 _SHINKA_DEFAULT_COST_AWARE_COEF = 0.0
 
 # Total order over reasoning-effort levels (lowest → highest). ShinkaEvolve has
@@ -725,7 +725,7 @@ def _route_selection_kwargs(
                 f"'{selection}' selection strategy on the shinka backend and was "
                 f"dropped (it would otherwise be ignored or raise a TypeError).\n"
             )
-    # M4: default cost_aware_coef to 0 (flat-rate/bridge) on ucb/ucb1 only.
+    # M4: default cost_aware_coef to 0 (flat-rate or local) on ucb/ucb1 only.
     if selection in ("ucb", "ucb1"):
         routed.setdefault("cost_aware_coef", _SHINKA_DEFAULT_COST_AWARE_COEF)
     return routed
@@ -1069,7 +1069,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
         llm_kwargs.setdefault("max_tokens", default_max_tokens)
         # Collapse per-member reasoning_effort into Shinka's single global pool
         # (FACT A: no per-member effort). Disagreements pick the highest level
-        # (never under-think) with a warning; local/bridge members warn as inert
+        # (never under-think) with a warning; local-source members warn as inert
         # (S17-27, ADR-007 A3.2). The returned flag records whether that
         # local-inert warning fired, so the U7 config-path check below never
         # emits a second inert warning for the same build.
@@ -1150,8 +1150,8 @@ class ShinkaBackend(ChildProcessReaperMixin):
             job["eval_program_path"] = str(wrapper_path)
 
         # 4c. Local-endpoint concurrency pin (UX-5 / S16-21): a "local"
-        #     source LLM is typically a serialized subscription or single-GPU
-        #     endpoint, so fanning out parallel proposal jobs starves it.
+        #     source LLM is typically a serialized single-GPU endpoint, so
+        #     fanning out parallel proposal jobs starves it.
         #     Pin job_config.max_proposal_jobs=1 unless the user set it
         #     explicitly via --config-override (the override loop below still
         #     wins for any value they pass). The key rides in the job_config
@@ -1202,7 +1202,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
         # U7 residual (S17a-13): the member-path inert warning (S17-27/W2a)
         # never sees a reasoning_efforts value arriving via config.yaml or
         # --config-override (overrides land after the projection). Warn when
-        # such a value is inert on an all-local/bridge fleet — unless the
+        # such a value is inert on an all-local fleet — unless the
         # member path already warned inert this build (one warning per run).
         self._warn_config_path_inert_reasoning_efforts(
             spec,
@@ -1308,7 +1308,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
           ``llm_kwargs["reasoning_efforts"] = [<value>]`` **silently**;
         - if they **disagree** → picks the **highest** effort under
           :data:`_REASONING_EFFORT_ORDER` (never under-think) and **warns**;
-        - warns **once** that effort is *inert* for ``local``/bridge-sourced
+        - warns **once** that effort is *inert* for ``local``-sourced
           members (Shinka classes them ``is_reasoning_model=False``).
 
         Mutates *llm_kwargs* in place (the caller writes it back into
@@ -1362,7 +1362,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
 
         if any_local_with_effort:
             sys.stderr.write(
-                "Warning: reasoning_effort is inert for local/bridge-sourced members "
+                "Warning: reasoning_effort is inert for local-sourced members "
                 "on the shinka backend (they are treated as non-reasoning models); "
                 "it applies only to reasoning-capable remote models.\n"
             )
@@ -1385,7 +1385,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
         ``reasoning_effort`` only: a value arriving via the problem
         ``config.yaml`` bypasses the projection (config wins) and a
         ``--config-override`` lands *after* it, so neither path warned. Shinka
-        classes ``local``/bridge-sourced models ``is_reasoning_model=False``,
+        classes ``local``-sourced models ``is_reasoning_model=False``,
         making the pool inert on an all-local fleet — surface that here,
         post-override, on the *final* built value. *members* is the
         ``(member, member_llm)`` list resolved once by ``build_config``.
@@ -1423,7 +1423,7 @@ class ShinkaBackend(ChildProcessReaperMixin):
             return
         sys.stderr.write(
             "Warning: reasoning_efforts is set via config.yaml/--config-override, "
-            "but every LLM in this run is local/bridge-sourced — the shinka "
+            "but every LLM in this run is local-sourced — the shinka "
             "backend treats those as non-reasoning models, so the value is inert "
             "(it applies only to reasoning-capable remote models).\n"
         )

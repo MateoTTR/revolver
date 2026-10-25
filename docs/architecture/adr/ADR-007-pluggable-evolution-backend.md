@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-11
 **Status**: Accepted (amended 2026-07-01, 2026-07-05)
-**Deciders**: Mathieu (domain expert), Claude (architecture assistant)
+**Deciders**: the project maintainer
 **Amended**: 2026-07-01 — v0.17 multi-LLM ensemble selection (see the *Amendment* section below; supersedes parts of D4/D5, the "lossy" consequence, and the S15 roadmap line).
 **Amended**: 2026-07-05 — v0.18 top-N extraction: `top_n_extraction` gains its first consumer (see the *Amendment — v0.18* section below; no capability-matrix change).
 
@@ -203,7 +203,7 @@ These are real ShinkaEvolve 0.0.7 constraints (source-verified; the adversarial 
    `--reasoning-effort` **per member on OE**, and to a **single global value on Shinka** — when members
    disagree, Revolver aligns on the **highest** effort (total order `min < low < medium < high < max`, a
    conservative default that never under-thinks) and **warns** that per-member effort is not honored.
-   Additionally inert for local/bridge models, which Shinka classes as non-reasoning.
+   Additionally inert for local models, which Shinka classes as non-reasoning.
 
 ### A4 — `capabilities()` widens to carry the selection surface honestly
 
@@ -220,7 +220,7 @@ silently.
 Shinka spreads `llm_dynamic_selection_kwargs` verbatim into the selected sampler's constructor, so a wrong
 key raises `TypeError`. Revolver validates/routes `--selection-kwarg` against the **selected** sampler's
 accepted kwargs and never passes a union. `cost_aware_coef` applies only to `ucb`/`ucb1` (**default 0** for
-the flat-rate/bridge case — M4; note it is inert anyway when per-model cost is undifferentiated). This
+the flat-rate or local case — M4; note it is inert anyway when per-model cost is undifferentiated). This
 composes with the "warn on a no-op override key" rule (backlog B9).
 
 ### Scope note

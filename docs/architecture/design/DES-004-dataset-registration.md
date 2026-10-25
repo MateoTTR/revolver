@@ -2,7 +2,7 @@
 
 **Version**: 0.1 — Initial draft
 **Date**: 2026-03-11
-**Status**: Draft
+**Status**: Accepted
 **Traceable to**: [spec-dataset.md](../../specs/spec-dataset.md), [Architecture](../architecture.md) §4, [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.2–3.4
 
 ---

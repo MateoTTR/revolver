@@ -333,12 +333,12 @@ class TestProxyErrorForwarding:
     def test_proxy_forwards_502_status(self) -> None:
         """Proxy forwards an upstream 502 status and body verbatim (A5 / #317).
 
-        A subscription-backed local OpenAI-compatible shim under sustained load
+        A local OpenAI-compatible gateway under sustained load
         can return ``502 Bad Gateway``. Because urllib raises ``HTTPError`` for
         5xx, this exercises the FB-01 forwarding branch — the client must see
         the real 502 + body, not a generic proxy error that masks the cause.
         """
-        error_body = b'{"error":"bad gateway","message":"bridge upstream failed"}'
+        error_body = b'{"error":"bad gateway","message":"upstream failed"}'
         fake_server, fake_port = _start_fake_error_llm(error_code=502, error_body=error_body)
         try:
             proxy = TokenCountingProxy(f"http://127.0.0.1:{fake_port}")
@@ -356,7 +356,7 @@ class TestProxyErrorForwarding:
             assert exc_info.value.code == 502
             body = exc_info.value.read()
             assert b"bad gateway" in body
-            assert b"bridge upstream failed" in body
+            assert b"upstream failed" in body
 
             proxy.stop()
         finally:

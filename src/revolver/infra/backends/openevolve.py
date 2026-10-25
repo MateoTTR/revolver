@@ -138,7 +138,7 @@ OE_BUILTIN_FEATURE_DIMENSIONS = frozenset({"complexity", "diversity", "combined_
 # Default LLM request timeout (seconds) injected for ``--source local``
 # endpoints when the LLM entry has no explicit ``timeout_s`` (#307). The
 # OpenEvolve OpenAI client defaults to 60 s, which aborts slow local
-# endpoints (e.g. a subscription-backed local shim at 50-530 s/call) -> a retry
+# endpoints (a single call can take several minutes) -> a retry
 # storm and a proxy BrokenPipeError. Remote APIs keep OpenEvolve's default.
 DEFAULT_LOCAL_LLM_TIMEOUT_S = 600
 
@@ -754,7 +754,7 @@ def build_config(
 
     # --parallel handling, incl. the local-endpoint auto-pin (A3/#315,
     # extends #309). A "local" source LLM is typically a serialized
-    # subscription or single-GPU endpoint, so fanning out parallel
+    # single-GPU endpoint, so fanning out parallel
     # evaluations starves it -> staggered calls, 600 s timeouts, a retry
     # storm and a multi-hour hang (see DEFAULT_LOCAL_LLM_TIMEOUT_S / #307).
     # Policy:
@@ -775,7 +775,7 @@ def build_config(
         if llm.source == "local" and parallel > 1:
             sys.stderr.write(
                 f"Warning: --parallel {parallel} on a --source local endpoint. Local "
-                "endpoints (subscription-backed or single-GPU) usually serialize "
+                "endpoints (often a single GPU) usually serialize "
                 "requests, so concurrency yields no speedup and can trigger timeouts "
                 "and a retry storm. Honouring your value; pass --parallel 1 to pin.\n"
             )
