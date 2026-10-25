@@ -1,8 +1,10 @@
 Closes #N
 
 <!-- Keep `Closes #N` as the first line (AGENTS.md, "Pull request workflow").
-     Open the pull request as a DRAFT; mark it ready only when the latest review
-     carries 0 CRITICAL (docs/process/code-review.md, "Exit rule").
+     Open the pull request as a DRAFT while you work; mark it ready once the local
+     gates are green, the self-review is done and the CHANGELOG line is in — CI
+     runs, then the review. It is merged only with 0 CRITICAL in the latest review
+     and every thread resolved (docs/process/code-review.md, "Merge rule").
      Delete these comments as you fill the sections. -->
 
 ## Summary
@@ -52,7 +54,7 @@ Mirror of [docs/process/definition-of-done.md § 1](https://github.com/MateoTTR/
 - [ ] Self-review against `docs/process/code-review.md` done
 - [ ] Code respects `cli/` → `core/` → `infra/`, the `RevolverError` hierarchy and exit codes 0–4, parameterized SQL, secrets as environment-variable names only
 - [ ] [Public-file rule](https://github.com/MateoTTR/revolver/blob/develop/docs/process/README.md#public-file-rule) respected in the diff and in this description
-- [ ] Latest review: 0 CRITICAL; WARNINGs fixed, or carried over here: <list, or "none">
+- [ ] Latest review: 0 CRITICAL; WARNINGs fixed, or carried over here: <list, or "none">; every review thread resolved
 
 <details>
 <summary><strong>New evolution backend</strong> — additional checklist (ADR-007; Definition of Done § 2)</summary>

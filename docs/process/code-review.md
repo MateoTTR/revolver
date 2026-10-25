@@ -1,6 +1,6 @@
 # Code review checklist
 
-Review every pull request against this checklist before it is marked ready.
+Review every pull request against this checklist once it is marked ready and its CI checks are green; the author walks it first, as a self-review, before marking the pull request ready.
 The author runs it first (self-review); a second reviewer runs it again. The
 review is posted on the pull request as a GitHub review with inline comments.
 
@@ -156,14 +156,17 @@ Summary body template:
 - Do not flag what `ruff` and `mypy` already catch — CI handles those; focus on logic, design and what a linter cannot see.
 - If no issue is found, still post a positive review confirming the code looks good. GOOD findings go in the summary body, never inline.
 
-## Exit rule
+## Merge rule
 
-The pull request may be marked ready (`gh pr ready <N>`, or the button in
-the web interface) only when the latest review carries **0 CRITICAL**
-findings and every WARNING is either fixed in the pull request or explicitly
-listed as carried over in the pull-request description. The four required CI
-checks must then be green before the maintainer merges (see `AGENTS.md`,
-"Pull request workflow").
+The author marks the pull request ready (`gh pr ready <N>`, or the button in
+the web interface) once the local gates are green, the self-review is done and
+the `[Unreleased]` line is in `CHANGELOG.md`; the four required CI checks run,
+and this review starts on a green build. The maintainer merges only when the
+latest review carries **0 CRITICAL** findings, every WARNING is either fixed in
+the pull request or explicitly listed as carried over in the pull-request
+description, and every review thread is resolved (a reply saying what was done,
+then the thread resolved). A re-review is needed only after a CRITICAL fix (see
+`AGENTS.md`, "Pull request workflow").
 
 ## Changes from the former agent definition
 
@@ -171,4 +174,5 @@ checks must then be green before the maintainer merges (see `AGENTS.md`,
 - **(changed)** Posting through a GitHub MCP tool with a `gh pr comment` fallback is replaced by the "Files changed" flow and `gh pr review`; the "Automated review by Claude Code" footer and the hard-coded owner / repository constants are dropped.
 - **(changed)** The "run discipline" paragraph about the agent harness idle timeout is dropped; its one portable rule (highest-risk files first, a partial review rather than none) is kept in step 1.
 - **(changed)** "Report in English" is kept; the French communication rule applied to the maintainer's own sessions and is not part of the project process.
+- **(changed, 2026-10-25, #317)** The exit rule ("ready only with 0 CRITICAL", review on the draft) becomes the merge rule: ready is the author's call once the local gates, the self-review and the CHANGELOG line are done, CI runs, the review happens on a green build, and 0 CRITICAL plus resolved threads gate the merge — GitHub's draft semantics.
 - **(added)** Step 3 (backend pull requests), the public-file-rule item and the exit rule were implicit practice (every sprint review reported "0 CRITICAL before ready"); they are now written down. The strict-marker note reflects `pyproject.toml` at v0.19.0.

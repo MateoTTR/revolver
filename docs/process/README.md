@@ -13,7 +13,7 @@ rationale for this layout is
 
 | Procedure | File | When |
 |---|---|---|
-| Code review | [code-review.md](code-review.md) | Every pull request, before it is marked ready; also the author's self-review |
+| Code review | [code-review.md](code-review.md) | Every pull request once it is ready and CI is green; the author's self-review before marking it ready |
 | Specification review | [spec-review.md](spec-review.md) | A spec, DES or ADR file changed; before a release |
 | Validation review | [validation-review.md](validation-review.md) | A validation document or a spec changed; before a release (includes the cross-document traceability sweep) |
 | Documentation review | [doc-review.md](doc-review.md) | After a release; README / guides / E2E walkthrough changed; CLI source changed |
@@ -35,9 +35,11 @@ Two severity vocabularies are used, one per kind of review:
 | Code review | **CRITICAL** / **WARNING** / **SUGGESTION** / **GOOD** | Must fix before merge / should fix / nice to have / positive pattern worth noting |
 | Document reviews (spec, validation, doc) | **FAIL** / **WARN** / **INFO** / **PASS** | Broken reference or factual error / inconsistency to fix / observation, no action / check passed |
 
-A pull request is marked ready only with **0 CRITICAL** findings; every
-WARNING is fixed in the pull request or carried over explicitly in its
-description. Document reviews end with a count line
+The author marks a pull request ready once the local gates, the self-review and
+the CHANGELOG line are done; the review follows a green CI. A pull request is
+merged only with **0 CRITICAL** findings in its latest review, every WARNING
+fixed in the pull request or carried over explicitly in its description, and
+every review thread resolved. Document reviews end with a count line
 ("N checks, N warnings, N failures"); a release requires 0 FAIL.
 
 Reviews are written in **English** and posted where the reviewed change
