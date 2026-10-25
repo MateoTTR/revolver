@@ -480,6 +480,48 @@ def test_llm_status_with_mock_ollama(mock_global_db: Path) -> None:
     assert status_by_name["remote-model"]["status"] == "unconfigured"
 
 
+# ── Test 8b: Remote status follows the API key env var (FR-LLM-015) ─────────
+
+
+@pytest.mark.integration
+def test_llm_status_remote_ready_when_env_set(
+    mock_global_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A remote LLM is ``ready`` when its ``api_key_env`` is set, ``unconfigured`` otherwise."""
+    runner.invoke(
+        app,
+        [
+            "llm",
+            "add",
+            "remote-model",
+            "--model",
+            "gpt-4o",
+            "--source",
+            "remote",
+            "--provider",
+            "openai",
+            "--api-key-env",
+            "REVOLVER_TEST_REMOTE_KEY",
+        ],
+    )
+
+    def _remote_status() -> str:
+        with (
+            patch("revolver.cli.llm.OllamaClient", return_value=_make_ollama_client_mock()),
+            patch("revolver.core.llm.get_gpu_info", return_value=None),
+        ):
+            result = runner.invoke(app, ["--json", "llm", "status"])
+        assert result.exit_code == 0, f"output: {_get_all_output(result)}"
+        statuses = {s["name"]: s for s in json.loads(result.stdout)["llms"]}
+        return str(statuses["remote-model"]["status"])
+
+    monkeypatch.setenv("REVOLVER_TEST_REMOTE_KEY", "dummy-key")
+    assert _remote_status() == "ready"
+
+    monkeypatch.delenv("REVOLVER_TEST_REMOTE_KEY")
+    assert _remote_status() == "unconfigured"
+
+
 # ── Test 9: Start with mock load ────────────────────────────────────────────
 
 

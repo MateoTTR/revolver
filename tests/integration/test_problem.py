@@ -826,3 +826,37 @@ def test_problem_version_delete_cli_no_force_with_runs(tmp_project: Path) -> Non
     assert result.exit_code == 1, f"Expected exit 1; output: {_get_all_output(result)}"  # type: ignore[union-attr]
     output = _get_all_output(result)
     assert "--force" in output
+
+
+@pytest.mark.integration
+def test_problem_test_warns_without_combined_score(tmp_project: Path) -> None:
+    """``problem test`` accepts a ``dict[str, float]`` without ``combined_score`` but warns.
+
+    Validates: FR-PRB-005 (the return value is validated as ``dict[str, float]``
+    and checked for the ``combined_score`` key) and FR-PRB-013 (the missing key
+    is a non-blocking warning: exit code 0).
+    """
+    (tmp_project / "evaluator.py").write_text(
+        "def evaluate(program_path):\n    return {'score': 1.0}\n"
+    )
+    shutil.copy2(_FIXTURES / "initial_program_simple.py", tmp_project / "initial_program.py")
+    instance_path = tmp_project / "instance.json"
+    shutil.copy2(_FIXTURES / "instances" / "instance_001.json", instance_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "problem",
+            "test",
+            "--instance",
+            str(instance_path),
+            "--program",
+            str(tmp_project / "initial_program.py"),
+            "--evaluator",
+            str(tmp_project / "evaluator.py"),
+        ],
+    )
+
+    output = _get_all_output(result)
+    assert result.exit_code == 0, f"Exit {result.exit_code}; output: {output}"
+    assert "no 'combined_score' key" in output
