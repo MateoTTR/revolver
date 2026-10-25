@@ -22,6 +22,7 @@ moves that block under a dated version heading (see `docs/process/release.md`).
 - CI actions bumped and SHA-pinned: `actions/checkout` 7.0.1 and `actions/setup-python` 7.0.0 (#291, #292, Dependabot).
 - The initial-program guide states its guidance without the narrative of the project's own demonstration problems: generic minimax examples in the `problem.md` sections, no model names, version numbers or gain figures, backend-neutral wording (closes #299).
 - Post-release documentation review of v0.19.0 (50 checks, 2 warnings, 0 failures): the E2E walkthrough's `doctor` transcript shows 0.19.0, the Dependabot index row says pip is security-only, README and the guides name the evolution backends where the text still read as OpenEvolve-only, and `architecture.md` drops the pre-ADR-007 source-tree entries.
+- The seven design documents DES-001 … DES-007 move from `Draft` to `Accepted` in their header and in the DES index tables of `AGENTS.md` and `architecture.md`; the Deciders lines of ADR-001/002/003/006/007 take ADR-008's neutral wording, `the project maintainer` (#313, open decisions of the Sprint 020 planning issue #312).
 
 ## [0.19.0] - 2026-10-24
 
