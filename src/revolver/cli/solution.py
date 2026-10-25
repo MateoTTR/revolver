@@ -108,6 +108,15 @@ def solution_info(
                 "program_path": info.get("program_path", ""),
             }
 
+            # Evaluation results, when an evaluation exists (FR-SOL-005):
+            # the LEFT JOIN of ``get_solution_detail`` carries the eval id and
+            # the solved/total counts; ``eval results`` has the full detail.
+            if info.get("eval_id") is not None:
+                data["eval_id"] = info["eval_id"]
+                data["eval_solved"] = (
+                    f"{info.get('instances_solved', 0)}/{info.get('instance_count', 0)}"
+                )
+
             # Resume chain display (F6)
             if "resumed_from" in info:
                 data["resumed_from"] = info["resumed_from"]
