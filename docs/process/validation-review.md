@@ -52,7 +52,10 @@ when missing). Performance NFRs (NFR-030/031/032) and deployment NFRs
 ### 3. Priority coverage
 
 Every `MUST` FR has at least one test (L1 or L2) — missing is **FAIL**. A
-`SHOULD` FR should have a test — missing is **WARN**. A `MAY` FR may have none.
+`MUST` FR whose only rows are `Planned` but carry a dated justification and an
+open tracking issue (an acknowledged requirement that is not implemented yet) is
+**WARN**, not FAIL; the review names it and the issue. A `SHOULD` FR should have a
+test — missing is **WARN**. A `MAY` FR may have none.
 
 ### 4. DES reference validity
 
@@ -151,3 +154,4 @@ the file, the line and the suggested fix.
 - **(changed)** Check 6 used the statuses "Written or Passing"; the matrix legend defines `Planned` → `Implemented` → `Passing`, so `Implemented` is used.
 - **(changed)** Part B folds in the former `/traceability-check` skill (its checks 1–5 and 7). `CLAUDE.md` is replaced by `AGENTS.md` throughout. The skill's "Backlog consistency" check (task numbers unique and sequential, completed tasks cite a session number, session numbers match session reports) is **dropped**: neither the backlog file nor the session journal is in the repository any more (ADR-008 D1, D2). Its "CLAUDE.md consistency" check (open questions ticked with a documented decision, phase statuses matching progress) becomes check 14.
 - **(changed)** Findings are reported in English; the agent-harness "run discipline" paragraph is dropped; "OK" is written "PASS" and "INFO" is added.
+- **(changed, 2026-10-25, #297)** Check 3 grades a `MUST` FR that is acknowledged as not implemented — `Planned` rows only, with a dated justification and an open tracking issue — as **WARN** instead of FAIL, the grading the Sprint 020 traceability-debt resolution applied to FR-LLM-005 (#315).
