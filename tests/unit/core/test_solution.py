@@ -20,7 +20,7 @@ import pytest
 
 from revolver.core.exceptions import DuplicateNameError, ValidationError
 from revolver.core.project import init_project
-from revolver.core.solution import extract_solution
+from revolver.core.solution import extract_solution, get_solution_info
 from revolver.infra.db import (
     get_project_db,
     get_solution,
@@ -368,3 +368,29 @@ class TestExtractSolutionForceAtomicity:
         assert sol.alias == "new-sol"
         assert sol.run_id == "run-test-001"
         assert sol.rank == 1
+
+
+class TestGetSolutionInfoProgramPath:
+    """FR-SOL-004: ``program_path`` is derived from the run directory and the rank."""
+
+    @pytest.mark.unit
+    def test_program_path_derived_from_run_dir_and_rank(self, tmp_path: Path) -> None:
+        """A rank-2 solution resolves to ``<run dir>/programs/rank-2.py``."""
+        root = _setup_project_with_run(tmp_path, run_id="run-test-002", rank=2)
+        conn = get_project_db(root / REVOLVER_DIR / "revolver.db")
+        try:
+            insert_solution(
+                conn,
+                solution_id="sol-rank-2",
+                run_id="run-test-002",
+                rank=2,
+                best_score=0.5,
+            )
+        finally:
+            conn.close()
+
+        info = get_solution_info("sol-rank-2", project_root=root)
+
+        expected = root / REVOLVER_DIR / RUNS_DIR / "run-test-002" / "programs" / "rank-2.py"
+        assert info["program_path"] == str(expected)
+        assert expected.is_file()

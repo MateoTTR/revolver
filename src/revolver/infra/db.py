@@ -2530,7 +2530,9 @@ def get_solution_detail(
 
     Returns solution data enriched with run lineage (problem_version,
     llm, dataset, status, config) and optional evaluation metadata
-    (eval_id, instances_solved, instance_count).
+    (eval_id, eval_dataset, instances_solved, instance_count) — the most
+    recent evaluation when the solution was evaluated on several datasets
+    (the post-run training evaluation plus ``revolver eval`` runs).
 
     Args:
         conn: An open project database connection.
@@ -2545,11 +2547,13 @@ def get_solution_detail(
                r.config_snapshot, r.llm_model, r.problem_hash, r.dataset_hash,
                r.created_at, r.iterations, r.generation_time_s,
                r.prompt_tokens, r.completion_tokens,
-               em.eval_id, em.instances_solved, em.instance_count
+               em.eval_id, em.dataset_name AS eval_dataset,
+               em.instances_solved, em.instance_count
         FROM solutions s
         JOIN runs r ON s.run_id = r.id
         LEFT JOIN eval_metadata em ON s.id = em.solution_id
         WHERE {where_clause}
+        ORDER BY em.evaluated_at DESC
     """
     conn.row_factory = sqlite3.Row
     try:

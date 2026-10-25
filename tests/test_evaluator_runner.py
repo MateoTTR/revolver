@@ -155,6 +155,35 @@ class TestRunInstance:
         assert result.error is not None
         assert "intentional failure" in result.error
 
+    def test_non_dict_return_is_fail(self, tmp_path: Path) -> None:
+        """An evaluator that returns something other than a dict -> status='fail'.
+
+        FR-PRB-005: the return value must be a ``dict[str, float]``.
+        """
+        list_eval = tmp_path / "list_eval.py"
+        list_eval.write_text("def evaluate(program_path):\n    return [0.5, 1.0]\n")
+        result = run_instance(
+            evaluator_path=list_eval,
+            program_path=FIXTURES / "initial_program_simple.py",
+            instance_path=FIXTURES / "instances" / "instance_001.json",
+        )
+        assert result.status == "fail"
+        assert result.metrics is None
+        assert result.error is not None
+
+    def test_non_float_metric_is_fail(self, tmp_path: Path) -> None:
+        """A dict whose values are not floats -> status='fail' (FR-PRB-005)."""
+        str_eval = tmp_path / "str_eval.py"
+        str_eval.write_text("def evaluate(program_path):\n    return {'combined_score': 'high'}\n")
+        result = run_instance(
+            evaluator_path=str_eval,
+            program_path=FIXTURES / "initial_program_simple.py",
+            instance_path=FIXTURES / "instances" / "instance_001.json",
+        )
+        assert result.status == "fail"
+        assert result.metrics is None
+        assert result.error is not None
+
     def test_timeout(self, tmp_path: Path) -> None:
         """An evaluator that sleeps too long produces status='timeout'."""
         slow_eval = tmp_path / "slow_eval.py"

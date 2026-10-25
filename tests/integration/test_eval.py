@@ -613,6 +613,62 @@ def test_results_per_instance(eval_project: dict[str, object]) -> None:
     assert "instance_001" in output or "instance_002" in output or "instance_003" in output
 
 
+# ── Test 9b: test_results_per_instance_json (FR-EVL-017) ────────────────────
+
+
+def test_results_per_instance_json(eval_project: dict[str, object]) -> None:
+    """``results --per-instance --json`` exports every raw per-instance row.
+
+    Validates: FR-EVL-017 — the export carries, for each instance, the id, the
+    status, the full metrics dict and the compute time, so external
+    post-processing needs nothing else; the raw payload has no aggregate block.
+    """
+    root = eval_project["root"]
+    assert isinstance(root, Path)
+
+    metrics = {"combined_score": 0.9, "makespan": 100.0}
+    mock_fn = _make_mock_run_instance(metrics)
+    with (
+        patch.object(core_eval_module, "run_instance", side_effect=mock_fn),
+        patch.object(core_eval_module, "_run_legacy_global_aggregation", return_value=None),
+    ):
+        result1 = _invoke_with_cwd(
+            ["eval", "--solution", "my-solution", "--dataset", "eval-bench"],
+            root,
+        )
+    assert result1.exit_code == 0, _get_all_output(result1)
+
+    result2 = _invoke_with_cwd(
+        [
+            "--json",
+            "eval",
+            "results",
+            "--solution",
+            "my-solution",
+            "--dataset",
+            "eval-bench",
+            "--per-instance",
+        ],
+        root,
+    )
+    assert result2.exit_code == 0, _get_all_output(result2)
+
+    data = _parse_json_output(result2)
+    assert isinstance(data, dict)
+    assert data["metadata"]["instance_count"] == 3
+    instances = data["instances"]
+    assert sorted(inst["instance_id"] for inst in instances) == [
+        "instance_001.json",
+        "instance_002.json",
+        "instance_003.json",
+    ]
+    for inst in instances:
+        assert inst["status"] == "solved"
+        assert inst["metrics"] == metrics
+        assert inst["compute_time_s"] == pytest.approx(0.05)
+    assert "aggregates" not in data
+
+
 # ── Test 10: test_results_shows_user_aggregates ─────────────────────────────
 
 

@@ -9,7 +9,7 @@ Traceable to: val-integration-tests.md section 2.7 (9 scenarios).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import re
@@ -22,6 +22,7 @@ from revolver.cli import app
 from revolver.core.project import init_project
 from revolver.infra.db import (
     get_project_db,
+    insert_eval_metadata,
     insert_run,
     insert_solution,
 )
@@ -1863,3 +1864,72 @@ def test_solution_info_no_resume_chain(project_with_solutions: Path) -> None:
 
     assert "resumed_from" not in data, f"Non-resumed run should not have resumed_from: {data}"
     assert "resume_chain" not in data, f"Non-resumed run should not have resume_chain: {data}"
+
+
+@pytest.mark.integration
+def test_info_shows_eval_results(project_with_solutions: Path) -> None:
+    """``solution info`` shows the evaluation results when an eval exists.
+
+    Validates: FR-SOL-005 — the JSON payload and the human-readable table both
+    carry the eval id, its dataset and the solved/total counts of the most
+    recent evaluation (here the eval-split run that followed the post-run
+    training evaluation); a solution without an evaluation shows neither.
+    """
+    _create_dataset_in_db(project_with_solutions, "eval-set")
+    db_path = project_with_solutions / REVOLVER_DIR / "revolver.db"
+    conn = get_project_db(db_path)
+    now = datetime.now(UTC)
+    try:
+        insert_eval_metadata(
+            conn,
+            eval_id="eval-1",
+            solution_id="sol-20260301-100000",
+            dataset_name="train-small",
+            instance_count=10,
+            instances_solved=8,
+            eval_time_s=12.5,
+            evaluated_at=now - timedelta(days=1),
+        )
+        insert_eval_metadata(
+            conn,
+            eval_id="eval-2",
+            solution_id="sol-20260301-100000",
+            dataset_name="eval-set",
+            instance_count=5,
+            instances_solved=5,
+            eval_time_s=4.0,
+            evaluated_at=now,
+        )
+    finally:
+        conn.close()
+
+    result = _invoke_with_cwd(
+        ["--json", "solution", "info", "sol-20260301-100000"],
+        project_with_solutions,
+    )
+    assert result.exit_code == 0  # type: ignore[union-attr]
+    data = _parse_json_output(result)
+    assert isinstance(data, dict)
+    assert data["eval_id"] == "eval-2"
+    assert data["eval_dataset"] == "eval-set"
+    assert data["instances_solved"] == 5
+    assert data["instance_count"] == 5
+
+    result_text = _invoke_with_cwd(
+        ["solution", "info", "sol-20260301-100000"],
+        project_with_solutions,
+    )
+    assert result_text.exit_code == 0  # type: ignore[union-attr]
+    output = _get_all_output(result_text)
+    assert "eval-2" in output
+    assert "eval-set" in output
+    assert "5/5" in output
+    assert "eval-1" not in output
+
+    # The other solution has no evaluation: no eval fields in text mode.
+    result_none = _invoke_with_cwd(
+        ["solution", "info", "sol-20260302-100000"],
+        project_with_solutions,
+    )
+    assert result_none.exit_code == 0  # type: ignore[union-attr]
+    assert "eval_id" not in _get_all_output(result_none)
