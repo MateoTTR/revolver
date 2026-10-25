@@ -97,7 +97,7 @@ benchmark results with full traceability.
 
 | Procedure | Path | When |
 |---|---|---|
-| Code review | [docs/process/code-review.md](docs/process/code-review.md) | Every pull request before it is marked ready (self-review, then reviewer) |
+| Code review | [docs/process/code-review.md](docs/process/code-review.md) | Every pull request: the author's self-review before marking it ready, the reviewer's pass once CI is green |
 | Specification review | [docs/process/spec-review.md](docs/process/spec-review.md) | A spec, DES or ADR changed; pre-release audit |
 | Validation review | [docs/process/validation-review.md](docs/process/validation-review.md) | A validation document or spec changed; pre-release audit; traceability sweep |
 | Documentation review | [docs/process/doc-review.md](docs/process/doc-review.md) | After a release; README / guides / E2E walkthrough or `src/revolver/cli/*.py` changed |
@@ -163,13 +163,14 @@ path", "a network Ollama host", "a separate demo repository"). See
 
 1. **Issue first.** Every pull request closes a GitHub issue — opened from one of the issue forms under `.github/ISSUE_TEMPLATE/` — that states the scope, the files to touch, the acceptance criteria, the test scenarios and the spec / DES / ADR references. The issue is the single source of truth for the change. External contributors proposing a design change open a **design issue** first (RFC-lite): the maintainer then updates — or reviews the contributor's edits to — the formal specification, DES, ADR and validation documents.
 2. **Branch** from `develop`: `feature/<topic>`.
-3. **Draft pull request** against `develop`, as soon as the branch exists, from the pull-request template (`.github/PULL_REQUEST_TEMPLATE.md`): the first line of the description is `Closes #N`; a short **Status** section is kept up to date at each working session (what is done, what is next, what blocks). Drafts do not run CI.
-4. **Local gates** before asking for review, on Python 3.12 (and 3.14 when available), after `pip install -e ".[dev]"`:
+3. **Draft pull request** against `develop`, as soon as the branch exists, from the pull-request template (`.github/PULL_REQUEST_TEMPLATE.md`): the first line of the description is `Closes #N`; a short **Status** section is kept up to date at each working session (what is done, what is next, what blocks). A draft is work in progress: CI does not run on it.
+4. **Local gates** before marking the pull request ready, on Python 3.12 (and 3.14 when available), after `pip install -e ".[dev]"`:
    `ruff check src/ tests/` · `ruff format --check src/ tests/` · `mypy` · `pytest --cov=revolver --cov-fail-under=80 -m "unit or integration"`.
    Engine-specific tests (`-m openevolve`, `-m shinkaevolve`) are not run by CI: state in the pull request how they were run.
-5. **Self-review** against [docs/process/code-review.md](docs/process/code-review.md) and the [Definition of Done](docs/process/definition-of-done.md); then a reviewer applies the same checklist and posts a pull-request review.
-6. **Ready** (`gh pr ready <N>`) only with **0 CRITICAL** findings, every WARNING fixed or explicitly carried over, and one line added under `[Unreleased]` in `CHANGELOG.md`. The four required checks must be green.
-7. **The maintainer merges** on GitHub.
+5. **Self-review** against [docs/process/code-review.md](docs/process/code-review.md) and the [Definition of Done](docs/process/definition-of-done.md); add the line under `[Unreleased]` in `CHANGELOG.md`.
+6. **Ready** (`gh pr ready <N>`) is the author's call once the local gates are green, the self-review is done and the CHANGELOG line is in: the four required checks run on that commit. A red check is fixed before anything else.
+7. **Review** on a green build: a reviewer applies the same checklist and posts a pull-request review. The author answers in every review thread, pushes the fixes (the checks run again) and resolves the threads; a re-review is needed only after a CRITICAL fix.
+8. **The maintainer merges** on GitHub when the four checks are green, the latest review carries **0 CRITICAL**, every WARNING is fixed or explicitly carried over in the description and every thread is resolved. Maintainer pull requests pass the ruleset's approval rule through its admin bypass; the rule protects external contributions.
 
 Independent pull requests proceed in parallel; a pull request that depends on
 another waits for it to be merged into `develop` (the planning issue's

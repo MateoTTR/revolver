@@ -182,28 +182,34 @@ is `Closes #N`, followed by Summary, Spec impact, Tests, the Definition-of-Done
 checklist and a **Status** section. Update **Status** (done / next / blocked)
 at the end of each working session: it is how continuity is carried between
 sessions and between contributors, since no journal or planning file is kept in
-the repository. Drafts do not run CI.
+the repository. A draft is work in progress: CI does not run on it.
 
 ```bash
 gh pr create --draft --base develop --title "<imperative summary>"   # or the web interface
 ```
 
-## 7. Review, ready, merge
+## 7. Ready, review, merge
 
 1. **Self-review** your diff against
    [docs/process/code-review.md](docs/process/code-review.md) and the
-   [Definition of Done](docs/process/definition-of-done.md); fix what you find.
-2. **Ask for a review** on the draft. A reviewer applies the same checklist and
-   posts a GitHub review with inline findings classified **CRITICAL** /
-   **WARNING** / **SUGGESTION** / **GOOD**; address them and push.
-3. **Mark the pull request ready** (`gh pr ready <N>`, or the button) only when
-   the latest review carries **0 CRITICAL** findings, every WARNING is fixed or
-   explicitly carried over in the description, and the `[Unreleased]` line is
-   in `CHANGELOG.md` ([code-review.md § Exit rule](docs/process/code-review.md#exit-rule)).
-   The four required checks then run and must be green.
-4. **The maintainer merges.** Merging into `develop` or `main`, tags, version
-   bumps and repository settings are maintainer-only actions
-   ([AGENTS.md § Git](AGENTS.md#git)); releases follow
+   [Definition of Done](docs/process/definition-of-done.md); fix what you find
+   and add the `[Unreleased]` line to `CHANGELOG.md`.
+2. **Mark the pull request ready** (`gh pr ready <N>`, or the button) once the
+   local gates are green, the self-review is done and the CHANGELOG line is in.
+   The four required checks run on that commit; fix a red check before anything
+   else.
+3. **Review** on a green build: a reviewer applies the same checklist and posts
+   a GitHub review with inline findings classified **CRITICAL** / **WARNING** /
+   **SUGGESTION** / **GOOD**. Answer in every review thread, push the fixes (the
+   checks run again) and resolve the threads; a re-review is needed only after a
+   CRITICAL fix ([code-review.md § Merge rule](docs/process/code-review.md#merge-rule)).
+4. **The maintainer merges** when the four checks are green, the latest review
+   carries **0 CRITICAL** findings, every WARNING is fixed or explicitly carried
+   over in the description and every thread is resolved. Maintainer pull
+   requests pass the ruleset's "one approving review" rule through its admin
+   bypass; the rule protects external contributions. Merging into `develop` or
+   `main`, tags, version bumps and repository settings are maintainer-only
+   actions ([AGENTS.md § Git](AGENTS.md#git)); releases follow
    [docs/process/release.md](docs/process/release.md).
 
 ## Working with AI tools (pointer-file rule)
