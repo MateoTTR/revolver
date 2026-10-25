@@ -2,7 +2,7 @@
 
 **Version**: 0.2 — per-LLM `reasoning_effort` registry field (§2.1/§2.8/§5/§6, ADR-007 Amendment A1/A3.2)
 **Date**: 2026-07-01
-**Status**: Draft
+**Status**: Accepted
 **Traceable to**: [spec-llm.md](../../specs/spec-llm.md), [ADR-001](../adr/ADR-001-ollama-local-llm-backend.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [Architecture](../architecture.md) §4, [DES-001 Data Model](DES-001-sqlite-data-model.md) §4.1/§4.3
 
 ---

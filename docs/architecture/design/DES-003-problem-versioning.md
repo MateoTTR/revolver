@@ -2,7 +2,7 @@
 
 **Version**: 0.2 — U4 backend persistence on problem versions (migration v14 — §2.2.2, §3, §4.3, DD-08; S18 / #369, FR-PRB-016); command surface aligned to the shipped CLI: `version create <TAG>` (positional; `--tag` deprecated — UX-2 / S16-17) + `version list` sub-commands (§1, §2.2, §2.3, §6, §8.2, §10)
 **Date**: 2026-07-05
-**Status**: Draft
+**Status**: Accepted
 **Traceable to**: [spec-problem.md](../../specs/spec-problem.md), [Architecture](../architecture.md) §4, [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.1
 
 ---

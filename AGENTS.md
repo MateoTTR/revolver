@@ -69,13 +69,13 @@ benchmark results with full traceability.
 
 | DES | Title | Status |
 |---|---|---|
-| [DES-001](docs/architecture/design/DES-001-sqlite-data-model.md) | SQLite Data Model | Draft |
-| [DES-002](docs/architecture/design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | Draft |
-| [DES-003](docs/architecture/design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | Draft |
-| [DES-004](docs/architecture/design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | Draft |
-| [DES-005](docs/architecture/design/DES-005-run-orchestration.md) | `revolver run` — Run Orchestration | Draft |
-| [DES-006](docs/architecture/design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | Draft |
-| [DES-007](docs/architecture/design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | Draft |
+| [DES-001](docs/architecture/design/DES-001-sqlite-data-model.md) | SQLite Data Model | Accepted |
+| [DES-002](docs/architecture/design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | Accepted |
+| [DES-003](docs/architecture/design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | Accepted |
+| [DES-004](docs/architecture/design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | Accepted |
+| [DES-005](docs/architecture/design/DES-005-run-orchestration.md) | `revolver run` — Run Orchestration | Accepted |
+| [DES-006](docs/architecture/design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | Accepted |
+| [DES-007](docs/architecture/design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | Accepted |
 
 ### Validation Documents
 

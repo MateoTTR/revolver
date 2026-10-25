@@ -429,13 +429,13 @@ Detailed design notes expanding on specific architectural areas. Each document t
 
 | ID | Title | Traces to | Status |
 |---|---|---|---|
-| [DES-001](design/DES-001-sqlite-data-model.md) | SQLite Data Model | ADR-004, NFR-013/016 | Draft |
-| [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Draft |
-| [DES-003](design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | spec-problem, AQ-04 | Draft |
-| [DES-004](design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | spec-dataset, DES-001 | Draft |
-| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — Run Orchestration | spec-run, ADR-006, ADR-007, DES-001, DES-003, DES-004 | Draft |
-| [DES-006](design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | spec-eval, ADR-006, DES-001, DES-003, DES-005 | Draft |
-| [DES-007](design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | spec-benchmark, DES-001, DES-005, DES-006 | Draft |
+| [DES-001](design/DES-001-sqlite-data-model.md) | SQLite Data Model | ADR-004, NFR-013/016 | Accepted |
+| [DES-002](design/DES-002-llm-subcommands.md) | `revolver llm` Subcommands — Ollama API Mapping | ADR-001, spec-llm | Accepted |
+| [DES-003](design/DES-003-problem-versioning.md) | `revolver problem` — Testing & Versioning | spec-problem, AQ-04 | Accepted |
+| [DES-004](design/DES-004-dataset-registration.md) | `revolver dataset` — Registration & Integrity | spec-dataset, DES-001 | Accepted |
+| [DES-005](design/DES-005-run-orchestration.md) | `revolver run` — Run Orchestration | spec-run, ADR-006, ADR-007, DES-001, DES-003, DES-004 | Accepted |
+| [DES-006](design/DES-006-eval-loop.md) | `revolver eval` — Evaluation Loop | spec-eval, ADR-006, DES-001, DES-003, DES-005 | Accepted |
+| [DES-007](design/DES-007-benchmark-design.md) | `revolver benchmark` — Benchmark Design | spec-benchmark, DES-001, DES-005, DES-006 | Accepted |
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Version**: 0.1
 **Date**: 2026-03-12
-**Status**: Draft
+**Status**: Accepted
 **Traceable to**: [spec-benchmark.md](../../specs/spec-benchmark.md), [Architecture](../architecture.md) §4/§6.3, [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.9–3.10 (benchmarks, benchmark_solutions), [DES-006 Eval Loop](DES-006-eval-loop.md) §4/§6 (compute_aggregates, Pydantic models), [ConOps](../../conops/conops.md) §4.7/§5.7/§8 (export formats)
 
 ---

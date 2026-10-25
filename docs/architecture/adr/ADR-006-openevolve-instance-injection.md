@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-11
 **Status**: Accepted
-**Deciders**: Mathi (domain expert), Claude (architecture assistant)
+**Deciders**: the project maintainer
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-10
 **Status**: Accepted
-**Deciders**: Mathi, Claude
+**Deciders**: the project maintainer
 
 ---
 

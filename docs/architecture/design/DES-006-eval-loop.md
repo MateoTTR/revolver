@@ -2,7 +2,7 @@
 
 **Version**: 0.5 — S18 eval honesty (U13/U11): reserved `instances_*` coverage keys excluded from aggregation (§1.3, §4.3, FR-EVL-021), post-run eval persists via `evaluate_solution()` (§1.2, FR-RUN-019/020)
 **Date**: 2026-07-05
-**Status**: Draft
+**Status**: Accepted
 **Traceable to**: [spec-eval.md](../../specs/spec-eval.md), [Architecture](../architecture.md) §4/§6.2, [ADR-006](../adr/ADR-006-openevolve-instance-injection.md), [ADR-007](../adr/ADR-007-pluggable-evolution-backend.md), [DES-001 Data Model](DES-001-sqlite-data-model.md) §3.6–3.8 (solutions, eval_metadata, eval_instances), [DES-003](DES-003-problem-versioning.md) §2.1.1, [DES-005](DES-005-run-orchestration.md) §7
 
 ---

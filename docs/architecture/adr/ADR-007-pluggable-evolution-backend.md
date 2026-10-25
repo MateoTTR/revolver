@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-11
 **Status**: Accepted (amended 2026-07-01, 2026-07-05)
-**Deciders**: Mathieu (domain expert), Claude (architecture assistant)
+**Deciders**: the project maintainer
 **Amended**: 2026-07-01 — v0.17 multi-LLM ensemble selection (see the *Amendment* section below; supersedes parts of D4/D5, the "lossy" consequence, and the S15 roadmap line).
 **Amended**: 2026-07-05 — v0.18 top-N extraction: `top_n_extraction` gains its first consumer (see the *Amendment — v0.18* section below; no capability-matrix change).
 

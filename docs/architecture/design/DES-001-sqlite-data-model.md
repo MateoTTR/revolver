@@ -2,7 +2,7 @@
 
 **Version**: 0.9 — migration v14: `problem_versions.backend` (Sprint 018, U4 / #369, FR-PRB-016); v13 head prior (v12 llms.reasoning_effort, v13 ensemble_members.reasoning_effort — Sprint 017, ADR-007 Amendment A3.2)
 **Date**: 2026-07-05
-**Status**: Draft
+**Status**: Accepted
 **Traceable to**: [Architecture Overview](../architecture.md) §5, [Specifications](../../specs/specifications.md) NFR-013/016
 
 ---
